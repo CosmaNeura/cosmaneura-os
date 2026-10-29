@@ -1,0 +1,62 @@
+.ehr-read-panel {max-width:48rem;min-width:0;display:grid;gap:.8rem;margin-block:1rem;}
+.ehr-read-panel h3,.ehr-read-panel h4,.ehr-read-panel p {margin:0;overflow-wrap:anywhere;}
+.ehr-read-panel fieldset {display:grid;gap:.7rem;min-width:0;margin:0;padding:1rem;border:1px solid var(--team-line,#d5dbe5);border-radius:12px;}
+.ehr-read-panel legend {font-weight:600;padding-inline:.3rem;}
+.ehr-read-panel label {display:flex;align-items:flex-start;gap:.6rem;line-height:1.45;min-width:0;}
+.ehr-read-panel label:has(input:not([type="checkbox"])) {display:grid;gap:.3rem;}
+.ehr-read-panel input:not([type="checkbox"]) {box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:44px;font:inherit;padding:.55rem;border:1px solid var(--team-line,#cbd4cd);border-radius:8px;}
+.ehr-read-panel input[type="checkbox"] {flex-shrink:0;min-width:18px;min-height:18px;margin-top:.2rem;}
+.team-workspace .ehr-read-panel button,.ehr-read-panel button {min-height:44px;max-width:100%;white-space:normal;overflow-wrap:anywhere;}
+.ehr-read-panel ul {list-style:none;margin:0;padding:0;display:grid;gap:.5rem;}
+.ehr-read-panel li {display:grid;gap:.3rem;}
+.ehr-read-panel li button {text-align:left;width:100%;}
+.ehr-read-panel [aria-label="Review patient and visit"],.ehr-read-panel [role="group"] {display:grid;gap:.8rem;padding:1rem;border:1px solid var(--team-line,#d5dbe5);border-radius:12px;background:var(--team-surface,#fff);}
+.ehr-read-panel [role="alert"] {padding:.8rem;border-left:3px solid var(--team-danger,#aa3e3e);background:var(--team-surface,#fff);}
+@media (max-width:480px) {.ehr-read-panel fieldset,.ehr-read-panel [aria-label="Review patient and visit"],.ehr-read-panel [role="group"] {padding:.75rem;}}
+
+.ehr-read-task {width:min(100%,52rem);min-width:0;margin-inline:auto;padding:1rem;box-sizing:border-box;}
+.ehr-read-task[hidden] {display:none;}
+.ehr-read-task>header {display:grid;gap:.65rem;margin-bottom:1.25rem;}
+.ehr-read-task>header button {justify-self:start;min-height:44px;max-width:100%;white-space:normal;text-align:left;}
+.ehr-read-task h1 {font-size:1.5rem;line-height:1.25;margin:0;overflow-wrap:anywhere;}
+.ehr-read-task>header p {margin:0;overflow-wrap:anywhere;}
+.ehr-source-action {display:grid;gap:.45rem;margin-block:.8rem 1rem;}
+.ehr-source-action button,.ehr-chief-action {min-height:44px;max-width:100%;white-space:normal;overflow-wrap:anywhere;}
+.ehr-source-action p {margin:0;font-size:.9rem;line-height:1.45;}
+@media(max-width:480px){.ehr-read-task {padding:.75rem;}.ehr-read-task>header {margin-bottom:1rem;}}
+
+.ehr-provider-choice {display:grid;gap:.4rem;max-width:48rem;font-weight:600;}
+.ehr-provider-choice select {box-sizing:border-box;width:100%;min-height:44px;min-width:0;font:inherit;padding:.55rem;border:1px solid var(--team-line,#cbd4cd);border-radius:8px;background:var(--team-surface,#fff);}
+
+.ehr-read-panel [aria-label="Review problem list"] {display:grid;gap:.8rem;}
+.ehr-read-panel [aria-label="Returned problems"] li {padding-block:.7rem;border-top:1px solid var(--team-line,#d5dbe5);}
+
+.ehr-read-panel [aria-label="Review medication records"],.ehr-record-choices,.ehr-record-choices>div {display:grid;gap:.8rem;}
+.ehr-read-panel [aria-label="Returned medication records"] li {padding-block:.8rem;border-top:1px solid var(--team-line,#d5dbe5);}
+.ehr-read-panel [aria-label="Returned medication records"] dl {display:grid;gap:.5rem;margin:.2rem 0;min-width:0;}
+.ehr-read-panel [aria-label="Returned medication records"] dl>div {display:grid;grid-template-columns:minmax(0,9rem) minmax(0,1fr);gap:.35rem;}
+.ehr-read-panel [aria-label="Returned medication records"] dt {font-weight:600;overflow-wrap:anywhere;}
+.ehr-read-panel [aria-label="Returned medication records"] dd {margin:0;white-space:pre-wrap;overflow-wrap:anywhere;}
+@media(max-width:480px){.ehr-read-panel [aria-label="Returned medication records"] dl>div {grid-template-columns:minmax(0,1fr);gap:.1rem;}}
+
+.ehr-read-panel [aria-label="Review Tebra medication records"] {display:grid;gap:.8rem;}
+.ehr-read-panel [aria-label="Tebra medication records"] li {padding-block:.8rem;border-top:1px solid var(--team-line,#d5dbe5);}
+.ehr-read-panel [aria-label="Tebra medication records"] h5,.ehr-read-panel [aria-label="Tebra medication records"] h6 {font:inherit;font-weight:600;margin:.2rem 0;overflow-wrap:anywhere;}
+.ehr-medication-details {display:grid;gap:.5rem;margin:.2rem 0;min-width:0;}
+.ehr-medication-details>div {display:grid;grid-template-columns:minmax(0,9rem) minmax(0,1fr);gap:.35rem;}
+.ehr-medication-details dt {font-weight:600;overflow-wrap:anywhere;}
+.ehr-medication-details dd {margin:0;white-space:pre-wrap;overflow-wrap:anywhere;}
+.ehr-medication-directions,.ehr-recorded-source {white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-width:100%;font:inherit;}
+.ehr-read-panel summary {min-height:44px;display:list-item;align-content:center;font-weight:600;cursor:pointer;overflow-wrap:anywhere;}
+@media(max-width:480px){.ehr-medication-details>div {grid-template-columns:minmax(0,1fr);gap:.1rem;}}
+.tebra-original-details,.tebra-original-details>section {display:grid;gap:.6rem;min-width:0;}
+.tebra-original-details>section {padding-block:.7rem;border-top:1px solid var(--team-line,#d5dbe5);}
+.ehr-read-panel .tebra-original-details h5,.ehr-read-panel .tebra-original-details h6 {font:inherit;font-weight:600;margin:.2rem 0;overflow-wrap:anywhere;}
+.tebra-recorded-fields {display:grid;gap:.5rem;margin:0;min-width:0;}
+.tebra-recorded-fields>div {display:grid;gap:.15rem;min-width:0;}
+.tebra-recorded-fields dt {font-weight:600;overflow-wrap:anywhere;}
+.tebra-recorded-fields dd {margin:0;padding-inline-start:.75rem;border-inline-start:1px solid var(--team-line,#d5dbe5);min-width:0;}
+.tebra-recorded-value {white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}
+.tebra-recorded-items {margin:0;padding-inline-start:1rem;min-width:0;}
+.tebra-recorded-fields .tebra-recorded-fields dd {padding-inline-start:0;border-inline-start:0;}
+.tebra-recorded-items .tebra-recorded-items {padding-inline-start:0;list-style:none;}

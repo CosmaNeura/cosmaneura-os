@@ -8,6 +8,11 @@ import httpx
 from fastapi import FastAPI
 from sqlalchemy.orm import Session
 
+from cosmas_os.adapters.elation_read import ElationCredentials, ElationReadScope
+from cosmas_os.adapters.elation_sandbox_runtime import (
+    ElationSandboxInstallation,
+    ManagedElationSandboxReads,
+)
 from cosmas_os.adapters.managed_event_routing import ManagedEventProfile, ManagedEventRoutes
 from cosmas_os.adapters.vendor_connectors.transport import Credential
 from cosmas_os.application import finance_settings, inbox_work, vendor_settings
@@ -46,6 +51,9 @@ class ManagedServiceProfile:
     fax_inbound_installations: tuple[FaxInboundInstallation, ...] = field(default=(), repr=False)
     # Independently reviewed exact item/participant scope; delivery grants do not confer reads.
     inbox_grants: tuple[inbox_work.InboxReadGrant, ...] = field(default=(), repr=False)
+    elation_sandbox: tuple[ElationSandboxInstallation, ...] = field(default=(), repr=False)
+    elation_credentials: Callable[[ElationReadScope], Awaitable[ElationCredentials]] | None = field(default=None, repr=False)
+    elation_credentials_current: Callable[[ElationReadScope], bool] | None = field(default=None, repr=False)
 
 
 class ManagedServices:
@@ -70,6 +78,16 @@ class ManagedServices:
         self.artifact_store = profile.artifact_store
         self._settings, self._profile, self._sessions = settings, profile, sessions
         self._closed = False
+        self.ehr_reads = None
+        if profile.elation_sandbox:
+            if profile.elation_credentials is None or profile.elation_credentials_current is None:
+                raise ValueError("Explicit Elation sandbox secret references required")
+            self.ehr_reads = ManagedElationSandboxReads(profile.elation_sandbox,
+                credentials=profile.elation_credentials, credentials_current=profile.elation_credentials_current,
+                sessions=sessions, enabled=lambda: self._available() and settings.workspace_elation_sandbox_available,
+                transport_factory=profile.transport_factory,
+                problems_enabled=lambda: self._available() and settings.workspace_elation_problems_enabled,
+                medications_enabled=lambda: self._available() and settings.workspace_elation_medications_enabled)
         if (len(profile.efax_inbound_installations) > 50
                 or any(type(item) is not EFaxInboundInstallation for item in profile.efax_inbound_installations)
                 or len({str(item.selection.connection_id) for item in profile.efax_inbound_installations})
@@ -234,6 +252,8 @@ class ManagedServices:
         # Existing invocations may retain private late observations. Closing
         # blocks fresh credentials/dispatch; it never deletes durable evidence.
         self._closed = True
+        if self.ehr_reads is not None:
+            self.ehr_reads.close()
 
 
 def configure_managed_services(app: FastAPI, profile: ManagedServiceProfile) -> None:
@@ -251,6 +271,7 @@ def managed_services_lifespan(app: FastAPI, settings: Settings, sessions: Callab
     app.state.managed_startup_seen = True
     app.state.managed_lifespan_active = True
     runtime = None
+    previous_ehr = getattr(app.state, "ehr_reads", None)
     try:
         profile = getattr(app.state, "managed_profile", None)
         configured_json = settings.managed_services_config_json
@@ -263,6 +284,10 @@ def managed_services_lifespan(app: FastAPI, settings: Settings, sessions: Callab
             profile = load_managed_profile(settings)
         runtime = ManagedServices(settings, profile, sessions) if profile is not None else None
         app.state.managed_services = runtime
+        if runtime is not None and runtime.ehr_reads is not None:
+            if previous_ehr is not None:
+                raise ValueError("Mock and managed EHR runtimes cannot be combined")
+            app.state.ehr_reads = runtime.ehr_reads
         from cosmas_os.application.efax_inbound_source import install_binding_reader
         from cosmas_os.application.fax_inbound_source import (
             install_binding_reader as install_fax_reader,
@@ -272,6 +297,7 @@ def managed_services_lifespan(app: FastAPI, settings: Settings, sessions: Callab
             yield
     finally:
         app.state.managed_services = None
+        app.state.ehr_reads = previous_ehr
         app.state.managed_lifespan_active = False
         if runtime is not None:
             runtime.close()

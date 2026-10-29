@@ -65,13 +65,17 @@ export type AssistantReply = { agent_name: string; agent_id?: string; role: BotR
   citations: { entry_id: string; revision: number; label: string; kind: string }[] };
 export type WorkspaceEntry = {
   id: string; revision: number;
-  kind: "synthetic_source" | "scratchpad" | "conversation" | "evidence" | "work_link" | "handoff_result" | "google_message" | "google_calendar" | "efax_inbound_source" | "fax_inbound_source";
+  kind: "synthetic_source" | "scratchpad" | "conversation" | "evidence" | "work_link" | "handoff_result" | "google_message" | "microsoft_message" | "google_calendar" | "efax_inbound_source" | "fax_inbound_source" | "ehr_read_source" | "calendar_import_source";
   content: string; source_label: string | null; origin: string;
   ticket: WorkReference | null; created_at: string;
+  calendar_import_source_state?: "current" | "unavailable";
+  ehr_source_state?: "current" | "unavailable";
   google_source_state?: "current" | "unavailable";
+  microsoft_source_state?: "current" | "unavailable";
   calendar_source_state?: "current" | "unavailable";
   practice_fax_source_state?: "current" | "unavailable";
   fax_source_state?: "current" | "unavailable";
+  research_packet?: {contract:"research.saved_packet_marker.v1";run_id:string;entry_id:string;entry_revision:number};
   reply?: AssistantReply | null;
   model_request?: EntryModelRequest;
 };

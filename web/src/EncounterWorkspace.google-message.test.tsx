@@ -1,7 +1,10 @@
 import {act,type ReactNode} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');});
+vi.hoisted(()=>{vi.stubEnv('VITE_MESSAGES_ENABLED','true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');});
+const observed=vi.hoisted(()=>({session:null as import('./session/workspace-session').WorkspaceSession|null}));
+vi.mock('./session/use-workspace-session',async original=>{const actual=await original<typeof import('./session/use-workspace-session')>();return {...actual,useWorkspaceSession:(...args:Parameters<typeof actual.useWorkspaceSession>)=>{observed.session=args[0];return actual.useWorkspaceSession(...args);}};});
+import {editorAddress} from './draft-journal';
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {workspaceApi,type Workspace} from './workspace-api';
 import {teamFixture,teamUuid as uuid} from './team-setup-test-fixture';
@@ -21,6 +24,10 @@ let mount:GoogleMessageMountProps;
 vi.mock('./GoogleMessageMount',()=>({GoogleMessageMount:(props:GoogleMessageMountProps)=>{mount=props;return <section aria-label="Mounted email work">{props.workspace?.label??'Choose a visit for email'}</section>;}}));
 const identity={mode:'clerk_jwt' as const,getToken:async()=> 'invented'},team=teamFixture();team.capture={enabled:false};team.scheduling={enabled:false};
 let root:Root,host:HTMLDivElement,current:Workspace&{appointment_id:string};
+const question=()=>host.querySelector<HTMLTextAreaElement>('#team-question')!;
+async function directions(value:string){await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question(),value);question().dispatchEvent(new Event('input',{bubbles:true}));});}
+async function chooseBot(role:string){await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent===role.replaceAll('_',' '))!.click());await wait(()=>expect(observed.session?.getSnapshot().selected).toBe(role));await wait(()=>expect(question().disabled).toBe(false));}
+async function savedEmail(){const nav=settingsNavigation(host);await nav.click('Team settings');await nav.click('Connections');await nav.click('Google email & calendar');await click('Work with email');const content='Invented reviewed email for draft preservation.',sha=[...new Uint8Array(await webcrypto.subtle.digest('SHA-256',new TextEncoder().encode(content)))].map(n=>n.toString(16).padStart(2,'0')).join('');current={...current,revision:3,entries:[...current.entries,{id:uuid(74),revision:3,kind:'google_message',content,source_label:'Google message: Invented referral',origin:'human',ticket:null,created_at:time,google_source_state:'current'}]};await act(async()=>mount.onSaved(structuredClone(current)));return {workspace_id:current.id,entry_id:uuid(74),entry_revision:3,source_sha256:'a'.repeat(64),content_sha256:sha,request_sha256:'b'.repeat(64),source_withheld:false};}
 const time='2026-10-02T14:00:00Z';
 async function wait(check:()=>void){for(let n=0;n<100;n++){let passed=false;await act(async()=>{await new Promise(r=>setTimeout(r,3));try{check();passed=true;}catch{}});if(passed)return;}check();}
 async function click(label:string){await wait(()=>expect([...host.querySelectorAll('button')].some(b=>!b.closest('[hidden]')&&b.textContent===label&&!b.disabled)).toBe(true));await act(async()=>[...host.querySelectorAll('button')].find(b=>!b.closest('[hidden]')&&b.textContent===label)!.click());}
@@ -37,6 +44,7 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('opens operational email from product settings and prepares Chief without replacing unfinished notes or sending',async()=>{
  const setValue=async(id:string,value:string)=>{await act(async()=>{const field=host.querySelector<HTMLTextAreaElement>(id)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});};
+ await chooseBot('chief');
  await setValue('#team-notebook','Unfinished provider notes');await setValue('#team-question','Existing provider request');
  const nav=settingsNavigation(host);await nav.click('Team settings');await nav.click('Connections');await nav.click('Google email & calendar');await click('Work with email');
  expect(host.querySelector('[aria-label="Mounted email work"]')?.closest('[hidden]')).toBeNull();expect(mount.workspace?.id).toBe(current.id);
@@ -70,4 +78,30 @@ it('offers Chief starters for a current reviewed email without copying it into t
  await wait(()=>expect([...host.querySelectorAll('button')].find(b=>b.textContent==='Prepare team drafts')?.disabled).toBe(true));
  expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
  current={...current,entries:saved};
+});
+
+it('keeps separate Follow-up and Chief drafts when preparing a reviewed email',async()=>{
+ await chooseBot('chief');await directions('Chief directions stay with Chief.');await chooseBot('follow_up');await directions('Follow-up directions stay with Follow-up.');const source=await savedEmail();await act(async()=>mount.onAskChief!(source));
+ await wait(()=>expect(question().value).toContain('Review the human-selected email source'));
+ expect(question().value).toContain('Chief directions stay with Chief.');expect(question().value).not.toContain('Follow-up directions');
+ const journal=observed.session!.recovery.journal.current!.value;expect(await journal.load(editorAddress(current.id,'conversation:follow_up'))).toMatchObject({data:{text:'Follow-up directions stay with Follow-up.'}});
+ await chooseBot('follow_up');expect(question().value).toBe('Follow-up directions stay with Follow-up.');await chooseBot('chief');expect(question().value).toContain('Chief directions stay with Chief.');expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
+});
+it('keeps Follow-up and both saved drafts when outgoing draft persistence fails',async()=>{
+ await chooseBot('chief');await directions('Retained Chief instructions.');await chooseBot('follow_up');await directions('Follow-up remains here.');const source=await savedEmail(),journal=observed.session!.recovery.journal.current!.value;
+ await wait(()=>expect(observed.session?.getSnapshot().conversationBusy).toBe(false));vi.spyOn(journal,'persist').mockRejectedValueOnce(new Error('Invented persistence failure'));await act(async()=>mount.onAskChief!(source));
+ await wait(()=>expect(observed.session?.getSnapshot().conversationError).toContain('draft is retained'));
+ expect(observed.session!.getSnapshot().selected).toBe('follow_up');expect(question().value).toBe('Follow-up remains here.');expect(await journal.load(editorAddress(current.id,'conversation:chief'))).toMatchObject({data:{text:'Retained Chief instructions.'}});expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
+});
+it('does not append old-account source directions when identity changes during the destination read',async()=>{
+ await chooseBot('chief');await directions('Chief account A directions.');await chooseBot('follow_up');await directions('Follow-up account A directions.');const source=await savedEmail();let release!:(value:Workspace)=>void;
+ vi.mocked(workspaceApi.read).mockImplementationOnce(()=>new Promise(r=>{release=r;}));await act(async()=>mount.onAskChief!(source));await wait(()=>expect(release).toBeTypeOf('function'));
+ const replacement={mode:'clerk_jwt' as const,getToken:async()=>'invented-replacement'};await act(async()=>root.render(<EncounterWorkspace authenticated={replacement} draftStorage={memoryDraftStorage()}/>));await act(async()=>release(structuredClone(current)));
+ expect(host.querySelector<HTMLTextAreaElement>('#team-question')?.value??'').not.toContain('human-selected email');expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
+});
+it('restores a retained Chief saved-note task instead of replacing it with email directions',async()=>{
+ await chooseBot('follow_up');await directions('Specialist draft stays separate.');const source=await savedEmail(),journal=observed.session!.recovery.journal.current!.value,task={contract:'chief-note-task.compose.v1' as const,note_id:uuid(91),note_version:1,content_hash:'a'.repeat(64),source_fingerprint:'b'.repeat(64)};
+ await journal.load(editorAddress(current.id,'conversation:chief'));await journal.persist(editorAddress(current.id,'conversation:chief'),{kind:'editor',workspaceId:current.id,editor:'conversation:chief',pending:null,data:{text:'Directions for the saved note.',noteTask:task}});
+ await act(async()=>mount.onAskChief!(source));await wait(()=>expect(observed.session?.getSnapshot().error).toContain('Finish or close the saved-note draft'));
+ expect(question().value).toBe('Directions for the saved note.');expect(observed.session!.getSnapshot().phoneNoteTask?.selection.note_id).toBe(task.note_id);expect(await journal.load(editorAddress(current.id,'conversation:follow_up'))).toMatchObject({data:{text:'Specialist draft stays separate.'}});expect(workspaceApi.ask).not.toHaveBeenCalled();
 });

@@ -17,6 +17,34 @@ async function click(text: string) {
   const button = visibleButtons().find(button => button.textContent?.includes(text));
   expect(button, `Visible button: ${text}`).toBeDefined(); await act(async () => button!.click());
 }
+it('opens Elation only when offered and selected, and retains its pending editor across navigation', async () => {
+  const mounted = vi.fn(), unmounted = vi.fn();
+  function Elation() { useEffect(() => { mounted(); return unmounted; }, []); return <input aria-label="Elation dates" defaultValue="Retained window"/>; }
+  const render = (enabled:boolean, initialScreen:'home'|'ehr'='home') => act(async () => root.render(<SettingsHub open initialScreen={initialScreen}
+    ehr={enabled?<Elation/>:undefined} team={<p>Team</p>} teamSummary="5 coworkers" teamDirty={false} onClose={()=>{}}/>));
+  await render(false);
+  expect(visibleButtons().some(button=>button.textContent?.includes('Connections'))).toBe(false);
+  await render(true);
+  expect(mounted).not.toHaveBeenCalled();
+  await click('Connections');
+  expect(mounted).not.toHaveBeenCalled();
+  expect(container.querySelector('[aria-label="Practice records"]')?.textContent).not.toContain('Connected');
+  await click('Practice appointments');
+  expect(mounted).toHaveBeenCalledOnce();
+  expect(container.querySelector('[aria-label="Elation dates"]')).toBeTruthy();
+  await click('All connections'); await click('Practice appointments');
+  expect(mounted).toHaveBeenCalledOnce(); expect(unmounted).not.toHaveBeenCalled();
+  expect((container.querySelector('[aria-label="Elation dates"]') as HTMLInputElement).value).toBe('Retained window');
+});
+it('restores Elation after visit selection and blocks leaving during an exact pending command', async () => {
+  const close=vi.fn();
+  await act(async()=>root.render(<SettingsHub open initialScreen="ehr" navigationLocked ehr={<p>Selected visit</p>}
+    team={<p>Team</p>} teamSummary="5 coworkers" teamDirty={false} onClose={close}/>));
+  expect(container.querySelector('[data-settings-screen="ehr"]')?.hasAttribute('hidden')).toBe(false);
+  expect(visibleButtons().find(button=>button.textContent==='Done')?.disabled).toBe(true);
+  expect(visibleButtons().find(button=>button.textContent?.includes('All connections'))?.disabled).toBe(true);
+  expect(close).not.toHaveBeenCalled();
+});
 it('opens appointment discovery directly and retains it after returning from connections', async () => {
   const mounted = vi.fn();
   function Core() { useEffect(() => { mounted(); }, []); return <button>View appointments</button>; }
@@ -75,6 +103,52 @@ it('moves focus to the new screen title and keeps unavailable connections out', 
   expect(visibleButtons().some(button => button.textContent?.includes('Connections'))).toBe(false);
   await click('Your team'); expect(document.activeElement?.textContent).toBe('Your team');
   await click('Done'); expect(close).toHaveBeenCalledOnce();
+});
+
+it.each(['workspace','messages',undefined] as const)('keeps Settings navigation in the native scroll target while preserving heading focus (native=%s)', async nativePresentation => {
+  const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype,'scrollIntoView');
+  const scroll = vi.fn();
+  const focus = vi.spyOn(HTMLElement.prototype,'focus');
+  Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,writable:true,value:scroll});
+  const render = (open:boolean,layout=nativePresentation) => act(async () => root.render(<SettingsHub open={open} nativePresentation={layout}
+    team={<div><p>Long team settings</p><input aria-label="Retained team draft" defaultValue="Invented draft"/></div>}
+    teamSummary="Five coworkers" teamDirty={false} onClose={() => {}}/>));
+  try {
+    await render(false);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+    await render(true);
+    const section = container.querySelector('.settings-hub')!;
+    const title = section.querySelector('h1')!;
+    const expectedTarget = nativePresentation ? section : title;
+    expect(document.activeElement).toBe(title);
+    expect(focus).toHaveBeenLastCalledWith({preventScroll:true});
+    expect(scroll.mock.contexts).toEqual([expectedTarget]);
+    expect(scroll).toHaveBeenLastCalledWith({block:'start'});
+    expect(section.querySelector('.settings-hub-nav')?.textContent).toContain('Done');
+    await click('Your team');
+    const editor = section.querySelector('[aria-label="Retained team draft"]');
+    expect(document.activeElement?.textContent).toBe('Your team');
+    expect(scroll.mock.contexts).toEqual([expectedTarget,expectedTarget]);
+    await click('All settings');
+    expect(document.activeElement?.textContent).toBe('Settings');
+    expect(scroll.mock.contexts).toEqual([expectedTarget,expectedTarget,expectedTarget]);
+    expect(section.querySelector('[aria-label="Retained team draft"]')).toBe(editor);
+    if(nativePresentation){
+      await render(true,nativePresentation==='messages'?'workspace':'messages');
+      expect(document.activeElement?.textContent).toBe('Settings');
+      expect(scroll.mock.contexts).toEqual([section,section,section,section]);
+      expect(section.querySelector('[aria-label="Retained team draft"]')).toBe(editor);
+    }
+    const focusCount = focus.mock.calls.length;
+    await render(false);
+    expect(scroll).toHaveBeenCalledTimes(nativePresentation?4:3);
+    expect(focus).toHaveBeenCalledTimes(focusCount);
+  } finally {
+    focus.mockRestore();
+    if(originalScroll)Object.defineProperty(HTMLElement.prototype,'scrollIntoView',originalScroll);
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  }
 });
 
 it('keeps recovery available while preventing navigation during an undurable edit', async () => {

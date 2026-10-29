@@ -1,0 +1,27 @@
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_EHR_READ_ENABLED','true');});
+vi.mock('./workspace-auth-headers',()=>({assertCurrentDesktopSession:()=>{},workspaceAuthHeaders:async()=>new Headers({'Content-Type':'application/json','Authorization':'Bearer invented'})}));
+import {ehrHash,ehrReadApi,validEhrStatus,verifyEhrReviewResponse,type EhrInstallRequest} from './ehr-read-api';
+import {emptyEhrReadRecovery,validateEhrReadRecovery} from './ehr-read-recovery';
+import {ehrBinding,ehrScope,ehrPractice,ehrUuid,ehrWindowReceipt,ehrVerifiedReceipt,ehrReviewBody,ehrReviewResult,ehrVisit} from './ehr-read-fixtures.test-support';
+const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+const identity={mode:'clerk_jwt' as const,getToken:async()=>null};
+const command:EhrInstallRequest={action:'install',installation_id:ehrUuid(810),installation_sha256:'8'.repeat(64),idempotency_key:ehrUuid(811)};
+const response=(v:unknown)=>new Response(JSON.stringify(v),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+const receipt=async()=>({contract_version:1,status:'installed',transport:'vendor_sandbox',...command,...ehrBinding,request_sha256:await ehrHash(command)});
+const wire=async()=>{const {action:_,...result}=await receipt();return result;};
+beforeEach(()=>vi.stubGlobal('crypto',webcrypto));afterEach(()=>vi.unstubAllGlobals());
+it('accepts only complete sandbox setup status and preserves legacy local examples',()=>{
+ const base={contract_version:1,provider:'elation',mode:'synthetic',status:'setup_required',connection_id:null,binding_sha256:null,practice:ehrPractice,transport:'vendor_sandbox',installation:{id:command.installation_id,sha256:command.installation_sha256}};
+ expect(validEhrStatus(base)).toBe(true);expect(validEhrStatus({...base,installation:null})).toBe(false);expect(validEhrStatus({...base,transport:'mock'})).toBe(false);expect(validEhrStatus({...base,status:'ready'})).toBe(false);expect(validEhrStatus({contract_version:1,provider:'elation',mode:'synthetic',status:'ready',...ehrBinding,practice:ehrPractice})).toBe(true);
+});
+it('dispatches exact setup once and recovers only through resolve',async()=>{const result=await wire(),fetcher=vi.fn().mockImplementation(()=>Promise.resolve(response(result)));vi.stubGlobal('fetch',fetcher);expect(await ehrReadApi.install(identity,command)).toEqual(result);expect(await ehrReadApi.resolveInstall(identity,command)).toEqual(result);expect(fetcher.mock.calls.map(call=>JSON.parse(call[1].body))).toEqual([command,{action:'resolve',idempotency_key:command.idempotency_key}]);});
+it.each(['installation_id','installation_sha256','idempotency_key','request_sha256','transport','extra'] as const)('rejects altered installation receipt %s',async field=>{const result=await wire();vi.stubGlobal('fetch',vi.fn().mockResolvedValue(response({...result,[field]:field==='installation_id'?ehrUuid(999):'altered'})));await expect(ehrReadApi.install(identity,command)).rejects.toMatchObject({status:502});});
+it('allows unavailable replay but rejects read-ledger unconfirmed for an installation',async()=>{vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(response({...await wire(),status:'unavailable'})).mockResolvedValueOnce(response({status:'unconfirmed',observation_id:ehrUuid(990),observation_key:command.idempotency_key})));expect(await ehrReadApi.resolveInstall(identity,command)).toMatchObject({status:'unavailable'});await expect(ehrReadApi.resolveInstall(identity,command)).rejects.toMatchObject({status:502});});
+it('binds a read result to its explicitly expected transport and verifies legacy mock inspection',async()=>{
+ const observe={action:'observe' as const,...ehrBinding,starts_at:'2026-10-25T12:00:00Z',ends_at:'2026-10-26T12:00:00Z',idempotency_key:ehrUuid(820)},legacy=await ehrWindowReceipt(observe),sandbox={...legacy,transport:'vendor_sandbox' as const};
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(response(sandbox)).mockResolvedValueOnce(response(sandbox)).mockResolvedValueOnce(response({...legacy,transport:'mock'})));
+ await expect(ehrReadApi.execute(identity,observe,null)).rejects.toMatchObject({status:502});expect(await ehrReadApi.execute(identity,observe,null,undefined,'vendor_sandbox')).toEqual(sandbox);expect(await ehrReadApi.inspect(identity,legacy)).toEqual({...legacy,transport:'mock'});
+});
+it('rejects a review response whose transport differs from the reviewed source',async()=>{const anchor={...await ehrVerifiedReceipt(await ehrWindowReceipt()),transport:'vendor_sandbox' as const},body=ehrReviewBody(anchor),result=await ehrReviewResult(anchor,body);await expect(verifyEhrReviewResponse(result,ehrVisit.id,body,anchor)).rejects.toMatchObject({status:502});expect(await verifyEhrReviewResponse({...result,transport:'vendor_sandbox'},ehrVisit.id,body,anchor)).toMatchObject({transport:'vendor_sandbox'});});
+it('retains a setup pending command without an active binding but rejects mixing it with a read',async()=>{const value={...emptyEhrReadRecovery(ehrScope),pending:{kind:'install',anchor:null,request:command}};expect(await validateEhrReadRecovery(value,ehrScope)).toEqual(value);await expect(validateEhrReadRecovery({...value,binding:ehrBinding},ehrScope)).rejects.toThrow();await expect(validateEhrReadRecovery({...value,pending:{...value.pending,request:{...command,credential:'must not persist'}}},ehrScope)).rejects.toThrow();});

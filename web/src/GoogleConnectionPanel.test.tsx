@@ -1,7 +1,7 @@
 import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {GoogleConnectionPanel} from './GoogleConnectionPanel';
+import {GoogleConnectionPanel,type GoogleCalendarWorkControls,type GoogleMessageWorkControls} from './GoogleConnectionPanel';
 import {googleConnectionRequest} from './google-connection-api';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
@@ -117,6 +117,35 @@ it('keeps Connect disabled after unavailable status until the connection check s
  await click('Connect with Google');expect(host.querySelector('a')).not.toBeNull();
  expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status','status','status','start']);
 });
+
+it('offers a connection check before new consent when the prior result is unknown',async()=>{
+ vi.mocked(googleConnectionRequest).mockRejectedValueOnce(new WorkspaceApiError(503)).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link);
+ await mount();const connect=()=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Connect with Google')!;
+ expect(connect().disabled).toBe(true);expect([...host.querySelectorAll('.google-connection .team-primary')].map(button=>button.textContent)).toEqual(['Check Google connection']);
+ expect(host.querySelector('.google-next-step')?.textContent).toContain('Confirm the current connection');await click('Connect with Google');expect(googleConnectionRequest).toHaveBeenCalledTimes(1);
+ await click('Check Google connection');expect(connect().disabled).toBe(false);expect([...host.querySelectorAll('.google-connection .team-primary')].map(button=>button.textContent)).toEqual(['Connect with Google']);
+ await click('Connect with Google');expect(host.querySelector('a')?.textContent).toBe('Continue with Google');expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status','status','start']);
+});
+
+it('guides an unfinished sign-in back to its result check without automatically starting over',async()=>{
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce({state:'sign_in_pending',account:null,connected_at:null}).mockResolvedValueOnce(connected);
+ await mount();expect(host.querySelector('.google-next-step')?.textContent).toContain('Finish in your browser');
+ expect([...host.querySelectorAll('.google-connection .team-primary')].map(button=>button.textContent)).toEqual(['Check Google connection']);
+ expect([...host.querySelectorAll('button')].some(button=>button.textContent==='Restart Google sign-in')).toBe(true);
+ await click('Check Google connection');expect(host.textContent).toContain('Google connected.');expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status','status']);
+});
+
+it('highlights one source-review next step while leaving previews and other saved work reachable',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','true');
+ vi.mocked(googleConnectionRequest).mockResolvedValue({...connected,capabilities:{mail:true,calendar:false}});const mail=vi.fn(),calendar=vi.fn();
+ try{
+  await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onOpenMessageWork={mail} onOpenCalendarWork={calendar}/>));
+  const primary=()=>[...host.querySelectorAll('.google-connection .team-primary')].map(button=>button.textContent);
+  expect(primary()).toEqual(['Work with email']);expect([...host.querySelectorAll('button')].some(button=>button.textContent==='Read recent email')).toBe(true);
+  await click('Calendar');expect(primary()).toEqual(['📅 Work with calendar']);expect([...host.querySelectorAll('button')].some(button=>button.textContent==='Add calendar access')).toBe(true);
+  await click('📅 Work with calendar');expect(calendar).toHaveBeenCalledOnce();expect(mail).not.toHaveBeenCalled();expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status']);
+ }finally{vi.unstubAllEnvs();}
+});
 it.each([401,403])('retains sign-in recovery after status %s',async status=>{
  const error=new WorkspaceApiError(status),denied=vi.fn();
  vi.mocked(googleConnectionRequest).mockRejectedValueOnce(error).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link);
@@ -163,4 +192,20 @@ it('withholds private recovery entry until the current identity account check fi
   await act(async()=>release(disconnected));expect(host.textContent).toContain('Work with email');
   expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','status']);
  }finally{vi.unstubAllEnvs();}
+});
+
+it('keeps Calendar recovery reopenable while blocking every account mutation and Gmail permission escalation',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');vi.mocked(googleConnectionRequest).mockResolvedValue(connected);
+ let calendar!:GoogleCalendarWorkControls,mail!:GoogleMessageWorkControls;const open=vi.fn(),show=vi.fn();
+ await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onOpenCalendarWork={open} onShowConnection={show} calendarWork={controls=>{calendar=controls;return <p>Retained calendar recovery</p>;}} messageWork={controls=>{mail=controls;return <p>Retained email work</p>;}}/>));
+ await act(async()=>calendar.onBusyChange(true));expect(mail.fullMailAccessBusy).toBe(true);expect(host.textContent).toContain('Review your saved Calendar work before continuing with email.');const buttons=[...host.querySelectorAll<HTMLButtonElement>('button')];expect(buttons.find(b=>b.textContent==='Reconnect Google')?.disabled).toBe(true);expect(buttons.find(b=>b.textContent==='Disconnect Google')?.disabled).toBe(true);expect(buttons.find(b=>b.textContent==='📅 Work with calendar')?.disabled).toBe(false);
+ await act(async()=>{mail.requestFullMailAccess();calendar.requestCalendarAccess();});await click('📅 Work with calendar');expect(open).toHaveBeenCalledOnce();expect(show).not.toHaveBeenCalled();expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status']);
+ await act(async()=>calendar.onBusyChange(false));await click('Check Google connection');await act(async()=>calendar.requestCalendarAccess());expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','status','start']);vi.unstubAllEnvs();
+});
+
+it('withholds a previously prepared browser authorization URL while Calendar work is unresolved and restores it only after unlock',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','true');vi.mocked(googleConnectionRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link);let calendar!:GoogleCalendarWorkControls;
+ await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} calendarWork={controls=>{calendar=controls;return <p>Retained calendar work</p>;}}/>));await click('Connect with Google');const anchor=host.querySelector<HTMLAnchorElement>('a.microsoft-continue')!;expect(anchor.getAttribute('href')).toBe(link.authorization_url);
+ await act(async()=>calendar.onBusyChange(true));expect(anchor.hasAttribute('href')).toBe(false);expect(anchor.getAttribute('aria-disabled')).toBe('true');expect(anchor.tabIndex).toBe(-1);expect(host.querySelector('[data-google-connection]')).toBeNull();expect([...host.querySelectorAll('[href]')].some(e=>e.getAttribute('href')===link.authorization_url)).toBe(false);
+ await act(async()=>calendar.onBusyChange(false));expect(anchor.getAttribute('href')).toBe(link.authorization_url);expect(anchor.hasAttribute('aria-disabled')).toBe(false);expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','start']);vi.unstubAllEnvs();
 });

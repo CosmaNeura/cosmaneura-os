@@ -75,7 +75,7 @@ def catalog(settings, runtime, *, version=1, identity=None, managed=None, portal
                    action("calendar_source", enabled["google"] and getattr(settings, "workspace_google_calendar_available", False)),
                    action("email_send", False, supported=False), action("calendar_write", False, supported=False)],
         "microsoft": [action("mail_headers", enabled["microsoft"]), action("calendar_summaries", enabled["microsoft"]),
-                      action("full_email_source", False, supported=False), action("email_send", False, supported=False)],
+                      action("full_email_source", enabled["microsoft"] and getattr(settings, "workspace_microsoft_message_available", False)), action("email_send", False, supported=False)],
         "scheduling": [action("availability", enabled["scheduling"]),
                        action("appointment_proposals", enabled["scheduling"] and getattr(settings, "workspace_appointments_enabled", False)),
                        action("live_booking", False, supported=False)],

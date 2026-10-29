@@ -72,7 +72,7 @@ def actual_record(monkeypatch):
         return SimpleNamespace(appointment_ref=selected.appointment_ref, workspace_id=selected.workspace_id, checked_at=datetime.now(UTC))
     monkeypatch.setattr(product, 'SessionLocal', Session)
     monkeypatch.setattr(product, 'authenticate_request', authenticate)
-    monkeypatch.setattr(product, 'settings', SimpleNamespace(workspace_available=True,
+    monkeypatch.setattr(product, 'settings', SimpleNamespace(cosmas_env='synth_os', workspace_available=True,
         workspace_core_record_available=True, workspace_draft_recovery_required=True,
         workspace_hosted_enabled=True,
         auth_mode='dev_headers', core_web_origin='https://core.example.invalid'))

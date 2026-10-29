@@ -1,4 +1,6 @@
 /** Public build configuration only. This module never reads files or credentials. */
+import {isPackagedWorkspaceDocument} from './workspace-document.mjs';
+
 export function exactHostedOrigin(value) {
   if (typeof value !== 'string' || value.length > 253) return false;
   try {
@@ -40,7 +42,7 @@ export function permittedHostedWorkspace(configuration, base, page, signed = fal
     const location = new URL(page);
     if (location.username || location.password || location.port) return false;
     if (configuration.client === 'web') return location.origin === configuration.pageOrigin;
-    if (configuration.client === 'desktop') return !signed && page === 'app://cosmas/index.html';
+    if (configuration.client === 'desktop') return !signed && isPackagedWorkspaceDocument(page);
     return location.protocol === 'capacitor:' && location.hostname === 'localhost';
   } catch { return false; }
 }
