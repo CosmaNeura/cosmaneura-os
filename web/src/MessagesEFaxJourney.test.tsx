@@ -116,7 +116,7 @@ it('cannot clear a shared session operation lock through a source callback retai
 
 
 async function saveFaxForCard():Promise<{receipt:EFaxSourceReceipt;request:EFaxSourceReviewRequest}>{
- const review=vi.spyOn(efaxSourceApi,'review');await prepareAcquisition();await openPassage();await editPassage();await confirmPassage();await click('Save reviewed fax passage for this visit');await wait(()=>expect(button('Prepare a Chief request')).toBeTruthy());await wait(()=>expect(button('Prepare a Chief request')!.disabled).toBe(false);
+ const review=vi.spyOn(efaxSourceApi,'review');await prepareAcquisition();await openPassage();await editPassage();await confirmPassage();await click('Save reviewed fax passage for this visit');await wait(()=>expect(button('Prepare a Chief request')).toBeTruthy());await wait(()=>expect(button('Prepare a Chief request')!.disabled).toBe(false));
  const receipt=await review.mock.results[0].value,request=structuredClone(review.mock.calls[0][2]);expect(receipt.page_numbers).toEqual([1]);expect(receipt.document_sha256).toBe(request.document_sha256);expect(receipt.operation_id).toBe(request.operation_id);expect(request.passage).toBe(RECEIVED_FAX_PASSAGE);return {receipt,request};
 }
 it.each([{layout:'phone',clamped:false},{layout:'phone',clamped:true},{layout:'desktop',clamped:false}] as const)('opens a saved received-fax card and preserves exact source custody, draft, focus and reading position ($layout, clamped=$clamped)',async({layout,clamped})=>{
