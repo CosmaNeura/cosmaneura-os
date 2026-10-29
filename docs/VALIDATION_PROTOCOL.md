@@ -1,7 +1,9 @@
 # Mandatory pre-build validation protocol
 
-Cursor performs this protocol before creating application code, migrations,
-containers, or installing dependencies.
+The Phase 0 docs-only limit in this protocol has passed. John Clemente approved
+writing code, installing dependencies, and running tests. Follow `AGENTS.md`
+and `.cursor/rules/` for current work. The permissions and stop below are the
+historical Phase 0 procedure, not a current ban.
 
 ## Purpose
 
@@ -9,7 +11,7 @@ The goal is an independent evidence-backed decision, not a ceremonial approval
 of the supplied plan. Cursor must re-check technical viability, creation order,
 deployment shape, cost, and end-user burden within its actual environment.
 
-## Phase 0 permissions
+## Phase 0 permissions (historical)
 
 Allowed:
 
@@ -180,22 +182,19 @@ recommended resolution, whether it blocks local synth, and exact evidence.
 - expected repository initialization behavior;
 - legacy repository before/after status evidence.
 
-## Mandatory stop
+## Mandatory stop (passed)
 
-After producing and checking the validation artifacts, Cursor must:
-
-1. Run no build command.
-2. Make no application-code change.
-3. Present a concise summary and links.
-4. Ask only for decisions that genuinely block the slice.
-5. End exactly with:
+That stop has passed. The historical end of Phase 0 was:
 
 ```text
 BUILD_GATE: WAITING_FOR_OWNER_APPROVAL
 ```
 
-Implementation begins only after the owner sends exactly:
+The current marker is:
 
 ```text
-APPROVE LOCAL SYNTH BUILD
+BUILD_GATE: LOCAL_SYNTH_BUILD_APPROVED
 ```
+
+Coding agents may write code, install dependencies, and run tests. Do not
+deploy or put anything live without a yes from John or Shawn.

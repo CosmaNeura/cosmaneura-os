@@ -1,11 +1,16 @@
 # Cursor Phase 0 output directory
 
-Cursor writes the eight mandatory validation artifacts described in
-`../VALIDATION_PROTOCOL.md` here and makes no product-code changes during that
-phase.
+These files are the completed Phase 0 validation package. The docs-only limit
+has passed. Current agent instructions are `AGENTS.md` and `.cursor/rules/`.
 
-The expected terminal line of the Phase 0 response is:
+The historical terminal line of that phase was:
 
 ```text
 BUILD_GATE: WAITING_FOR_OWNER_APPROVAL
+```
+
+The current marker, recorded in `AGENTS.md`, is:
+
+```text
+BUILD_GATE: LOCAL_SYNTH_BUILD_APPROVED
 ```

@@ -1,6 +1,7 @@
 # Build and deployment roadmap
 
-Status: proposed and subject to Cursor Phase 0 validation
+Status: Phase 0 validation is complete. John Clemente approved local code,
+installs, and tests. This roadmap does not authorize a deploy.
 
 The roadmap is gate-driven. Calendar ranges are planning hypotheses, not
 promises. External-system timing is never treated as an engineering estimate.
@@ -56,10 +57,10 @@ Deliverables:
 Exit gate:
 
 - no unresolved fatal contradiction;
-- owner reviews the evidence and sends `APPROVE LOCAL SYNTH BUILD`.
+- owner approval `APPROVE LOCAL SYNTH BUILD` has been given.
 
-No product code, dependency installation, container start, IaC, or deployment is
-authorized in this phase.
+The Phase 0 ban on product code, dependency installation, and container start
+has passed. Deploys and IaC apply still need a yes from John or Shawn.
 
 ### Phase 1 - local synthetic foundation
 
