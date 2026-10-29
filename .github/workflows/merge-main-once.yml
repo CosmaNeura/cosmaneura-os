@@ -1,0 +1,54 @@
+name: merge-main-once
+on:
+  push:
+    branches: [cursor/visits-tabs-phone-type-06d2]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: merge-main-once
+  cancel-in-progress: false
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/visits-tabs-phone-type-06d2
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Merge main and resolve VisitCatalog
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git merge origin/main --no-edit || true
+          python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path("web/src/VisitCatalog.tsx")
+          t = p.read_text()
+          t = re.sub(r"<<<<<<<[^\n]*\n(.*?)=======\n(.*?)>>>>>>>[^\n]*\n", "", t, flags=re.S)
+          old = '<nav className="team-material-tabs" aria-label="Visit views">'
+          if old in t:
+              t = t.replace(old, '<nav className="team-material-tabs visit-catalog-tabs" aria-label="Visit views">')
+          t = t.replace("{['All','Today','Upcoming','Past',...visitsOnly?[]:['Unlinked notes']].map(label=>", "{(visitsOnly?VISIT_CATALOG_VIEWS.filter(label=>label!=='Unlinked notes'):VISIT_CATALOG_VIEWS).map(label=>")
+          if "VISIT_CATALOG_VIEWS=" not in t:
+              t = t.replace("export function VisitCatalog(", "export const VISIT_CATALOG_VIEWS=['All','Today','Upcoming','Past','Unlinked notes'] as const;\n\nexport function VisitCatalog(", 1)
+          css = "import './visit-catalog.css';"
+          if css not in t:
+              t = t.replace("import type {NotebookSummaries} from './notebook-metadata-contract';", "import type {NotebookSummaries} from './notebook-metadata-contract';\n" + css, 1)
+          p.write_text(t)
+          assert "<<<<<<<" not in t and ">>>>>>>" not in t, 'markers remain'
+          assert 'visit-catalog-tabs' in t, 'missing class'
+          assert 'VISIT_CATALOG_VIEWS' in t, 'missing const'
+          print('VisitCatalog resolved')
+          PY
+          git add web/src/VisitCatalog.tsx
+          if ! git diff --cached --quiet; then
+            git commit -m 'Merge main into visits tabs branch'
+          fi
+          rm -f .github/workflows/merge-main-once.yml
+          git add -A
+          git commit -m 'ci: remove one-shot merge workflow' || true
+          git push origin HEAD:cursor/visits-tabs-phone-type-06d2
+          echo pushed
