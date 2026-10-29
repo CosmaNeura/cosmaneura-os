@@ -1,9 +1,9 @@
 name: merge-main-once
 on:
+  workflow_dispatch:
   push:
     branches:
-      - cursor/forgot-password-clerk-06d2
-  workflow_dispatch:
+      - cursor/resolve-214-never
 permissions:
   contents: write
 jobs:
@@ -15,42 +15,49 @@ jobs:
           ref: cursor/forgot-password-clerk-06d2
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Merge main and resolve App.tsx
+      - name: Merge main and resolve App.tsx deterministically
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
-          git merge --no-edit FETCH_HEAD || true
-          echo "--- status ---"
-          git status --porcelain | head -30
+          git merge --no-edit FETCH_HEAD >/dev/null 2>&1 || true
+          echo "--- conflicted paths ---"
+          git diff --name-only --diff-filter=U || true
+          git checkout FETCH_HEAD -- web/src/App.tsx
           python3 - <<'PY'
           import pathlib
-          import re
           import sys
 
           path = pathlib.Path("web/src/App.tsx")
           text = path.read_text()
-          text = re.sub(r"<<<<<<<[^\n]*\n.*?=======\n.*?>>>>>>>[^\n]*\n", "", text, flags=re.S)
-          if "BetaSignIn" not in text:
-              sys.exit("BetaSignIn missing")
-          text = text.replace('<SignIn routing="hash" />', "<BetaSignIn />")
-          text = text.replace(
-              'import { OrganizationSwitcher, UserButton, useAuth } from "@clerk/react";',
-              'import { OrganizationSwitcher, UserButton, useAuth, useClerk, useUser } from "@clerk/react";',
-          )
-          text = text.replace(
-              'import { OrganizationSwitcher, SignIn, UserButton, useAuth, useClerk, useUser } from "@clerk/react";',
-              'import { OrganizationSwitcher, UserButton, useAuth, useClerk, useUser } from "@clerk/react";',
-          )
-          path.write_text(text)
+
           if "<<<<<<<" in text or ">>>>>>>" in text:
-              sys.exit("markers remain in App.tsx")
-          if "BetaSignIn />" not in text:
+              sys.exit("unexpected conflict markers in main App.tsx")
+
+          clerk_old = 'import { OrganizationSwitcher, SignIn, UserButton, useAuth, useClerk, useUser } from "@clerk/react";'
+          clerk_new = 'import { OrganizationSwitcher, UserButton, useAuth, useClerk, useUser } from "@clerk/react";'
+          if clerk_old in text:
+              text = text.replace(clerk_old, clerk_new)
+
+          if '<SignIn routing="hash" />' in text:
+              text = text.replace('<SignIn routing="hash" />', "<BetaSignIn />")
+          if "<BetaSignIn />" not in text:
               sys.exit("BetaSignIn not mounted")
-          if "useClerk" not in text:
-              sys.exit("useClerk import missing")
-          print("App.tsx resolved")
+
+          if "from \"./beta-sign-in\"" not in text:
+              anchor = 'import { BetaIdentityAdmin } from "./BetaIdentityAdmin";'
+              if anchor not in text:
+                  sys.exit("BetaIdentityAdmin import anchor missing")
+              text = text.replace(anchor, anchor + '\nimport { BetaSignIn } from "./beta-sign-in";')
+
+          if "SignIn " in text and "<BetaSignIn" not in text:
+              sys.exit("stale SignIn usage")
+          if "SignIn" in text.replace("BetaSignIn", "") and "<SignIn" in text:
+              sys.exit("SignIn still rendered")
+
+          path.write_text(text)
+          print("App.tsx resolved from main plus BetaSignIn")
           PY
           git add -A
           if ! git diff --cached --quiet; then
