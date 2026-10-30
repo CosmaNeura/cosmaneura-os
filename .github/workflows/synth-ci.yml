@@ -146,6 +146,24 @@ jobs:
           VITE_API_BASE: https://api.example.invalid
           VITE_MESSAGES_ENABLED: 'true'
         run: pnpm run build:beta
+      - name: Confirm version.json
+        working-directory: web
+        run: |
+          set -euo pipefail
+          node --input-type=module -e '
+          import {readFileSync} from "node:fs";
+          import {execFileSync} from "node:child_process";
+          const doc = JSON.parse(readFileSync("dist/version.json", "utf8"));
+          const head = execFileSync("git", ["rev-parse", "HEAD"], {encoding: "utf8"}).trim();
+          if (!/^[0-9a-f]{40}$/.test(doc.commit) || doc.commit !== head || doc.commit !== process.env.GITHUB_SHA) {
+            console.error("version.json commit does not match this checkout");
+            process.exit(1);
+          }
+          if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(doc.built_at)) {
+            console.error("version.json is missing a UTC build time");
+            process.exit(1);
+          }
+          '
 
   container-image:
     name: release-image-manifest
@@ -184,6 +202,7 @@ jobs:
             --build-arg VITE_COSMANEURA_WEB_ORIGIN=https://core.example.invalid \
             --build-arg VITE_CAPTURE_UPLOAD_ORIGINS=https://upload.example.invalid \
             --build-arg VITE_MESSAGES_ENABLED=true \
+            --build-arg VITE_BUILD_SHA="${GITHUB_SHA}" \
             .
           DIGEST="$(docker image inspect --format='{{.Id}}' "$IMAGE_TAG")"
           WEB_DIGEST="$(docker image inspect --format='{{.Id}}' "$WEB_IMAGE_TAG")"
@@ -234,6 +253,16 @@ jobs:
           assert 'VITE_MESSAGES_ENABLED' in flags, 'Messages missing from built web image'
           assert not {'VITE_EHR_READ_ENABLED', 'VITE_CALENDAR_IMPORT_ENABLED'} & set(flags), 'Local-only connector flag enabled in hosted web image'
           print('Built hosted web image enables Messages and keeps EHR/calendar import disabled')
+          PY
+          docker run --rm --network none --entrypoint cat "$WEB_IMAGE_TAG" \
+            /usr/share/nginx/html/version.json > artifacts/releases/web-version.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          document = json.loads(Path('artifacts/releases/web-version.json').read_text())
+          assert document['commit'] == os.environ['GITHUB_SHA'], 'web image version.json commit does not match GITHUB_SHA'
+          assert isinstance(document['built_at'], str) and len(document['built_at']) == 20
+          print('web image version.json matches the commit')
           PY
       - name: Reject fixable high or critical image vulnerabilities
         run: |

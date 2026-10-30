@@ -1781,6 +1781,7 @@ case "$operation" in
         --file "$repository_root/Dockerfile.web" \
         --tag "$web_image" \
         "${web_build_args[@]}" \
+        --build-arg "VITE_BUILD_SHA=$source_sha" \
         "$repository_root" >>"$build_log" 2>&1; then
         die "web image build failed; diagnostics remain root-only on the runner"
       fi
