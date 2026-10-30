@@ -31,7 +31,7 @@ must not become application dependencies.
   `git@github.com:CosmaNeura/cosmaneura-os.git` (company org **CosmaNeura**,
   private). A personal `JohnClem` copy was deleted — do not recreate it.
 - Legacy Track A evidence, if present on disk:
-  `/Users/jw/Desktop/Cosmas/` (`cosmaneura-master`, `cosmaneura-scribe`, and
+  `~/Desktop/Cosmas/` (`cosmaneura-master`, `cosmaneura-scribe`, and
   siblings). **READ-ONLY.** If that tree is not mounted in your environment,
   do **not** clone Track A, request Track A credentials, or invent Track A
   access. Canonical docs in this repo are sufficient to continue.
@@ -390,7 +390,7 @@ Contract rules:
   boundary. PHI stays out of ordinary logs.
 - Master remains usable when OS is down. OS retains work when Master is down.
 - Track A code changes use Track A review/deploy doctrine, performed by Track A
-  owners — not by silently editing `/Users/jw/Desktop/Cosmas/*`.
+  owners — not by silently editing `~/Desktop/Cosmas/*`.
 
 **Exit criteria**
 
@@ -523,10 +523,10 @@ END CODEX PROMPT
 | `docs/reference/` | Historical sources — evidence only |
 | `docs/handoff/CODEX_D3_TO_COMPLETE_BUILD_HANDOFF.md` | This file |
 
-Writable workspace: `/Users/jw/Desktop/cosmaneura-os` (or Codex clone of
+Writable workspace: `~/Desktop/cosmaneura-os` (or Codex clone of
 `CosmaNeura/cosmaneura-os`).
 
-Read-only Track A (if present): `/Users/jw/Desktop/Cosmas/`.
+Read-only Track A (if present): `~/Desktop/Cosmas/`.
 
 ## B. Azure synth resources (D2, non-PHI)
 

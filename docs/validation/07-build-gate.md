@@ -59,7 +59,7 @@ Out of slice: real messaging, Athena, Acuity, Clerk, Azure, application LLM, Cap
 Illustrative sequence (exact names finalized in README during build):
 
 ```bash
-cd /Users/jw/Desktop/cosmaneura-os
+cd ~/Desktop/cosmaneura-os
 git status   # confirm handoff tree
 git init -b main
 # scaffold package layout, pyproject, compose, web app
@@ -111,7 +111,7 @@ No Terraform apply; no Azure login; no Clerk/Stripe/Athena/Acuity calls; no lega
 | Create GitHub remote / push | Later direct instruction | **No** under this approval |
 | Multi-root with `Cosmas/` | Not proposed | Avoid write-boundary risk |
 
-Current state: `/Users/jw/Desktop/cosmaneura-os` is **not** a git repository.
+Current state: `~/Desktop/cosmaneura-os` is **not** a git repository.
 
 ## Legacy repository before/after status evidence
 
@@ -119,14 +119,14 @@ Captured during Phase 0 inspection; after = before (no mutations).
 
 | Path | Branch | Commit | Dirty lines before | Dirty lines after |
 |---|---|---|---|---|
-| `/Users/jw/Desktop/Cosmas/cosmaneura-master` | `legal/baa-v2-3-remove-claims-submission-20260829` | `7d8000a` | 0 | 0 |
-| `/Users/jw/Desktop/Cosmas/cosmaneura-scribe` | `codex/scribe-stt-mobile-roadmap` | `ad5a579` | 45 | 45 |
-| `/Users/jw/Desktop/Cosmas/Cosmas-CAB-Tool-main` | `codex/cab-suggested-codes-card-chase-20260829` | `e3c335d` | 0 | 0 |
-| `/Users/jw/Desktop/Cosmas/cosmaneura-scheduling` | `codex/deployment-readiness-tranche` | `1e63328` | 0 | 0 |
-| `/Users/jw/Desktop/Cosmas/cosmaneura-architecture` | `codex/scribe-optional-scheduling-contract` | `18e971e` | 3 | 3 |
-| `/Users/jw/Desktop/Cosmas/cosmaneura-sovereign-main` | `codex/v7-pilot-ux-remediation-plan` | `c570560` | dirty | dirty (unchanged) |
+| `~/Desktop/Cosmas/cosmaneura-master` | `legal/baa-v2-3-remove-claims-submission-20260829` | `7d8000a` | 0 | 0 |
+| `~/Desktop/Cosmas/cosmaneura-scribe` | `codex/scribe-stt-mobile-roadmap` | `ad5a579` | 45 | 45 |
+| `~/Desktop/Cosmas/Cosmas-CAB-Tool-main` | `codex/cab-suggested-codes-card-chase-20260829` | `e3c335d` | 0 | 0 |
+| `~/Desktop/Cosmas/cosmaneura-scheduling` | `codex/deployment-readiness-tranche` | `1e63328` | 0 | 0 |
+| `~/Desktop/Cosmas/cosmaneura-architecture` | `codex/scribe-optional-scheduling-contract` | `18e971e` | 3 | 3 |
+| `~/Desktop/Cosmas/cosmaneura-sovereign-main` | `codex/v7-pilot-ux-remediation-plan` | `c570560` | dirty | dirty (unchanged) |
 
-No bare `/Users/jw/Desktop/Cosmas/sovereign` directory. Secrets/`.env` contents were not opened.
+No bare `~/Desktop/Cosmas/sovereign` directory. Secrets/`.env` contents were not opened.
 
 ## What approval authorizes / does not
 

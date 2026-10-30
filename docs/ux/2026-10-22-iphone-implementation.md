@@ -7,8 +7,8 @@ cannot render while disconnected. Work and validation stayed in this conversatio
 and used synthetic data only.
 
 The completed checkout is saved outside Desktop and iCloud at
-`/Users/jw/Cosmas-Work/cosmabot-iphone-ui-20261022`. The original handoff archive is
-preserved at `/Users/jw/Cosmas-Handoffs/2026-10-22/cosmabot-ui-handoff.zip`.
+`~/Cosmas-Work/cosmabot-iphone-ui-20261022`. The original handoff archive is
+preserved at `~/Cosmas-Handoffs/2026-10-22/cosmabot-ui-handoff.zip`.
 The Desktop checkout and its missing Git index were not changed.
 
 ## Implemented behavior

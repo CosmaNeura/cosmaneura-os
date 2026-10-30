@@ -1,7 +1,7 @@
 # 00 — Source inventory and current evidence
 
 Date: 2026-09-02  
-Workspace: `/Users/jw/Desktop/cosmaneura-os`  
+Workspace: `~/Desktop/cosmaneura-os`  
 Git: not initialized (documentation-only handoff)  
 Host: Python 3.14.7 available; Node v22.23.2; uv present; Docker 29.7.2 present
 
@@ -23,7 +23,7 @@ Host: Python 3.14.7 available; Node v22.23.2; uv present; Docker 29.7.2 present
 | `.cursor/rules/scope-and-safety.mdc` | Cursor rule | yes |
 | `.gitignore` | Secret/venv ignores | yes |
 
-Sibling zip: `/Users/jw/Desktop/cosmaneura-os-cursor-handoff-20260902.zip` (same tree).
+Sibling zip: `~/Desktop/cosmaneura-os-cursor-handoff-20260902.zip` (same tree).
 
 ## Original source hashes
 
@@ -36,13 +36,13 @@ Verified 2026-09-02 via `shasum -a 256` on repository copies. All four match `do
 | `docs/reference/Cosmas_OS_codex_pack.json` | v1.8, 2026-09-01 | `b4e67473fceafe38991586fc17f0c77e162c0ff31b40a35eedb2bf10df70fa5f` | yes |
 | `docs/reference/cosmaneura-grok-context-pack.md` | v1.0, 2026-08-30 | `a039441c6bf6b8a45c427340fc020051f3bf2f69ebdf7fd7d3682ecdcc607706` | yes |
 
-Originals also present under `/Users/jw/Downloads/codex-azure-validate/` with matching sizes. Embedded Azure/operational commands in the brief and older packs are **evidence only**, not authorization.
+Originals also present under `~/Downloads/codex-azure-validate/` with matching sizes. Embedded Azure/operational commands in the brief and older packs are **evidence only**, not authorization.
 
 PDF page coverage: pages 1–7 read completely (product thesis, invariants, dual track, ladders, ports, CardChase=insurance, tenancy, roadmap, stack table, locked Clerk/idempotency/retention, early-adopter path, Azure ground truth).
 
 ## Legacy repositories discovered
 
-Under `/Users/jw/Desktop/Cosmas/` (read-only). Bare `sovereign` path does not exist; `cosmaneura-sovereign-*` worktrees do.
+Under `~/Desktop/Cosmas/` (read-only). Bare `sovereign` path does not exist; `cosmaneura-sovereign-*` worktrees do.
 
 | Repository | Path | Branch | Commit | Dirty lines before | Dirty lines after | Mutated? |
 |---|---|---|---|---|---|---|

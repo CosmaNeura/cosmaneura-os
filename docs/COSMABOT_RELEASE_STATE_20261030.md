@@ -15,7 +15,7 @@ runtime, Apple session or phone was inspected again for source consolidation.
 
 ## Stable private release package
 
-`/Users/jw/Desktop/Cosmas/CosmaBot-Cursor-Handoff-20261029-Final.zip`
+`~/Desktop/Cosmas/CosmaBot-Cursor-Handoff-20261029-Final.zip`
 
 SHA-256: `17dc3e1c8b9adb41613d53d35ec85aa743e9824f0c916e6e0fa926cc953e0b9f`.
 The ZIP is immutable release/recovery evidence. Older expanded October 29
