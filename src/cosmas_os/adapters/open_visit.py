@@ -36,7 +36,9 @@ class OpenVisitContext:
             when = "Visit time was not supplied."
         return (
             f"Open visit: {label}. {when} This is the visit that is open. "
-            "It is not a chart, medication list, diagnosis, or completed history."
+            "It is not a chart, medication list, diagnosis, or completed history. "
+            "Name this visit in the answer. If saved notes, intake, or preparation are absent, "
+            "say what is missing and that the clinician can save notebook notes or add a reference note."
         )
 
     @staticmethod

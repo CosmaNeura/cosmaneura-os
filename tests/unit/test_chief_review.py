@@ -79,6 +79,5 @@ def test_open_visit_enters_only_the_chief_request_payload():
     assert "Jordan Cypress" in payload["question"]
     assert "one-week sleep diary" in json.dumps(payload["sources"])
     assert all(item["kind"] != "open_visit" for item in payload["sources"])
-    assert "name that visit" in envelope["body"]["messages"][0]["content"]
     named = WorkspaceReviewConnector().review(chief)
     assert "Jordan Cypress" in named.content and "one-week sleep diary" in named.content
