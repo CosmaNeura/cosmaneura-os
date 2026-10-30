@@ -32,7 +32,7 @@ export function EhrReadProviders({requestedProvider,...props}:Omit<EhrReadMountP
  },[requestedProvider,props.active,props.locked,props.recoveryLocked]);
  const elationBusy=useCallback((value:boolean)=>update('elation',value),[update]),tebraBusy=useCallback((value:boolean)=>update('tebra',value),[update]),athenaBusy=useCallback((value:boolean)=>update('athena',value),[update]);
  useEffect(()=>()=>report.current?.(false),[]);
- const locked=dispatching||props.locked||props.recoveryLocked;
+ const locked=Boolean(dispatching||props.locked||props.recoveryLocked);
  function choose(next:RecordsProvider){
   if(busy.current.elation||busy.current.tebra||busy.current.athena||props.locked||props.recoveryLocked)return;
   setProvider(next);setVisited(old=>old.includes(next)?old:[...old,next]);
@@ -49,7 +49,7 @@ function TebraRecords(props:Omit<EhrReadMountProps,'provider'>){
  const update=useCallback((name:'medications'|'appointments',value:boolean)=>{busy.current[name]=value;const active=busy.current.medications||busy.current.appointments;setDispatching(active);report.current?.(active);},[]);
  const medicationsBusy=useCallback((value:boolean)=>update('medications',value),[update]),appointmentsBusy=useCallback((value:boolean)=>update('appointments',value),[update]);
  useEffect(()=>()=>report.current?.(false),[]);
- const locked=dispatching||props.locked||props.recoveryLocked;
+ const locked=Boolean(dispatching||props.locked||props.recoveryLocked);
  return <><SegmentedChoice label="Tebra records" value={choice} disabled={locked}
   options={[{id:'medications',name:'Medication records'},{id:'appointments',name:'Appointments'}]}
   onChange={next=>{if(busy.current.medications||busy.current.appointments||props.locked||props.recoveryLocked)return;setChoice(next);setVisited(old=>old.includes(next)?old:[...old,next]);}}/>
@@ -61,7 +61,7 @@ function AthenaRecords(props:Omit<EhrReadMountProps,'provider'>){
  const update=useCallback((name:'allergies'|'medications',value:boolean)=>{busy.current[name]=value;const active=busy.current.allergies||busy.current.medications;setDispatching(active);report.current?.(active);},[]);
  const allergiesBusy=useCallback((value:boolean)=>update('allergies',value),[update]),medicationsBusy=useCallback((value:boolean)=>update('medications',value),[update]);
  useEffect(()=>()=>report.current?.(false),[]);
- const locked=dispatching||props.locked||props.recoveryLocked;
+ const locked=Boolean(dispatching||props.locked||props.recoveryLocked);
  return <><SegmentedChoice label="Athena records" value={choice} disabled={locked}
   options={[{id:'allergies',name:'Allergy records'},{id:'medications',name:'Medication records'}]}
   onChange={next=>{if(busy.current.allergies||busy.current.medications||props.locked||props.recoveryLocked)return;setChoice(next);setVisited(old=>old.includes(next)?old:[...old,next]);}}/>

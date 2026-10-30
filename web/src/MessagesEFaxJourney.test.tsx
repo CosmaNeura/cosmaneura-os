@@ -145,7 +145,7 @@ it('opens an unavailable saved received-fax card through the existing placeholde
 it('uses the signed-in received-fax connector to save invented Chief work without a vendor sign-in',async()=>{
  const opened=vi.spyOn(window,'open').mockReturnValue(null),status=vi.spyOn(efaxInboundApi,'status'),ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append'),directions='Keep invented fax directions for Chief.';
  await openChat();await type(directions);history.replaceState(null,'','/?scenario=received-fax-absent#cosmas/home');await openTask();await click('Check received-fax access');
- expect(status.mock.calls[0][0].mode).toBe('clerk_jwt');expect(await status.mock.calls[0][0].getToken()).toBe('invented-ui-rehearsal-token');
+ const session=status.mock.calls[0][0];expect(session.mode).toBe('clerk_jwt');if(session.mode!=='clerk_jwt')throw new Error('signed-in connector');expect(await session.getToken({skipCache:true})).toBe('invented-ui-rehearsal-token');
  const portal=[...host.querySelectorAll<HTMLElement>('[aria-label="Sign-in portal backup"]')].find(visible)!,action=portal.querySelector('button')!;expect(portal.textContent).toContain('No vendor sign-in is started');expect(action.disabled).toBe(true);expect(action.textContent).toBe('Not available in this app');
  await act(async()=>action.click());expect(question().value).toBe(directions);expect(stats()).toMatchObject({observations:0,acquisitions:0,reviews:0,externalCalls:0});expect(opened).not.toHaveBeenCalled();
  history.replaceState(null,'','/?scenario=received-fax-happy#cosmas/home');await prepareAcquisition(false);await openPassage();await editPassage();await confirmPassage();await click('Save reviewed fax passage for this visit');await click('Prepare a Chief request');
