@@ -83,7 +83,9 @@ web/tsconfig.tsbuildinfo
 
 /web/ux-acceptance-dist/
 /web/.beta/
-!/docs/ux/validation/*.log
+
+# UX validation logs are produced locally and are not kept in git.
+docs/ux/validation/*.log
 
 # Local source-recovery release artifacts and generated Apple state
 /.local-release/
