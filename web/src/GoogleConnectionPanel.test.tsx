@@ -58,7 +58,7 @@ it('shows calendar dates and explains missing consent without replaying the read
   .mockResolvedValueOnce({kind:'calendar',account:connected.account,more:false,observed_at:new Date().toISOString(),items:[
    {id:'invented',subject:'Invented all-day visit',starts_at:'2026-11-01',ends_at:'2026-11-03',all_day:true,cancelled:false}]});
  await click('Check Google connection');
- await click('View next 7 days');expect(host.textContent).toContain('Invented all-day visit');expect(host.textContent).toContain('Nov 1, 2026');
+ await click('View next 7 days');expect(host.textContent).toContain('Invented all-day visit');expect(host.textContent).toContain(new Date('2026-11-01T12:00:00Z').toLocaleDateString(undefined,{dateStyle:'medium',timeZone:'UTC'}));
  expect(host.textContent).toContain('All day');
 });
 it('uses the latest capability check if Calendar permission changed during recovery',async()=>{
