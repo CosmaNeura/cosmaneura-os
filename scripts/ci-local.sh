@@ -10,13 +10,7 @@ export REDIS_URL="${REDIS_URL:-redis://localhost:63799/0}"
 export BLOB_ROOT="${BLOB_ROOT:-./data/blobs}"
 
 echo "== ensure postgres/redis =="
-docker-compose up -d postgres redis
-for i in $(seq 1 45); do
-  if docker-compose exec -T postgres pg_isready -U cosmas -d cosmas_os >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
+bash scripts/ensure-local-services.sh postgres redis
 
 echo "== uv sync =="
 uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import

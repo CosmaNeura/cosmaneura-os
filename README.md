@@ -40,7 +40,9 @@ credentials, or live Athena/Acuity/Clerk/messaging belong in this tree.
 ./scripts/dev-up.sh
 ```
 
-Requires: Docker (`docker-compose`), `uv`, Python 3.13, Node 24+ and Corepack. Starts Postgres + Redis,
+Requires: `uv`, Python 3.13, Node 24+ and Corepack; Docker (`docker-compose`)
+when local services are not already running. Reuses healthy Postgres + Redis
+endpoints started by the cloud-agent hook, or starts only missing containers,
 runs migrations, seeds a clinic, and serves the API on `:8000`.
 
 In another terminal:
