@@ -70,6 +70,9 @@ healthy. Do not treat enabled schedules as evidence of a completed backup or
 successful reboot; record the service invocation, resulting receipt and actual
 timer-triggered health checks.
 
+The daily backup does not delete older base backups. Retention is a separate
+dry-run plan, described below, and it is not part of this installer.
+
 Before running `provision-postgres.sql`, activate the reviewed PostgreSQL backup
 runtime profile. Provisioning refuses the default unlimited slot retention or
 any limit other than 4 GiB before creating a role or reserving WAL. It also
@@ -173,3 +176,63 @@ application capture artifacts stored outside PostgreSQL. External effects and
 identity revocations newer than the backup require
 reconciliation before activation; `external_state_reconciled` and
 `application_activated` remain false.
+
+## Retention
+
+WAL-G keeps every base backup until an operator turns retention on. `install-host.py`
+does not copy `retention.py`, `retention.json`, or `cosmabot-backup-retention.timer`.
+Those units load no backup credential and have no network. Nothing in this
+repository runs `wal-g delete` against a server.
+
+Defaults in `retention.json`:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `policy` | `retain_count` | Use `wal-g delete retain FULL` |
+| `retain_count` | 14 | Keep the 14 newest full backups |
+| `retain_days` | 30 | Used when `policy` is `retain_days` |
+| `dry_run` | `true` | Compute and log the delete set only |
+| `enabled` | `false` | Apply refuses while this is false |
+
+`retain_count` orders backups by sentinel `start_time`. The 14th newest is kept.
+Older non-permanent backups are the delete set. The logged command is:
+
+```text
+wal-g delete retain FULL 14 --use-sentinel-time
+```
+
+`--confirm` is absent, which is WAL-G's own dry run. `retain_days` uses
+`wal-g delete before <cutoff> --use-sentinel-time`, where the cutoff is now minus
+`retain_days`. A backup at the cutoff is kept. If every backup is older than the
+cutoff, the delete set is empty: WAL-G exits without deleting when that command
+would remove the whole history. Permanent backups are never in the delete set.
+If a permanent backup is older than the boundary, the plan does not call WAL-G,
+because that command would also delete WAL the permanent backup still needs.
+
+Plan reads a local JSON backup list only. It does not contact storage.
+
+### Turn it on
+
+1. Review this source. Leave `dry_run` true and `enabled` false.
+2. Copy `retention.py` to `/opt/cosmabot/backup/retention.py` (root-owned, mode 0555)
+   and `retention.json` to `/etc/cosmabot/backup/retention.json` (root-owned, mode 0644).
+3. Export `wal-g backup-list --detail --json` to
+   `/var/lib/cosmabot-backup/retention-backup-list.json`, owned by `cosmabot-backup`,
+   mode 0600. Do not put credentials in that file or in the retention unit.
+4. Install `cosmabot-backup-retention.service` and `.timer`, then enable the timer.
+   It runs at 06:00 UTC and only appends a JSON plan to the journal and
+   `retention.log`. Read `delete_names` there. A skipped plan means the list file
+   is not installed yet; that is not a retention pass.
+5. To delete, set `enabled` to true and `dry_run` to false, then run this on the
+   backup host with the same credential directory the backup job uses:
+
+```text
+COSMABOT_RETENTION_APPLY=1 python3 -I /opt/cosmabot/backup/retention.py apply \
+  --config /etc/cosmabot/backup/retention.json \
+  --backup-list /var/lib/cosmabot-backup/retention-backup-list.json \
+  --confirm-apply
+```
+
+That is the only command that adds `--confirm`. Leave the timer on `plan`.
+Do not point apply at a list you have not just reviewed. Applying with an empty
+delete set does not call WAL-G.

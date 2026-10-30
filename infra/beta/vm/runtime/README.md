@@ -140,7 +140,11 @@ proxy adds `NET_BIND_SERVICE` after dropping all capabilities; it retains UID
 10001, `no-new-privileges`, a read-only root filesystem and ports 8080/8443.
 Every other service drops all capabilities and adds none. Native amd64 execution
 of Caddy 2.11.4 confirmed this requirement; full proxy/TLS operation still needs
-runtime acceptance. Public certificate issuance/renewal and private certificate rotation
+runtime acceptance. App, API, worker, and proxy container logs use the Docker
+`local` driver limits in `infra/beta/vm/logging/retention.json`. The default remains
+10 MB and 3 files. Caddy file rolling stays out of the Caddyfile until
+`caddy.enabled` is true and this renderer is run again for a new release.
+See `infra/beta/vm/logging/README.md`. Public certificate issuance/renewal and private certificate rotation
 must be exercised and monitored. Registry pulls and backup custody are host-only;
 the runtime identity must not acquire deployment, registry-admin or backup powers.
 
