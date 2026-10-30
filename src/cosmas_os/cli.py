@@ -655,5 +655,39 @@ def verify_beta_offboarding_acceptance_cmd(
     typer.echo(evidence.sanitized_json())
 
 
+@app.command("delete-patient-records")
+def delete_patient_records_cmd(
+    patient_link_id: str = typer.Argument(..., help="Internal patient id"),
+    actor_principal_id: str = typer.Option(..., "--actor"),
+    confirm: bool = typer.Option(False, "--confirm"),
+) -> None:
+    """Count or delete one patient's records. The practice owner is the admin."""
+
+    from cosmas_os.application.patient_deletion import delete_patient_records, storage_roots
+    from cosmas_os.application.services import Container
+    from cosmas_os.domain.rules import AuthorizationError
+
+    session = _session()
+    try:
+        container = Container(session)
+        report = delete_patient_records(
+            session,
+            actor_principal_id=actor_principal_id,
+            patient_link_id=patient_link_id,
+            confirm=confirm,
+            blob=container.blob,
+            file_roots=storage_roots(container.blob),
+        )
+    except AuthorizationError:
+        typer.echo("admin authority required", err=True)
+        raise typer.Exit(1) from None
+    except Exception:
+        typer.echo("patient records could not be deleted", err=True)
+        raise typer.Exit(1) from None
+    finally:
+        session.close()
+    typer.echo(json.dumps(report, sort_keys=True))
+
+
 if __name__ == "__main__":
     app()
