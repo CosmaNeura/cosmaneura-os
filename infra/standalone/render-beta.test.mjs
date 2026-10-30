@@ -4,11 +4,11 @@ import {readFile} from 'node:fs/promises';
 import {render} from './render.mjs';
 
 const sample=JSON.parse(await readFile(new URL('./invented-host-input.json',import.meta.url),'utf8'));
-function candidate({model=true,google=true,owned=false}={}){
+function candidate({model=true,google=true,owned=false,host='staging.cosmas.ai'}={}){
   const value=structuredClone(sample);
-  if(owned){value.resource_scope='owned-cosmabot-vm-instance';value.web_origin='https://staging.cosmas.ai';
-    value.api_origin='https://api.staging.cosmas.ai';value.identity.apiOrigin=value.api_origin;
-    value.tls.hostnames=['staging.cosmas.ai','api.staging.cosmas.ai'];}
+  if(owned){value.resource_scope='owned-cosmabot-vm-instance';value.web_origin=`https://${host}`;
+    value.api_origin=`https://api.${host}`;value.identity.apiOrigin=value.api_origin;
+    value.tls.hostnames=[host,`api.${host}`];}
   value.beta_features={model:model?{origin:'https://invented-owned-chief.openai.azure.com',
     endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'}:null,
     google:google?{client_id:'invented-client.apps.googleusercontent.com',
@@ -46,6 +46,41 @@ test('existing owned VM scope admits only retained CosmaBot routes and cannot cr
   assert.equal(contract.existing_proxy.old_services_and_data_retained,true);
   assert.equal(contract.existing_proxy.cutover_and_rollback_qualified,false);
   assert.equal(contract.deployment_authorized,false);
+});
+
+test('owned beta.cosmas.ai stays synthetic and every other host stays refused',()=>{
+  const files=render(candidate({owned:true,host:'beta.cosmas.ai'})),env=files['api-public.json'];
+  assert.equal(env.COSMAS_ENV,'standalone_clerk_synthetic');
+  assert.equal(env.DATA_MODE,'synthetic');
+  assert.equal(files['host-preparation.json'].synthetic_only,true);
+  assert.equal(files['host-preparation.json'].deployment_authorized,false);
+  assert.equal(files['clients/web-build-env.json'].VITE_WORKSPACE_DATA_MODE,'synthetic');
+  assert.equal(env.CORS_ALLOWED_ORIGINS,['https://beta.cosmas.ai','app://cosmas','capacitor://localhost'].join(','));
+  for(const extra of ['data_mode','cosmas_env','phi']){
+    const switched=candidate({owned:true,host:'beta.cosmas.ai'});
+    switched[extra]='authorized_beta';
+    assert.throws(()=>render(switched));
+  }
+  const featureSwitch=candidate({owned:true,host:'beta.cosmas.ai'});
+  featureSwitch.beta_features.data_mode='authorized_beta';
+  assert.throws(()=>render(featureSwitch));
+  const hosts=[
+    ['https://app.cosmaneura.com','https://api.cosmaneura.com'],
+    ['https://cosmas.ai','https://api.cosmas.ai'],
+    ['https://www.cosmas.ai','https://api.www.cosmas.ai'],
+    ['https://app.cosmas.ai','https://api.cosmas.ai'],
+    ['https://foo.cosmaneura.com','https://api.foo.cosmaneura.com'],
+    ['https://random.example.invalid','https://api.random.example.invalid'],
+    ['https://beta.cosmas.ai','https://api.staging.cosmas.ai'],
+  ];
+  for(const [web,api] of hosts){
+    const refused=candidate({owned:true,host:'beta.cosmas.ai'});
+    refused.web_origin=web;refused.api_origin=api;refused.identity.apiOrigin=api;
+    refused.tls.hostnames=[new URL(web).hostname,new URL(api).hostname];
+    refused.beta_features.google.callback_uri=api+'/connections/google/callback';
+    refused.beta_features.google.return_origin=web;
+    assert.throws(()=>render(refused));
+  }
 });
 
 test('public overlay rejects credentials, alternate destinations, models, profiles and legacy routes',()=>{

@@ -23,7 +23,7 @@ class ExplicitSettings(Settings):
 
 
 class HostSettingsContract(unittest.TestCase):
-    def rendered(self, policy: str, features: bool = False) -> dict:
+    def rendered(self, policy: str, features: bool = False, host: str = "staging") -> dict:
         program = """
 import {readFile} from 'node:fs/promises';
 import {render} from './infra/standalone/render.mjs';
@@ -33,16 +33,17 @@ if(process.argv[1]==='shared_staging'){
   input.identity.audience='';input.identity.frontendOrigin='https://invented-own-practice.clerk.accounts.dev';
   input.identity.publishableKey='pk_test_'+Buffer.from('invented-own-practice.clerk.accounts.dev$').toString('base64');
 }
+const webHost=process.argv[3]==='beta'?'beta.cosmas.ai':'staging.cosmas.ai';
 if(process.argv[2]==='features'){
-  input.resource_scope='owned-cosmabot-vm-instance';input.web_origin='https://staging.cosmas.ai';input.api_origin='https://api.staging.cosmas.ai';
-  input.identity.apiOrigin=input.api_origin;input.tls.hostnames=['staging.cosmas.ai','api.staging.cosmas.ai'];
+  input.resource_scope='owned-cosmabot-vm-instance';input.web_origin='https://'+webHost;input.api_origin='https://api.'+webHost;
+  input.identity.apiOrigin=input.api_origin;input.tls.hostnames=[webHost,'api.'+webHost];
   input.beta_features={model:{origin:'https://invented-owned-chief.openai.azure.com',endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'},
     google:{client_id:'invented-client.apps.googleusercontent.com',callback_uri:input.api_origin+'/connections/google/callback',return_origin:input.web_origin}};
 }
 const files=render(input);console.log(JSON.stringify({environment:files['api-public.json'],contract:files['host-preparation.json']}));
 """
         result = subprocess.run(
-            ["node", "--input-type=module", "-e", program, policy, "features" if features else "base"],
+            ["node", "--input-type=module", "-e", program, policy, "features" if features else "base", host],
             cwd=ROOT,
             env={"PATH": os.environ["PATH"]},
             text=True,
@@ -105,6 +106,32 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
                 self.assertFalse(settings.workspace_core_connection_available)
                 self.assertFalse(settings.workspace_agent_tools_enabled)
                 self.assertFalse(settings.workspace_routines_enabled)
+
+    def test_beta_host_stays_standalone_synthetic(self):
+        import base64
+
+        output = self.rendered("audience", features=True, host="beta")
+        public, contract = output["environment"], output["contract"]
+        self.assertEqual(public["COSMAS_ENV"], "standalone_clerk_synthetic")
+        self.assertEqual(public["DATA_MODE"], "synthetic")
+        self.assertTrue(contract["synthetic_only"])
+        self.assertFalse(contract["deployment_authorized"])
+        self.assertIn("https://beta.cosmas.ai", public["CORS_ALLOWED_ORIGINS"])
+        database = contract["database"]
+        private = {
+            "database_url": f"postgresql+psycopg://{database['role']}:invented-password@127.0.0.1:{database['port']}/{database['name']}",
+            "human_deploy_evidence_ref": "invented feature preparation only",
+            "workspace_llm_api_key": "invented-model-key",
+            "google_connection_client_secret": "invented-google-secret",
+            "google_connection_encryption_key": base64.urlsafe_b64encode(b"x" * 32).decode(),
+        }
+        settings = ExplicitSettings(**{key.lower(): value for key, value in public.items()}, **private)
+        settings.validate_runtime_configuration()
+        switched = {key.lower(): value for key, value in public.items()}
+        switched["data_mode"] = "authorized_beta"
+        refused = ExplicitSettings(**switched, **private)
+        with self.assertRaises(RuntimeError):
+            refused.validate_runtime_configuration()
 
 
 if __name__ == "__main__":
