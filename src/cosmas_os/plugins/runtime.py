@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -24,6 +25,15 @@ LEGACY = {"google.mail_headers", "google.calendar_summaries", "microsoft.mail_he
           "scheduling.inspect_proposal", "scribe.read_existing", "visit_prep.read_brief",
           "spruce.prepare_delivery", "srfax.prepare_delivery", "documo.prepare_delivery", "efax.prepare_delivery"}
 HEADERS = {"X-Cosmas-Workspace-Protocol": "1", "X-Cosmas-Draft-Recovery": "2"}
+
+
+def _elation_plugin_present():
+    """PR #237 adds Elation tools. Either merge order should keep that module loadable."""
+    try:
+        importlib.import_module("cosmas_os.plugins.elation")
+    except ImportError:
+        return False
+    return True
 
 
 class PluginError(Exception):
@@ -105,11 +115,16 @@ class PluginRuntime:
             except (ValueError, TypeError):
                 raise PluginError("invalid_workspace") from None
         self.workspace_id = workspace_id
+        self.plugins = tuple(plugins)
+        # "athena" is this plugin. PR #237's "elation" is accepted when that module is present.
+        known = {operation.plugin for operation in definitions()} | {"athena"}
+        if _elation_plugin_present():
+            known.add("elation")
+        if plugins and not set(plugins) <= known:
+            raise PluginError("unknown_plugin")
         self.operations = {operation.id.replace(".", "_"): operation for operation in definitions()
                            if (operation.agent_callable or operation.id in LEGACY)
                            and (not plugins or operation.plugin in plugins)}
-        if plugins and not set(plugins) <= {operation.plugin for operation in definitions()}:
-            raise PluginError("unknown_plugin")
         self.client = None if session else httpx.Client(transport=transport, follow_redirects=False, trust_env=False,
                                                         timeout=30, limits=httpx.Limits(max_connections=4))
 
@@ -159,7 +174,7 @@ class PluginRuntime:
         finally:
             response.close()
 
-    def request(self, method, path, *, headers=None, body=None, query=None, timeout=30):
+    def request(self, method, path, *, headers=None, body=None, query=None, timeout=30, closed_detail=False):
         if any(key.lower() in {"authorization", "cookie", "x-box-id", "x-actor-principal-id"}
                for key in (headers or {})):
             raise PluginError("identity_headers_forbidden")
@@ -176,14 +191,21 @@ class PluginRuntime:
                         raise PluginError("response_limit_exceeded")
                 media = response.headers.get("content-type", "").split(";", 1)[0]
                 if response.status_code not in range(200, 300):
-                    if response.status_code == 409 and media == "application/json":
+                    value = None
+                    if media == "application/json" and (response.status_code == 409 or closed_detail):
                         value = json.loads(data, object_pairs_hook=pairs,
                                            parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
-                        if isinstance(value, dict) and value.get("outcome") in {
-                                "not_found", "reserved", "running", "saved", "unknown", "failed", "abandoned"}:
-                            return {**value, "http_status": 409, "recovery_required": True}
+                    if response.status_code == 409 and isinstance(value, dict) and value.get("outcome") in {
+                            "not_found", "reserved", "running", "saved", "unknown", "failed", "abandoned"}:
+                        return {**value, "http_status": 409, "recovery_required": True}
                     code = "sign_in_required" if response.status_code == 401 else "operation_rejected"
-                    return {"error": code, "http_status": response.status_code}
+                    result = {"error": code, "http_status": response.status_code}
+                    # Closed product codes only. Extra fields can carry chart text and stay dropped.
+                    if (closed_detail and response.status_code != 401 and isinstance(value, dict)
+                            and set(value) == {"detail"} and isinstance(value.get("detail"), str)
+                            and re.fullmatch(r"[a-z][a-z0-9_]{0,80}", value["detail"])):
+                        result["detail"] = value["detail"]
+                    return result
                 if media == "application/pdf":
                     if not data.startswith(b"%PDF-"):
                         raise PluginError("invalid_document_response")
@@ -194,6 +216,12 @@ class PluginRuntime:
                     raise PluginError("unsupported_api_response")
                 return json.loads(data, object_pairs_hook=pairs,
                                   parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        except httpx.TimeoutException:
+            self._require_current_session()
+            if closed_detail:
+                return {"error": "timeout", "automatic_retry": False}
+            return {"error": "response_unconfirmed", "recovery_required": True,
+                    "automatic_retry": False}
         except httpx.RequestError:
             self._require_current_session()
             return {"error": "response_unconfirmed", "recovery_required": True,
@@ -202,7 +230,26 @@ class PluginRuntime:
             raise PluginError("invalid_api_response") from None
 
     def _session_target(self, method, path, headers, body, query, timeout):
-        """No arbitrary proxy access through an application-session adapter."""
+        """No arbitrary proxy access through an application-session adapter.
+
+        The EHR allowlist is shared with PR #237. On merge, keep a body when
+        either Athena or Elation ``command_allowed`` accepts it. Do not raise
+        on the first miss before the other plugin is considered.
+        """
+        if method == "POST" and path == "/connections/ehr/reads":
+            from cosmas_os.plugins.athena import ehr_route_allowed
+
+            expected = {"Content-Type": "application/json", **HEADERS, "X-Cosmas-Ehr-Read": "1"}
+            if headers == expected and not query and ehr_route_allowed(body) and 0 < timeout <= 45:
+                return
+            raise PluginError("invalid_tool_arguments")
+        if method == "POST" and path == "/connections/cosmaneura/read":
+            from cosmas_os.plugins.athena import schedule_command_allowed
+
+            expected = {"Content-Type": "application/json", **HEADERS, "X-Cosmas-Connection-Contract": "1"}
+            if headers == expected and not query and schedule_command_allowed(body) and 0 < timeout <= 30:
+                return
+            raise PluginError("invalid_tool_arguments")
         if method == "GET" and path == "/connections/plugins":
             expected = {"Content-Type": "application/json", **HEADERS, "X-Cosmas-Connection-Contract": "1"}
             if headers == expected and not query and body is None and 0 < timeout <= 30:
@@ -255,10 +302,29 @@ class PluginRuntime:
             raise PluginError("invalid_catalog_response") from None
 
     def tool_definitions(self):
+        from cosmas_os.plugins import athena
+
         enabled = self.catalog()
-        return [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
+        rows = [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
+        elation = athena.optional_elation()
+        if elation is not None and (not self.plugins or "elation" in self.plugins):
+            rows.extend(elation.tool_definitions())
+        if not self.plugins or "athena" in self.plugins:
+            rows.extend(athena.tool_definitions())
+        return rows
 
     def call(self, name, arguments):
+        from cosmas_os.plugins import athena
+
+        elation = athena.optional_elation()
+        if elation is not None and name in elation.NAMES:
+            if self.plugins and "elation" not in self.plugins:
+                raise PluginError("unknown_tool")
+            return elation.call(self, name, arguments)
+        if name in athena.NAMES:
+            if self.plugins and "athena" not in self.plugins:
+                raise PluginError("unknown_tool")
+            return athena.call(self, name, arguments)
         operation = self.operations.get(name)
         if operation is None:
             raise PluginError("unknown_tool")
