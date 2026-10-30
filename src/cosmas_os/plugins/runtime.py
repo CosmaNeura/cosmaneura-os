@@ -106,8 +106,9 @@ class PluginRuntime:
                 raise PluginError("invalid_workspace") from None
         self.workspace_id = workspace_id
         self.plugins = tuple(plugins)
-        known = {operation.plugin for operation in definitions()} | {"elation", "tebra"}
-        if plugins and not set(plugins) <= known:
+        catalog_plugins = {operation.plugin for operation in definitions()} | {"elation"}
+        catalog_plugins.add("tebra")
+        if plugins and not set(plugins) <= catalog_plugins:
             raise PluginError("unknown_plugin")
         self.operations = {operation.id.replace(".", "_"): operation for operation in definitions()
                            if (operation.agent_callable or operation.id in LEGACY)
@@ -219,13 +220,11 @@ class PluginRuntime:
     def _session_target(self, method, path, headers, body, query, timeout):
         """No arbitrary proxy access through an application-session adapter."""
         if method == "POST" and path == "/connections/ehr/reads":
-            from cosmas_os.plugins.elation import command_allowed as elation_allowed
-            from cosmas_os.plugins.tebra import command_allowed as tebra_allowed
+            from cosmas_os.plugins.elation import command_allowed
+            from cosmas_os.plugins.tebra import command_allowed as tebra_command_allowed
 
             expected = {"Content-Type": "application/json", **HEADERS, "X-Cosmas-Ehr-Read": "1"}
-            # Either closed command may allow the read. A miss on one does not reject the other.
-            if (headers == expected and not query and (elation_allowed(body) or tebra_allowed(body))
-                    and 0 < timeout <= 45):
+            if headers == expected and not query and (command_allowed(body) or tebra_command_allowed(body)) and 0 < timeout <= 45:
                 return
             raise PluginError("invalid_tool_arguments")
         if method == "GET" and path == "/connections/plugins":
@@ -280,27 +279,30 @@ class PluginRuntime:
             raise PluginError("invalid_catalog_response") from None
 
     def tool_definitions(self):
-        from cosmas_os.plugins import elation, tebra
+        from cosmas_os.plugins.elation import tool_definitions
+        from cosmas_os.plugins.tebra import tool_definitions as tebra_tool_definitions
 
         enabled = self.catalog()
         rows = [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
         if not self.plugins or "elation" in self.plugins:
-            rows.extend(elation.tool_definitions())
+            rows.extend(tool_definitions())
         if not self.plugins or "tebra" in self.plugins:
-            rows.extend(tebra.tool_definitions())
+            rows.extend(tebra_tool_definitions())
         return rows
 
     def call(self, name, arguments):
-        from cosmas_os.plugins import elation, tebra
+        from cosmas_os.plugins import elation
+        from cosmas_os.plugins.tebra import NAMES as tebra_names
+        from cosmas_os.plugins.tebra import call as tebra_call
 
         if name in elation.NAMES:
             if self.plugins and "elation" not in self.plugins:
                 raise PluginError("unknown_tool")
             return elation.call(self, name, arguments)
-        if name in tebra.NAMES:
+        if name in tebra_names:
             if self.plugins and "tebra" not in self.plugins:
                 raise PluginError("unknown_tool")
-            return tebra.call(self, name, arguments)
+            return tebra_call(self, name, arguments)
         operation = self.operations.get(name)
         if operation is None:
             raise PluginError("unknown_tool")

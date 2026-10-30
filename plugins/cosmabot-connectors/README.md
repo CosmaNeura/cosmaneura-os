@@ -72,13 +72,12 @@ observe the original command/key; they never automatically repeat uncertain work
 
 Tools include bounded Google/Microsoft reads, current Google source custody,
 approved SRFax/Documo image acquisition, retained fax PDFs, vendor/portal/Stripe
-proposals and status, Core/Scribe/Scheduling/Research reads and recovery,
-read-only Elation appointment, problem, medication, and lab pages, and read-only
-Tebra appointment, visit, authorized-patient, and medication pages. Elation and
-Tebra tools call the existing signed EHR read route. They say in plain language
-when that record system is not connected or when that read is not supported.
-They do not prescribe, sign, book, or change the chart. See
-`docs/plugins/elation-reads.md` and `docs/plugins/tebra-reads.md`.
+proposals and status, Core/Scribe/Scheduling/Research reads and recovery, and
+read-only Elation appointment, problem, medication, and lab pages. Elation tools
+call the existing signed EHR read route. They say in plain language when Elation
+is not connected or when that read is not supported. They do not prescribe, sign,
+book, or change the chart. See `docs/plugins/elation-reads.md`.
+Tebra appointment, visit, authorized-patient, and medication tools are read-only pages on that same route. They say when Tebra is not connected or a read is not supported. See `docs/plugins/tebra-reads.md`.
 Enabled tools depend on signed server configuration; current grants are checked
 again when called. Spruce fax images remain unavailable until verified download
 hosts exist. Spruce's installed registry supports retained inbox work; fresh inbox

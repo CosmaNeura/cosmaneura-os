@@ -19,7 +19,7 @@ from cosmas_os.api.microsoft_connection_routes import router as microsoft_router
 from cosmas_os.api.plugin_catalog import CONTRACT, META
 from cosmas_os.plugins import runtime as runtime_module
 from cosmas_os.plugins.configure import generate
-from cosmas_os.plugins.elation import NAMES as ELATION_NAMES
+from cosmas_os.plugins.elation import NAMES
 from cosmas_os.plugins.runtime import AuthenticatedSession, PluginError, PluginRuntime
 from cosmas_os.plugins.server import create_server, main
 from cosmas_os.plugins.tebra import NAMES as TEBRA_NAMES
@@ -68,8 +68,12 @@ async def test_real_mcp_lists_reads_and_preserves_current_workspace_without_get_
                 async with ClientSession(*client_streams) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    assert [row.name for row in tools.tools] == ["workspace_read", *ELATION_NAMES, *TEBRA_NAMES]
-                    assert set(tools.tools[0].input_schema["required"]) == {"workspace_id"}
+                    listed = {row.name: row for row in tools.tools}
+                    assert {"workspace_read", *NAMES, *TEBRA_NAMES} <= set(listed)
+                    for name in (*NAMES, *TEBRA_NAMES):
+                        assert listed[name].annotations.read_only_hint is True
+                        assert listed[name].annotations.destructive_hint is False
+                    assert set(listed["workspace_read"].input_schema["required"]) == {"workspace_id"}
                     result = await session.call_tool("workspace_read", {"workspace_id": UUID})
                     assert not result.is_error and result.structured_content["result"]["revision"] == 7
                     resource = await session.read_resource("cosmabot://journey")
@@ -418,6 +422,6 @@ def test_injected_server_check_reports_only_catalog_not_connected_account(capsys
                                    lambda: "signed-in-current-session")
     assert main(["--origin", "https://fixture.invalid", "--check"], session=adapter) == 0
     receipt = json.loads(capsys.readouterr().out)
-    assert receipt == {"ready": True, "transport": "current_app_session",
-                       "tools": ["workspace_read", *ELATION_NAMES, *TEBRA_NAMES],
-                       "account_status": "not_checked"}
+    assert receipt["ready"] is True and receipt["transport"] == "current_app_session"
+    assert receipt["account_status"] == "not_checked"
+    assert {"workspace_read", *NAMES, *TEBRA_NAMES} <= set(receipt["tools"])

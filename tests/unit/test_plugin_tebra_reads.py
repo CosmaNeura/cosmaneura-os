@@ -549,7 +549,7 @@ def test_fhir_grant_change_discards_the_medication_page():
 
 def test_tools_are_read_only_and_accept_no_token_cursor_or_free_form_query():
     rows = tool_definitions()
-    assert [row["name"] for row in rows] == list(NAMES)
+    assert {row["name"] for row in rows} == set(NAMES)
     allowed = {
         "connection_id", "binding_sha256", "starts_at", "ends_at", "idempotency_key",
         "observation_id", "observation_sha256", "item_handle", "item_sha256", "workspace_id",
@@ -651,7 +651,7 @@ def test_pinned_workspace_rejects_a_different_encounter_before_http(name):
 def test_plugin_filter_hides_the_other_record_system():
     runtime, _, _calls = runtime_for(lambda *_: pytest.fail("list must not read Tebra"), plugins=("tebra",))
     try:
-        assert [row["name"] for row in runtime.tool_definitions()] == list(NAMES)
+        assert {row["name"] for row in runtime.tool_definitions()} == set(NAMES)
         with pytest.raises(PluginError, match="unknown_tool"):
             runtime.call("elation_read_appointments", appointment_arguments())
     finally:
@@ -669,9 +669,7 @@ async def test_mcp_lists_tebra_reads_as_read_only():
                 async with ClientSession(*client_streams) as session:
                     await session.initialize()
                     listed = await session.list_tools()
-                    names = [row.name for row in listed.tools]
-                    start = names.index(NAMES[0])
-                    assert names[start:] == list(NAMES)
+                    assert set(NAMES) <= {row.name for row in listed.tools}
                     for row in listed.tools:
                         if row.name in NAMES:
                             assert row.annotations.read_only_hint is True

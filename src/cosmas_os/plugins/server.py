@@ -23,10 +23,7 @@ clinical writes, sending, bookings and payment execution stay in the human UI.
 Elation appointment, problem, medication and lab tools only read the connected
 practice, one page at a time. Not connected and not supported are separate from
 a returned page. They never prescribe, sign, book, or change Elation.
-Tebra appointment and visit tools read the connected practice. Tebra authorized-patient
-and medication tools read the connected Tebra record, one page at a time. Not connected
-and not supported are separate from a returned page. They never prescribe, sign, book,
-or change Tebra.
+Tebra appointment, visit, authorized-patient, and medication tools only read the connected practice, one page at a time. Not connected and not supported are separate from a returned page. They never prescribe, sign, book, or change Tebra.
 """
 
 
