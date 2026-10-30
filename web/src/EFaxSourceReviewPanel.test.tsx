@@ -118,11 +118,13 @@ it('permits Back after a lost source-save response while retaining the exact dur
 it('keeps actual review dispatch locked through native abort until its promise settles',async()=>{
  props={...props,onOperationBusyChange:vi.fn(),identity:{mode:'clerk_jwt',getToken:async()=>null,nativeSession:{revision:uuid(90),isCurrent:()=>true}}};
  await mount();await enter();await ack();let reject!:(reason:unknown)=>void;vi.mocked(efaxSourceApi.review).mockReturnValueOnce(new Promise((_,no)=>{reject=no;}));
- await act(async()=>button('Save reviewed fax passage for this visit')!.click());await wait(()=>expect(saved?.pending).not.toBeNull());
+ await act(async()=>button('Save reviewed fax passage for this visit')!.click());
+ await wait(()=>{expect(saved?.pending?.request).toEqual(expect.any(Object));expect(typeof saved?.pending?.request_sha256).toBe('string');expect(efaxSourceApi.review).toHaveBeenCalledOnce();});
+ const request=structuredClone(saved!.pending!.request);
  await act(async()=>notifyNativeWorkspaceForeground(props.identity,false));expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(true);
  await act(async()=>notifyNativeWorkspaceForeground(props.identity,true));expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(true);
  await act(async()=>reject(new WorkspaceApiError(503)));await wait(()=>expect(button('Restore saved fax passage')).toBeDefined());
- expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false);expect(saved!.pending).not.toBeNull();
+ expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false);expect(saved!.pending!.request).toEqual(request);
 });
 it('releases the initial access-operation lock after a failed journal load without deleting saved work',async()=>{
  props={...props,onOperationBusyChange:vi.fn()};vi.mocked(props.recovery!.load).mockRejectedValueOnce(new Error('Invented load failure'));
