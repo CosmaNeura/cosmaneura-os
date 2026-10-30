@@ -14,7 +14,7 @@ export function researchRehearsal(read:()=>Workspace,write:(workspace:Workspace)
  const page=<T,>(items:T[],before:string|undefined,id:(item:T)=>string)=>{const index=before?items.findIndex(item=>id(item)===before):-1;if(before&&index<0)throw new WorkspaceApiError(404);return structuredClone(items.slice(index+1,index+6));};
  persist();
  return {
-  catalog:async()=>researchCatalog(),
+  catalog:async()=>researchCatalog(new URLSearchParams(location.search).get('research-scenario')!=='connector-absent'),
   history:async(_identity,workspace,address,_signal,before)=>{check(workspace,address);stats.historyReads++;return {contract:'research.history.v1',runs:page(state.runs,before,item=>item.run_id)};},
   savedHistory:async(_identity,workspace,address,_signal,before)=>{check(workspace,address);stats.packetReads++;return {contract:'research.saved_history.v1',workspace_id:workspace,bot,packets:page(state.packets,before,item=>item.saved.entry_id)};},
   search:async(_identity,workspace,body)=>{
