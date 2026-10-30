@@ -6,8 +6,8 @@
 .provider-portal-systems button small { margin-top:4px; color:var(--team-muted,#536158); font-size:13px; }
 .provider-portal-systems button[aria-pressed="true"] { background:var(--team-accent-soft,#edf4ef); border-color:var(--team-accent,#396750); font-weight:650; }
 .provider-portal-systems button:focus-visible { outline:2px solid var(--team-accent,#396750); outline-offset:2px; }
-.provider-portal-detail, .provider-portal-limits, .provider-portal-relay { display:grid; gap:8px; padding:16px; border:1px solid var(--team-line,#d9ddd9); border-radius:12px; }
-.provider-portal-detail h2, .provider-portal-limits h2, .provider-portal-relay h3 { margin:0; }
+.provider-portal-detail, .provider-portal-limits, .provider-portal-relay, .provider-portal-backup { display:grid; gap:8px; padding:16px; border:1px solid var(--team-line,#d9ddd9); border-radius:12px; }
+.provider-portal-detail h2, .provider-portal-limits h2, .provider-portal-relay h3, .provider-portal-backup h3 { margin:0; }
 .provider-portal-detail p, .provider-portal-limits li, .provider-portal-relay p { margin:0; line-height:1.45; }
 .provider-portal-badge { justify-self:start; margin:0; padding:4px 8px; border-radius:999px; background:#eef3ed; color:#326c59; font-size:12px; font-weight:700; }
 .provider-portal-access { color:var(--team-muted,#536158); font-size:14px; }

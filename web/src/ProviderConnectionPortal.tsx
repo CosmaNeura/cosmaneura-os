@@ -22,7 +22,7 @@ export function ProviderConnectionPortal({locked, records}:{locked:boolean; reco
   const system = systems.find(item => item.id === selected) ?? systems[1];
   const open = records?.[system.id];
   return <section className="provider-portal" aria-label="EHR and Rx Relay">
-    <p className="provider-portal-lead">Connect the records system your practice uses. Chart access here is read only. Rx Relay does not sign or send a prescription.</p>
+    <p className="provider-portal-lead">Use the CosmaBot connector for this records system. It reads through your signed-in session and does not export a credential. A vendor sign-in portal is only the backup when that connector is not available in this app. Chart access stays read only, and Rx Relay does not sign or send a prescription.</p>
     <div className="provider-portal-systems" role="group" aria-label="Records system">
       {systems.map(item => <button key={item.id} type="button" aria-pressed={selected===item.id} disabled={locked} onClick={() => setSelected(item.id)}>
         <strong>{item.name}</strong><small>Read only</small>
@@ -37,8 +37,12 @@ export function ProviderConnectionPortal({locked, records}:{locked:boolean; reco
         <h3>Rx Relay</h3>
         <p role="status"><strong>Not connected for sending.</strong> {system.relay}</p>
       </section>
-      <button className="team-primary" type="button" disabled={locked || !open} onClick={() => open?.()}>{open ? system.openLabel : 'Not available in this app'}</button>
-      {!open && <p className="provider-portal-access">Ask your practice administrator to make {system.name} available in this app before opening records.</p>}
+      {open ? <button className="team-primary" type="button" disabled={locked} onClick={() => open()}>{system.openLabel}</button> : <section className="provider-portal-backup" aria-label="Sign-in portal backup">
+        <h3>Sign-in portal</h3>
+        <p role="status">Backup only. No vendor sign-in is started from CosmaBot until an administrator enables the {system.name} connector.</p>
+        <button className="team-primary" type="button" disabled>Not available in this app</button>
+        <p className="provider-portal-access">Ask your practice administrator to make {system.name} available in this app before opening records.</p>
+      </section>}
     </article>
     <section className="provider-portal-limits" aria-label="Before a prescription can be sent">
       <h2>Before a prescription can leave this app</h2>
