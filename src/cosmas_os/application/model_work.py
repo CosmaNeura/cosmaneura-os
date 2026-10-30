@@ -532,6 +532,16 @@ def _finish(s, row, state, reason, at, *, dispatch=None, outcome=None, reply=Non
             handoffs._terminal(s, attempt, status, error=reason, result=row.result_entry_id)
 
 
+def open_visit_passage(s, workspace, settings):
+    """Chief names the visit already open. Other roles keep their own source rules."""
+    if settings["role"] != "chief" or workspace.appointment_id is None:
+        return None
+    from cosmas_os.adapters.open_visit import OpenVisitContext
+    from cosmas_os.models import AppointmentObservation
+
+    return OpenVisitContext.text(s.get(AppointmentObservation, workspace.appointment_id))
+
+
 def _context_for(
     s, workspace, version, settings, bot, command, *, handoff_roles=(), draft_only=False, session_prep_phase="before", prepared_contract=None
 ):
@@ -598,6 +608,7 @@ def _context_for(
         agent_id=bot.agent_id,
         handoff_targets=targets,
         additional_sources=_selected_connector_passages(s, workspace, settings),
+        open_visit=open_visit_passage(s, workspace, settings),
     )
     from cosmas_os.application.clinical_note_share import clinical_request
 

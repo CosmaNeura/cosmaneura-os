@@ -32,7 +32,12 @@ def build_context(
     handoff_targets=(),
     additional_sources=(),
     session_prep_analysis=None,
+    open_visit=None,
 ):
+    from cosmas_os.adapters.open_visit import OpenVisitContext
+
+    if role == "chief":
+        content = OpenVisitContext.question(content, open_visit, draft_only=draft_only)
     # Only the latest typed draft is current. Evidence remains explicitly attributed.
     notes = [e for e in snapshot["entries"] if e["kind"] == "scratchpad"][-1:]
     evidence = [e for e in snapshot["entries"] if e["kind"] in {"evidence", "synthetic_source"}]
@@ -241,6 +246,7 @@ def ask(
         content,
         agent_id=bot.agent_id,
         additional_sources=model_work._selected_google_passages(s, w, settings),
+        open_visit=model_work.open_visit_passage(s, w, settings),
     )
     if settings["role"] == "chief":
         from cosmas_os.adapters.chief_review import review

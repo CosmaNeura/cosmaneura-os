@@ -241,7 +241,7 @@ async function combined(){
 function CommitProbe({capture}:{capture?:()=>void}){useLayoutEffect(()=>{capture?.();});return null;}
 it.each(['identity','scope','recording','authority'] as const)('the first committed %s replacement cannot display the previous saved recording or Scribe session',async change=>{
  const c=await combined();const snapshot={state:'processing',recordedChunks:1};mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:c.transcribe,close:async()=>{}});
- await c.render();await waitFor(()=>expect(host.textContent).toContain('Invented combined test clip'));const commits:string[]=[];const onCommit=()=>commits.push(host.innerHTML);
+ await c.render();await waitFor(()=>expect(host.textContent).toContain('Invented combined test clip'));await waitFor(()=>expect(c.transcribe).toHaveBeenCalledOnce());const commits:string[]=[];const onCommit=()=>commits.push(host.innerHTML);
  mocks.open.mockImplementation(()=>new Promise(()=>{}));
  if(change==='identity')await c.render({identity:{...identity},onCommit});
  if(change==='scope')await c.render({entry:{...c.entry,scope:'f'.repeat(64)},onCommit});
