@@ -45,6 +45,16 @@ it('makes context the primary title and keeps each Chief conversation and its me
     `Conversation actions for ${otherChief.context_label}, Chief of Staff`,
   ]);
 });
+it('shows quiet working presence only while attention is working',async()=>{
+  const working:ConversationSummary={...first,attention:'working',unread:false};
+  await act(async()=>root.render(<Harness rows={[working,otherChief]}/>));
+  const cards=[...host.querySelectorAll<HTMLElement>('.messages-conversation-card')];
+  const workingStatus=cards[0].querySelector('.messages-status[data-attention="working"]');
+  expect(workingStatus?.textContent).toContain('Working');
+  expect(workingStatus?.querySelectorAll('.messages-working-dots>span')).toHaveLength(3);
+  expect(cards[1].querySelector('.messages-working-dots')).toBeNull();
+  expect(cards[1].querySelector('.messages-status')?.getAttribute('data-attention')).toBeNull();
+});
 it('uses one row menu and keeps hidden chats discoverable and restorable',async()=>{
   expect(button('Mark unread')).toBeUndefined();expect(host.querySelectorAll('.messages-row-menu')).toHaveLength(2);
   await menu();expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(1);await click('Hide conversation');
