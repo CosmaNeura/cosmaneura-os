@@ -100,6 +100,9 @@ def delete_patient_records(
         statement = statement.with_for_update().execution_options(populate_existing=True)
     patient = session.scalar(statement)
     if patient is None:
+        # Release the owner lock. A repeat call must not pin that row.
+        if confirm:
+            session.commit()
         return _report(patient_id, confirm=confirm, deleted=False, tables={}, files={})
     if patient.box_id != actor.box_id:
         raise AuthorizationError("admin authority required")
