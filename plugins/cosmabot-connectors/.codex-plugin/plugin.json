@@ -1,12 +1,12 @@
 {
   "name": "cosmabot-connectors",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Operational CosmaBot connectors and bot handoffs through the authenticated product API.",
   "author": {"name": "CosmaNeura"},
   "interface": {
     "displayName": "CosmaBot Connectors",
     "shortDescription": "Connected sources, private team drafts and recovery.",
-    "longDescription": "Calls configured first-party CosmaBot operations using current sign-in and server grants. Human review and destination approval remain in CosmaBot.",
+    "longDescription": "Calls configured first-party CosmaBot operations using current sign-in and server grants. Elation appointment, problem, medication, and lab tools are read-only and say when Elation is not connected or a read is not supported. Human review and destination approval remain in CosmaBot.",
     "developerName": "CosmaNeura",
     "category": "Productivity",
     "capabilities": ["Read", "Write", "Interactive"],

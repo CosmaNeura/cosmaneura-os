@@ -105,11 +105,13 @@ class PluginRuntime:
             except (ValueError, TypeError):
                 raise PluginError("invalid_workspace") from None
         self.workspace_id = workspace_id
+        self.plugins = tuple(plugins)
+        catalog_plugins = {operation.plugin for operation in definitions()} | {"elation"}
+        if plugins and not set(plugins) <= catalog_plugins:
+            raise PluginError("unknown_plugin")
         self.operations = {operation.id.replace(".", "_"): operation for operation in definitions()
                            if (operation.agent_callable or operation.id in LEGACY)
                            and (not plugins or operation.plugin in plugins)}
-        if plugins and not set(plugins) <= {operation.plugin for operation in definitions()}:
-            raise PluginError("unknown_plugin")
         self.client = None if session else httpx.Client(transport=transport, follow_redirects=False, trust_env=False,
                                                         timeout=30, limits=httpx.Limits(max_connections=4))
 
@@ -159,7 +161,7 @@ class PluginRuntime:
         finally:
             response.close()
 
-    def request(self, method, path, *, headers=None, body=None, query=None, timeout=30):
+    def request(self, method, path, *, headers=None, body=None, query=None, timeout=30, closed_detail=False):
         if any(key.lower() in {"authorization", "cookie", "x-box-id", "x-actor-principal-id"}
                for key in (headers or {})):
             raise PluginError("identity_headers_forbidden")
@@ -176,14 +178,21 @@ class PluginRuntime:
                         raise PluginError("response_limit_exceeded")
                 media = response.headers.get("content-type", "").split(";", 1)[0]
                 if response.status_code not in range(200, 300):
-                    if response.status_code == 409 and media == "application/json":
+                    value = None
+                    if media == "application/json" and (response.status_code == 409 or closed_detail):
                         value = json.loads(data, object_pairs_hook=pairs,
                                            parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
-                        if isinstance(value, dict) and value.get("outcome") in {
-                                "not_found", "reserved", "running", "saved", "unknown", "failed", "abandoned"}:
-                            return {**value, "http_status": 409, "recovery_required": True}
+                    if response.status_code == 409 and isinstance(value, dict) and value.get("outcome") in {
+                            "not_found", "reserved", "running", "saved", "unknown", "failed", "abandoned"}:
+                        return {**value, "http_status": 409, "recovery_required": True}
                     code = "sign_in_required" if response.status_code == 401 else "operation_rejected"
-                    return {"error": code, "http_status": response.status_code}
+                    result = {"error": code, "http_status": response.status_code}
+                    # Closed product codes only. Extra fields can carry chart text and stay dropped.
+                    if (closed_detail and response.status_code != 401 and isinstance(value, dict)
+                            and set(value) == {"detail"} and isinstance(value.get("detail"), str)
+                            and re.fullmatch(r"[a-z][a-z0-9_]{0,80}", value["detail"])):
+                        result["detail"] = value["detail"]
+                    return result
                 if media == "application/pdf":
                     if not data.startswith(b"%PDF-"):
                         raise PluginError("invalid_document_response")
@@ -194,6 +203,12 @@ class PluginRuntime:
                     raise PluginError("unsupported_api_response")
                 return json.loads(data, object_pairs_hook=pairs,
                                   parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        except httpx.TimeoutException:
+            self._require_current_session()
+            if closed_detail:
+                return {"error": "timeout", "automatic_retry": False}
+            return {"error": "response_unconfirmed", "recovery_required": True,
+                    "automatic_retry": False}
         except httpx.RequestError:
             self._require_current_session()
             return {"error": "response_unconfirmed", "recovery_required": True,
@@ -203,6 +218,13 @@ class PluginRuntime:
 
     def _session_target(self, method, path, headers, body, query, timeout):
         """No arbitrary proxy access through an application-session adapter."""
+        if method == "POST" and path == "/connections/ehr/reads":
+            from cosmas_os.plugins.elation import command_allowed
+
+            expected = {"Content-Type": "application/json", **HEADERS, "X-Cosmas-Ehr-Read": "1"}
+            if headers == expected and not query and command_allowed(body) and 0 < timeout <= 45:
+                return
+            raise PluginError("invalid_tool_arguments")
         if method == "GET" and path == "/connections/plugins":
             expected = {"Content-Type": "application/json", **HEADERS, "X-Cosmas-Connection-Contract": "1"}
             if headers == expected and not query and body is None and 0 < timeout <= 30:
@@ -255,10 +277,21 @@ class PluginRuntime:
             raise PluginError("invalid_catalog_response") from None
 
     def tool_definitions(self):
+        from cosmas_os.plugins.elation import tool_definitions
+
         enabled = self.catalog()
-        return [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
+        rows = [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
+        if not self.plugins or "elation" in self.plugins:
+            rows.extend(tool_definitions())
+        return rows
 
     def call(self, name, arguments):
+        from cosmas_os.plugins import elation
+
+        if name in elation.NAMES:
+            if self.plugins and "elation" not in self.plugins:
+                raise PluginError("unknown_tool")
+            return elation.call(self, name, arguments)
         operation = self.operations.get(name)
         if operation is None:
             raise PluginError("unknown_tool")
