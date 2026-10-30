@@ -5,21 +5,29 @@ transition. CosmaBot stays in its own repository, deployment and data boundary.
 
 ## Native staging prerequisite
 
-The platform staging identity uses a Clerk development instance. The new
-`operational-staging-v1` native identity profile accepts only a matching
-development public key/frontend, retains the existing beta app identifiers and
-requires explicit synthetic data mode throughout build preparation, composition,
+Shared staging (`staging.cosmas.ai`) uses its own Clerk instance,
+`clerk.staging.cosmas.ai`, with a `pk_live` key, on the API's
+`CLERK_SESSION_POLICY=audience` with audience `cosmas-os-beta-api`.
+
+The `shared_staging` policy stays the development-instance path
+(`*.clerk.accounts.dev`, empty audience). `operational-staging-v1` accepts that
+matching development public key and frontend, and it accepts the
+`clerk.staging.cosmas.ai` live key when the frontend host matches and the
+audience is non-empty. Both shapes retain the existing beta app identifiers and
+require explicit synthetic data mode throughout build preparation, composition,
 desktop packaging and desktop startup. Production identity validation remains
 unchanged. A distinct native Keychain namespace preserves prior credentials and
 prevents presenting them to the new staging frontend.
 
-The profile selects the shared default-session contract with an explicitly empty
-audience in public configuration. The API and native client require the signed
-JWT to omit `aud` entirely, including rejecting null/empty audience claims. The
-default production policy remains audience-bound. Shared-session admission is
-limited to a development issuer and synthetic staging; existing organization,
-Box, binding and active-human authorization remain independent requirements.
-No global Core/Clerk claims change is required.
+On the development-instance path, the profile selects the shared default-session
+contract with an explicitly empty audience in public configuration. The API and
+native client require the signed JWT to omit `aud` entirely, including
+rejecting null/empty audience claims. `staging.cosmas.ai` uses the audience
+policy and requires `cosmas-os-beta-api`. The default production policy remains
+audience-bound. Shared-session admission stays limited to a development issuer
+and synthetic staging; existing organization, Box, binding and active-human
+authorization remain independent requirements. No global Core/Clerk claims
+change is required.
 
 This source increment does not change the installed app, desktop installation
 marker, account bindings, organization membership or either live Clerk instance.
