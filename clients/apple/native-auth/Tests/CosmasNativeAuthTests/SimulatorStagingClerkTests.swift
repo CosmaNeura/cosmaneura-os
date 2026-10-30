@@ -4,7 +4,7 @@ import Testing
 
 private let stagingHost = "clerk.staging.cosmas.ai"
 private let stagingKey = "pk_live_Y2xlcmsuc3RhZ2luZy5jb3NtYXMuYWkk"
-private let stagingOrganization = "org_3LHYUvs3Hu9TLNjL11kUlCt2poR"
+private let stagingOrganization = "org_invented_beta"
 
 @Suite struct SimulatorStagingClerkTests {
     @Test func simulatorVariantReturnsToItsOwnScheme() throws {

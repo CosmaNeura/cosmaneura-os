@@ -14,7 +14,7 @@ STAGING_HOST = "clerk.staging.cosmas.ai"
 STAGING_ORIGIN = "https://clerk.staging.cosmas.ai"
 STAGING_API = "https://api.staging.cosmas.ai"
 STAGING_KEY = "pk_live_Y2xlcmsuc3RhZ2luZy5jb3NtYXMuYWkk"
-ORGANIZATION = "org_3LHYUvs3Hu9TLNjL11kUlCt2poR"
+ORGANIZATION = "org_invented_beta"
 AUDIENCE = "cosmas-os-beta-api"
 SCRIPT = ROOT / "scripts/prepare-apple-synthetic.py"
 
