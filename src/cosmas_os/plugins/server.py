@@ -23,6 +23,7 @@ clinical writes, sending, bookings and payment execution stay in the human UI.
 Elation appointment, problem, medication and lab tools only read the connected
 practice, one page at a time. Not connected and not supported are separate from
 a returned page. They never prescribe, sign, book, or change Elation.
+Atlas.md read tools do not call Atlas.md. They say this read is not supported yet.
 """
 
 

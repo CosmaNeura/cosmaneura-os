@@ -106,7 +106,7 @@ class PluginRuntime:
                 raise PluginError("invalid_workspace") from None
         self.workspace_id = workspace_id
         self.plugins = tuple(plugins)
-        catalog_plugins = {operation.plugin for operation in definitions()} | {"elation"}
+        catalog_plugins = {operation.plugin for operation in definitions()} | {"elation", "atlas_md"}
         if plugins and not set(plugins) <= catalog_plugins:
             raise PluginError("unknown_plugin")
         self.operations = {operation.id.replace(".", "_"): operation for operation in definitions()
@@ -277,21 +277,28 @@ class PluginRuntime:
             raise PluginError("invalid_catalog_response") from None
 
     def tool_definitions(self):
+        from cosmas_os.plugins.atlas_md import tool_definitions as atlas_md_tools
         from cosmas_os.plugins.elation import tool_definitions
 
         enabled = self.catalog()
         rows = [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
         if not self.plugins or "elation" in self.plugins:
             rows.extend(tool_definitions())
+        if not self.plugins or "atlas_md" in self.plugins:
+            rows.extend(atlas_md_tools())
         return rows
 
     def call(self, name, arguments):
-        from cosmas_os.plugins import elation
+        from cosmas_os.plugins import atlas_md, elation
 
         if name in elation.NAMES:
             if self.plugins and "elation" not in self.plugins:
                 raise PluginError("unknown_tool")
             return elation.call(self, name, arguments)
+        if name in atlas_md.NAMES:
+            if self.plugins and "atlas_md" not in self.plugins:
+                raise PluginError("unknown_tool")
+            return atlas_md.call(self, name, arguments)
         operation = self.operations.get(name)
         if operation is None:
             raise PluginError("unknown_tool")

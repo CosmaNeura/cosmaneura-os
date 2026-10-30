@@ -503,7 +503,9 @@ async def test_mcp_lists_elation_reads_as_read_only():
                     await session.initialize()
                     listed = await session.list_tools()
                     names = [row.name for row in listed.tools]
-                    assert names[-4:] == list(NAMES)
+                    # Later EHR tools may follow Elation, so Elation is not required to be the tail.
+                    start = names.index(NAMES[0])
+                    assert names[start:start + len(NAMES)] == list(NAMES)
                     for row in listed.tools:
                         if row.name in NAMES:
                             assert row.annotations.read_only_hint is True
