@@ -82,12 +82,53 @@ remaining work. See the W8m checkpoint for the exact evidence and next step.
 W8t adds an optional native ClerkKit adapter and Capacitor workspace entry. The
 composition command accepts `--native-auth-clerk-archive /path/to/clerk-1.5.5.tar.gz`;
 the exact public archive hash is checked before importing the unmodified SDK core.
-This adds the plugin but always writes `CosmasNativeAuth.enabled = false` in the
+This adds the plugin but by default writes `CosmasNativeAuth.enabled = false` in the
 app's Info.plist. No real instance, organization, publishable key or audience is
 generated. Native runtime selection additionally requires
 `VITE_WORKSPACE_NATIVE_AUTH_ENABLED=true`, authenticated/workspace flags, the
 Apple local-transport flag, the exact Capacitor origin and the local API profile.
 An incomplete native profile fails closed and cannot fall back to a demo user.
+
+### Simulator staging sign-in return
+
+The device build returns to `com.cosmasos.beta.ios://callback`. The scheme is
+`com.cosmasos.beta.ios`. Operational composition writes that scheme in
+`CFBundleURLTypes`, and `NativeClerkConfiguration.callbackURL` is the app
+bundle identifier plus `://callback`.
+
+The synthetic simulator variant `com.cosmasos.synthetic` uses a different
+return address: `com.cosmasos.synthetic://callback`. The scheme is
+`com.cosmasos.synthetic`. `NativeClerkConfiguration` builds it from that
+bundle identifier, and the runtime profile is `simulator-staging-v1`. A
+verification variant such as `w8m` uses `com.cosmasos.synthetic.w8m://callback`
+because that build's bundle identifier is `com.cosmasos.synthetic.w8m`.
+
+`scripts/prepare-apple-synthetic.py` writes `CFBundleURLTypes` for the
+simulator scheme only when `--allow-simulator-staging-native-auth` is set.
+The device build does not gain that scheme. The flag is accepted only when
+the identity file's frontend origin and the host decoded from its publishable
+key are both `clerk.staging.cosmas.ai`, the API origin is
+`https://api.staging.cosmas.ai`, and the data mode is `synthetic`. It is
+refused for production hosts (`clerk.cosmaneura.com`, `app.cosmaneura.com`,
+`api.cosmaneura.com`), for any other host, when the data mode is not
+synthetic, and when the flag is absent. Omitting the flag leaves device
+sign-in and the unsigned synthetic composition unchanged. The flag does not
+sign the app or change Clerk.
+
+Linux synth-ci does not compile the Swift tests. On a Mac with Xcode, from
+`clients/apple/native-auth`, run the package scheme `CosmasNativeAuth` on an
+iOS Simulator named iPhone 16:
+
+```sh
+xcodebuild test \
+  -scheme CosmasNativeAuth \
+  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -only-testing:CosmasNativeAuthTests/SimulatorStagingClerkTests \
+  -only-testing:CosmasNativeAuthTests/SimulatorStagingKeychainTests
+```
+
+Any iOS 17+ simulator destination can replace that name. The suites use
+invented organization and staging host values only.
 
 The native adapter keeps SDK credentials native, acquires fresh tokens and binds
 them to the current user/session/organization, issuer, audience and native origin.
