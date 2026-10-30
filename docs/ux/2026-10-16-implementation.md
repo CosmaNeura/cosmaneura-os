@@ -57,15 +57,17 @@ The runtime schema expectation and the local candidate release schema selection 
 
 ## Validation
 
+Command logs for these checks are produced locally and are not kept in git. The results below are unchanged. Committed evidence that remains is linked.
+
 | Check | Final result | Evidence |
 | --- | --- | --- |
-| Full frontend | 3,784 passed; 103 skipped; 279 test files passed | [web-full.log](validation/web-full.log) |
-| Full retained capture | 550 passed across 39 files | [capture-full.log](validation/capture-full.log) |
-| Signed backend and changed contracts | 196 passed | [signed-backend.log](validation/signed-backend.log), [JUnit](validation/signed-backend-junit.xml) |
-| Runtime migration/privilege checks | 24 passed | [runtime-privileges.log](validation/runtime-privileges.log) |
-| Compact authority/isolation | 23 passed | [compact-isolation.log](validation/compact-isolation.log) |
-| Web and capture TypeScript | Passed | [web-typecheck.log](validation/web-typecheck.log), [capture-typecheck.log](validation/capture-typecheck.log) |
-| Normal web and both previews | Passed | [web-build.log](validation/web-build.log), [acceptance-build.log](validation/acceptance-build.log), [connections-build.log](validation/connections-build.log) |
+| Full frontend | 3,784 passed; 103 skipped; 279 test files passed | [summary.json](validation/summary.json) |
+| Full retained capture | 550 passed across 39 files | [summary.json](validation/summary.json) |
+| Signed backend and changed contracts | 196 passed | [JUnit](validation/signed-backend-junit.xml), [summary.json](validation/summary.json) |
+| Runtime migration/privilege checks | 24 passed | [summary.json](validation/summary.json) |
+| Compact authority/isolation | 23 passed | [summary.json](validation/summary.json) |
+| Web and capture TypeScript | Passed | [summary.json](validation/summary.json) |
+| Normal web and both previews | Passed | [summary.json](validation/summary.json) |
 | Visual and keyboard acceptance | Reviewed at 1090, 1507 and 768px; no horizontal overflow at the narrower tested width; focus trap/Escape/restore verified | [Screenshots](screenshots), [summary.json](validation/summary.json) |
 
 The frontend skips include signed API labs that require an explicit backend fixture. The relevant labs were run through their Python bridges against the migrated local database, rather than being counted as ordinary frontend passes. Signed request validation, exact server writes, source custody and database assertions use the actual application paths. Provider responses, speech recognition and source PCM are explicitly scripted synthetic adapters.
@@ -107,6 +109,6 @@ The workspace preview's [README](../../web/ux-acceptance/README.md) explains its
 
 The owner requested merging this implementation into the codebase on October 16. GitHub main remained at `c12f2dd`, so there were no upstream code conflicts. The new date projections now explicitly preserve an unknown UTC date when an owner-scoped Core appointment has only a local source time. An added PostgreSQL regression checks both the catalog and linked notebook summary with a correctly reviewed account and patient correspondence.
 
-All changed Python files pass Ruff. The final changed-contract suite passes 193 tests, including the new date regression, and the four signed UI bridge journeys passed in the merge recheck. The complete beta web build passes with operational-beta-v1, synthetic data mode and public example.invalid origins. See [merge-validation.json](validation/merge-validation.json), [contract results](validation/merge-contracts.log) and [beta build](validation/merge-beta-build.log).
+All changed Python files pass Ruff. The final changed-contract suite passes 193 tests, including the new date regression, and the four signed UI bridge journeys passed in the merge recheck. The complete beta web build passes with operational-beta-v1, synthetic data mode and public example.invalid origins. See [merge-validation.json](validation/merge-validation.json) and the [contract JUnit report](validation/merge-contracts-junit.xml). The contract-run log and the beta-build log are produced locally and are not kept in git.
 
 Repository-wide Ruff still reports 28 existing errors and Pyright reports 101 existing errors, both reproduced on unchanged source. GitHub main's [existing synthetic CI run](https://github.com/CosmaNeura/cosmaneura-os/actions/runs/38067807377) already failed Ruff, Python tests, web tests and infrastructure validation. The merge does not claim that repository-wide CI is green and does not relax or bypass any checks. Main has no branch protection or applicable branch rules. Its workflows perform synthetic checks and do not deploy.
