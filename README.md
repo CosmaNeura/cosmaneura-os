@@ -4,16 +4,16 @@ CosmaBot is a standalone desktop and mobile app for a configurable team of
 clinical and practice coworkers. Its workspace combines private notes, chat,
 team settings, research and tracked operational work.
 
-CosmaBot connects to the main Cosmaneura platform through authenticated APIs.
-Platform features such as SOAP notes remain owned by Cosmaneura. Scribe is a
-main capture and documentation connector for CosmaBot users. This repository
-does not contain the Core or Scribe server applications or share their databases.
-See [application boundaries](docs/COSMABOT_ARCHITECTURE.md).
+Start with [the current source and release index](docs/COSMABOT_SOURCE_OF_TRUTH.md).
+It identifies integrated feature code, the recovered iPhone source, preserved
+local changes and the exact released build. This repository owns CosmaBot;
+the separate Core/Cosmaneura, Scribe, Session Prep and Zoom services are outside
+its development and deployment boundary.
 
-**Source integration, September 25:** this branch brings previously local
-CosmaBot implementation into the owning repository. It is an integration
-candidate, not a deployed or fully qualified operational beta. Desktop and mobile
-are both required for initial release. See [scope and validation](docs/beta/COSMABOT_SOURCE_INTEGRATION.md).
+The independent Cosmas MD synthetic practice uses CosmaBot's own identity and
+storage. Linking users' historical Cosmaneura transcripts and summaries remains
+future integration work. The older foundation/deployment history below is not
+the current release inventory.
 
 ## Build the current standalone app
 
@@ -22,7 +22,8 @@ are both required for initial release. See [scope and validation](docs/beta/COSM
   complete `operational-beta-v1` profile; use its current public build arguments.
 - Mac and iPhone: [native build inputs](docs/operational-native-build.md), then
   [Mac archive packaging](docs/desktop-release-packaging.md). Both clients are
-  required for release. Existing capture components remain at the paused snapshot.
+  required for release. See the [recovered iPhone baseline](apps/capture/README.md)
+  for the missing source now preserved here and its remaining build qualification.
 - Backend validation: [local checks](docs/local-checks.md). Record the exact
   reviewed commit and results locally; GitHub is used for source and PR evidence.
 

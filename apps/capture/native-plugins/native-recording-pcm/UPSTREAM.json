@@ -1,0 +1,59 @@
+{
+  "repository": "CosmaNeura/cosmaneura-scribe",
+  "commit": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+  "purpose": "Retained native PCM graph, encrypted persistence and lease/reservation continuation.",
+  "files": [
+    {
+      "path": "Sources/CosmaneuraNativeRecordingPCM/NativeEncryptedPCMRecorder.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecordingPCM/NativeEncryptedPCMRecorder.swift",
+      "upstream_blob": "14850a4739a04ff0979aafc1d24f7ebd814b264c"
+    },
+    {
+      "path": "Sources/CosmaneuraNativeRecordingPCM/NativeRecordingContinuation.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecordingPCM/NativeRecordingContinuation.swift",
+      "upstream_blob": "8861725ad60c434a654ead47e073281bb7787971"
+    },
+    {
+      "path": "Sources/CosmaneuraNativeRecordingPCM/NativeRecordingPCMSink.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecordingPCM/NativeRecordingPCMSink.swift",
+      "upstream_blob": "3a9cfa060898d0af0c2029ef210362bf08ec494b"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingPCMTests/NativeRecordingContinuationTests.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Tests/CosmaneuraNativeRecordingPCMTests/NativeRecordingContinuationTests.swift",
+      "upstream_blob": "0c585da9acbf58510fbc27ec0bb5088471505bb5"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingPCMTests/NativeRecordingPCMSinkTests.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Tests/CosmaneuraNativeRecordingPCMTests/NativeRecordingPCMSinkTests.swift",
+      "upstream_blob": "5e9d9bbfe8d4423c36072891335379f62ad47d52"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingPCMTests/InputRouteStartupTests.swift",
+      "upstream_path": "apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/InputRouteStartupTests.swift",
+      "upstream_blob": "7b7bc4d7f9c6f24374bfd0bfeebebeb4a2cacaa6"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingPCMTests/LongSourceWindowTests.swift",
+      "upstream_path": "apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/LongSourceWindowTests.swift",
+      "upstream_blob": "06baa5e2adc331ce0ed90591e8077db45503f4ed"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingPCMTests/StartupDiagnosticsTests.swift",
+      "upstream_path": "apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/StartupDiagnosticsTests.swift",
+      "upstream_blob": "abae0d860d0e055dda97f1eb440613edfbeee8b5"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingPCMTests/NativeInputFrameLimitTests.swift",
+      "upstream_path": "apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/NativeInputFrameLimitTests.swift",
+      "upstream_blob": "56f9ebc9951ab23f7afd57dbc71454927c842bc1",
+      "selection": "First two input-size tests and fixtures; CosmaBot renderer-loss regression added. Upstream microphone-picker/signal bridge tests omitted because those APIs are not imported."
+    }
+  ],
+  "adaptations": [
+    "Use CosmaBot ciphertext key prefixes and separate native custody/PCM packages.",
+    "Driver dependencies retain CosmaBot renderer-loss and fresh extension-decision guards.",
+    "Existing foreground capture keeps automatic play-and-record/voice-chat routing; the native encrypted path uses explicit measurement input.",
+    "LongSourceWindowTests additionally proves expired extension decisions and exceeding the original 360-position window are rejected."
+  ]
+}

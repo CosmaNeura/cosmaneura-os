@@ -1,0 +1,44 @@
+Open the CosmaNeura/cosmaneura-os repository on branch
+recovery/cosmabot-source-of-truth-20261030.
+Local Mac workspace: /Users/jw/Desktop/Cosmas/CosmaBot-Workspace.
+Cloud/background agents: select the same repository and branch in Cursor.
+After this consolidation PR is reviewed and merged, use main for both modes.
+
+First read AGENTS.md, docs/COSMABOT_SOURCE_OF_TRUTH.md,
+docs/COSMABOT_RELEASE_STATE_20261030.md and apps/capture/README.md.
+
+This repository is the one CosmaBot development source. Do not treat an
+expanded handoff folder or an old /private/tmp release checkout as current
+source. Existing checkouts contain independent/staged/uncommitted owner work;
+do not reset, delete, overwrite or merge them wholesale. Most prior features
+are already integrated in main. Source missing from GitHub was recovered here.
+
+Released baseline: 0.1.147/1107 from
+0e70fe6a802ab30362ffb77e8cb8538f7123bc1c.
+Development base at consolidation: 9b4b3d1d33e68985b33b66597bde5009c8fa87fa.
+1107 TestFlight delivery and hosted R6r1 activation passed October 29. The phone's
+1107 install and the installed Mac version are not directly verified. A source
+recovery branch is not a new build or completed beta acceptance.
+
+Preserved local provider/connector UI edits are under docs/recovery/20261030.
+They are not applied, tested or released. Authorship is unknown. Reconcile
+against newer main with a dedicated reviewed feature change; SettingsHub
+patches overlap. Shared native source owners remain clients/*; recovered
+apps/capture is the frozen composed baseline plus unconfigured identity.
+A portable current-source iPhone composition/build still needs qualification.
+
+Goal to pursue when the owner resumes execution: technically beta-ready by
+November 1, emphasizing the October 23 Chief-first Messages/mobile experience,
+seamless connectors and operational synthetic provider journeys. Prioritize
+Atlas.MD, Elation, Tebra and Athena; include email/calendar/fax/research workflows.
+Do feature development and then focused provider journeys, not repeated broad
+infrastructure testing. Use synthetic data. Keep Core/Cosmaneura, Scribe,
+Session Prep and Zoom repositories, identities, data and deployments untouched.
+Historical Cosmaneura transcript/summary account linking is later work.
+
+The owner's broad work pause remains in effect during this consolidation.
+Do not deploy, access the phone, or resume feature work merely by reading this
+handoff. Wait for the owner's task instruction, then work from one exact branch
+and record source/binary/runtime identities honestly. Coordinate local/cloud
+changes through Git commits/PRs; do not send messages to other Codex chats.
+Avoid excessive screenshots/images; prefer text and use images only when needed.
