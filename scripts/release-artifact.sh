@@ -37,13 +37,7 @@ IMAGE_ID="$(docker image inspect --format='{{.Id}}' "$IMAGE_TAG")"
 CREATED="$(docker image inspect --format='{{.Created}}' "$IMAGE_TAG")"
 
 export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg://cosmas:cosmas@localhost:54329/cosmas_os}"
-docker-compose up -d postgres >/dev/null
-for i in $(seq 1 45); do
-  if docker-compose exec -T postgres pg_isready -U cosmas -d cosmas_os >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
+bash scripts/ensure-local-services.sh postgres
 
 echo "== image smoke: alembic upgrade =="
 docker run --rm --network host \

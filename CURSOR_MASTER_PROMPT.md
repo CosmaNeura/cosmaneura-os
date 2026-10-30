@@ -15,8 +15,10 @@ Your mission is to:
 3. The Phase 0 validation package is already in `docs/validation/`.
 4. The docs-only limit has passed. John Clemente approved writing code,
    installing dependencies, and running tests.
-5. Follow `AGENTS.md` and `.cursor/rules/` for current work. Do not deploy or
-   put anything live without a yes from John or Shawn.
+5. Follow `AGENTS.md` and `.cursor/rules/` for current work. The October 30,
+   2026 decision in `AGENTS.md` lets Cursor agents apply infrastructure, change
+   live Clerk settings, publish signed Mac and iPhone builds, and deploy to
+   production without asking John or Shawn first.
 
 Do not rubber-stamp this handoff. Re-evaluate it. Report evidence, assumptions,
 unknowns, and concise decision rationales; do not expose private chain-of-
@@ -84,9 +86,11 @@ legacy repository. Do not copy production modules wholesale, database state,
 Terraform state, credentials, PHI, user exports, production fixtures, or `.env`
 values. Avoid opening files likely to contain secret values.
 
-Do not access Azure, Clerk, Stripe, Athena, Acuity, production databases,
-external messaging systems, or production GitHub identities. Do not run
-Terraform/OpenTofu apply or any cloud mutation.
+In this repository, agents may apply infrastructure changes, change live Clerk
+settings, publish signed Mac and iPhone builds, and deploy to production.
+They keep real patient data, credentials, production database dumps, and
+Terraform state out of the repository. They do not force-push `main` or weaken
+CI, Trivy scanning, or the main branch ruleset.
 
 ## Decisions to preserve unless a fatal flaw is proven
 
@@ -123,8 +127,9 @@ compliance task, or preference for another framework is not fatal.
 ## Phase 0 - mandatory independent validation
 
 This procedure is complete. The docs-only limit has passed. Do not treat the
-steps below as a current ban on code, installs, or tests. Current permissions
-are in `AGENTS.md` and `.cursor/rules/`.
+steps below as a current ban on code, installs, tests, infrastructure, Clerk
+changes, signed builds, or deployment. Current permissions are in `AGENTS.md`
+and `.cursor/rules/`.
 
 Historically, Phase 0 did not create application code, migrations, containers,
 or dependency files, and it did not install anything. The only files written in
@@ -209,7 +214,8 @@ The deployment roadmap must distinguish local synth, synthetic CI, optional
 non-PHI Azure, isolated early-adopter beta, later connector rungs, and eventual
 Track A integration. Include a transparent cost model with assumptions. Do not
 invent a final tier or price: show per-Box ranges, shared-versus-dedicated
-packing, support assumptions, and break-even combinations. Do not create IaC.
+packing, support assumptions, and break-even combinations. Phase 0 did not
+create IaC.
 
 `07-build-gate.md` must list:
 
@@ -244,21 +250,22 @@ owner-approved validation plan. Record any owner changes to the decision log
 before implementation.
 
 This one approval authorizes Roadmap Phase 1 foundation and Roadmap Phase 2
-vertical slice as one local synthetic mandate. Roadmap Gate 1 is a mandatory
-internal checkpoint: if it fails, stop; if it passes, continue to the approved
-vertical slice without inventing a second approval phrase. It does not authorize
-cloud deployment.
+vertical slice as one local synthetic mandate. Roadmap Gate 1 is an internal
+checkpoint: if it fails, repair it and continue; if it passes, continue to the
+approved vertical slice. Infrastructure apply, live Clerk changes, signed Mac
+and iPhone publication, and production deploy follow the October 30, 2026
+decision in `AGENTS.md`.
 
 Before editing:
 
 - confirm the active directory is `cosmaneura-os`;
 - confirm the working-tree state;
 - confirm sibling repositories are outside write scope;
-- confirm no PHI or production credential is present;
-- if this directory is not yet a Git repository, initialize local Git on `main`
-  only if that behavior was disclosed in `07-build-gate.md`; do not create a
-  remote or push;
-- create a short implementation checklist tied to acceptance tests.
+- keep real patient data and production credentials out of the repository;
+- when unexpected owner changes are present, leave them in place and continue
+  around them;
+- branch, commit, push the agent's own branch, and open a pull request. Do
+  not force-push `main`.
 
 ### First slice
 
@@ -355,26 +362,29 @@ After the approved local build, provide:
 - retention behavior and demo walkthrough;
 - `BUILD_REPORT.md` with changes, tests, limitations and next gate.
 
-Do not push, deploy, create cloud resources, connect a real vendor, or modify
-Track A.
+Ship the working branch. When the task includes infrastructure, Clerk, signed
+Mac or iPhone builds, or production deploy, carry that through. Keep real
+patient data out of the repository, tests, logs, notes, commits, and chat.
+Leave Track A unchanged.
 
-## Hard stops
+## Limits
 
-Stop immediately if:
+Keep going until the task's finish line. Stop only when a required credential
+or physical device is not available.
 
-- PHI, production-like patient data, or real credentials are encountered;
-- a step would mutate a legacy repository or external system;
-- the active directory is not clearly the new repository;
-- a fatal contradiction prevents a coherent L0 design;
-- reliable approval/audit behavior cannot fit the approved model;
-- implementation would weaken an authority or Box boundary;
-- an essential source is unavailable and the affected decision cannot be safely
-  bounded;
-- owner changes overlap files you would overwrite.
+Also:
 
-Preserve evidence, make no speculative workaround, and ask one focused
-question.
+- If real patient data or production credentials appear, leave them out of
+  code, tests, logs, notes, commits, and chat, and continue with synthetic
+  data.
+- Leave legacy repositories unchanged.
+- Leave unexpected owner edits in place and continue the rest of the work.
+- If a locked decision has a fatal contradiction, record the concrete
+  counterexample, use the smallest compatible alternative, and continue.
+- Keep CI, Trivy scanning, and the main branch ruleset intact.
+- Do not force-push `main`.
+- If the active directory is not this repository, move back to it and continue.
 
-At the end of Phase 1, report what works, exact demo commands, test results,
-assumptions, dark capabilities, remaining risks, and the next recommended gate.
-Then stop before cloud deployment or real-PHI work.
+At the end of the task, report what works, exact demo commands, test results,
+assumptions, dark capabilities, remaining risks, and any credential or device
+blocker.
