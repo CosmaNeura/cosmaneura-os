@@ -10,10 +10,11 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EncounterWorkspace } from "./EncounterWorkspace";
 import {CHIEF_STARTERS} from './ChiefStartActions';
+import {ChiefOpenVisit} from './ChiefOpenVisit';
 import {modelWorkApi} from './model-work-api';
 import {modelReceipt,modelUuid,retryReceipt} from './model-work-test-fixture';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
-import { workspaceApi, WorkspaceApiError, type Workspace, type ProviderTeam, type BotRole } from "./workspace-api";
+import { workspaceApi, WorkspaceApiError, type Workspace, type ProviderTeam, type BotRole, type ConversationInput } from "./workspace-api";
 import {VisitOpenDeadline} from "./visit-open-deadline";
 import {listPrivateRecordings,type PrivateRecordingSnapshot} from "./private-recording-runtime";
 vi.mock("./private-recording-runtime",async original=>({...await original<typeof import("./private-recording-runtime")>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
@@ -539,6 +540,47 @@ describe("private encounter workspace", () => {
     await click('Organize saved notes');expect(question.value).toBe(CHIEF_STARTERS[1].prompt);
     await click('Send message');expect(workspaceApi.ask).toHaveBeenCalledOnce();
     expect(vi.mocked(workspaceApi.ask).mock.calls[0][2]).toMatchObject({role:'chief',content:CHIEF_STARTERS[1].prompt,expected_revision:1,team_revision:1});
+  });
+
+  it('names an invented visit in Chief’s reply and explains how to add missing context',async()=>{
+    const connected=structuredClone(team);connected.llm.enabled=true;
+    const detail='Reason for visit: Discussing sleep routine. Bring a one-week sleep diary.';
+    const visit={...structuredClone(fixture),label:'Jordan Cypress',entries:[{...fixture.entries[0],content:detail,source_label:'Invented preparation · v1'}]};
+    const answer=(workspace:Workspace,body:ConversationInput,revision:number)=>{
+      const saved=structuredClone(workspace);saved.revision=revision;
+      saved.entries=[...saved.entries,{id:modelUuid(601),revision,kind:'conversation' as const,content:body.content,source_label:null,origin:'authenticated_human',ticket:null,created_at:'2026-09-21T22:00:00Z',
+        reply:{role:'chief' as const,agent_name:'Chief',backend:'azure_gpt41',content:ChiefOpenVisit.reply(workspace),context_revision:workspace.revision,citations:[]}}];
+      vi.mocked(workspaceApi.read).mockResolvedValue(saved);return modelReceipt(body,workspace.id,revision);
+    };
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(visit),team:connected});
+    vi.mocked(workspaceApi.team).mockResolvedValue(connected);
+    vi.mocked(workspaceApi.ask).mockImplementation(async(_identity,_id,body)=>answer(visit,body,2));
+    await click('Open synthetic encounter');await chooseBot('Chief');
+    expect(container.textContent).toContain('Open visit: Jordan Cypress.');
+    expect(container.textContent).toContain('one-week sleep diary');
+    await click('Prepare visit questions');await click('Send message');
+    await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(container.querySelector('.team-bot-message')?.textContent).toContain('Jordan Cypress');});
+    expect(container.querySelector('.team-bot-message')?.textContent).toContain('one-week sleep diary');
+    expect(vi.mocked(workspaceApi.ask).mock.calls[0][1]).toBe(visit.id);
+    expect(vi.mocked(workspaceApi.ask).mock.calls[0][2].role).toBe('chief');
+
+    const empty={id:modelUuid(880),appointment_id:null,label:'Private note',revision:1,entries:[],work_candidates:[],private_draft:{title:'Private note',state:'unlinked' as const,link_receipt_id:null,linked_at:null}};
+    vi.mocked(workspaceApi.read).mockResolvedValue(structuredClone(empty));
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(empty),team:connected});
+    vi.mocked(workspaceApi.ask).mockReset();
+    vi.mocked(workspaceApi.ask).mockImplementation(async(_identity,_id,body)=>answer(empty,body,2));
+    await act(async()=>root.unmount());root=createRoot(container);
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage}/>));
+    await click('Open synthetic encounter');await chooseBot('Chief');
+    expect(container.textContent).toContain(ChiefOpenVisit.missing);
+    expect(container.textContent).toContain('save notebook notes');
+    expect(container.textContent).not.toContain('Jordan Cypress');
+    await input('Thought or question','What should I do with this note?');await click('Send message');
+    await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(container.querySelector('.team-bot-message')?.textContent).toContain('save notebook notes');});
+    expect(container.querySelector('.team-bot-message')?.textContent).toContain('add a reference note');
+    expect(container.textContent).not.toContain('Jordan Cypress');
+    expect(container.textContent).not.toContain('one-week sleep diary');
+    expect(vi.mocked(workspaceApi.ask).mock.calls[0][1]).toBe(empty.id);
   });
 
   it('routes an edited first-use team back to review rather than accepting it as the default',async()=>{

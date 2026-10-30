@@ -651,8 +651,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
-        "sha256": "0e642292790c3fe09706adc3d8366b093700bf0b17ffbdbe603c40a41bad9c11",
-        "status": "byte-identical"
+        "sha256": "428b65a2e4318fac9ff8885b7d2c146a06ea339dda46e978723aa8a4ec74d16b",
+        "status": "differs"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },

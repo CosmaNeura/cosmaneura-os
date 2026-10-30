@@ -1,11 +1,16 @@
 """Native source/work organization available before a model or connector setup."""
 
+from cosmas_os.adapters.open_visit import OpenVisitContext
 from cosmas_os.ports.bot_capabilities import BotReply
 
 
 def review(context, *, operational_rows=()):
     lines = ["Saved encounter overview"]
     citations = []
+    visit = OpenVisitContext.supplied(context.question)
+    if visit:
+        lines.append("Open visit:")
+        lines.append("• " + visit)
     if context.sources:
         lines.append("Sources to carry into the handoff:")
         for source in context.sources[:12]:
@@ -15,8 +20,10 @@ def review(context, *, operational_rows=()):
             citations.append(source)
         if len(context.sources) > 12:
             lines.append(f"{len(context.sources) - 12} additional sources are outside this overview.")
+    elif visit:
+        lines.append(OpenVisitContext.NOTES_GAP)
     else:
-        lines.append("No source passages were supplied. Add the intake, Scribe output or preparation before assigning source-based work.")
+        lines.append(OpenVisitContext.MISSING)
     if context.linked_work or context.follow_ups:
         lines.append("Current work:")
         lines.extend(f"• {lane.replace('_', ' ')}: {state.replace('_', ' ')}" for lane, state in context.linked_work)

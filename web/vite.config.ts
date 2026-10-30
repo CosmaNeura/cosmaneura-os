@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {resolveHostedWorkspace} from "../clients/shared/hosted-workspace-config.mjs";
 import {resolveBetaFeatureProfile} from "../clients/shared/beta-feature-profile.mjs";
+import {resolveCommitSha, utcStamp, versionAsset} from "./scripts/version-json.mjs";
 
 let hostedBuild: ReturnType<typeof resolveHostedWorkspace> = null;
 let featureBuild: ReturnType<typeof resolveBetaFeatureProfile> | null = null;
@@ -53,6 +54,7 @@ export default defineConfig(({mode}) => {
       }
     },
     generateBundle() {
+      this.emitFile(versionAsset({commit: resolveCommitSha(), builtAt: utcStamp()}));
       if (hostedBuild) this.emitFile({type: "asset", fileName: "cosmas-workspace-build.json",
         source: JSON.stringify({version: 1, ...hostedBuild}) + "\n"});
       if (featureBuild) this.emitFile({type: 'asset', fileName: 'cosmas-beta-features.json',

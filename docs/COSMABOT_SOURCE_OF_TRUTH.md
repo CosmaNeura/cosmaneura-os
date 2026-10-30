@@ -3,7 +3,7 @@
 Open one repository: `CosmaNeura/cosmaneura-os`. For this consolidation, use
 branch `recovery/cosmabot-source-of-truth-20261030`; after review and merge,
 use `main`. On John's Mac the matching independent clone is
-`/Users/jw/Desktop/Cosmas/CosmaBot-Workspace`. Its Git objects do not depend on
+`~/Desktop/Cosmas/CosmaBot-Workspace`. Its Git objects do not depend on
 any `/private/tmp` worktree. Do not open an expanded handoff as the development
 workspace or reset another checkout to match this one.
 

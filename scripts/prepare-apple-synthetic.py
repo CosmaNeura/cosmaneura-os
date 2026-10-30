@@ -6,6 +6,7 @@ Scribe, reads an environment file, contacts a service, or invokes signing.
 """
 
 import argparse
+import base64
 import hashlib
 import html
 import importlib.util
@@ -45,6 +46,30 @@ SOURCE_PATHS = (
 BUNDLE_ID = "com.cosmasos.synthetic"
 MINIMUM_IOS_VERSION = "17.0"
 SIMULATOR_IDENTITY_PREFIX = "COSMASW8NT"  # Invented local prefix, never an Apple team.
+STAGING_CLERK_HOST = "clerk.staging.cosmas.ai"
+STAGING_API_ORIGIN = "https://api.staging.cosmas.ai"
+# Runtime profile for the synthetic simulator only. Device builds keep the
+# identity file's own profile and the com.cosmasos.beta.ios callback.
+SIMULATOR_RUNTIME_PROFILE = "simulator-staging-v1"
+PRODUCTION_SIGN_IN_HOSTS = frozenset({
+    "clerk.cosmaneura.com",
+    "app.cosmaneura.com",
+    "api.cosmaneura.com",
+})
+DEVICE_CUSTODY_REFUSAL = (
+    "Operational Apple composition requires hosted services and device custody, "
+    "without a synthetic variant or Simulator identity."
+)
+PRODUCTION_SIGN_IN_REFUSAL = (
+    "Simulator staging native auth refuses production hosts "
+    "(clerk.cosmaneura.com, app.cosmaneura.com, api.cosmaneura.com)."
+)
+SYNTHETIC_DATA_REFUSAL = "Simulator staging native auth requires synthetic data mode."
+SIMULATOR_STAGING_REFUSAL = (
+    "Simulator staging native auth requires hosted services, "
+    "frontend origin and publishable-key host clerk.staging.cosmas.ai, "
+    "and API origin https://api.staging.cosmas.ai."
+)
 RECOVERY_UI = Path(__file__).parents[1] / "clients/apple/startup-recovery"
 RECOVERY_INPUTS = {
     "apps/capture/ios/App/App/SceneDelegate.swift": "738b9b96bb71d34d80cd8c1183cf7f8f6f2e789c64e46fb5fe6777a35ae12dfd",
@@ -234,6 +259,85 @@ def source_access_group(bundle_id: str, explicit: str | None) -> str:
     return explicit
 
 
+def _https_host(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(
+        r"https://([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)",
+        value,
+    )
+    return match.group(1) if match else None
+
+
+def publishable_key_host(value: object) -> str | None:
+    """Return the host embedded in a Clerk publishable key, or None when it is not one."""
+    if not isinstance(value, str):
+        return None
+    prefix = next((item for item in ("pk_live_", "pk_test_") if value.startswith(item)), None)
+    if prefix is None:
+        return None
+    encoded = value[len(prefix):].replace("-", "+").replace("_", "/")
+    encoded += "=" * ((-len(encoded)) % 4)
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not decoded.endswith("$"):
+        return None
+    return _https_host("https://" + decoded[:-1])
+
+
+def authorize_simulator_staging_native_auth(identity: dict, selected_data_mode: str, *, hosted_workspace: bool) -> None:
+    """Allow native sign-in on the synthetic simulator only for the staging allowlist.
+
+    The identity profile name is not a substitute for the host check. operational-beta-v1
+    and a staging profile are both accepted when the hosts and data mode match.
+    """
+    record = identity.get("identity") if isinstance(identity, dict) else None
+    if not isinstance(record, dict):
+        raise ValueError(SIMULATOR_STAGING_REFUSAL)
+    hosts = {
+        _https_host(record.get("frontendOrigin")),
+        _https_host(record.get("apiOrigin")),
+        publishable_key_host(record.get("publishableKey")),
+    }
+    if hosts & PRODUCTION_SIGN_IN_HOSTS:
+        raise ValueError(PRODUCTION_SIGN_IN_REFUSAL)
+    if selected_data_mode != "synthetic":
+        raise ValueError(SYNTHETIC_DATA_REFUSAL)
+    frontend = _https_host(record.get("frontendOrigin"))
+    if (not hosted_workspace or frontend != STAGING_CLERK_HOST
+            or publishable_key_host(record.get("publishableKey")) != STAGING_CLERK_HOST
+            or record.get("apiOrigin") != STAGING_API_ORIGIN):
+        raise ValueError(SIMULATOR_STAGING_REFUSAL)
+
+
+def resolve_apple_bundle(identity, verification_variant: str | None, *, operational: bool,
+                         simulator_staging_auth: bool) -> tuple[str, str]:
+    if simulator_staging_auth or not operational:
+        return build_identity(verification_variant)
+    return identity["bundle"], "CosmaBot"
+
+
+def simulator_staging_sign_in(bundle_id: str) -> dict[str, object]:
+    """Return the callback registered for the synthetic simulator variant only."""
+    if not re.fullmatch(r"com\.cosmasos\.synthetic(?:\.w[1-9][0-9]*[a-z]?)?", bundle_id):
+        raise ValueError("Simulator staging native auth callback is only for the synthetic simulator variant.")
+    return {
+        "callback_url": f"{bundle_id}://callback",
+        "callback_scheme": bundle_id,
+        "CFBundleURLTypes": [{"CFBundleURLName": bundle_id, "CFBundleURLSchemes": [bundle_id]}],
+    }
+
+
+def simulator_native_auth_settings(identity: dict) -> dict[str, object]:
+    auth = dict(identity["auth"])
+    if auth.get("enabled") is not True:
+        raise ValueError("Simulator staging native auth requires an enabled native identity.")
+    auth["profile"] = SIMULATOR_RUNTIME_PROFILE
+    return auth
+
+
 def prepare(
     source: Path, web: Path, output: Path, verification_variant: str | None = None,
     native_auth_clerk_archive: Path | None = None,
@@ -251,12 +355,21 @@ def prepare(
     native_identity_config: Path | None = None,
     data_mode: str | None = None,
     native_source_access_group: str | None = None,
+    allow_simulator_staging_native_auth: bool = False,
 ) -> Path:
     identity = _identity.load(native_identity_config, "apple", workspace_api_origin)
     operational = identity is not None
-    if operational and (not hosted_workspace or verification_variant is not None or simulator_custody):
-        raise ValueError("Operational Apple composition requires hosted services and device custody, without a synthetic variant or Simulator identity.")
     data_mode = _identity.data_mode(identity, data_mode)
+    simulator_staging_auth = False
+    if allow_simulator_staging_native_auth:
+        if not operational:
+            raise ValueError("Simulator staging native auth requires an explicit native identity configuration.")
+        if native_auth_clerk_archive is None:
+            raise ValueError("Simulator staging native auth requires the native sign-in adapter.")
+        authorize_simulator_staging_native_auth(identity, data_mode, hosted_workspace=hosted_workspace)
+        simulator_staging_auth = True
+    elif operational and (not hosted_workspace or verification_variant is not None or simulator_custody):
+        raise ValueError(DEVICE_CUSTODY_REFUSAL)
     _navigation.validate_google(google_connection_client_id, google_connection_callback_uri)
     if google_connection_client_id and (native_auth_clerk_archive is None or not native_renderer_recovery):
         raise ValueError("Google connection requires the authenticated native host.")
@@ -291,7 +404,8 @@ def prepare(
                               captureUploadOrigins=list(capture_upload_origins),
                               renewableNativeCapture=renewable_native_capture,
                               nativeRendererRecovery=native_renderer_recovery,
-                              simulatorCustody=simulator_custody, deviceCustody=operational)
+                              simulatorCustody=simulator_custody,
+                              deviceCustody=operational and not simulator_staging_auth)
     staging = feature_manifest is not None and feature_manifest["profile"] == _beta.NATIVE_STAGING_PROFILE
     independent = feature_manifest is not None and feature_manifest["profile"] == _beta.INDEPENDENT_BETA_PROFILE
     capture_disabled = feature_manifest is not None and feature_manifest["profile"] in _beta.CAPTURE_DISABLED_PROFILES
@@ -312,13 +426,15 @@ def prepare(
             raise ValueError("Independent beta Google sign-in must return to its exact configured API.")
     policy = ((hosted_workspace_policy if hosted_workspace else local_workspace_policy)(workspace_api_origin, capture_upload_origins)
               if workspace_api_origin is not None else None)
-    if operational:
+    if operational and not simulator_staging_auth:
         policy["purpose"] = "operational-beta-build-input"
     if (not re.fullmatch(r"(?:0|[1-9][0-9]{0,3})(?:\.(?:0|[1-9][0-9]{0,3})){2}", app_version)
             or not re.fullmatch(r"[1-9][0-9]{0,3}", build_number)):
         raise ValueError("Use a numeric three-part app version and a build number from 1 to 9999.")
-    bundle_id, display_name = (identity["bundle"], "CosmaBot") if operational else build_identity(verification_variant)
-    if native_source_access_group is not None and not operational:
+    bundle_id, display_name = resolve_apple_bundle(
+        identity, verification_variant, operational=operational, simulator_staging_auth=simulator_staging_auth)
+    simulator_sign_in = simulator_staging_sign_in(bundle_id) if simulator_staging_auth else None
+    if native_source_access_group is not None and (not operational or simulator_staging_auth):
         raise ValueError("An explicit source access group requires operational device custody.")
     configured_source_group = source_access_group(bundle_id, native_source_access_group)
     simulator_identity = simulator_custody_identity(verification_variant) if simulator_custody else None
@@ -403,7 +519,7 @@ def prepare(
             raise ValueError("Pinned Apple app has unexpected entitlement settings.")
         text = text.replace(marker, marker + '\n\t\t\t\t"LD_ENTITLEMENTS_SECTION[sdk=iphonesimulator*]" = "$(SRCROOT)/App/CosmasSimulator.entitlements";')
         (app / "CosmasSimulator.entitlements").write_bytes(plistlib.dumps(simulator_identity))
-    if operational:
+    if operational and not simulator_staging_auth:
         marker = "INFOPLIST_FILE = App/Info.plist;"
         if text.count(marker) != 2 or "CODE_SIGN_ENTITLEMENTS" in text or "SUPPORTED_PLATFORMS" in text:
             raise ValueError("Pinned Apple app has unexpected device-signing settings.")
@@ -431,7 +547,8 @@ def prepare(
     info["CFBundleDisplayName"] = display_name
     info["NSMicrophoneUsageDescription"] = (
         "Cosmas records visit audio after you confirm consent and choose Start recording."
-        if operational else "Record an invented encounter only after you explicitly start a synthetic capture test."
+        if operational and not simulator_staging_auth
+        else "Record an invented encounter only after you explicitly start a synthetic capture test."
     )
     info["NSSpeechRecognitionUsageDescription"] = "Transcribe your saved recording on this iPhone only when you choose Transcribe. Your audio is not sent to a speech server."
     info["NSAppTransportSecurity"] = {} if hosted_workspace else {"NSAllowsLocalNetworking": True}
@@ -491,12 +608,20 @@ def prepare(
             1,
         )
         package_path.write_text(package)
-        info["CosmasNativeAuth"] = identity["auth"] if operational else {"enabled": False}
-        if operational:
+        if simulator_sign_in is not None:
+            # The device scheme stays off this variant. Clerk returns to the
+            # synthetic bundle registered below and in NativeClerkConfiguration.
+            info["CosmasNativeAuth"] = simulator_native_auth_settings(identity)
             info["CosmasNativeIdentity"] = identity["identity"]
             info["CosmasConfiguredCapture"] = {"enabled": False} if capture_disabled else {"enabled": True, "apiOrigin": workspace_api_origin}
-            info["CosmasSourceAccessGroup"] = configured_source_group
-            info["CFBundleURLTypes"] = [{"CFBundleURLName": bundle_id, "CFBundleURLSchemes": [bundle_id]}]
+            info["CFBundleURLTypes"] = simulator_sign_in["CFBundleURLTypes"]
+        else:
+            info["CosmasNativeAuth"] = identity["auth"] if operational else {"enabled": False}
+            if operational:
+                info["CosmasNativeIdentity"] = identity["identity"]
+                info["CosmasConfiguredCapture"] = {"enabled": False} if capture_disabled else {"enabled": True, "apiOrigin": workspace_api_origin}
+                info["CosmasSourceAccessGroup"] = configured_source_group
+                info["CFBundleURLTypes"] = [{"CFBundleURLName": bundle_id, "CFBundleURLSchemes": [bundle_id]}]
         info["CosmaneuraWebOrigin"] = cosmaneura_web_origin
         info["GoogleConnectionClientID"] = google_connection_client_id
         info["GoogleConnectionCallbackURI"] = google_connection_callback_uri
@@ -512,7 +637,7 @@ def prepare(
         config["packageClassList"].append("CosmasPrivateSpeechPlugin")
         config_path.write_text(json.dumps(config, indent=2) + "\n")
     manifest = {
-        "purpose": "operational-beta-build-input" if operational else "local-synthetic-unsigned",
+        "purpose": "operational-beta-build-input" if operational and not simulator_staging_auth else "local-synthetic-unsigned",
         "source_ref": SOURCE_REF,
         "source_paths": SOURCE_PATHS,
         "bundle_id": bundle_id,
@@ -520,9 +645,20 @@ def prepare(
         "build_number": build_number,
         "minimum_ios_version": MINIMUM_IOS_VERSION,
         "verification_variant": verification_variant,
-        "native_auth": "configured-operational" if operational else "compiled-disabled" if native_auth_clerk_archive else "not-included",
+        "native_auth": ("configured-simulator-staging" if simulator_staging_auth
+                        else "configured-operational" if operational
+                        else "compiled-disabled" if native_auth_clerk_archive else "not-included"),
         "configured_native_capture": configured_native,
-        "device_custody": {"enabled": operational, "requires_provisioning": operational},
+        "device_custody": {
+            "enabled": operational and not simulator_staging_auth,
+            "requires_provisioning": operational and not simulator_staging_auth,
+        },
+        "simulator_staging_native_auth": {
+            "enabled": simulator_staging_auth,
+            "callback_url": None if simulator_sign_in is None else simulator_sign_in["callback_url"],
+            "callback_scheme": None if simulator_sign_in is None else simulator_sign_in["callback_scheme"],
+            "runtime_profile": SIMULATOR_RUNTIME_PROFILE if simulator_staging_auth else None,
+        },
         "local_workspace_policy": policy,
         "renewable_native_capture": native_capture_overlay,
         "native_renderer_recovery": native_renderer_overlay,
@@ -578,6 +714,8 @@ def main() -> None:
     parser.add_argument("--native-identity-config", type=Path, help="Explicit public operational identity; stages a device-only project")
     parser.add_argument("--native-source-access-group", help="Exact signing-team private bundle Keychain group for builds compiled without provisioning")
     parser.add_argument("--data-mode", choices=("synthetic", "authorized_beta"), help="Explicit hosted data classification; synthetic for staging with a real identity")
+    parser.add_argument("--allow-simulator-staging-native-auth", action="store_true",
+                        help="Enable native sign-in on the synthetic simulator variant for clerk.staging.cosmas.ai and synthetic data only")
     args = parser.parse_args()
     try:
         project = prepare(args.scribe_source, args.web_dist, args.output, args.verification_variant,
@@ -588,7 +726,7 @@ def main() -> None:
                           args.scheduling_google_client_id, args.scheduling_google_callback_uri,
                           args.microsoft_connection_tenant_id, args.microsoft_connection_client_id, args.microsoft_connection_callback_uri,
                           args.google_connection_client_id, args.google_connection_callback_uri, args.native_identity_config, args.data_mode,
-                          args.native_source_access_group)
+                          args.native_source_access_group, args.allow_simulator_staging_native_auth)
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     print(f"Prepared synthetic Apple project: {project}")

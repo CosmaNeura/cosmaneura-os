@@ -4,7 +4,7 @@ The CosmaBot connectors plugin exposes four read-only athenaOne tools. Each one 
 
 These tools do not prescribe, sign, book, or change the Athena chart. Merging this change does not deploy it. People using CosmaBot today do not see these tools until a release ships the plugin.
 
-Merge the Elation read-only tools first. The combined plugin registers those four tools, then these four.
+The Elation read-only tools are already registered. These four athenaOne tools are registered after them.
 
 ## Tools
 

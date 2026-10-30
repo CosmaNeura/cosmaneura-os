@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE = ROOT / "clients/apple/startup-recovery"
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path("~/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node").expanduser()
 GENERATION = "00000000-0000-4000-8000-000000000001"
 
 

@@ -32,6 +32,10 @@ test('missing features, foreign clients and conflicting headers cannot generate 
   }
 });
 
+test('version.json stays a real JSON file and is not replaced by the application shell',()=>{
+  assert.match(template,/location = \/version\.json \{\s*default_type application\/json;\s*try_files \/version\.json =404;\s*expires -1;\s*\}/);
+  assert.match(renderBetaNginx(template,manifest),/location = \/version\.json \{\s*default_type application\/json;/);
+});
 test('generated hosted policy serves PDF ES modules as JavaScript without relaxing nosniff',()=>{
   for(const candidate of [manifest,resolveBetaFeatureProfile({...env,VITE_WORKSPACE_CAPTURE_MODE:'synthetic'}).manifest]) {
     const generated=renderBetaNginx(template,candidate);

@@ -53,6 +53,7 @@ docker buildx build --load \
   --build-arg VITE_COSMANEURA_WEB_ORIGIN=https://platform.example.invalid \
   --build-arg VITE_CAPTURE_UPLOAD_ORIGINS=https://uploads.example.invalid \
   --build-arg VITE_WORKSPACE_CAPTURE_MODE=synthetic \
+  --build-arg VITE_BUILD_SHA="$(git rev-parse HEAD)" \
   .
 WEB_UID="$(docker run --rm --entrypoint id cosmas-os-web:d3-local-check -u)"
 if [[ "$WEB_UID" == "0" ]]; then

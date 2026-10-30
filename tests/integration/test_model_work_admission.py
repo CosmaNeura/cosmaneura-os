@@ -1,5 +1,6 @@
 """Real PostgreSQL commits with invented input and an injected model only."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -88,6 +89,20 @@ def command(revision=1, key="invented-question"):
 
 def answer(_):
     return BotReply("Invented answer for human review.", (), "azure_gpt41", 25, 8)
+
+
+def test_chief_request_payload_names_the_open_invented_visit(engine, enabled):
+    box, owner, wid, _ = case(engine)
+    with Session(engine) as s:
+        admission, _ = work.reserve_conversation(
+            s, box, owner, wid, **{**command(), "role": "chief", "content": "What is open on this visit?"}
+        )
+        row = s.get(ModelWorkAdmission, admission)
+        payload = json.loads(row.prepared_envelope["body"]["messages"][1]["content"])
+        assert "Invented W35 visit" in payload["question"]
+        assert payload["question"].startswith("What is open on this visit?")
+        assert any("Invented visit preparation" in source["text"] for source in payload["sources"])
+        assert all(source["kind"] != "open_visit" for source in payload["sources"])
 
 
 def test_reservation_is_durable_and_resolve_is_read_only(engine, enabled):

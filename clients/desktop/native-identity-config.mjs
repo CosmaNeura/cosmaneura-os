@@ -2,6 +2,8 @@ import {exactHostedApiOrigin as exactHostedOrigin} from './hosted-auth-http.mjs'
 
 export const OPERATIONAL_NATIVE_PROFILE = 'operational-beta-v1';
 export const STAGING_NATIVE_PROFILE = 'operational-staging-v1';
+/** Exact Clerk hosts staging may use with its own live publishable key. */
+const STAGING_DEDICATED_CLERK_HOSTS = new Set(['clerk.staging.cosmas.ai']);
 const fields = ['version', 'profile', 'client', 'apiOrigin', 'publishableKey', 'frontendOrigin', 'organizationId', 'audience'];
 const unavailable = () => { throw new Error('Operational native identity configuration is incomplete or inconsistent'); };
 
@@ -15,23 +17,28 @@ export function validateOperationalNativeDataMode(value, identity) {
 /** Public build input only. Never selects an account or fetches a credential. */
 export function validateOperationalNativeIdentity(value, client, apiOrigin) {
   const staging = value?.profile === STAGING_NATIVE_PROFILE;
-  const prefix = staging ? 'pk_test_' : 'pk_live_';
+  const frontendOrigin = typeof value?.frontendOrigin === 'string' && exactHostedOrigin(value.frontendOrigin)
+    ? value.frontendOrigin : '';
+  const hostname = frontendOrigin ? new URL(frontendOrigin).hostname : '';
+  const dedicatedStagingFrontend = STAGING_DEDICATED_CLERK_HOSTS.has(hostname);
+  const developmentFrontend = !dedicatedStagingFrontend && hostname.endsWith('.clerk.accounts.dev');
+  const prefix = staging && developmentFrontend ? 'pk_test_' : 'pk_live_';
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).length !== fields.length || fields.some(key => !Object.hasOwn(value, key)) ||
       value.version !== 1 || ![OPERATIONAL_NATIVE_PROFILE, STAGING_NATIVE_PROFILE].includes(value.profile) ||
       !['apple', 'desktop'].includes(client) || value.client !== client || value.apiOrigin !== apiOrigin ||
-      !exactHostedOrigin(apiOrigin) || !exactHostedOrigin(value.frontendOrigin) ||
-      new URL(value.frontendOrigin).hostname.endsWith('.clerk.accounts.dev') !== staging ||
-      !/^[a-z]/.test(new URL(value.frontendOrigin).hostname.split('.').at(-1)) ||
+      !exactHostedOrigin(apiOrigin) || !frontendOrigin ||
+      (staging ? !(developmentFrontend || dedicatedStagingFrontend) : hostname.endsWith('.clerk.accounts.dev')) ||
+      !/^[a-z]/.test(hostname.split('.').at(-1)) ||
       typeof value.publishableKey !== 'string' || value.publishableKey.length > 1024 ||
       !value.publishableKey.startsWith(prefix) ||
       !/^[A-Za-z0-9+/_-]+={0,2}$/.test(value.publishableKey.slice(prefix.length)) ||
       typeof value.organizationId !== 'string' || !/^org_[A-Za-z0-9_]{1,251}$/.test(value.organizationId) ||
       typeof value.audience !== 'string' ||
-      (staging ? value.audience !== '' : !/^[\x21-\x7e]{1,255}$/.test(value.audience))) unavailable();
+      (staging && developmentFrontend ? value.audience !== '' : !/^[\x21-\x7e]{1,255}$/.test(value.audience))) unavailable();
   try {
     const encoded = value.publishableKey.slice(prefix.length).replaceAll('-', '+').replaceAll('_', '/');
-    if (atob(encoded) !== new URL(value.frontendOrigin).hostname + '$') unavailable();
+    if (atob(encoded) !== hostname + '$') unavailable();
   } catch { unavailable(); }
   return Object.freeze({...value});
 }

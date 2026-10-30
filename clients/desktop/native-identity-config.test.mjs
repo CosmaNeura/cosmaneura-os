@@ -15,6 +15,9 @@ const config = {mode:'hosted-beta-authenticated',dataMode:'authorized_beta',apiO
 
 const stagingIdentity = {...identity, profile:'operational-staging-v1', audience:'',
   frontendOrigin:'https://invented.clerk.accounts.dev', publishableKey:'pk_test_'+btoa('invented.clerk.accounts.dev$')};
+const dedicatedStagingKey = 'pk_live_Y2xlcmsuc3RhZ2luZy5jb3NtYXMuYWkk';
+const productionClerkKey = 'pk_live_Y2xlcmsuY29zbWFuZXVyYS5jb20k';
+const liveKey = host => 'pk_live_'+btoa(host+'$');
 
 test('explicit staging identity uses the development issuer without accepting it as production',()=>{
   for (const client of ['desktop','apple']) {
@@ -29,6 +32,43 @@ test('explicit staging identity uses the development issuer without accepting it
       {frontendOrigin:identity.frontendOrigin,publishableKey:'pk_test_'+btoa('clerk.example.invalid$')}])
       assert.throws(()=>validateOperationalNativeIdentity({...value,...changed},client,value.apiOrigin));
   }
+});
+
+test('staging profile accepts its own Clerk instance and rejects other live hosts',()=>{
+  for (const client of ['apple','desktop']) {
+    const value={...identity,profile:'operational-staging-v1',client,
+      frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:dedicatedStagingKey,audience:'cosmas-os-beta-api'};
+    assert.deepEqual(validateOperationalNativeIdentity(value,client,value.apiOrigin),value);
+    const auth=operationalNativeAuthSettings(value);
+    assert.equal(auth.profile,'operational-staging-v1');
+    assert.equal(auth.frontendOrigin,'https://clerk.staging.cosmas.ai');
+    assert.equal(auth.publishableKey,dedicatedStagingKey);
+    assert.equal(auth.audience,'cosmas-os-beta-api');
+    assert.equal(validateOperationalNativeDataMode('synthetic',value),'synthetic');
+    assert.throws(()=>validateOperationalNativeDataMode('authorized_beta',value));
+    const otherAudience={...value,audience:'invented-staging-audience'};
+    assert.deepEqual(validateOperationalNativeIdentity(otherAudience,client,otherAudience.apiOrigin),otherAudience);
+    const beta={...value,profile:'operational-beta-v1'};
+    assert.deepEqual(validateOperationalNativeIdentity(beta,client,beta.apiOrigin),beta);
+    assert.equal(validateOperationalNativeDataMode('authorized_beta',beta),'authorized_beta');
+    for (const changed of [
+      {frontendOrigin:'https://clerk.cosmaneura.com',publishableKey:productionClerkKey},
+      {frontendOrigin:identity.frontendOrigin,publishableKey:identity.publishableKey},
+      {frontendOrigin:'https://clerk.invented.example',publishableKey:liveKey('clerk.invented.example')},
+      {publishableKey:productionClerkKey},
+      {publishableKey:liveKey('clerk.other.example')},
+      {frontendOrigin:'https://clerk.other.example',publishableKey:dedicatedStagingKey},
+      {audience:''},{audience:null},{audience:'has space'},
+      {publishableKey:'pk_test_'+btoa('clerk.staging.cosmas.ai$')},
+      {frontendOrigin:'https://clerk.staging.cosmas.ai.example',publishableKey:liveKey('clerk.staging.cosmas.ai.example')},
+      {frontendOrigin:'https://preview.clerk.staging.cosmas.ai',publishableKey:liveKey('preview.clerk.staging.cosmas.ai')},
+    ]) assert.throws(()=>validateOperationalNativeIdentity({...value,...changed},client,value.apiOrigin),
+      /Operational native identity/,JSON.stringify(changed));
+  }
+  const production={...identity,client:'apple',frontendOrigin:'https://clerk.cosmaneura.com',
+    publishableKey:productionClerkKey,audience:'cosmas-os-beta-api'};
+  assert.deepEqual(validateOperationalNativeIdentity(production,'apple',production.apiOrigin),production);
+  assert.throws(()=>validateOperationalNativeIdentity({...production,profile:'operational-staging-v1'},'apple',production.apiOrigin));
 });
 
 test('staging launch cannot authorize real data or silently replace an installed identity',async t=>{

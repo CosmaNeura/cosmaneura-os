@@ -47,7 +47,9 @@ def test_generated_key_contract_matches_current_docker_arguments(tmp_path: Path)
     # into Messages or a standalone profile with its reviewed organization.
     assert set(docker_args) == set(config) | {
         "VITE_MESSAGES_ENABLED", "VITE_WORKSPACE_FEATURE_PROFILE", "VITE_WORKSPACE_ORGANIZATION_ID",
+        "VITE_BUILD_SHA",
     }
+    assert docker_args["VITE_BUILD_SHA"] in ("", None)
     assert docker_args["VITE_MESSAGES_ENABLED"] == "false"
     assert docker_args["VITE_WORKSPACE_FEATURE_PROFILE"] == "operational-beta-v1"
     assert docker_args["VITE_WORKSPACE_ORGANIZATION_ID"] == ""
@@ -64,7 +66,7 @@ def test_missing_input_is_rejected(tmp_path: Path, missing: str) -> None:
 
 @pytest.mark.parametrize("extra", ["VITE_WORKSPACE_FEATURE_PROFILE", "VITE_WORKSPACE_ORGANIZATION_ID", "VITE_WORKSPACE_HOSTED_CLIENT",
                                   "VITE_API_BASE", "CLERK_SECRET_KEY", "NODE_BUILD_IMAGE",
-                                  "VITE_MESSAGES_ENABLED"])
+                                  "VITE_MESSAGES_ENABLED", "VITE_BUILD_SHA"])
 def test_extra_fields_cannot_override_fixed_build_or_carry_secrets(tmp_path: Path, extra: str) -> None:
     with pytest.raises(web_build.WebBuildError, match="seven"):
         web_build.load_config(write_config(tmp_path, configuration() | {extra: "unexpected"}))
@@ -198,7 +200,7 @@ def test_protected_docker_command_forwards_all_validated_arguments_and_hash(tmp_
     argv = captured.read_bytes().decode().split("\0")[:-1]
     assert argv[:3] == ["buildx", "build", "--load"]
     forwarded = [argv[index + 1] for index, value in enumerate(argv) if value == "--build-arg"]
-    assert forwarded == [f"{key}={value}" for key, value in config.items()]
+    assert forwarded == [f"{key}={value}" for key, value in config.items()] + ["VITE_BUILD_SHA=" + "a" * 40]
     assert "com.cosmaneura.cosmas-os.public-config-sha256=" + web_build.config_sha256(config) in argv
     assert argv[-1] == str(REPO)
 
