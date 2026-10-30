@@ -1,10 +1,13 @@
+import {ChiefOpenVisit} from '../ChiefOpenVisit';
 import {botAddress,type BotSettings,type Workspace} from '../workspace-api';
 import type {SaveContext} from './saves';
 import type {WorkspaceSession} from './workspace-session';
 
 export const latestNotebookText=(workspace:Workspace|null)=>workspace?.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'';
 export function hasSavedBotContext(workspace:Workspace|null,bot:BotSettings|undefined):boolean {
-  return !!bot&&!!workspace?.entries.some(entry=>entry.content.trim()&&
+  if(!bot||!workspace)return false;
+  if(ChiefOpenVisit.countsAsContext(workspace,bot.role))return true;
+  return !!workspace.entries.some(entry=>entry.content.trim()&&
     (entry.kind==='scratchpad'&&entry.content===latestNotebookText(workspace)&&bot.include_notebook||
       (entry.kind==='evidence'||entry.kind==='synthetic_source'||
         entry.kind==='google_message'&&entry.google_source_state==='current'||entry.kind==='microsoft_message'&&entry.microsoft_source_state==='current'||entry.kind==='google_calendar'&&entry.calendar_source_state==='current'||

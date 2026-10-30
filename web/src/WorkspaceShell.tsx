@@ -40,6 +40,7 @@ import {RecordingVisitPanel} from './RecordingVisitPanel';
 import {PrivateDraftLinkPanel} from './PrivateDraftLinkPanel';
 import {SavedRecordingTranscriptionPanel} from './SavedRecordingTranscriptionPanel';
 import {ChiefStartActions,InitialTeamAction} from './ChiefStartActions';
+import {ChiefOpenVisit} from './ChiefOpenVisit';
 import type {CoreConnectionCommand} from './core-connection-contract';
 import { CoreConnectionPanel, CORE_CONNECTION_BUILD, CONNECTION_ONBOARDING_BUILD } from "./CoreConnectionPanel";
 import { setupChange, validTeamConfiguration, type SetupProjection } from "./team-setup-request";
@@ -1295,6 +1296,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const chiefStarters=bot?.role==='chief'&&!!team?.revision&&<ChiefStartActions compact={phoneLayout()} minimal={messagesMode&&!messagesTask} locked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||!bot.enabled||!!bot.retired}
     modelEnabled={team.llm.enabled&&!bot.blocked_capabilities?.includes('model_answer')} sourceAllowed={bot.include_notebook||bot.include_evidence}
     hasSavedContext={chiefSavedContext} notesDirty={note!==latestNote} hasQuestion={!!thought.trim()}
+    visitSummary={bot?.role==='chief'?ChiefOpenVisit.summary(workspace):''}
     canDelegate={!bot.blocked_capabilities?.includes('private_draft_handoff')} onChoose={prepareChiefQuestion}/>;
   const modelRecovery=<>
       {localModelPending&&!busy&&<section className="team-recovery" aria-label="Unconfirmed model request"><p>{inlineModelRecovery?'Chief hasn’t confirmed this message yet. Check its status before retrying.':'The retained request is unconfirmed. Check its saved result; checking never starts another model call.'}</p>
