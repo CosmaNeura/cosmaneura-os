@@ -72,11 +72,15 @@ observe the original command/key; they never automatically repeat uncertain work
 
 Tools include bounded Google/Microsoft reads, current Google source custody,
 approved SRFax/Documo image acquisition, retained fax PDFs, vendor/portal/Stripe
-proposals and status, Core/Scribe/Scheduling/Research reads and recovery, and
-read-only Athena appointment, medication, allergy, and visit-link status.
-Athena tools call the existing signed routes. They say in plain language when
-Athena is not connected or when that read is not supported. They do not
-prescribe, sign, book, or change the chart. See `docs/plugins/athena-reads.md`.
+proposals and status, Core/Scribe/Scheduling/Research reads and recovery,
+read-only Elation appointment, problem, medication, and lab pages, and read-only
+Athena appointment, medication, allergy, and visit-link status. Elation tools
+call the existing signed EHR read route. Athena appointment and visit-link tools
+call the existing Core connection route; medication and allergy tools call the
+EHR read route. They say in plain language when that record system is not
+connected or when that read is not supported. They do not prescribe, sign, book,
+or change the chart. See `docs/plugins/elation-reads.md` and
+`docs/plugins/athena-reads.md`.
 Enabled tools depend on signed server configuration; current grants are checked
 again when called. Spruce fax images remain unavailable until verified download
 hosts exist. Spruce's installed registry supports retained inbox work; fresh inbox

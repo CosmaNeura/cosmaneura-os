@@ -2,7 +2,6 @@
 
 import base64
 import hashlib
-import importlib
 import json
 import os
 import re
@@ -25,15 +24,6 @@ LEGACY = {"google.mail_headers", "google.calendar_summaries", "microsoft.mail_he
           "scheduling.inspect_proposal", "scribe.read_existing", "visit_prep.read_brief",
           "spruce.prepare_delivery", "srfax.prepare_delivery", "documo.prepare_delivery", "efax.prepare_delivery"}
 HEADERS = {"X-Cosmas-Workspace-Protocol": "1", "X-Cosmas-Draft-Recovery": "2"}
-
-
-def _elation_plugin_present():
-    """PR #237 adds Elation tools. Either merge order should keep that module loadable."""
-    try:
-        importlib.import_module("cosmas_os.plugins.elation")
-    except ImportError:
-        return False
-    return True
 
 
 class PluginError(Exception):
@@ -116,10 +106,7 @@ class PluginRuntime:
                 raise PluginError("invalid_workspace") from None
         self.workspace_id = workspace_id
         self.plugins = tuple(plugins)
-        # "athena" is this plugin. PR #237's "elation" is accepted when that module is present.
-        known = {operation.plugin for operation in definitions()} | {"athena"}
-        if _elation_plugin_present():
-            known.add("elation")
+        known = {operation.plugin for operation in definitions()} | {"athena", "elation"}
         if plugins and not set(plugins) <= known:
             raise PluginError("unknown_plugin")
         self.operations = {operation.id.replace(".", "_"): operation for operation in definitions()
@@ -232,15 +219,16 @@ class PluginRuntime:
     def _session_target(self, method, path, headers, body, query, timeout):
         """No arbitrary proxy access through an application-session adapter.
 
-        The EHR allowlist is shared with PR #237. On merge, keep a body when
-        either Athena or Elation ``command_allowed`` accepts it. Do not raise
-        on the first miss before the other plugin is considered.
+        An EHR read is allowed when either the Athena or Elation closed command
+        accepts it. A miss on one allowlist does not reject the other.
         """
         if method == "POST" and path == "/connections/ehr/reads":
-            from cosmas_os.plugins.athena import ehr_route_allowed
+            from cosmas_os.plugins.athena import command_allowed as athena_allowed
+            from cosmas_os.plugins.elation import command_allowed as elation_allowed
 
             expected = {"Content-Type": "application/json", **HEADERS, "X-Cosmas-Ehr-Read": "1"}
-            if headers == expected and not query and ehr_route_allowed(body) and 0 < timeout <= 45:
+            if (headers == expected and not query and (athena_allowed(body) or elation_allowed(body))
+                    and 0 < timeout <= 45):
                 return
             raise PluginError("invalid_tool_arguments")
         if method == "POST" and path == "/connections/cosmaneura/read":
@@ -302,22 +290,20 @@ class PluginRuntime:
             raise PluginError("invalid_catalog_response") from None
 
     def tool_definitions(self):
-        from cosmas_os.plugins import athena
+        from cosmas_os.plugins import athena, elation
 
         enabled = self.catalog()
         rows = [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
-        elation = athena.optional_elation()
-        if elation is not None and (not self.plugins or "elation" in self.plugins):
+        if not self.plugins or "elation" in self.plugins:
             rows.extend(elation.tool_definitions())
         if not self.plugins or "athena" in self.plugins:
             rows.extend(athena.tool_definitions())
         return rows
 
     def call(self, name, arguments):
-        from cosmas_os.plugins import athena
+        from cosmas_os.plugins import athena, elation
 
-        elation = athena.optional_elation()
-        if elation is not None and name in elation.NAMES:
+        if name in elation.NAMES:
             if self.plugins and "elation" not in self.plugins:
                 raise PluginError("unknown_tool")
             return elation.call(self, name, arguments)
