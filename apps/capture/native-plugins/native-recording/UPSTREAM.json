@@ -1,0 +1,76 @@
+{
+  "repository": "CosmaNeura/cosmaneura-scribe",
+  "commit": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+  "purpose": "Native recording encryption, key-binding, lease, reservation and recovery custody for CosmaBot.",
+  "adaptations": [
+    "CosmaBot keychain service and storage key prefixes; no adoption or mutation of Scribe recordings.",
+    "Standalone native custody package; PCM/driver/host integration is a subsequent part of the same beta work."
+  ],
+  "files": [
+    {
+      "path": "Sources/CosmaneuraNativeRecording/NativeRecordingBindingOwner.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingBindingOwner.swift",
+      "upstream_blob": "ffb5df436c76a24d0fc91d40917148396822de1f"
+    },
+    {
+      "path": "Sources/CosmaneuraNativeRecording/NativeRecordingEncryption.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingEncryption.swift",
+      "upstream_blob": "c648a90eb365b66c9575bc268c91010179a6d5f9"
+    },
+    {
+      "path": "Sources/CosmaneuraNativeRecording/NativeRecordingFlowInventory.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingFlowInventory.swift",
+      "upstream_blob": "7b947b8e14b03cac6ab6545b134527a6bec29a1c"
+    },
+    {
+      "path": "Sources/CosmaneuraNativeRecording/NativeRecordingFlowOwner.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingFlowOwner.swift",
+      "upstream_blob": "0b73c3b29b0f0df9a9e0c7d3b8b78dcb8ebb4305"
+    },
+    {
+      "path": "Sources/CosmaneuraNativeRecording/NativeRecordingLeaseOwner.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingLeaseOwner.swift",
+      "upstream_blob": "d1dd22a730fb33e788326ec22daab7c7c4f119e1"
+    },
+    {
+      "path": "Sources/CosmaneuraNativeRecording/NativeRecordingQueueWriter.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingQueueWriter.swift",
+      "upstream_blob": "3988f1a6611384b260ef3e5fd36e5ab355e921bb"
+    },
+    {
+      "path": "Sources/CosmaneuraNativeRecording/NativeRecordingReservationOwner.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingReservationOwner.swift",
+      "upstream_blob": "ec9b3fec6a4da2e70b2fac10c53af76752fa4088"
+    },
+    {
+      "path": "Sources/CosmaneuraNativeRecording/NativeRecordingReservations.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingReservations.swift",
+      "upstream_blob": "c207784b93229820088ca4e0c4131d1ec0abe4d3"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingTests/NativeRecordingBindingTests.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Tests/CosmaneuraNativeRecordingTests/NativeRecordingBindingTests.swift",
+      "upstream_blob": "7e54b1aac0f69724b58ead2fffecd3810e85d4d0"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingTests/NativeRecordingEncryptionTests.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Tests/CosmaneuraNativeRecordingTests/NativeRecordingEncryptionTests.swift",
+      "upstream_blob": "502f3784f800405204f217b6460a299ddbf5b0a7"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingTests/NativeRecordingFlowTests.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Tests/CosmaneuraNativeRecordingTests/NativeRecordingFlowTests.swift",
+      "upstream_blob": "91284ceaed46a0159dd28180481fc648f6267bbc"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingTests/NativeRecordingLeaseTests.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Tests/CosmaneuraNativeRecordingTests/NativeRecordingLeaseTests.swift",
+      "upstream_blob": "9833873061067f72591b756ce1e9cb5fe631e5b7"
+    },
+    {
+      "path": "Tests/CosmaneuraNativeRecordingTests/NativeRecordingReservationTests.swift",
+      "upstream_path": "apps/capture/native-plugins/native-recording/Tests/CosmaneuraNativeRecordingTests/NativeRecordingReservationTests.swift",
+      "upstream_blob": "fe5460e0ef675bfb679f67720fd6775cc8bfbdd9"
+    }
+  ]
+}

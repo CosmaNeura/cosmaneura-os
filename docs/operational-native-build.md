@@ -1,5 +1,13 @@
 # Operational native build inputs
 
+> Current ownership/checkpoint: [source index](COSMABOT_SOURCE_OF_TRUTH.md),
+> [recorded release ledger](COSMABOT_RELEASE_STATE_20261030.md), and
+> [recovered iPhone baseline](../apps/capture/README.md). The inputs below
+> describe existing composers; the Apple composer still requires its historical
+> raw snapshot. A portable build from the newly owned app source is pending
+> qualification. Historical deferrals below are not a current release inventory.
+
+
 The existing Scribe-based composers now support an explicit operational identity.
 Optional account connections do not block native capture packaging. Omit both
 Gmail client/callback arguments until that connector is configured; native Google

@@ -1,0 +1,33 @@
+diff --git a/web/src/SettingsHub.tsx b/web/src/SettingsHub.tsx
+index 6a1a85f..75793dd 100644
+--- a/web/src/SettingsHub.tsx
++++ b/web/src/SettingsHub.tsx
+@@ -27,6 +27,11 @@ const titles: Record<Screen, string> = {
+   core: 'Cosmaneura account & appointments', scheduling: 'Scheduling & Google sign-in', microsoft:'Microsoft email & calendar', google:'Google email & calendar',
+   messaging: 'Messaging & fax', payments: 'Payments', portals: 'Patient portals', ehr: 'Practice appointments',
+ };
++const connectionSearchAliases:Partial<Record<ConnectionId,string[]>>={
++  google:['Google Workspace','G Suite'],
++  microsoft:['Microsoft 365','Office 365'],
++};
++const searchText=(value:string)=>value.toLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
+ 
+ /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
+ export function SettingsHub({appearance,accountControls,practiceRecordActions,open,nativePresentation,googleTaskPresentation=false, receivedFaxTaskOpen=false, receivedFaxReturnLabel='Back to saved sources', onCloseReceivedFax, onReceivedFaxActiveChange, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+@@ -140,13 +145,13 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
+   const editors = {team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals};
+   const connectionCards = (['core','scheduling','google','microsoft','messaging','payments','portals'] as const)
+     .filter(id=>editors[id]!=null).map(id=>({id,...CONNECTION_GUIDES[id]}));
+-  const search=connectionSearch.trim().toLowerCase();
+-  const matchesSearch=(...values:string[])=>!search||values.join(' ').toLowerCase().includes(search);
++  const search=searchText(connectionSearch);
++  const matchesSearch=(...values:string[])=>!search||values.some(value=>searchText(value).includes(search));
+   const pickerRecords=practiceRecordActions&&(connectionCategory==='all'||connectionCategory==='records')
+     ?practiceRecordProviders.filter(item=>matchesSearch(item.name,item.description,'EHR practice records')):[];
+   const pickerServices=connectionCards.filter(item=>connectionCategory!=='records'
+     &&(connectionCategory==='all'||(connectionCategory==='email')===(item.group==='Email & calendar'))
+-    &&matchesSearch(titles[item.id],item.description,item.group));
++    &&matchesSearch(titles[item.id],item.description,item.group,...(connectionSearchAliases[item.id]??[])));
+   const pickerCount=pickerRecords.length+pickerServices.length;
+   const selectedGuide=screen in CONNECTION_GUIDES?CONNECTION_GUIDES[screen as ConnectionId]:null;
+   const setupUnavailable=selectedGuide&&catalog?.[screen as ConnectionId]===false;

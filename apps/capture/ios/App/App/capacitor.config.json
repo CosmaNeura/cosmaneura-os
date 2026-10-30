@@ -1,0 +1,21 @@
+{
+  "appId": "com.cosmasos.beta.ios",
+  "appName": "CosmaBot",
+  "webDir": "public",
+  "loggingBehavior": "none",
+  "packageClassList": [
+    "IOSPCMCapacitorPlugin",
+    "SecureQueuePlugin",
+    "CosmasWorkspaceAuthPlugin",
+    "CosmasPrivateSpeechPlugin"
+  ],
+  "server": {
+    "hostname": "localhost",
+    "iosScheme": "capacitor"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  }
+}

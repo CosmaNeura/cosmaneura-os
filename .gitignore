@@ -84,3 +84,11 @@ web/tsconfig.tsbuildinfo
 /web/ux-acceptance-dist/
 /web/.beta/
 !/docs/ux/validation/*.log
+
+# Local source-recovery release artifacts and generated Apple state
+/.local-release/
+/apps/capture/ios/App/App/public/
+**/.build/
+**/.swiftpm/
+**/xcuserdata/
+**/DerivedData/

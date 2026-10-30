@@ -1,0 +1,60 @@
+{
+  "schema": "cosmabot-current-local-source-recovery/v1",
+  "captured_at": "2026-10-30T15:07:58.103896+00:00",
+  "base_commit": "0e70fe6a802ab30362ffb77e8cb8538f7123bc1c",
+  "original_checkout": "/private/tmp/cosmabot-chief-double-icon-20261029",
+  "authorship": "UNQUALIFIED_CURRENT_LOCAL_EDITS; do not attribute to prior Codex or overwrite owner work",
+  "status": "PRESERVED_NOT_APPLIED_TESTED_OR_RELEASED",
+  "tracked_diff_paths": [
+    "web/src/EhrReadProviders.test.tsx",
+    "web/src/EhrReadProviders.tsx",
+    "web/src/EhrReadTask.tsx",
+    "web/src/MessagesAthenaAllergiesJourney.test.tsx",
+    "web/src/MessagesAthenaMedicationsJourney.test.tsx",
+    "web/src/MessagesEhrJourney.test.tsx",
+    "web/src/MessagesEhrProblemsJourney.test.tsx",
+    "web/src/MessagesPracticeRecordsJourney.test.tsx",
+    "web/src/MessagesTebraMedicationsJourney.test.tsx",
+    "web/src/PracticeHome.tsx",
+    "web/src/SettingsHub.connections.test.tsx",
+    "web/src/SettingsHub.test.tsx",
+    "web/src/SettingsHub.tsx",
+    "web/src/WorkspaceShell.tsx",
+    "web/src/ehr-read.css",
+    "web/src/messages-presentation.css",
+    "web/src/settings-hub.css"
+  ],
+  "tracked_diff_sha256": "f71598664afa0b361def85873c543c52b4e815eef753ab38d88f317f823532ac",
+  "untracked_files": [
+    {
+      "original_relative_path": "web/src/ProviderConnectionPortal.test.tsx",
+      "snapshot_relative_path": "provider-portal-untracked/web/src/ProviderConnectionPortal.test.tsx",
+      "sha256": "136e606ff361beb6c1aa8ce44b31808096bb44b2532e2d1163f461c85a221a25",
+      "bytes": 2153
+    },
+    {
+      "original_relative_path": "web/src/ProviderConnectionPortal.tsx",
+      "snapshot_relative_path": "provider-portal-untracked/web/src/ProviderConnectionPortal.tsx",
+      "sha256": "8dcd9dd167a3cb13c75b76a117694f3959db0d7422bcbdb89028315da4b1d1f1",
+      "bytes": 3757
+    },
+    {
+      "original_relative_path": "web/src/provider-connection-portal.css",
+      "snapshot_relative_path": "provider-portal-untracked/web/src/provider-connection-portal.css",
+      "sha256": "6f6725252b53672aba5b82dc9bc5245c76da04f9501f51982b941b93317ff2bb",
+      "bytes": 1882
+    }
+  ],
+  "source_snapshot_consistency": "tracked full-index diff and all untracked bytes reread equal",
+  "original_checkout_modified": false,
+  "reconciliation": "Review on current main with three-way application; do not blindly apply both overlapping SettingsHub patches",
+  "deferred_excluded": "Old Core read integration superseded by independent CosmaBot; unfinished hosting helpers remain historical in the local audit/private handoff and are not activated",
+  "connector_search_aliases_patch_sha256": "3287158979c6d2fae8310de976484df738c270f396b6a344d40b960840164c68",
+  "connector_search_aliases_provenance": {
+    "original_checkout": "/private/tmp/cosmabot-studio-mobile-connector-next-step-20261029",
+    "base_commit": "cc3111cc271a848224b5c30c7ed7734879e1699c",
+    "file": "web/src/SettingsHub.tsx",
+    "authorship": "UNQUALIFIED_CURRENT_LOCAL_EDIT",
+    "status": "PRESERVED_NOT_APPLIED_TESTED_OR_RELEASED"
+  }
+}

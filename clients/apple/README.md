@@ -1,9 +1,19 @@
 # Apple client composition
 
-The owner requested reuse of Scribe's existing Apple shell. The OS build composes
-the shared web workspace into that shell, preserving its native PCM and encrypted
-queue plugins. Source stays owned by Scribe; no second shell or copied backend is
-introduced here.
+Current source ownership and the recovered 1107 app are documented in
+[the source index](../../docs/COSMABOT_SOURCE_OF_TRUTH.md) and
+[apps/capture](../../apps/capture/README.md). CosmaBot owns the app source
+preserved in this repository; shared implementation owners are `clients/*`.
+The separate Scribe server application and repository are outside this work.
+
+## Historical composition path
+
+The material below describes the earlier reuse of a pinned Apple shell. It is
+historical build evidence, not a portable current-source build instruction.
+The old composer still requires that raw snapshot and cannot consume the
+already-composed recovered 1107 tree. Qualify the owned-source build path before
+another native release; do not fetch or modify a separate Scribe repository to
+work around missing CosmaBot source.
 
 `scripts/prepare-apple-synthetic.py` reads four client-only paths at Scribe commit
 `ea7f99d0278a05706531ffb1288cb1df7acf507b` into a fresh output directory. It records
