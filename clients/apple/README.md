@@ -10,10 +10,11 @@ The separate Scribe server application and repository are outside this work.
 
 The material below describes the earlier reuse of a pinned Apple shell. It is
 historical build evidence, not a portable current-source build instruction.
-The old composer still requires that raw snapshot and cannot consume the
-already-composed recovered 1107 tree. Qualify the owned-source build path before
-another native release; do not fetch or modify a separate Scribe repository to
-work around missing CosmaBot source.
+`scripts/compose-portable-iphone.py` builds project inputs from `clients/apple`,
+`clients/capture`, and the frozen `apps/capture` scaffold. That entry is not a
+qualified install. The old composer still requires that raw snapshot and cannot
+consume the already-composed recovered 1107 tree. Do not fetch or modify a
+separate Scribe repository to work around missing CosmaBot source.
 
 `scripts/prepare-apple-synthetic.py` reads four client-only paths at Scribe commit
 `ea7f99d0278a05706531ffb1288cb1df7acf507b` into a fresh output directory. It records
