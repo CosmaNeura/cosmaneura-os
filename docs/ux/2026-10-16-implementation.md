@@ -9,7 +9,7 @@ The supplied Claude handoff and design prompts were treated as reference materia
 - Repository: `CosmaNeura/cosmaneura-os`.
 - Baseline: `c12f2ddac5d68ee19be2b4cd408971ab148fc113`, retrieved from current GitHub main on October 16.
 - Integration branch: `codex/cosmabot-ux-20261016`. The owner requested integration into GitHub main after the completed local review.
-- Desktop delivery: `/Users/jw/Desktop/Cosmas/cosmabot-ux-20261016`.
+- Desktop delivery: `~/Desktop/Cosmas/cosmabot-ux-20261016`.
 - Validated execution copy: `/private/tmp/cosmabot-ux-execution-20261016`. Desktop file reads stalled TypeScript and Git during initial validation; the complete local execution copy restored normal checks. The completed source and evidence are synchronized to the Desktop delivery.
 - Actual-component workspace preview: [127.0.0.1:5196](http://127.0.0.1:5196/).
 - Connection-state preview: [127.0.0.1:5187](http://127.0.0.1:5187/).

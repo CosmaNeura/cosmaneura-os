@@ -28,7 +28,7 @@ not a persisted clinical note; metadata work cannot replace a clinical note.
 
 From the repository root, use Python 3.13 with this project's dependencies and
 PostgreSQL 16 tools. On the current development Mac the working Python is
-`/Users/jw/Desktop/Cosmas/d3-compact-proof-worktree/.venv/bin/python`.
+`~/Desktop/Cosmas/d3-compact-proof-worktree/.venv/bin/python`.
 
 ```sh
 # Fast deterministic baseline; no model calls.

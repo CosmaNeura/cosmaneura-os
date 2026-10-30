@@ -1,6 +1,6 @@
 Open the CosmaNeura/cosmaneura-os repository on branch
 recovery/cosmabot-source-of-truth-20261030.
-Local Mac workspace: /Users/jw/Desktop/Cosmas/CosmaBot-Workspace.
+Local Mac workspace: ~/Desktop/Cosmas/CosmaBot-Workspace.
 Cloud/background agents: select the same repository and branch in Cursor.
 After this consolidation PR is reviewed and merged, use main for both modes.
 

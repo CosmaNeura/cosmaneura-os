@@ -1,5 +1,5 @@
 {
-  "source": "/Users/jw/Desktop/Cosmas/cosmas-beta-local-recovery-20260921/w96-service-source-integration-r1/scribe-source",
+  "source": "~/Desktop/Cosmas/cosmas-beta-local-recovery-20260921/w96-service-source-integration-r1/scribe-source",
   "inputs": {
     "apps/desktop-companion/src/provider-recorder.ts": "68eef784e972005df78a37aceb1e013402cd7a12bfab78d2406977b2d1858126",
     "apps/desktop-companion/src/controller.ts": "baf30e4709e43f8a1361b730e533cdaf7cbd4eb79e50d610719047ff013eba95",

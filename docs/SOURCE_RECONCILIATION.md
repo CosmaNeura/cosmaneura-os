@@ -11,10 +11,10 @@ operate external systems.
 
 | Source | Observed version/date | SHA-256 | Repository copy | Original path |
 |---|---|---|---|---|
-| Codex brief | 2026-09-01 | `9676fa5c17250fa4c90a1b8b00ef7dd45ec2d4e993721391a0b486f5f306eca2` | `docs/reference/CODEX_BRIEF.md` | `/Users/jw/Downloads/codex-azure-validate/CODEX_BRIEF.md` |
-| Human roadmap PDF | canonical v1.8.2, 2026-09-01 | `68fec46aa271706f6db9d132923047b15b2ba10dc46380bdd17d7456dabb6ca5` | `docs/reference/Cosmas_OS_Product_Technical_Specs_and_Roadmap.pdf` | `/Users/jw/Downloads/codex-azure-validate/Cosmas_OS_Product_Technical_Specs_and_Roadmap.pdf` |
-| Machine pack | v1.8, 2026-09-01 | `b4e67473fceafe38991586fc17f0c77e162c0ff31b40a35eedb2bf10df70fa5f` | `docs/reference/Cosmas_OS_codex_pack.json` | `/Users/jw/Downloads/codex-azure-validate/Cosmas_OS_codex_pack.json` |
-| Grok context pack | v1.0, 2026-08-30 | `a039441c6bf6b8a45c427340fc020051f3bf2f69ebdf7fd7d3682ecdcc607706` | `docs/reference/cosmaneura-grok-context-pack.md` | `/Users/jw/Downloads/codex-azure-validate/cosmaneura-grok-context-pack.md` |
+| Codex brief | 2026-09-01 | `9676fa5c17250fa4c90a1b8b00ef7dd45ec2d4e993721391a0b486f5f306eca2` | `docs/reference/CODEX_BRIEF.md` | `~/Downloads/codex-azure-validate/CODEX_BRIEF.md` |
+| Human roadmap PDF | canonical v1.8.2, 2026-09-01 | `68fec46aa271706f6db9d132923047b15b2ba10dc46380bdd17d7456dabb6ca5` | `docs/reference/Cosmas_OS_Product_Technical_Specs_and_Roadmap.pdf` | `~/Downloads/codex-azure-validate/Cosmas_OS_Product_Technical_Specs_and_Roadmap.pdf` |
+| Machine pack | v1.8, 2026-09-01 | `b4e67473fceafe38991586fc17f0c77e162c0ff31b40a35eedb2bf10df70fa5f` | `docs/reference/Cosmas_OS_codex_pack.json` | `~/Downloads/codex-azure-validate/Cosmas_OS_codex_pack.json` |
+| Grok context pack | v1.0, 2026-08-30 | `a039441c6bf6b8a45c427340fc020051f3bf2f69ebdf7fd7d3682ecdcc607706` | `docs/reference/cosmaneura-grok-context-pack.md` | `~/Downloads/codex-azure-validate/cosmaneura-grok-context-pack.md` |
 
 Cursor should validate the hashes of the repository copies before analysis. If
 they differ, stop and report the mismatch rather than silently choosing one.
