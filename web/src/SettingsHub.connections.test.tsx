@@ -28,6 +28,21 @@ it('exposes the supplied account control at home without duplicating or replacin
  const logout=vi.fn();await act(async()=>root.render(<SettingsHub {...{accountControls:<button onClick={logout}>Log out</button>}} open team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
  expect(host.querySelector('[aria-label="Account"]')?.textContent).toContain('Log out');await click('Log out');expect(logout).toHaveBeenCalledOnce();
 });
+it('opens the EHR and Rx Relay portal without claiming a prescription can be sent',async()=>{
+ const open=vi.fn();await act(async()=>root.render(<SettingsHub {...{practiceRecordActions:{elation:open}}} open team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
+ await click('EHR & Rx Relay');
+ expect(host.querySelector('h1')?.textContent).toBe('EHR & Rx Relay');
+ expect(host.textContent).toContain('Not connected for sending');
+ expect(host.textContent).not.toMatch(/Send prescription/);
+ await click('Open Elation records');expect(open).toHaveBeenCalledOnce();
+});
+it('keeps Log out reachable from Connections next to Done',async()=>{
+ const logout=vi.fn();await act(async()=>root.render(<SettingsHub {...{accountControls:<button onClick={logout}>Log out</button>}} open initialScreen="connections" team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
+ const navAccount=host.querySelector('.settings-hub-nav [aria-label="Account"]');
+ expect(navAccount?.textContent).toContain('Log out');
+ expect(host.querySelector('.settings-hub-nav .settings-done')).toBeTruthy();
+ await act(async()=>navAccount!.querySelector('button')!.click());expect(logout).toHaveBeenCalledOnce();
+});
 it('returns from the catalog to its launching control without starting another connection check',async()=>{
  await act(async()=>root.render(<SettingsHub open initialScreen="connections" connectionIdentity={identity} google={<button>Actual Google editor</button>} team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
  const before={catalog:vi.mocked(readConnectionCatalog).mock.calls.length,summary:vi.mocked(readConnectionSummary).mock.calls.length};
@@ -59,6 +74,8 @@ it('replaces the ordinary list with one searchable picker and keeps email, fax a
  expect(buttons().filter(b=>b.textContent?.includes('Back to'))).toHaveLength(1);
  expect(buttons().some(b=>b.textContent==='Add connection'||b.textContent?.includes('All settings')||b.textContent==='Refresh connections')).toBe(false);
  expect(host.querySelector('[aria-label="Add connection catalog"]')?.textContent).toContain('Messaging & fax');
+ await search('G Suite');expect(buttons().some(b=>b.textContent?.includes('Google email & calendar'))).toBe(true);expect(buttons().some(b=>b.textContent?.includes('Microsoft email & calendar'))).toBe(false);
+ await search('Office 365');expect(buttons().some(b=>b.textContent?.includes('Microsoft email & calendar'))).toBe(true);expect(buttons().some(b=>b.textContent?.includes('Google email & calendar'))).toBe(false);
  await search('  Gmail  ');expect(buttons().some(b=>b.textContent?.includes('Google email & calendar'))).toBe(true);expect(buttons().some(b=>b.textContent?.includes('Elation')||b.textContent?.includes('Messaging & fax'))).toBe(false);
  expect(mounted).not.toHaveBeenCalled();expect(readConnectionCatalog).toHaveBeenCalledTimes(before.catalog);expect(readConnectionSummary).toHaveBeenCalledTimes(before.summary);
  await click('Google email & calendar');expect(mounted).toHaveBeenCalledOnce();expect(buttons().some(b=>b.textContent==='Actual Google editor')).toBe(true);

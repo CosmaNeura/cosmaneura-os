@@ -56,14 +56,15 @@ it('opens appointment discovery directly and retains it after returning from con
   expect(mounted).toHaveBeenCalledOnce();
 });
 
-it('starts with two choices and loads only the selected editor', async () => {
+it('starts with team, EHR, and connections and loads only the selected editor', async () => {
   const mounted = vi.fn();
   function Editor({name}: {name:string}) { useEffect(() => { mounted(name); }, [name]); return <label>{name}<input /></label>; }
   await act(async () => root.render(<SettingsHub open team={<Editor name="team"/>} messaging={<Editor name="messaging"/>}
     payments={<Editor name="payments"/>} portals={<Editor name="portals"/>} teamSummary="4 coworkers" teamDirty={false} onClose={() => {}}/>));
   expect(mounted).not.toHaveBeenCalled();
   expect(container.querySelectorAll('input')).toHaveLength(0);
-  expect(visibleButtons()).toHaveLength(3);
+  expect(visibleButtons()).toHaveLength(4);
+  expect(visibleButtons().some(button => button.textContent?.includes('EHR & Rx Relay'))).toBe(true);
   await click('Connections'); expect(mounted).not.toHaveBeenCalled();
   await click('Messaging & fax'); expect(mounted.mock.calls).toEqual([['messaging']]);
   expect(container.querySelectorAll('input')).toHaveLength(1);
