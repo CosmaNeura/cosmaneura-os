@@ -34,6 +34,13 @@ afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreA
 it('keeps the original unauthenticated synthetic workspace usable without a records owner',async()=>{
  await act(async()=>root.render(<EncounterWorkspace draftStorage={memoryDraftStorage()}/>));expect(host.querySelector('.team-workspace')).not.toBeNull();expect(task()).toBeUndefined();
 });
+it.each([['elation','Open Elation records'],['atlas_md','Import Atlas.MD calendar file']] as const)('opens the %s task from EHR and Rx Relay and keeps the exact Chief draft',async (provider,action)=>{
+ await openChat();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question(),'Keep my original Chief directions.');question()!.dispatchEvent(new Event('input',{bubbles:true}));});await click('‹ Messages');await click('Settings');await click('EHR & Rx Relay');
+ if(provider==='atlas_md')await click('Atlas.MD');
+ await click(action);await wait(()=>expect(task()).toBeDefined());
+ if(provider==='atlas_md')expect(task()?.textContent).toContain('Import calendar file');else await wait(()=>expect(recordsSystem(task())).toBe(provider));
+ await click('‹ Back to connections');expect(task()).toBeUndefined();await click('Done');await openChat();expect(question()?.value).toBe('Keep my original Chief directions.');expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();expect(ehrReadApi.execute).not.toHaveBeenCalled();
+});
 it.each(['elation','tebra','athena','atlas_md'])('opens the existing %s task from Connections and keeps the exact Chief draft',async provider=>{
  await openChat();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question(),'Keep my original Chief directions.');question()!.dispatchEvent(new Event('input',{bubbles:true}));});await click('‹ Messages');await records();const target=await choose(provider);
  await wait(()=>expect(task()).toBeDefined());

@@ -1225,8 +1225,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     if(choice.owner!==authenticated)return;
     if(!visitLinked){const selection={...choice,stage:'loading' as 'loading'|'shown'};ehrVisitSelection.current=selection;setSettingsOpen(false);try{await loadEncounters();}finally{if(ehrVisitSelection.current===selection&&selection.stage==='loading')ehrVisitSelection.current=false;}return;}
     const directory=continued?workspaceFrame.current?.querySelector<HTMLElement>('.connection-directory'):null;
-    const launcher=continued?directory?.closest('.settings-hub')?.querySelector<HTMLElement>('.settings-hub-heading h1'):workspaceFrame.current?.querySelector<HTMLElement>(`[data-practice-record-provider="${provider}"]`);
-    if(!launcher||launcher.closest('[hidden]'))return;
+    const visibleControl=(selector:string)=>{const element=workspaceFrame.current?.querySelector<HTMLElement>(selector);return element&&!element.closest('[hidden]')?element:null;};
+    const launcher=continued?directory?.closest('.settings-hub')?.querySelector<HTMLElement>('.settings-hub-heading h1'):visibleControl(`[data-practice-record-provider="${provider}"]`)??visibleControl('.provider-portal .team-primary');
+    if(!launcher)return;
     const id=workspace!.id;
     if(await openVisitSourceTask('connections',provider==='atlas_md'?'calendar':'ehr',launcher)){
       if(provider!=='atlas_md')setRequestedEhrProvider({...choice,workspaceId:id});
