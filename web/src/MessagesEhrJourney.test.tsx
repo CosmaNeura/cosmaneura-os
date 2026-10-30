@@ -34,6 +34,15 @@ it('returns to visible Details without opening the keyboard, keeping one mounted
  await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(visibleButton('Details')));expect(document.activeElement?.closest('[hidden]')).toBeNull();expect(document.activeElement).not.toBe(composer);expect(question()).toBe(composer);expect(question().value).toBe('Keep my Chief directions.');
  await openTask();expect(host.querySelector('.ehr-read-panel')).toBe(panel);expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
 });
+it('saves an Elation appointment for Chief from EHR and Rx Relay without sending',async()=>{
+ await draft('Keep the provider’s original directions.');await click('‹ Messages');await click('Settings');
+ const relay=()=>[...host.querySelectorAll('button')].find(button=>!button.closest('[hidden]')&&button.querySelector('strong')?.textContent==='EHR & Rx Relay');
+ await wait(()=>expect(relay()).toBeTruthy());await wait(()=>expect(relay()!.disabled).toBe(false));await act(async()=>relay()!.click());
+ await click('Open Elation records');
+ await wait(()=>expect(visibleButton('Check Elation access')??visibleButton('Restore saved Elation work')).toBeTruthy());
+ await review();await click('Save reviewed appointment');await click('Prepare Chief draft');await wait(()=>expect(question().value).toContain('Review the human-selected EHR'));
+ expect(question().value).toContain('Keep the provider’s original directions.');expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
+});
 it('reviews an appointment from Chief Details, saves it once, and appends source directions to the retained draft without sending',async()=>{
  await draft('Keep the provider’s original directions.');await openTask();await review();await click('Save reviewed appointment');await click('Prepare Chief draft');await wait(()=>expect(question().value).toContain('Review the human-selected EHR'));
  expect(question().value).toContain('Keep the provider’s original directions.');expect(host.querySelector('.ehr-read-task')?.hasAttribute('hidden')).toBe(true);expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
