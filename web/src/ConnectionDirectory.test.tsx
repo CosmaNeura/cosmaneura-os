@@ -20,7 +20,7 @@ const mount=(google:React.ReactNode,owner=identity)=>act(async()=>root.render(<S
 it('shows disabled services with useful setup steps without mounting a dead editor',async()=>{
   const editor=vi.fn();function Google(){useEffect(()=>{editor();},[]);return <p>OAuth editor</p>;}
   vi.mocked(readConnectionCatalog).mockResolvedValue(catalog);await mount(<Google/>);
-  expect(host.querySelectorAll('.connection-card')).toHaveLength(7);expect(host.textContent).toContain('Needs setup');
+  expect(host.querySelectorAll('.connection-card:not(.connection-record-row)')).toHaveLength(7);expect(host.querySelector('.connection-record-row strong')?.textContent).toBe('EHR & Rx Relay');expect(host.textContent).toContain('Needs setup');
   const unavailable=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
   expect(unavailable.parentElement!.textContent).toContain('Availability checked');expect(unavailable.parentElement!.textContent).not.toContain('Account checked');
   await click('Google email & calendar');expect(editor).not.toHaveBeenCalled();expect(host.textContent).toContain('Google sign-in has not been enabled');
@@ -70,7 +70,7 @@ it('ignores a late response from the previous signed-in account',async()=>{
 it('checks only services actually present in this client',async()=>{
   vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,google:true,microsoft:true,scheduling:true});
   await act(async()=>root.render(<SettingsHub open initialScreen="connections" team={<p>Team</p>} core={<p>Practice setup</p>} teamSummary="Five bots" teamDirty={false} onClose={()=>{}} connectionIdentity={identity}/>));
-  expect(host.querySelectorAll('.connection-card')).toHaveLength(1);
+  expect(host.querySelectorAll('.connection-card:not(.connection-record-row)')).toHaveLength(1);expect(host.querySelector('.connection-record-row strong')?.textContent).toBe('EHR & Rx Relay');
   expect(readConnectionSummary).toHaveBeenCalledOnce();
   expect(vi.mocked(readConnectionSummary).mock.calls[0][1]).toBe('core');
 });
@@ -167,8 +167,9 @@ it('keeps legacy setup unqualified when current action and account readiness wer
  expect(details.textContent).toContain('Review accounts and permissions');
  expect(readConnectionSummary).not.toHaveBeenCalled();
  await act(async()=>root.render(<SettingsHub open initialScreen="connections" team={<p>Team</p>} google={<p>Google editor</p>} teamSummary="Team" teamDirty={false} onClose={()=>{}}/>));
- expect(host.querySelector('.connection-card .connection-badge')?.textContent).toBe('Not checked');
- const card=host.querySelector<HTMLButtonElement>('.connection-card')!;
+ const serviceCard=()=>host.querySelector<HTMLButtonElement>('.connection-card:not(.connection-record-row)')!;
+ expect(serviceCard().querySelector('.connection-badge')?.textContent).toBe('Not checked');
+ const card=serviceCard();
  card.focus();expect(document.activeElement).toBe(card);expect(card.tagName).toBe('BUTTON');
  await act(async()=>card.click());expect(document.activeElement?.textContent).toBe('Google email & calendar');
 });
