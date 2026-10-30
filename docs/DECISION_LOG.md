@@ -347,3 +347,31 @@ IMPLEMENTATION IMPACT:
   Camera attachments, live dictation, push notifications and continuous
   cross-visit bot history remain deferred. This approval does not activate
   production capabilities or authorize access to real patient content.
+
+### DL-20261030-01
+
+- **Status:** ACCEPTED
+- **Date:** 2026-10-30
+- **Ruling:** Cursor agents on this repository may, without asking John or
+  Shawn first, apply infrastructure changes, change live Clerk settings,
+  publish signed Mac and iPhone builds, and deploy to production. Agents work
+  through branch, commit, push of their own branch, pull request, and CI
+  repair until the task's finish line. They stop only when a required
+  credential or physical device is not available. Development, tests, logs,
+  notes, commits, and chat stay on synthetic patient data. Real patient data
+  stays out of code history. Agents leave CI, Trivy scanning, and the main
+  branch ruleset intact, do not force-push `main`, and keep unexpected owner
+  changes while continuing the rest of the work.
+- **Rationale:** John Clemente removed the prior ask-first gate for those four
+  actions so agents can finish the work in front of them.
+- **Supersedes:** Ask-first and do-not-deploy limits that conflict with this
+  ruling, including the signing-and-upload limit in `DL-20260903-06` and the
+  "does not authorize a production rollout" limit in `DL-20260927-01`. Shared
+  identity, separate CosmaBot permissions, and the synthetic-data rule remain
+  in force.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Direct decision from John Clemente, CEO, on
+  Friday, October 30, 2026, at 9:04am ET.
+- **Implementation impact:** Update the agent instructions and the cloud-agent
+  test setup. This entry records the decision. It does not itself deploy
+  software or change live Clerk, infrastructure, or app stores.

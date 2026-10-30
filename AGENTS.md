@@ -3,7 +3,7 @@
 ## Objective
 
 Build and validate a simple, usable practice computer without destabilizing
-Track A. The initial repository is synthetic-only and local-only.
+Track A. Development data in this repository stays synthetic.
 
 ## Authority
 
@@ -32,8 +32,33 @@ marked passed:
 BUILD_GATE: LOCAL_SYNTH_BUILD_APPROVED
 ```
 
-Nothing goes live without a yes from John or Shawn. Do not deploy. Do not edit
-another repository.
+Do not edit another repository. Authority for infrastructure, live Clerk
+settings, signed Mac and iPhone builds, and production deploy is the October
+30, 2026 decision in the next section.
+
+## Owner decision, October 30, 2026
+
+On Friday, October 30, 2026, at 9:04am ET, John Clemente, CEO, decided that
+Cursor agents working in this repository may do the following without asking
+John or Shawn first:
+
+1. Apply infrastructure changes.
+2. Change live Clerk settings.
+3. Publish signed Mac and iPhone builds.
+4. Deploy to production.
+
+Agents work from branch to finish line. They branch, commit, push their own
+branch, open a pull request, fix CI, and keep going. They stop only when a
+required credential or physical device is not available to them.
+
+Development, tests, logs, notes, commits, and chat use synthetic patient data
+only. Never put real patient data in code history.
+
+Agents keep CI, Trivy scanning, and the main branch ruleset intact. Agents do
+not force-push `main`. When an unexpected owner change is already in the tree,
+agents leave that change in place and continue the rest of the work.
+
+This decision is also recorded as `DL-20261030-01`.
 
 ## Repository boundary
 
@@ -41,7 +66,8 @@ another repository.
 - Legacy repositories are read-only evidence.
 - Never edit, format, branch, commit, migrate, or push a legacy repository.
 - No direct legacy database access, source import, shared migration ownership,
-  shared Terraform state, or production deployment identity.
+  or shared Terraform state. Infrastructure and deploy work for this product
+  stays in this repository.
 - Future integration is a narrow versioned HTTPS/OpenAPI or first-party MCP
   contract.
 
@@ -63,13 +89,11 @@ Product runtime and coding agents are different.
 Do not commit credentials, `.env` values, database dumps, vendor tokens, or
 real production identifiers.
 
-Production access is off by default. This includes Azure, Clerk, Stripe,
-Athena, Acuity, production databases, external messaging, and GitHub
-production identities. John or Shawn may grant it for a specific task by
-saying so in that task. The grant covers that task only. Even then, do not
-copy real patient data into code, tests, fixtures, commits, pull request
-text, logs, or chat, and do not deploy or put anything live without a yes
-from John or Shawn.
+Cursor agents may apply infrastructure changes, change live Clerk settings,
+publish signed Mac and iPhone builds, and deploy to production without asking
+John or Shawn first, as recorded on October 30, 2026. That authority still
+forbids copying real patient data into code, tests, fixtures, commits, pull
+request text, logs, or chat.
 
 Use invented people, appointments, identifiers, images, and money in synth
 work.
@@ -108,28 +132,37 @@ work.
 ## Engineering behavior
 
 - Inspect before changing.
-- Preserve unexpected owner changes and stop before overwriting them.
+- Preserve unexpected owner changes. Leave those edits in place and continue
+  the rest of the work.
 - Keep changes small and testable; separate unrelated outcomes.
 - Tests must prove failure and recovery paths, not only happy paths.
 - Never claim a command passed unless it ran and its output was checked.
 - Record assumptions and exact evidence.
-- Do not push, deploy, or create cloud resources. Nothing goes live without a
-  yes from John or Shawn. Production and vendor access follows the data and
-  credential boundary.
+- Branch, commit, push the agent's own branch, open a pull request, and fix CI
+  until the task reaches its finish line. Stop only when a required credential
+  or physical device is not available.
+- Do not force-push `main`.
+- Do not weaken CI, Trivy scanning, or the main branch ruleset.
+- Apply infrastructure, change live Clerk settings, publish signed Mac and
+  iPhone builds, and deploy to production when the task calls for them.
 
 ## Risk discipline
 
 Treat identity/authority, PHI paths, patient messaging, retention, schema,
 external side effects, deployment, and cross-repository contracts as high-risk.
-They require explicit tests, recovery behavior, and owner review before a real
-environment is considered.
+They require explicit tests and recovery behavior. Agents carry that work
+through under the October 30, 2026 decision.
 
 ## Install, lint, and tests
 
 From the repository root. These commands match `.github/workflows/synth-ci.yml`.
 They do not need secrets or real keys. Backend checks start a temporary
 database and invent their own password. Cloud agents prepare a fresh machine
-with the `install` command in `.cursor/environment.json`.
+with the `install` command in `.cursor/environment.json`. That install adds
+Redis when `redis-server` is missing. The `start` command runs
+`scripts/start-cloud-agent-services.sh`, which starts Postgres on
+`127.0.0.1:54329` (database `cosmas_os`) and Redis on `127.0.0.1:63799` when
+those ports are not already accepting connections.
 
 Install:
 
