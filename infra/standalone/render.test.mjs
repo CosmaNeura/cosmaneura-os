@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile,writeFile,mkdtemp,rm,stat,symlink} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,mkdtemp,rm,stat,symlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {render,prepare,validateInput} from './render.mjs';
+import {packageStagingWeb, STAGING_WEB_ORIGIN} from '../../scripts/package-staging-web.mjs';
 import {validateBetaFeatureManifest} from '../../clients/shared/beta-feature-profile.mjs';
 
 const sample=JSON.parse(await readFile(new URL('./invented-host-input.json',import.meta.url),'utf8'));
@@ -90,6 +91,11 @@ test('shared platform resources, identity ambiguity, plaintext origins and confi
     item=>{item.resource_scope='existing-platform-host';},item=>{item.instance_id='not-an-instance';},
     item=>{item.box_id=item.instance_id;},item=>{delete item.box_id;},
     item=>{item.api_origin='https://app.cosmaneura.com';item.identity.apiOrigin=item.api_origin;},
+    item=>{item.web_origin='https://beta.cosmas.ai';},
+    item=>{item.web_origin='https://cosmas.ai';},
+    item=>{item.web_origin='https://www.cosmas.ai';},
+    item=>{item.web_origin='https://app.cosmas.ai';},
+    item=>{item.web_origin='https://foo.cosmaneura.com';},
     item=>{item.web_origin='https://api.staging.cosmas.ai';},
     item=>{item.identity.frontendOrigin='https://clerk.cosmaneura.com';},
     item=>{item.identity.frontendOrigin='https://offline.cosmabot.invalid';},
@@ -129,4 +135,22 @@ test('CLI writes a fresh bounded public package, refuses duplicate keys and syml
   assert.notEqual(denied.status,0);assert.doesNotMatch(denied.stdout+denied.stderr,/DO_NOT_LOG_THIS_SECRET/);
   const good=spawnSync(process.execPath,[script,'--input',input,'--output',join(root,'cli-good')],{encoding:'utf8'});
   assert.equal(good.status,0,good.stderr);assert.equal(JSON.parse(good.stdout).startup_held,true);
+});
+
+test('the web packager accepts beta.cosmas.ai and still refuses other hosts and real-data switches',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'beta-web-package-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const dist=join(root,'dist');await mkdir(dist);
+  const commit='0123456789abcdef0123456789abcdef01234567';
+  await writeFile(join(dist,'version.json'),`${JSON.stringify({commit,built_at:'2026-10-30T17:48:00Z'})}\n`);
+  const beta=packageStagingWeb({distDir:dist,outputDir:join(root,'beta'),argv:['--target','https://beta.cosmas.ai']});
+  assert.equal(beta.target,'https://beta.cosmas.ai');
+  assert.equal(beta.production,false);assert.equal(beta.deployed,false);assert.equal(beta.pushed,false);
+  const staging=packageStagingWeb({distDir:dist,outputDir:join(root,'staging'),argv:['--dist',dist,'--output',join(root,'staging')]});
+  assert.equal(staging.target,STAGING_WEB_ORIGIN);assert.equal(staging.production,false);
+  const refused=[
+    ['--target','https://app.cosmaneura.com'],['--target','https://cosmas.ai'],['--target','https://www.cosmas.ai'],
+    ['--target','https://app.cosmas.ai'],['--target','https://foo.cosmaneura.com'],['--target','https://random.example.invalid'],
+    ['authorized_beta'],['--data-mode','authorized_beta'],
+  ];
+  for(const [index,argv] of refused.entries())assert.throws(()=>packageStagingWeb({distDir:dist,outputDir:join(root,`refused-${index}`),argv}),/staging_web_package_refused/);
 });

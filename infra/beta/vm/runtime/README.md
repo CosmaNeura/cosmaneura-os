@@ -18,9 +18,8 @@ version 1 manifest contains exactly:
   digests. The review must prove the chosen digest contains the declared image,
   expected UID and matching application/web configuration. This renderer does
   not pull images or infer their provenance from their names.
-- Exact `web_origin` `https://staging.cosmas.ai` and selected `api_origin`
-  `https://api.staging.cosmas.ai`. DNS/control and this separate API name remain
-  required deployment inputs. An alternative origin needs a reviewed change.
+- Exact `web_origin` `https://staging.cosmas.ai` or `https://beta.cosmas.ai`, and the matching `api_origin`.
+  Any other hostname is refused. Synthetic mode stays on. DNS and this separate API name remain required inputs.
 - `runtime`: `environment`, `secret_names`, `runtime_identity_client_id`.
   Public environment keys are actual application Settings names in uppercase.
   Every Boolean setting must be explicitly `true` or `false`, preserving the

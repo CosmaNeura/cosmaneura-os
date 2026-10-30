@@ -52,6 +52,47 @@ def write_identity(root: Path, document: dict) -> Path:
     return path
 
 
+BETA_HOST = "clerk.beta.cosmas.ai"
+BETA_ORIGIN = "https://clerk.beta.cosmas.ai"
+BETA_API = "https://api.beta.cosmas.ai"
+
+
+def test_beta_address_is_accepted_for_synthetic_data_only():
+    script = composition()
+    key = live_key(BETA_HOST)
+    script.authorize_simulator_staging_native_auth(
+        {"identity": identity_document(BETA_API, BETA_ORIGIN, key)},
+        "synthetic", hosted_workspace=True)
+    with pytest.raises(ValueError, match="requires synthetic data mode"):
+        script.authorize_simulator_staging_native_auth(
+            {"identity": identity_document(BETA_API, BETA_ORIGIN, key)},
+            "authorized_beta", hosted_workspace=True)
+
+
+def test_beta_clerk_does_not_accept_the_staging_api():
+    script = composition()
+    with pytest.raises(ValueError, match="clerk.staging.cosmas.ai"):
+        script.authorize_simulator_staging_native_auth(
+            {"identity": identity_document(STAGING_API, BETA_ORIGIN, live_key(BETA_HOST))},
+            "synthetic", hosted_workspace=True)
+
+
+@pytest.mark.parametrize(("api", "frontend", "key_host"), [
+    ("https://api.cosmaneura.com", "https://app.cosmaneura.com", "app.cosmaneura.com"),
+    ("https://api.cosmas.ai", "https://cosmas.ai", "cosmas.ai"),
+    ("https://www.cosmas.ai", "https://www.cosmas.ai", "www.cosmas.ai"),
+    ("https://app.cosmas.ai", "https://app.cosmas.ai", "app.cosmas.ai"),
+    ("https://foo.cosmaneura.com", "https://foo.cosmaneura.com", "foo.cosmaneura.com"),
+    ("https://api.random.example.invalid", "https://random.example.invalid", "random.example.invalid"),
+])
+def test_cosmas_addresses_and_a_random_host_stay_refused(api, frontend, key_host):
+    script = composition()
+    with pytest.raises(ValueError):
+        script.authorize_simulator_staging_native_auth(
+            {"identity": identity_document(api, frontend, live_key(key_host))},
+            "synthetic", hosted_workspace=True)
+
+
 def test_public_staging_key_decodes_to_the_allowlisted_host():
     script = composition()
     assert live_key(STAGING_HOST) == STAGING_KEY
