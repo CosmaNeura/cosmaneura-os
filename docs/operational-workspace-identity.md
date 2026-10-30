@@ -46,23 +46,32 @@ inspection; it must not be consumed as a finished build input set.
 ## Shared identity in synthetic staging
 
 The owner selected shared Cosmaneura identity with separate product permissions
-on September 27, 2026. `operational-staging-v1` accepts a matching `pk_test_`
-development frontend for the existing beta application bundles, only when the
-build explicitly selects `synthetic` data and the identity's `audience` is the
-empty string. This selects the shared instance's default session contract:
-the signed JWT must omit `aud` entirely. Null, empty and foreign audience claims
-are rejected; issuer, signature, session, origin and organization checks remain.
-`operational-beta-v1` continues to
-require a production key/frontend. This identity profile does not change the
+on September 27, 2026. Shared staging (`staging.cosmas.ai`) uses its own Clerk
+instance, `clerk.staging.cosmas.ai`, with a `pk_live` key, on the API's
+`CLERK_SESSION_POLICY=audience` with audience `cosmas-os-beta-api`.
+`operational-staging-v1` accepts that key when the decoded host is
+`clerk.staging.cosmas.ai`, the frontend origin is `https://clerk.staging.cosmas.ai`,
+the audience is non-empty, and the build explicitly selects `synthetic` data.
+
+The `shared_staging` policy stays the development-instance path
+(`*.clerk.accounts.dev`, empty audience). `operational-staging-v1` still accepts
+a matching `pk_test_` key for that frontend when the audience is the empty
+string and the build selects `synthetic` data. That path selects the development
+instance's default session contract: the signed JWT must omit `aud` entirely.
+Null, empty and foreign audience claims are rejected; issuer, signature,
+session, origin and organization checks remain. `operational-beta-v1` continues
+to require a production key/frontend. This identity profile does not change the
 feature profile, grant workspace access or enable Core capabilities.
 
-This staging profile emits public VM settings in `os.runtime-identity.json`.
-It explicitly selects `CLERK_SESSION_POLICY=shared_staging` with an empty
-`CLERK_AUDIENCE`; the API refuses this policy outside synthetic staging with a
-development issuer. The default API policy still requires its configured audience.
-It does not emit `os.identity.tfvars.json`, because the existing Terraform
-environment accepts only production identity profiles. The production profile's
-outputs remain unchanged. Preparing settings does not apply them to a host.
+The development-instance path emits public VM settings in
+`os.runtime-identity.json`. It explicitly selects
+`CLERK_SESSION_POLICY=shared_staging` with an empty `CLERK_AUDIENCE`; the API
+refuses this policy outside synthetic staging with a development issuer. The
+audience policy used by `staging.cosmas.ai` requires `cosmas-os-beta-api`.
+The development path does not emit `os.identity.tfvars.json`, because the
+existing Terraform environment accepts only production identity profiles. The
+production profile's outputs remain unchanged. Preparing settings does not
+apply them to a host.
 
 CosmaBot still requires its configured organization, an active local external
 identity binding and an active human principal in its own Box. Platform account
