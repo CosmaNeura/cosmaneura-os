@@ -16,7 +16,7 @@ export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedCon
   const guidance=!modelEnabled?'AI drafting is unavailable. You can still write and review your notes.'
     :!sourceAllowed?'Chief’s saved-source access is off. Review its source choices in Skills & settings.'
     :notesDirty?'Save your notebook changes before preparing a request.'
-    :!hasSavedContext?ChiefOpenVisit.missing
+    :!hasSavedContext?(visitSummary?`${visitSummary} ${ChiefOpenVisit.notesGap}`:ChiefOpenVisit.missing)
     :hasQuestion?'Your question is below. Keep it, or clear it to choose another task.'
     :`Choose a task, review the question, then send it when ready.${visitSummary?` ${visitSummary}`:''}`;
   if(minimal)return <section className="chief-start-actions messages-starters" aria-label="Ask Chief on this visit"><div>{CHIEF_STARTERS.slice(0,2).map(task=><button type="button" key={task.id} disabled={disabled} onClick={()=>{if(!disabled)onChoose(task.prompt);}}>{task.label}</button>)}</div>{disabled&&<p>{guidance}</p>}</section>;
