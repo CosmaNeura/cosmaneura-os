@@ -115,6 +115,21 @@ synthetic, and when the flag is absent. Omitting the flag leaves device
 sign-in and the unsigned synthetic composition unchanged. The flag does not
 sign the app or change Clerk.
 
+Linux synth-ci does not compile the Swift tests. On a Mac with Xcode, from
+`clients/apple/native-auth`, run the package scheme `CosmasNativeAuth` on an
+iOS Simulator named iPhone 16:
+
+```sh
+xcodebuild test \
+  -scheme CosmasNativeAuth \
+  -destination 'platform=iOS Simulator,name=iPhone 16' \
+  -only-testing:CosmasNativeAuthTests/SimulatorStagingClerkTests \
+  -only-testing:CosmasNativeAuthTests/SimulatorStagingKeychainTests
+```
+
+Any iOS 17+ simulator destination can replace that name. The suites use
+invented organization and staging host values only.
+
 The native adapter keeps SDK credentials native, acquires fresh tokens and binds
 them to the current user/session/organization, issuer, audience and native origin.
 The server remains responsible for signature and current authority verification.
