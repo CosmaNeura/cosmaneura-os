@@ -36,7 +36,7 @@ approval sequence is deliberately staged:
 | Source closure | Reviewed committed SHA, complete local D3 gate, image scan evidence, green GitHub CI | Create no cloud resource |
 | Bootstrap | Exact saved bootstrap plan/review hashes, two D3 resource groups, Box UUID, region, deploy identity, registry posture, and cost-alert decision | Apply only the bootstrap/state/runner root |
 | Foundation | Exact create-only environment plan hash and null/empty prior-state proof | Create private services and ACA environment with database job/workloads off |
-| Identity/release | Foundation-derived origins, production Clerk/Org configuration, source SHA, immutable API/worker and web digests, scan evidence | Prepare release; invite nobody |
+| Identity/release | Foundation-derived origins, shared Cosmaneura identity with separate CosmaBot permissions and organization binding (`DL-20260927-01`), source SHA, immutable API/worker and web digests, scan evidence | Prepare release; invite nobody |
 | Database | Exact subsequent plan hash and prior lineage/serial | Create/run only the unscheduled preparation job and collect its attestation |
 | Workloads | Exact saved workload plan hash, current lineage/serial, structured database attestation, live-network evidence, release evidence, and capability-manifest hash | Deploy digest-pinned web/API/worker |
 | Tester admission | Live authority, readiness, audit/purge, restore, rollback, drift, monitoring, and offboarding evidence | Invite approved synthetic-only testers |
@@ -86,9 +86,10 @@ Before the **workload apply**, the human must additionally stop unless:
 - [ ] The foundation-derived dedicated `web_origin` and `api_origin` are
       recorded; production Clerk does not use the shared
       `azurecontainerapps.io` web hostname.
-- [ ] The production Cosmas OS Clerk instance and empty production Cosmas Beta
-      Lab Organization are configured for that exact origin and map to the
-      dedicated Box.
+- [ ] The shared Cosmaneura Clerk instance is configured for that exact origin.
+      CosmaBot permissions, organization binding, and the dedicated Box stay
+      independent of platform roles (`DL-20260927-01`). A separate production
+      Clerk application is not required.
 - [ ] The reviewed API/worker and web digests, web release evidence, structured
       `database_preparation_attestation`, and
       `runner_live_network_evidence_reference` are all present.

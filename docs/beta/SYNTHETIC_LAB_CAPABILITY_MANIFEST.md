@@ -24,9 +24,9 @@ that review invalidates the prior manifest reference.
 | D3 isolated environment | **APPROVED** | `DL-20260903-03`; never promote D2 in place |
 | First cohort | **Cosmas Beta Lab; owner and later invited outside testers** | `DL-20260903-04` |
 | Data | **Invented data only** | `synthetic_lab`; PHI, real clinic data, and production exports prohibited |
-| Identity topology | **Separate Cosmas OS Clerk application and one Beta Lab Organization mapped to one Box** | `DL-20260903-04` and `DL-20260903-05` |
-| Development Clerk state | **CONFIGURED** | B2B, email verification code, invite-only, Organizations required, user-created Organizations disabled, audience `cosmas-os-beta-api`; zero members |
-| Production Clerk state | **PENDING EXACT OWNER DECISION AND FOUNDATION-DERIVED WEB ORIGIN** | Recommended package: `beta.cosmaneura.com`, verified email + TOTP + recovery codes, SMS disabled, no wildcard/shared ACA origin; no production Organization or tester invitation yet |
+| Identity topology | **Shared Cosmaneura Clerk application; separate CosmaBot permissions, organization binding, and one Box** | `DL-20260927-01`, which supersedes the separate Clerk application requirement in `DL-20260903-04` and `DL-20260903-05`. Platform membership does not grant CosmaBot access |
+| Development Clerk state | **HISTORICAL DEVELOPMENT STRUCTURE / NOT PRODUCTION AUTHORITY** | A separate development app and zero-member Beta Lab Org were configured earlier. Production sign-in reuses the Cosmaneura identity instance |
+| Production Clerk state | **SHARED IDENTITY ACCEPTED / ROLLOUT NOT AUTHORIZED** | `DL-20260927-01`. Reuse the existing Cosmaneura identity. Keep CosmaBot grants, Box, principals, and organization binding independent. Qualify the account transition before changing live sign-in. See `docs/validation/shared-identity-flight-plan.md` |
 | MyCatholicDoctor users | **NO TRANSFER / NO SHARED SESSION** | Direct re-invitation may be reviewed later; bulk migration remains separately gated |
 | Mobile | **SCHEDULED AFTER BROWSER D3, BEFORE D4; NOT AUTHORIZED TO BUILD/UPLOAD HERE** | `DL-20260903-06` |
 | Track A | **OUT OF SCOPE / UNTOUCHED** | No shared state, identity, database, storage, credential, or direct call |
@@ -78,7 +78,7 @@ not be treated as permission to widen this list.
 
 | Capability | D3 synthetic-lab state | Activation boundary / fail-closed result |
 |---|---|---|
-| Clerk AuthPort | **SOURCE IMPLEMENTED; DEVELOPMENT CONFIGURED; PRODUCTION OFF** | Production exact-origin/Org/Box evidence and live authority tests required; otherwise reject and make zero API calls |
+| Clerk AuthPort | **SOURCE IMPLEMENTED; SHARED IDENTITY ACCEPTED; PRODUCTION ROLLOUT OFF** | `DL-20260927-01`. Production exact-origin, organization, Box, and separate CosmaBot grant evidence required; otherwise reject and make zero API calls |
 | Fixed synthetic F-8 queue | **SOURCE IMPLEMENTED; LIVE OFF** | May turn on only with the digest-pinned workloads and completed acceptance evidence |
 | Human decision actions | **SOURCE IMPLEMENTED; LIVE OFF** | Immutable revision/payload binding and authenticated human authority required |
 | Identity administration | **SOURCE IMPLEMENTED; LIVE OFF** | Box owner only; no deployer impersonation or agent approval |

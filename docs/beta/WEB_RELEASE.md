@@ -25,8 +25,10 @@ staging release stages.
   `web_custom_domain_dns_ready = false`. Applying the reviewed foundation plan
   supplies `web_origin` and `api_origin`, reserving the selected web origin and
   deterministic API hostname before either workload exists.
-- The human must configure the production Cosmas OS Clerk instance for that
-  exact `web_origin`. The workload plan refuses any different approved origin.
+- The human must configure the shared Cosmaneura Clerk instance for that exact
+  `web_origin`, with separate CosmaBot permissions (`DL-20260927-01`). The
+  workload plan refuses any different approved origin. A separate production
+  Clerk application is not the accepted identity topology.
 - The API derives `CORS_ALLOWED_ORIGINS` and `CLERK_AUTHORIZED_PARTIES` from
   the same Terraform origin; wildcard or caller-selected origins are not used.
 - `web_custom_domain` remains nullable for non-production validation, but D3
