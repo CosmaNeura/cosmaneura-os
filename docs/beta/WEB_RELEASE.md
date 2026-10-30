@@ -15,6 +15,98 @@ hostname; they do not establish deployment, DNS binding, or approval of a
 particular foundation or workload plan. Retain that hostname through all
 staging release stages.
 
+Prepare a staging web bundle with the nginx procedure below. That procedure
+does not publish the bundle. The Container Apps contract that follows is
+source-only. It is not how the last recorded staging web update was made, and
+this procedure does not apply it.
+
+## Staging web update
+
+This procedure prepares a static web bundle for `https://staging.cosmas.ai`
+only. It does not change the API, the database, Clerk, DNS, or production.
+
+`scripts/package-staging-web.mjs` is the only command. It accepts `--dist` and
+`--output` and no other flags. The only origin written in that file is
+`https://staging.cosmas.ai`. An argument that names production
+(`app.cosmaneura.com`, `staging-app.cosmaneura.com`, `chat.cosmaneura.com`,
+`staging-chat.cosmaneura.com`, `bot.cosmas.ai`, `app.cosmas.ai`,
+`api.cosmas.ai`, `www.cosmas.ai`), or that says production, Terraform, Azure,
+or kubectl, stops the helper before it writes anything. Its only subprocess is
+local `tar`. It does not call a shell, SSH, Docker, a cloud CLI, or Terraform,
+so there is no path from this command to a production host.
+
+Do not run the helper as a deployment. It builds a local archive and stops.
+
+1. At one reviewed commit, with synth-ci green including the image scan, build
+   the web so `web/dist/version.json` exists. The file contains the 40-character
+   commit and the UTC build time. `pnpm build` and `pnpm run build:beta` both
+   emit it. The image build passes the same commit as `VITE_BUILD_SHA`.
+2. Package that directory into a new local folder:
+
+   ```sh
+   node scripts/package-staging-web.mjs --dist web/dist --output /protected/staging-web-PACKAGE
+   ```
+
+   The folder receives `cosmabot-web-<commit>.tar.gz` and `receipt.json`.
+   The receipt records `target` `https://staging.cosmas.ai`, `server` `nginx`,
+   and `deployed: false`.
+3. Open `version.json` inside the archive and check that `commit` is the
+   reviewed SHA before anyone copies the archive. A Beta Tester re-score can
+   then be tied to that commit by fetching `/version.json` on staging.
+4. Putting the archive on the staging nginx document root, and any reload, is
+   a separate human step. This repository does not perform it. Use only the
+   staging path that served the last recorded web archive. Do not point that
+   step at a production hostname, and do not use it as a reason to apply the
+   Container Apps plan or the beta VM runtime below.
+
+### How staging is updated today
+
+These facts are from this repository. They are not a live inspection.
+
+- The last recorded hosted web advance is `release-r6r1` on 29 October 2026.
+  The web artifact was the static archive
+  `cosmabot-web-0e70fe6-0.1.147-1107.tar.gz`. The API was not rebuilt; it stayed
+  on R5 source `b770fe05f339e15c681a0df2b4b4b329e47d770d`. There was no
+  data, schema, or identity change. See
+  `docs/COSMABOT_RELEASE_STATE_20261030.md`. The commands that unpacked that
+  archive are not in git. The private package that holds the receipts is outside
+  this repository.
+- The web image this repository builds is nginx, not Caddy. `Dockerfile.web`
+  copies `web/dist` to `/usr/share/nginx/html` in
+  `nginxinc/nginx-unprivileged` and listens on port 8080. `web/nginx.conf`
+  serves `/healthz`, fingerprinted assets, and `/version.json`. A missing
+  version file returns 404 instead of the application shell.
+- `infra/beta` is a different design, and it is built on Caddy. The VM runtime
+  still runs the nginx web container, then puts Caddy in front of it
+  (`reverse_proxy web:8080` for `staging.cosmas.ai`). That runtime README says
+  rendering does not deploy, the VM path is not qualified, and a test render
+  must not be copied onto staging. `infra/standalone/render.mjs` says the
+  existing staging VM's TLS is already owned by Caddy, and for
+  `vm-cosmabot-staging-eus2-lab01` it refuses to emit a second listener.
+  Replacing a Caddyfile, rendering a new VM release, or applying Terraform is
+  not the update recorded for R6r1, and this procedure does not do those things.
+- `docs/beta/CONNECTOR_UX_AND_ACTIVATION_20260928.md` says a maintenance window
+  deploys the API first and then the web at `staging.cosmas.ai`. It does not
+  give the command. `docs/beta/STAGING_VM_OPTION_20260925.md` says the
+  configured name `staging.cosmas.ai` does not prove DNS, a certificate, or a
+  running app.
+
+### Not confirmed from the repository
+
+John or Shawn would have to confirm these. This change did not log in to a
+host, query Azure, or request the live site.
+
+- The live nginx document root, and whether today's staging web is that
+  unprivileged container or a host nginx reading an unpacked archive.
+- The exact command used to install
+  `cosmabot-web-0e70fe6-0.1.147-1107.tar.gz`.
+- Whether Caddy on `vm-cosmabot-staging-eus2-lab01` is currently the public
+  edge in front of nginx, or is only the beta design. The standalone renderer
+  and the beta VM runtime disagree with a plain "nginx only" description, and
+  the R6r1 record describes a static web archive rather than a Caddy change.
+- Which machine answers `staging.cosmas.ai` now, and whether its certificate
+  and DNS match the names in the docs.
+
 ## Fixed hosting contract
 
 - Azure Container Apps provides the public HTTPS certificates and external
