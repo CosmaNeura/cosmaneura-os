@@ -87,6 +87,7 @@ it('hides private assessment words immediately under a replaced identity until f
 });
 it('reports not connected honestly while preserving a question without public dispatch',async()=>{
  vi.mocked(port.catalog).mockResolvedValue(researchCatalog(false));await mount();await fill('Retain this general question');expect(element.textContent).toContain('Public research is not connected');expect(button('Review query').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();expect(port.history).not.toHaveBeenCalled();
+ const portal=element.querySelector('[aria-label="Sign-in portal backup"]')!;expect(portal.textContent).toContain('No vendor sign-in is started');expect(portal.querySelector('button')!.disabled).toBe(true);
  const saved=await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`));expect(saved).toMatchObject({data:{query:'Retain this general question',pending:null}});
 });
 it('restores an uncertain exact request after remount and resolves without resending',async()=>{

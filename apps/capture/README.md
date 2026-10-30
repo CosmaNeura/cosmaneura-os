@@ -31,24 +31,32 @@ All 11 local package edges, 15 target directories, three declared resources and
 Xcode source/config paths resolved in the recovery audit. Generated
 `ios/App/App/public` is deliberately excluded. No native build ran here.
 
-## What is still required before another native release
+## Portable composition
 
-This is a composed release closure, not the historical raw source accepted by
-`scripts/prepare-apple-synthetic.py`. That script still expects an external
-snapshot at `ea7f99d0278a05706531ffb1288cb1df7acf507b`. Do not point it at this
-folder, fabricate that commit, or fetch/modify a separate Scribe repository.
+`scripts/compose-portable-iphone.py` builds a fresh iPhone project input from
+this frozen app scaffold plus the authoritative `clients/apple` and
+`clients/capture` implementations. It reads those owners and this scaffold
+only. It does not modify this directory, compile, sign, or install.
 
-Qualify a portable composition/build entry point using this app scaffold and
-the authoritative `clients/*` modules. Regenerate the web renderer using
-`scripts/build-native-renderer.mjs` (dependencies come from `web/package.json`),
-select explicit retained public native identity/profile inputs, and populate
-fresh generated app assets before native compilation. Then qualify current
-source, signing and installation against the same reviewed commit. Review
-required-reason API privacy declarations: app code uses
+This directory remains a composed release closure, not the historical raw
+source accepted by `scripts/prepare-apple-synthetic.py`. That script still
+expects an external snapshot at `ea7f99d0278a05706531ffb1288cb1df7acf507b`.
+Do not point it at this folder, fabricate that commit, or fetch/modify a
+separate Scribe repository.
+
+## What a Mac must still do before a qualified install
+
+The portable composition is not a qualified install. Regenerate the web
+renderer using `scripts/build-native-renderer.mjs` (dependencies come from
+`web/package.json`), select explicit retained public native identity/profile
+inputs, and populate fresh generated app assets before native compilation.
+Then compile, sign, and install current source against the same reviewed
+commit. Review required-reason API privacy declarations: app code uses
 `ProcessInfo.systemUptime`, while this recovered app has no app-level
-`PrivacyInfo.xcprivacy`; existing dependency manifests do not establish app API
-coverage. Do not assume prior TestFlight processing completes that release gate. A Linux
-cloud agent can develop source; Apple compilation/signing requires the Mac.
+`PrivacyInfo.xcprivacy`; existing dependency manifests do not establish app
+API coverage. Do not assume prior TestFlight processing completes that
+release gate. A Linux agent can prepare the project inputs; Apple
+compilation and signing require the Mac.
 
 Exact prior artifacts and public inputs are retained privately in the local
 workspace's ignored `.local-release/` and the final October 29 ZIP. This source

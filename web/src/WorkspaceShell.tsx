@@ -1225,8 +1225,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     if(choice.owner!==authenticated)return;
     if(!visitLinked){const selection={...choice,stage:'loading' as 'loading'|'shown'};ehrVisitSelection.current=selection;setSettingsOpen(false);try{await loadEncounters();}finally{if(ehrVisitSelection.current===selection&&selection.stage==='loading')ehrVisitSelection.current=false;}return;}
     const directory=continued?workspaceFrame.current?.querySelector<HTMLElement>('.connection-directory'):null;
-    const launcher=continued?directory?.closest('.settings-hub')?.querySelector<HTMLElement>('.settings-hub-heading h1'):workspaceFrame.current?.querySelector<HTMLElement>(`[data-practice-record-provider="${provider}"]`);
-    if(!launcher||launcher.closest('[hidden]'))return;
+    const visibleControl=(selector:string)=>{const element=workspaceFrame.current?.querySelector<HTMLElement>(selector);return element&&!element.closest('[hidden]')?element:null;};
+    const launcher=continued?directory?.closest('.settings-hub')?.querySelector<HTMLElement>('.settings-hub-heading h1'):visibleControl(`[data-practice-record-provider="${provider}"]`)??visibleControl('.provider-portal .team-primary');
+    if(!launcher)return;
     const id=workspace!.id;
     if(await openVisitSourceTask('connections',provider==='atlas_md'?'calendar':'ehr',launcher)){
       if(provider!=='atlas_md')setRequestedEhrProvider({...choice,workspaceId:id});
@@ -1614,6 +1615,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         nativeCompact={nativeHome} conversationContext={contextChoice?{name:contextChoice.name,scribe:contextChoice.role==='scribe'}:undefined} onPendingChange={setHomePending}
         locked={!!privateRecordingEntry||busy||!!pending||conflict||recoveryState==="failed"||captureNavigationLocked||captureDraftLocked} teamError={teamListError} onRetryTeam={()=>setTeamAttempt(value=>value+1)} onBusyChange={setHomeBusy} onAccessLost={failure}
         onUseTeam={()=>{if(initialTeamUnchanged)saveTeam();else void openSettings();}} onSettings={()=>void openSettings()} onVisits={()=>void loadEncounters()}
+        onOpenVisit={appointmentId=>void open(appointmentId)}
         onConnections={()=>void openSettings('connections')} onPracticeWork={()=>{setPracticeOpen(true);setPracticeOpened(true);}}
         onRecord={CAPTURE_WORKSPACE_BUILD?startPrivateRecording:undefined}
         recordingActive={!!privateRecordingEntry} openRecordingRequest={privateRecordingRequest}
@@ -1648,7 +1650,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           onBusyChange={reportEhrBusy} onAuthenticationLost={failure}
           onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareEhrChief(source)}/>
       </EhrReadTask>}
-      {calendarImportOwned&&authenticated&&workspace&&<EhrReadTask title="Import calendar file" open={calendarImportOpen} context={workspace.notebook?.title??workspace.label}
+      {calendarImportOwned&&authenticated&&workspace&&<EhrReadTask title="Import calendar file" note="Atlas.MD export · not a live chart or prescription connection." open={calendarImportOpen} context={workspace.notebook?.title??workspace.label}
         returnLabel={calendarImportReview.origin==='connections'?'Back to connections':calendarImportReview.origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`} returnBlocked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onReturn={closeCalendarImportTask}>
         <CalendarImportMount identity={authenticated} active={calendarImportOpen} workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
           currentSources={workspace.entries.filter(entry=>entry.kind==='calendar_import_source'&&!!entry.calendar_import_source_state).map(entry=>({id:entry.id,state:entry.calendar_import_source_state!}))}
@@ -1848,7 +1850,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           <div className="clinical-plan-host team-conversation-tools" hidden={messagesMode?messagesTask!=='Tools'&&!chiefNoteCompose:phoneChiefConversation&&!phoneChiefToolsVisible&&!chiefNoteCompose}>{clinicalTeamDrafts}</div>
           {/* Keep transient notices before the transcript so its visible end
               still proves the latest reply was displayed for read tracking. */}
-          {messagesChat&&<div className="messages-recovery-notices">{recoveryNotices}{workspaceNotices}</div>}
+          {messagesMode&&practicePage==='notebook'&&mobilePanel==='Conversation'&&!settingsOpen&&!practiceOpen&&<div className="messages-recovery-notices">{recoveryNotices}{workspaceNotices}</div>}
           <div hidden={phoneChiefToolsVisible || bot?.role==='research'&&!savedResearchChat || visitPrepReader&&!turns.length&&pending?.type!=='ask'} className="team-messages" aria-live="polite" aria-relevant="additions">
             {!turns.length && !conversation.entries.some(row=>row.kind==='material') && !visitPrepReader && !chiefNoteCompose && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
               enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />
@@ -1898,7 +1900,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               <div><span>{bot?.name} <span className="team-fine">· {selectedPrep?"saved encounter + selected brief":"saved encounter only"}</span></span><button className="team-send" disabled={!conversationCanSend || conversationBusy || locked || !!nativeChatOwner&&!nativeComposerEditable || (chiefNoteCompose?phoneNoteTaskBlocked:!thought.trim()) || !bot?.enabled}
                 onPointerDown={event=>{if(nativeChatOwner&&document.activeElement===questionRef.current)event.preventDefault();}} aria-label={chiefNoteCompose?'Prepare Follow-up and Research':'Send message'}>↑</button></div>
             </form>}
-            {conversationCanSend&&<p className="team-fine">{phoneChiefConversation?"Review Chief’s answer and sources before using them.":"Ask about this visit. Check the answer and its sources before using it."} {!phoneChiefConversation&&(CAPTURE_WORKSPACE_BUILD&&authenticated&&workspace.private_draft?.state==='unlinked'&&!visitLinked ? "Record privately with Scribe. Choose a patient or visit later." : CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled ? "Use the Scribe visit controls for consented recording." : "Recording is not connected.")}</p>}
+            {conversationCanSend&&!messagesMode&&<p className="team-fine">{phoneChiefConversation?"Review Chief’s answer and sources before using them.":"Ask about this visit. Check the answer and its sources before using it."} {!phoneChiefConversation&&(CAPTURE_WORKSPACE_BUILD&&authenticated&&workspace.private_draft?.state==='unlinked'&&!visitLinked ? "Record privately with Scribe. Choose a patient or visit later." : CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled ? "Use the Scribe visit controls for consented recording." : "Recording is not connected.")}</p>}
+            {conversationCanSend&&messagesMode&&<p className="team-fine">Review Chief’s answer and sources before using them.</p>}
           </div>
         </section><aside className="team-notebook-panel">
           <nav aria-label="Encounter materials" className="team-material-tabs">{["Notebook", "Sources", "Review", "Work"].map(value => <button key={value} aria-pressed={panel === value} onClick={() => setPanel(value)}>{value}</button>)}</nav>

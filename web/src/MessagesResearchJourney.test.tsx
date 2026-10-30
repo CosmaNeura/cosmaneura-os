@@ -118,3 +118,14 @@ it.each(['direct','ehr','calendar'] as const)('keeps a Research source return 21
  await act(async()=>{scroll.dispatchEvent(new Event('scroll'));observer.callback();scroll.dispatchEvent(new Event('scroll'));observer.callback();});
  await wait(()=>expect(scroll.scrollTop).toBe(3423));expect(document.activeElement).toBe(control);expect(composer().value).toBe(draft);expect(stats()).toEqual(before);expect(marks).toHaveBeenCalledTimes(markCount);expect(ask).not.toHaveBeenCalled();noDispatchReceipt();
 });
+it('uses the signed-in Research connector to save invented Chief work without a vendor sign-in',async()=>{
+ const opened=vi.spyOn(window,'open').mockReturnValue(null),search=vi.spyOn(researchApi,'search'),ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append'),prefix='Keep invented Research directions for Chief.';
+ await openChief();await type(composer(),prefix);await click('‹ Messages');await chooseResearch();expect(host.querySelector('[aria-label="Sign-in portal backup"]')).toBeNull();await searchAndSave();
+ const session=search.mock.calls[0][0];expect(session.mode).toBe('clerk_jwt');if(session.mode!=='clerk_jwt')throw new Error('signed-in connector');expect(await session.getToken({skipCache:true})).toBe('invented-ui-rehearsal-token');await wait(()=>expect(button('Prepare Chief draft')!.disabled).toBe(false));await click('Prepare Chief draft');
+ await wait(()=>expect(composer().value).toContain('Review the saved public Research packet'));expect(composer().value.startsWith(prefix+'\n\n')).toBe(true);expect(composer().value).not.toContain('Invented source excerpt');expect(stats()).toMatchObject({searches:1,saves:1,externalCalls:0});expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();expect(opened).not.toHaveBeenCalled();noDispatchReceipt();
+ const draft=composer().value;history.replaceState(null,'','?research-scenario=connector-absent#cosmas/home');await click('‹ Messages');await chooseResearch();
+ await wait(()=>expect([...host.querySelectorAll('[aria-label="Sign-in portal backup"]')].find(visible)).toBeTruthy());const portal=[...host.querySelectorAll<HTMLElement>('[aria-label="Sign-in portal backup"]')].find(visible)!,action=portal.querySelector('button')!;
+ expect(portal.textContent).toContain('No vendor sign-in is started');expect(action.disabled).toBe(true);expect(action.textContent).toBe('Not available in this app');await act(async()=>action.click());
+ expect(stats()).toMatchObject({searches:1,saves:1,externalCalls:0});expect(opened).not.toHaveBeenCalled();await click('‹ Messages');
+ const row=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(element=>visible(element)&&element.textContent?.includes('Chief of Staff'));await wait(()=>expect(row()?.disabled).toBe(false));await act(async()=>row()!.click());await wait(()=>expect(composer().value).toBe(draft));
+});

@@ -44,9 +44,9 @@ ordinary plan from relabeling retained PHI as synthetic.
 |---|---|---|
 | Deployment mode | **`synthetic_lab` APPROVED** | Record `synthetic_lab`; any later `authorized_beta` plan requires a new reviewed evidence set |
 | Legal name of first early-adopter clinic | **NOT REQUIRED FOR `synthetic_lab`; BLOCKED FOR `authorized_beta`** | Human-confirmed legal organization name, kept out of public resource names |
-| Dedicated Box identity | **PENDING GENERATION AND OWNER REVIEW** | Human-approved Box UUID and proof that one production Clerk Organization maps to one logical Box |
+| Dedicated Box identity | **PENDING GENERATION AND OWNER REVIEW** | Human-approved Box UUID. One CosmaBot organization binding maps to one logical Box and stays independent of platform roles (`DL-20260927-01`) |
 | BAA and PHI authorization prerequisites | **NOT REQUIRED FOR `synthetic_lab`; BLOCKED FOR `authorized_beta`** | Human/legal BAA confirmation plus a separate PHI release authorization for the PHI-capable mode |
-| Clerk application and Organization | **DEVELOPMENT STRUCTURE CREATED / PRODUCTION PENDING FOUNDATION** | Separate Cosmas OS development app and zero-member Beta Lab Org exist; after the foundation exposes the exact web origin, recreate the empty production Org and prove its Box binding before workloads |
+| Clerk application and Organization | **SHARED IDENTITY ACCEPTED / PRODUCTION ROLLOUT NOT AUTHORIZED** | `DL-20260927-01` reuses the Cosmaneura identity instance. CosmaBot permissions, Box, principals, and organization binding stay independent. The separate Clerk application required by `DL-20260903-04` and `DL-20260903-05` is superseded. The earlier development app is historical evidence only |
 | Beta web host and exact origin | **SOURCE IMPLEMENTED / FOUNDATION OUTPUT PENDING** | Foundation-derived ACA HTTPS origin, production Clerk configuration, reviewed web digest, and human release evidence |
 | Human deployer | **PENDING HUMAN RECORD** | Named accountable human, exact deployment identity, plan-bound approval records, and execution evidence |
 | Region and data residency | **CENTRAL US PROVISIONAL / OWNER APPROVAL PENDING** | Human approval after the recorded availability, residency, latency, and current cost review |

@@ -14,6 +14,7 @@ import {noteResearchSelectionMatches,type NoteResearchSelection} from './note-re
 import {researchQueryGuidance,researchQueryIssue,researchSourceFailure} from './research-query-guidance';
 import {researchAnalysisPreview} from './research-analysis-contract';
 import type {ResearchChiefSelection} from './session/research-chief';
+import {ConnectorSignInBackup} from './ConnectorSignInBackup';
 import './research-workspace.css';
 
 const blank=(bot:string):ResearchDraft=>({version:1,bot,topic:'literature',query:'',sources:[],pending:null});
@@ -212,7 +213,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
   <header><p className="team-kicker">RESEARCH</p><h2>Find a source. Check the details.</h2><p>Review public literature, warnings, trial criteria and coverage versions alongside your own judgment.</p></header>
   <EditorRecoveryNotice recovery={recovery} label="Research" onRestore={async(saved,_workspace,isCurrent)=>{const next=validateResearchDraft(saved.data,bot.address);if(isCurrent()){setDraft(next);setReview(null);setConfirmed(false);setObservation(null);setSelected([]);}}}/>
   {!enabled&&<p className="research-status" role="status">Research is paused or not yet saved to your team. Saved work is retained.</p>}
-  {!catalog?.enabled&&<div className="research-status" role="status"><strong>{catalogError?'Research connection could not be checked':'Public research is not connected'}</strong><p>Source availability does not confirm a working Cosmas connection. You can keep a question here while the connection is being prepared.</p><button disabled={blocked} onClick={()=>void loadCatalog()}>Check connection</button></div>}
+  {!catalog?.enabled&&<div className="research-status" role="status"><strong>{catalogError?'Research connection could not be checked':'Public research is not connected'}</strong><p>Source availability does not confirm a working Cosmas connection. You can keep a question here while the connection is being prepared.</p><button disabled={blocked} onClick={()=>void loadCatalog()}>Check connection</button>{catalog&&!catalog.enabled&&<ConnectorSignInBackup name="Research"/>}</div>}
   {notePlan&&<NoteResearchPanel plan={notePlan} selection={draft.note_question} locked={!canSearch||draft.query!==''} onChoose={chooseNoteQuestion}/>}
   {draft.note_question&&!noteQuestionCurrent&&<section className="research-status" aria-label="Saved note research source changed"><p>The saved note or Research assessment changed. Your public question is kept; this earlier selection cannot start a new lookup.</p>
     <button type="button" disabled={!canSearch} onClick={()=>{const next={...draft};delete next.note_question;setDraft(next);setReview(null);setConfirmed(false);queryField.current?.focus();}}>Keep as a separate general question</button></section>}

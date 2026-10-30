@@ -6,6 +6,7 @@ import {vendorCanonical} from './vendor-contract';
 import {efaxInboundApi,efaxFaxHash,efaxMissing,efaxUtcSeconds,type EFaxScope,type EFaxStatus,type EFaxPending,type EFaxReceipt} from './efax-inbound-api';
 import {emptyEFaxRecovery,validateEFaxRecovery,type EFaxInboundRecovery,type EFaxInboundRecoveryAccess} from './efax-inbound-recovery';
 import type {EFaxSourceOffer} from './efax-inbound-source-api';
+import {ConnectorSignInBackup} from './ConnectorSignInBackup';
 
 export type EFaxInboundPanelProps={identity:AuthenticatedWorkspaceIdentity;scope:EFaxScope;recovery:EFaxInboundRecoveryAccess;locked?:boolean;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;taskActive?:boolean;isTaskCurrent?:()=>boolean;onAuthenticationLost:(e:unknown)=>void;onReviewDocument?:(document:EFaxSourceOffer,request:Extract<EFaxPending,{kind:'acquire'}>)=>void};
 export function EFaxInboundPanel({identity,scope,recovery,locked=false,onBusyChange,onActiveChange,taskActive=true,isTaskCurrent,onAuthenticationLost,onReviewDocument}:EFaxInboundPanelProps){
@@ -89,6 +90,7 @@ export function EFaxInboundPanel({identity,scope,recovery,locked=false,onBusyCha
  {error&&<p role="alert">{error}</p>}{busy&&<p role="status">Waiting for the current received-fax operation… <button onClick={()=>controller.current?.abort()}>Stop waiting</button></p>}
  {ready&&!offer&&<><button disabled={!taskActive||dispatching||busy||locked||suspended||!!pending} onClick={()=>void run(check)}>Check received-fax access</button>
  {status&&!suspended&&<><p role="status">{!status.enabled?'Received-fax access is disabled for this practice.':!status.installations.length?'No inbound eFax account is configured. Ask your practice administrator to connect one.':'An inbound eFax account is configured. Account review is still required.'}</p>
+ {(!status.enabled||status.installations.length===0)&&<ConnectorSignInBackup name="eFax"/>}
  {status.enabled&&status.installations.length>0&&<fieldset disabled={blocked}><legend>Authorize an eFax account</legend><label>Account <select value={installation} onChange={e=>{setInstallation(e.target.value);setCheckedAccount(false);setAllowImage(false);}}><option value="">Choose account</option>{status.installations.filter(i=>i.metadata_available).map(i=><option key={i.installation_id} value={i.installation_id}>{i.label}</option>)}</select></label>
  <label><input type="checkbox" checked={checkedAccount} onChange={e=>setCheckedAccount(e.target.checked)}/>I checked this account and authorize received metadata for the next day.</label>
  <label><input type="checkbox" disabled={!status.installations.find(i=>i.installation_id===installation)?.image_available} checked={allowImage} onChange={e=>{setAllowImage(e.target.checked);setCheckedAccount(false);}}/>Also permit separately approved image acquisition. Downloading an image can mark it downloaded/read at eFax.</label><button disabled={blocked||!checkedAccount||!installation} onClick={authorizeGrant}>Save received-fax access</button></fieldset>}

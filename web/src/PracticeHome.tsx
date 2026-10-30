@@ -18,10 +18,10 @@ function recordingDetails(recording:PrivateRecordingSnapshot):string {
 }
 
 export type StartPrivateRecording={title:string;prepareNotebook:(title?:string)=>Promise<PrivateNotebookResult>};
-export function PracticeHome({conversationContext,onPendingChange,identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false,teamError='',onRetryTeam,suspended=false}:{
+export function PracticeHome({conversationContext,onPendingChange,identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onOpenVisit,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false,teamError='',onRetryTeam,suspended=false}:{
   conversationContext?:{name:string;scribe:boolean};onPendingChange?:(pending:boolean)=>void;
   identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess|null;team:ProviderTeam|null;teamUnchanged?:boolean;locked:boolean;
-  onUseTeam:()=>void;onSettings:()=>void;onVisits:()=>void;onConnections:()=>void;onPracticeWork:()=>void;
+  onUseTeam:()=>void;onSettings:()=>void;onVisits:()=>void;onOpenVisit?:(appointmentId:string)=>void;onConnections:()=>void;onPracticeWork:()=>void;
   onOpened:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
   onNoteOpened?:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
   onAccessLost:(cause:unknown)=>void;onBusyChange:(busy:boolean)=>void;
@@ -198,7 +198,7 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
   function retryChecks(){if(!ready||teamError)onRetryTeam?.();void readLists(live.current.epoch);}
   const titleField=<label>Note title<input maxLength={160} value={title} disabled={busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>;
   const todayVisits=<section className="practice-home-notes" aria-label="Today's visits"><h2>Today's visits</h2>
-      {todaysVisits.map(visit=><button className="practice-home-note" key={visit.appointment_id} onClick={onVisits}><strong>{visit.label}</strong><time dateTime={visit.start_at}>{new Date(visit.start_at!).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time><span>{visit.workspace_id?'Open visit notes':'View visit'}</span></button>)}
+      {todaysVisits.map(visit=><button className="practice-home-note" key={visit.appointment_id} disabled={locked||busy} onClick={()=>onOpenVisit?onOpenVisit(visit.appointment_id):onVisits()}><strong>{visit.label}</strong><time dateTime={visit.start_at}>{new Date(visit.start_at!).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time><span>{visit.workspace_id?'Open visit notes':'Open visit'}</span></button>)}
       {visitError?<p role="status">{visitError}</p>:visits&&!todaysVisits.length?<p>No supported visits are scheduled today. You can record or write a private note.</p>:null}
     </section>;
   const recordingList=recordings&&onReopenRecording?<section tabIndex={-1} className="practice-home-notes practice-home-recordings" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong>{recording.createdAt&&<time dateTime={recording.createdAt}>{new Date(recording.createdAt).toLocaleString()}</time>}<span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>:null;

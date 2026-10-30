@@ -3,7 +3,10 @@
 .settings-hub-nav { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; margin-bottom: 20px; }
 .team-workspace .settings-hub button { min-height: 44px; }
 .settings-hub-nav button { padding: 9px 14px; min-width: 0; max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; }
-.settings-hub-nav .settings-done { margin-left: auto; }
+.settings-hub-nav-end { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-left:auto; }
+.settings-hub-nav .settings-done { margin-left: 0; }
+.settings-nav-account { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.settings-nav-account button { min-height:44px; }
 .settings-hub-heading h1 { margin: 0 0 6px; font-size: clamp(26px, 4vw, 34px); line-height: 1.2; letter-spacing: -.8px; scroll-margin-top: 16px; }
 .settings-hub-heading h1:focus { outline: none; }
 .settings-hub-heading-quiet { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

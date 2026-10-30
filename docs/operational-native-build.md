@@ -4,8 +4,10 @@
 > [recorded release ledger](COSMABOT_RELEASE_STATE_20261030.md), and
 > [recovered iPhone baseline](../apps/capture/README.md). The inputs below
 > describe existing composers; the Apple composer still requires its historical
-> raw snapshot. A portable build from the newly owned app source is pending
-> qualification. Historical deferrals below are not a current release inventory.
+> raw snapshot. `scripts/compose-portable-iphone.py` builds project inputs from
+> the owned clients and the frozen app scaffold. A signed install from that
+> entry is still pending qualification. Historical deferrals below are not a
+> current release inventory.
 
 
 The existing Scribe-based composers now support an explicit operational identity.

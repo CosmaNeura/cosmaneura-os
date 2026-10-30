@@ -6,6 +6,7 @@ import {modelCanonical} from './model-work-request';
 import {useConnectionHealth,connectionReadScope,type ConnectionReadScope} from './connection-operation-health';
 import {googleCalendarApi,googleCalendarServiceUnavailable,googleCalendarValidUntil,googleCalendarEventHash,googleCalendarSourceContent,googleCalendarReviewProvesNoCommit,type GoogleCalendarStatus,type GoogleCalendarReceipt,type GoogleCalendarResolve} from './google-calendar-api';
 import {emptyGoogleCalendarRecovery,validateGoogleCalendarRecovery,type GoogleCalendarPending,type GoogleCalendarRecoveryAccess,type GoogleCalendarRecoveryScope,type GoogleCalendarRecoveryRecord,type GoogleCalendarVisit,type GoogleCalendarSaved} from './google-calendar-recovery';
+import {ConnectorSignInBackup} from './ConnectorSignInBackup';
 import './google-calendar.css';
 export type GoogleCalendarPanelProps={identity:AuthenticatedWorkspaceIdentity;scope:GoogleCalendarRecoveryScope;recovery:GoogleCalendarRecoveryAccess|null;workspace:GoogleCalendarVisit|null;locked?:boolean;recoveryLocked?:boolean;onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;taskActive?:boolean;isTaskCurrent?:()=>boolean;currentSources?:Array<{entry_id:string;state:'current'|'unavailable'}>;onAuthenticationLost:(cause:unknown)=>void;onRequestCalendarAccess?:()=>void;calendarAccessBusy?:boolean;onChooseVisit?:()=>void;onAskChief?:(source:GoogleCalendarSaved)=>void;onRefreshVisit?:()=>Promise<void>};
 const authority=(e:unknown)=>e instanceof WorkspaceApiError&&[401,403,404,426].includes(e.status);
@@ -74,7 +75,8 @@ export function GoogleCalendarPanel({identity,scope,recovery,workspace,locked=fa
  {error&&owned&&<p role={pending?'status':'alert'}>{error}</p>}
  {owned&&ready&&<><div className="google-calendar-actions"><button disabled={blocked} onClick={()=>void run(check)}>Check calendar access</button><button className="team-primary" disabled={blocked||status?.state!=='connected'||!status.calendar_read} onClick={load}>{record.observation?'Load current 7-day summary':'Load next 7 days'}</button></div>
  {status&&!connectionChanged&&<p role="status">{status.state==='connected'?`${status.account!.email} · ${status.calendar_read?'Calendar access granted':'Calendar permission needed'}`:'Connect Google again to continue.'}</p>}
- {status&&!status.calendar_read&&<button disabled={blocked||!onRequestCalendarAccess} onClick={onRequestCalendarAccess}>{status.state==='connected'?'Add calendar access':'Connect Google'}</button>}
+ {status&&status.state==='connected'&&!status.calendar_read&&<button disabled={blocked||!onRequestCalendarAccess} onClick={onRequestCalendarAccess}>Add calendar access</button>}
+ {status&&status.state!=='connected'&&<ConnectorSignInBackup name="Google Calendar"/>}
  {privateNotebook&&status?.state==='connected'&&!privateSupported&&<p role="status">This practice service needs an update to add calendar sources to private notebooks. Your notes and calendar work are retained.</p>}
  {expired&&<p role="alert">The selected calendar summary has expired for new work. Load and review a current summary.</p>}
  {(withheld||connectionChanged||unavailable)&&<p role="alert">Saved calendar contents are unavailable. Check access or load a current summary. The private recovery record is retained.</p>}

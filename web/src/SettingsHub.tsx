@@ -6,6 +6,7 @@ import {connectionActionClientAvailable,readConnectionCatalog, type ConnectionCa
 import {CONNECTION_GUIDES,CONNECTION_ACTION_LABELS} from './connection-guides';
 import {accountStatusSupported,connectionSetupSummary,readConnectionSummary,personalConnectionSummary,type ConnectionSummary} from './connection-summary';
 import {useConnectionHealth} from './connection-operation-health';
+import {ProviderConnectionPortal} from './ProviderConnectionPortal';
 import {FaxConnectionOverview} from './FaxConnectionOverview';
 import {FaxInboundMount} from './FaxInboundMount';
 import type {FaxInboundPanelProps} from './FaxInboundPanel';
@@ -13,7 +14,7 @@ import {EFaxInboundMount} from './EFaxInboundMount';
 import type {EFaxInboundPanelProps} from './EFaxInboundPanel';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
-type Screen = 'home' | 'connections' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google' | 'ehr';
+type Screen = 'home' | 'connections' | 'provider' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google' | 'ehr';
 export type PracticeRecordProvider = 'atlas_md' | 'elation' | 'tebra' | 'athena';
 const practiceRecordProviders: {id:PracticeRecordProvider;name:string;description:string;available:string;setup:string}[] = [
   {id:'atlas_md',name:'Atlas.MD',description:'Import appointments from an exported calendar file.',available:'File import only · no live sync',setup:'Ask your practice administrator to make calendar-file import available in this app. Once available, you can choose an exported Atlas.MD calendar file. Imported appointments do not stay in sync automatically.'},
@@ -21,12 +22,17 @@ const practiceRecordProviders: {id:PracticeRecordProvider;name:string;descriptio
   {id:'tebra',name:'Tebra',description:'Appointments and medication records.',available:'Approved practice access checked when opened',setup:'Your practice needs approved Tebra access. Ask your practice administrator to configure and verify the supported records connection before enabling it here.'},
   {id:'athena',name:'Athena',description:'athenahealth allergy and medication records.',available:'Practice access checked when opened',setup:'Ask your practice administrator to connect the approved Athena account through Cosmaneura and confirm your access before enabling Athena records here.'},
 ];
-type Editor = Exclude<Screen, 'home' | 'connections'>;
+type Editor = Exclude<Screen, 'home' | 'connections' | 'provider'>;
 const titles: Record<Screen, string> = {
-  home: 'Settings', connections: 'Connections', members:'Practice access', team: 'Your team',
+  home: 'Settings', connections: 'Connections', provider: 'EHR & Rx Relay', members:'Practice access', team: 'Your team',
   core: 'Cosmaneura account & appointments', scheduling: 'Scheduling & Google sign-in', microsoft:'Microsoft email & calendar', google:'Google email & calendar',
   messaging: 'Messaging & fax', payments: 'Payments', portals: 'Patient portals', ehr: 'Practice appointments',
 };
+const connectionSearchAliases: Partial<Record<ConnectionId, string[]>> = {
+  google: ['Google Workspace', 'G Suite'],
+  microsoft: ['Microsoft 365', 'Office 365'],
+};
+const searchText = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
 export function SettingsHub({appearance,accountControls,practiceRecordActions,open,nativePresentation,googleTaskPresentation=false, receivedFaxTaskOpen=false, receivedFaxReturnLabel='Back to saved sources', onCloseReceivedFax, onReceivedFaxActiveChange, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
@@ -131,7 +137,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
     if (leaveLocked) return;
     if(!accepted&&screen==='team'&&next!=='team'&&teamDirty&&beforeLeaveTeam){beforeLeaveTeam(()=>visit(next,true));return;}
     setRecovering(null);setAddingConnection(false);
-    if (next !== 'home' && next !== 'connections') {
+    if (next !== 'home' && next !== 'connections' && next !== 'provider') {
       if(!(next in CONNECTION_GUIDES)||!connectionIdentity||catalog?.[next as ConnectionId]===true||catalogError&&!current?.denied)
         setVisited(previous => previous.includes(next) ? previous : [...previous, next]);
     }
@@ -140,14 +146,15 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
   const editors = {team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals};
   const connectionCards = (['core','scheduling','google','microsoft','messaging','payments','portals'] as const)
     .filter(id=>editors[id]!=null).map(id=>({id,...CONNECTION_GUIDES[id]}));
-  const search=connectionSearch.trim().toLowerCase();
-  const matchesSearch=(...values:string[])=>!search||values.join(' ').toLowerCase().includes(search);
+  const search=searchText(connectionSearch);
+  const matchesSearch=(...values:string[])=>!search||values.some(value=>searchText(value).includes(search));
   const pickerRecords=practiceRecordActions&&(connectionCategory==='all'||connectionCategory==='records')
     ?practiceRecordProviders.filter(item=>matchesSearch(item.name,item.description,'EHR practice records')):[];
   const pickerServices=connectionCards.filter(item=>connectionCategory!=='records'
     &&(connectionCategory==='all'||(connectionCategory==='email')===(item.group==='Email & calendar'))
-    &&matchesSearch(titles[item.id],item.description,item.group));
-  const pickerCount=pickerRecords.length+pickerServices.length;
+    &&matchesSearch(titles[item.id],item.description,item.group,...(connectionSearchAliases[item.id]??[])));
+  const showProviderPortal=(connectionCategory==='all'||connectionCategory==='records')&&matchesSearch('EHR & Rx Relay','prescription','Elation','Tebra','Athena','Atlas');
+  const pickerCount=pickerRecords.length+pickerServices.length+(showProviderPortal?1:0);
   const selectedGuide=screen in CONNECTION_GUIDES?CONNECTION_GUIDES[screen as ConnectionId]:null;
   const setupUnavailable=selectedGuide&&catalog?.[screen as ConnectionId]===false;
   const readiness=selectedGuide?catalog?.readiness?.[screen as ConnectionId]:undefined;
@@ -205,16 +212,20 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
     :connectionCards;
   return <section ref={section} className="settings-hub" hidden={!open} aria-label={presentingTask?undefined:'Settings'} data-editor-task={presentingGoogleTask?'google':presentingReceivedFaxTask?'efax':undefined}>
     <nav className="settings-hub-nav" aria-label="Settings navigation" hidden={presentingTask}>
-      {screen !== 'home' && <button aria-label={addingConnection?'Back to connections':undefined} disabled={leaveLocked} onClick={() => addingConnection?setAddingConnection(false):visit(screen === 'members' || screen === 'team' || screen === 'connections' ? 'home' : 'connections')}>
-        <span aria-hidden="true">← </span>{addingConnection?'Back to connections':screen === 'members' || screen === 'team' || screen === 'connections' ? 'All settings' : 'All connections'}
+      {screen !== 'home' && <button aria-label={addingConnection?'Back to connections':undefined} disabled={leaveLocked} onClick={() => addingConnection?setAddingConnection(false):visit(screen === 'members' || screen === 'team' || screen === 'connections' || screen === 'provider' ? 'home' : 'connections')}>
+        <span aria-hidden="true">← </span>{addingConnection?'Back to connections':screen === 'members' || screen === 'team' || screen === 'connections' || screen === 'provider' ? 'All settings' : 'All connections'}
       </button>}
-      <button className="settings-done" disabled={leaveLocked} onClick={onClose}>Done</button>
+      <div className="settings-hub-nav-end">
+        {screen!=='home'&&accountControls&&<div className="settings-nav-account" aria-label="Account">{accountControls}</div>}
+        <button className="settings-done" disabled={leaveLocked} onClick={onClose}>Done</button>
+      </div>
     </nav>
     {leaveLocked&&!presentingTask && <p className="settings-navigation-notice" role="status">Wait for this step to finish, or recover any unsaved edits before leaving.</p>}
-    <header hidden={presentingTask} className={`settings-hub-heading${screen !== 'home' && screen !== 'connections' ? ' settings-hub-heading-quiet' : ''}`}>
+    <header hidden={presentingTask} className={`settings-hub-heading${screen !== 'home' && screen !== 'connections' && screen !== 'provider' ? ' settings-hub-heading-quiet' : ''}`}>
       <h1 ref={addingConnection?catalogHeading:title} tabIndex={-1}>{addingConnection?'Choose a service':titles[screen]}</h1>
       {screen === 'home' && <p>A little setup. A team that fits your practice.</p>}
       {screen === 'connections' && !addingConnection && <p>Choose a service, check what is ready, and take the next step.</p>}
+      {screen === 'provider' && <p>Read-only records for your practice. Prescriptions are not sent from CosmaBot.</p>}
     </header>
     {screen === 'home' && appearance}
     {screen === 'home' && <div className="settings-cards">
@@ -227,6 +238,11 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
         <span className="settings-card-icon" aria-hidden="true">＋</span>
         <span><strong>Practice access</strong><small>Teammates joining your practice workspace</small></span><span aria-hidden="true">›</span>
       </button>}
+      <button disabled={navigationLocked} className="settings-card" onClick={() => visit('provider')}>
+        <span className="settings-card-icon" aria-hidden="true">℞</span>
+        <span><strong>EHR & Rx Relay</strong><small>Read-only chart access. Prescriptions are not sent from here.</small></span>
+        <span aria-hidden="true">›</span>
+      </button>
       {(connectionCards.length > 0 || ehr != null || practiceRecordActions != null) && <button disabled={navigationLocked} className="settings-card" onClick={() => visit('connections')}>
         <span className="settings-card-icon" aria-hidden="true">↔</span>
         <span><strong>Connections</strong><small>{core?'Practice account, appointments & services':'Messaging, fax, payments & portals'}</small></span>
@@ -234,12 +250,14 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       </button>}
     </div>}
     {screen==='home'&&accountControls&&<section className="settings-account" aria-label="Account"><h2>Account</h2>{accountControls}</section>}
+    {screen==='provider'&&<ProviderConnectionPortal locked={leaveLocked} records={practiceRecordActions}/>}
     {screen === 'connections' && <div className="connection-directory" data-catalog-open={addingConnection}>
       {addingConnection&&<section className="connection-add-catalog" aria-label="Add connection catalog">
-        <label className="connection-search"><span>Find a service</span><input type="search" value={connectionSearch} maxLength={100} autoComplete="off" spellCheck={false} disabled={leaveLocked} placeholder="Elation, Gmail, fax…" onChange={event=>setConnectionSearch(event.target.value)}/></label>
+        <label className="connection-search"><span>Find a service</span><input type="search" value={connectionSearch} maxLength={100} autoComplete="off" spellCheck={false} disabled={leaveLocked} placeholder="Elation, Gmail, fax, Rx…" onChange={event=>setConnectionSearch(event.target.value)}/></label>
         <div className="connection-catalog-filters" role="group" aria-label="Filter services">{([['all','All'],['records','Records'],['email','Email & calendar'],['services','Other services']] as const).map(([id,label])=><button key={id} aria-pressed={connectionCategory===id} disabled={leaveLocked} onClick={()=>setConnectionCategory(id)}>{label}</button>)}</div>
         <p className="connection-catalog-count" role="status">{pickerCount===0?'No services match your search.':`${pickerCount} ${pickerCount===1?'service':'services'}`}</p>
         {pickerCount===0&&<div className="connection-catalog-empty"><p>Try a provider name or choose All.</p><button disabled={leaveLocked} onClick={()=>{setConnectionSearch('');setConnectionCategory('all');}}>Show all services</button></div>}
+        {showProviderPortal&&<section className="connection-group" aria-label="EHR and Rx Relay catalog"><h3>EHR & prescriptions</h3><button className="settings-card connection-card connection-record-row" disabled={leaveLocked} onClick={()=>visit('provider')}><span className="connection-card-copy"><strong>EHR & Rx Relay</strong><small>Read-only chart access. Prescriptions are not sent from here.</small></span><span className="connection-row-chevron" aria-hidden="true">›</span></button></section>}
         {pickerRecords.length>0&&<section className="connection-group" aria-label="Practice records catalog"><h3>Practice records</h3><div className="connection-cards">{pickerRecords.map(item=><div className="connection-card-box" key={item.id}><button data-practice-record-provider={item.id} className="settings-card connection-card connection-record-row" disabled={leaveLocked||!practiceRecordActions?.[item.id]} onClick={()=>{if(!leaveLocked)practiceRecordActions?.[item.id]?.();}}>
           <span className="connection-card-copy"><strong>{item.name}</strong><small>{item.description}</small><small className="connection-record-state">{!practiceRecordActions?.[item.id]?'Not available in this app':item.available}</small></span><span className="connection-row-chevron" aria-hidden="true">›</span>
         </button>{!practiceRecordActions?.[item.id]&&<details className="connection-state-help"><summary aria-label={`${item.name} setup requirements`}>Setup requirements</summary><p>{item.setup}</p></details>}</div>)}</div></section>}
@@ -249,6 +267,12 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
         </button>;})}</div></section>;})}
       </section>}
       <div className="connection-directory-list" data-native-directory={nativeConnectionDirectory||undefined} hidden={addingConnection}>
+      <section className="connection-group" aria-label="EHR and prescriptions"><h2>EHR & prescriptions</h2>
+        <button className="settings-card connection-card connection-record-row" disabled={leaveLocked} onClick={()=>visit('provider')}>
+          <span className="connection-card-copy"><strong>EHR & Rx Relay</strong><small>Read-only chart access. Prescriptions are not sent from here.</small></span>
+          <span className="connection-row-chevron" aria-hidden="true">›</span>
+        </button>
+      </section>
       <div className="connection-directory-actions"><button ref={addConnectionButton} className="team-primary" disabled={leaveLocked} onClick={()=>openPicker('add')}>Add connection</button></div>
       {connectionIdentity&&<div className="connection-directory-status"><p role="status">{checking?(checkingAgain?'Checking again. Last confirmed results remain below.':'Checking connections…'):catalog?'Connected confirms the account. Read results and task outcomes are shown separately.':catalogError?'Connections could not be checked. Try again or open a service.':'Checking connections…'}</p>
         <button disabled={navigationLocked||checking||!catalog&&!catalogError} onClick={()=>setRefreshCatalog(value=>value+1)}>Refresh connections</button></div>}
