@@ -42,25 +42,51 @@ workspace/native build profiles keep their existing behavior.
    lists PostgreSQL 16/B1ms/32 GiB and Container Apps. Catalog support is not an
    allocation guarantee. East US 2 remains a bounded source option that needs
    a new capacity check; regions outside these two are rejected.
-4. Run the private database bootstrap job and verify the restricted application
-   role. Build and push images from the accepted source; use registry manifest
-   digests, not local Docker configuration IDs.
-5. Prepare two saved synthetic practices using
+4. Export the actual foundation coordinates. Verify Entra/approved-IP access,
+   infrastructure encryption and locking on its new Blob state container. Use
+   the exported API state key only for `runtime/`, and distinct state keys for
+   each database-job operation. Retain private provider-data directories and
+   recovery custody; runtime/database-job do not currently define OpenTofu
+   client-side state/plan encryption. Build, scan and push images from the
+   accepted source into the owned ACR; use registry manifest digests, not local
+   Docker configuration IDs. Seed the exact versioned private-vault DB references,
+   run the manual bootstrap, migrate and check jobs, and verify restricted SQL
+   authority, private DNS/TLS, restart and restore before qualifying the database.
+5. Deploy the central account/API containers with acquisition closed, using the
+   measured database receipt, exact image digests and protected renderer output.
+   Verify CNAME/asuid records against both documented resolvers, bind managed TLS
+   and run the deployed-host verifier from `infra/enrollment/STAGING-HOSTING.md`.
+6. Prepare two saved synthetic practices using
    `infra/enrollment/workspaces/README.md`. Perform owner reservation, migration,
    signed owner setup and qualification before registering either workspace as
    ready or opening Checkout. Give each Box only its derived admission key and
    own storage/database access.
-6. Deploy the central account/API containers with acquisition closed. Verify
-   CNAME/asuid records against both documented resolvers, bind managed TLS and
-   run the deployed-host verifier from `infra/enrollment/STAGING-HOSTING.md`.
 7. Complete the hosted acceptance gates below, then enable staging enrollment.
    Publish the companion marketing change only after its link reaches this
-   verified journey. Production requires a subsequent deployment decision.
+   verified journey. Production remains on the owner's explicit hold and needs
+   a subsequent deployment decision after staging and production qualification.
+
+The October 31, 2026 Central US price-metadata review estimates **$31.55/month**
+for the fixed foundation and **$134.73/month** for two isolated practice stores:
+**$166.28/month combined**, using 730 hours/month. App/job Consumption usage,
+variable storage/transactions, vault operations, telemetry, egress, backup
+overage, third-party vendors and taxes are additional. This is a metadata-based
+estimate, not an actual bill or allocation guarantee.
 
 `/operational-ready` checks the owned schema while enrollment is closed; it is
 only a container readiness probe. `/ready` and customer admission retain their
 separate configuration, provisioning and billing gates. Neither a successful
 probe nor a Terraform mock plan grants customer access.
+
+All qualification and admission flags start false and remain false until their
+corresponding actual measurements are recorded against the selected source.
+`database_preparation_qualified`, workspace-ready switches and renderer readiness
+booleans are not measurement tools. Enabling registration or acquisition also
+requires the real staged journey receipt; a placeholder Boolean or invented
+receipt hash cannot replace it. Keep runtime access limited to its own ACR and
+exact application-secret scopes, and give the static account image only AcrPull.
+Bootstrap/migration, state, clinical, Core and other-Box authority never enter
+either public account container.
 
 ## Acceptance evidence
 

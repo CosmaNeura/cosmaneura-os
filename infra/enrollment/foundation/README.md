@@ -91,10 +91,16 @@ python infra/enrollment/foundation/prepare.py export --directory /protected/new-
 
 The export verifies the stored environment, namespace and tenant/subscription,
 and writes only resource coordinates to a fresh protected file. Keep the
-local encrypted foundation state; `../runtime/` and database-job each use
-separate keys in the new Blob container rather than moving this state or sharing
-the foundation key. Back up the encrypted state/passphrase independently under
-operator custody.
+local encrypted foundation state and its recovery passphrase under independent
+operator custody. The exported `state_backend.key` names the central API state
+only. Initialize `../runtime/` against that new Blob container; database-job
+uses distinct `database-bootstrap-v1.tfstate`, `database-migrate-v1.tfstate` and
+`database-check-v1.tfstate` keys. Never reuse the API key for a job operation or
+move the foundation state into it. The Blob account enforces infrastructure
+encryption at rest and Entra-only access. Runtime/database-job do not currently
+define OpenTofu client-side state/plan encryption, so do not represent them as
+using the foundation's encryption passphrase. Their actual backend access,
+locking and recovery custody still require verification.
 
 ## Secret seed and SQL roles
 
@@ -148,11 +154,14 @@ and authorizes only the actual rendered application secret names.
 ## Integration and remaining hosted measurements
 
 1. Review actual names, `/20` non-overlap, exact operator IP, subscription/tenant,
-   resource-provider registration and East US 2 PG16/Consumption capacity, then
+   resource-provider registration and Central US PG16/Consumption capacity, then
    inspect/apply the protected foundation plan. Preserve its encrypted state.
 2. Export public foundation coordinates. Initialize database-job and runtime
-   separately against the new `state_backend` coordinates, with distinct keys.
-   Authenticate using the approved operator Entra identity from the exact IP.
+   separately against the new `state_backend` coordinates, with the distinct
+   Blob keys above and private provider-data directories. Verify actual storage
+   encryption, Entra authentication, exact-IP access and backend locking with
+   the approved operator's existing scoped state-container authority; a mock
+   plan or control-plane storage response does not establish this data path.
 3. Publish the CI-qualified application image into the new Basic ACR, and build
    the small database job image from that exact digest. Seed the three DB URLs
    through ARM; prepare/run the manual bootstrap, migrate and check jobs.
@@ -164,19 +173,24 @@ and authorizes only the actual rendered application secret names.
    `https://enrollment-api.staging.cosmas.ai`; leave the existing beta app intact.
 5. Feed `foundation` output's RG/location/CAE/ACR/KV fields directly to
    `../runtime/main.tf`, together with the reviewed renderer directory. Keep
-   `deploy_workload=false` until actual DB role/isolation/restore checks; keep
-   all registration/billing/acquisition flags false until actual readiness and
-   signed practice/browser/Stripe journeys pass. DNS/TLS, vendor validation,
+   `deploy_workload=false` and `database_preparation_qualified=false` until actual
+   DB role/isolation/restore checks. The account web stage also requires this
+   qualified API deployment and its own reviewed image digest. Keep every
+   registration/billing/acquisition/activation flag false until its corresponding
+   source-bound measurements and signed practice/browser/Stripe receipts exist.
+   DNS/TLS, vendor validation,
    provisioning/admission, signature/webhook/portal and cancellation/recovery
    are measured deployment work; this definition invents none of those proofs.
 
-With 730 hours/month, the planning allowance is roughly **$25–50/month** for PG
-B1ms + 32 GiB, Basic ACR, one KV private endpoint, two DNS zones, small state and
-capped telemetry, plus consumption app/job usage (roughly **$0–40/month** for a
-small 0.5-vCPU/1-GiB staging app, traffic dependent). No VM/NAT/Premium ACR or
-Dedicated compute is budgeted. These are assumptions, not an Azure price quote;
-root must verify the subscription's prices/capacity before applying. Paid
-third-party vendors, egress, backups beyond included storage and taxes are extra.
+The October 31, 2026 Azure price-metadata review, using 730 hours/month in Central
+US, estimates a **$31.55/month** fixed foundation footprint. The two isolated
+practice stores add **$134.73/month**, for **$166.28/month combined**. Container
+Apps and manual-job Consumption usage is additional, as are variable Blob
+storage/transactions, vault operations, telemetry, egress, backup overage,
+third-party vendors and taxes. Free Consumption grants are shared at subscription
+level. No VM/NAT/Premium ACR or Dedicated compute is budgeted. These metadata
+estimates are not an Azure bill or allocation guarantee; retain the actual
+reviewed subscription/region/SKU metadata with the protected deployment receipt.
 
 ## Local checks (synthetic only)
 
