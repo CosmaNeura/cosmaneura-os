@@ -458,3 +458,73 @@ def test_httpx_url_query_email_is_redacted() -> None:
     assert "files.example.test" in text
     assert "req-synth-100" in text
     assert "37" in text
+
+
+def test_mixed_case_note_keys_are_dropped_from_dicts_json_and_extras() -> None:
+    secret = "Synthetic ZZQX"
+    spellings = ("nOtE", "NoTe", "nOTE")
+    for spelling in spellings:
+        assert scrub_structure(
+            {spelling: secret, "patientNote": secret, "n%6fte": secret, "page": 2}
+        ) == {"page": 2}
+        rendered = scrub_text(json.dumps({spelling: secret, "page": 2}))
+        assert secret not in rendered
+        assert spelling not in rendered
+        assert "page" in rendered
+
+    logger, stream, previous = _capture("cosmas_os.mixednote")
+    try:
+        logger.info(
+            "dict %s",
+            {spelling: secret for spelling in spellings} | {"patientNote": secret, "page": 2},
+        )
+    finally:
+        _restore(logger, previous)
+    text = stream.getvalue()
+    assert "dict %s" not in text
+    assert secret not in text
+    for spelling in (*spellings, "patientNote"):
+        assert spelling not in text
+    assert "page" in text
+
+    grabbed: list[logging.LogRecord] = []
+
+    class Grab(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            grabbed.append(record)
+
+    install()
+    extra_logger = logging.getLogger("cosmas_os.mixedextra")
+    previous_extra = (extra_logger.level, extra_logger.propagate, list(extra_logger.handlers))
+    extra_logger.handlers = []
+    extra_logger.setLevel(logging.INFO)
+    extra_logger.propagate = False
+    extra_logger.addHandler(Grab())
+    try:
+        extra_logger.info(
+            "kept",
+            extra={
+                "nOtE": secret,
+                "NoTe": secret,
+                "nOTE": secret,
+                "patientNote": secret,
+                "page": 2,
+            },
+        )
+    finally:
+        level, propagate, handlers = previous_extra
+        extra_logger.handlers = handlers
+        extra_logger.setLevel(level)
+        extra_logger.propagate = propagate
+    assert len(grabbed) == 1
+    recorded = grabbed[0].__dict__
+    for spelling in (*spellings, "patientNote"):
+        assert spelling not in recorded
+    assert secret not in str(recorded)
+    assert recorded["page"] == 2
+
+
+def test_adjacent_redacted_tokens_collapse() -> None:
+    assert scrub_text("a [redacted] [redacted] b") == "a [redacted] b"
+    assert scrub_text("a [redacted][redacted] b") == "a [redacted] b"
+    assert scrub_text("a [redacted] phone [redacted] b") == "a [redacted] phone [redacted] b"

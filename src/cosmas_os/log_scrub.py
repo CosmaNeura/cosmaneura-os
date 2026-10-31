@@ -35,6 +35,7 @@ NOTE_TEXT_KEYS = frozenset(
         "note_body",
         "note_text",
         "notes",
+        "patient_note",
         "objective",
         "plan",
         "prompt",
@@ -217,6 +218,16 @@ def _norm_key(key: object) -> str:
     return text.replace("-", "_").replace(" ", "_").lower()
 
 
+def _matches(key: object, names: frozenset[str]) -> bool:
+    """True for any casing, percent-encoding, or camelCase form of a known key."""
+    raw = unquote_plus(str(key).strip())
+    plain = raw.lower()
+    decoded = unquote(plain).strip().lower()
+    if plain in names or decoded in names:
+        return True
+    return _norm_key(raw) in names or _norm_key(decoded) in names
+
+
 def _replace_value(match: re.Match[str]) -> str:
     value = match.group("value")
     if value == "":
@@ -244,7 +255,7 @@ def _scrub_plain(text: str, *, redact_dates: bool = True) -> str:
     text = _SSN.sub(REDACTED, text)
     if redact_dates:
         text = _BARE_DATE.sub(_redact_bare_date, text)
-    return text
+    return re.sub(r"\[redacted\](?:\s*\[redacted\])+", REDACTED, text)
 
 
 def _scrub_query(raw: str) -> str:
@@ -253,22 +264,21 @@ def _scrub_query(raw: str) -> str:
         if not pair:
             continue
         key, separator, value = pair.partition("=")
-        norm = _norm_key(unquote_plus(key))
-        if norm in NOTE_TEXT_KEYS:
+        if _matches(key, NOTE_TEXT_KEYS):
             continue
         if not separator:
             kept.append(key)
             continue
-        if norm in IDENTIFIER_KEYS:
+        if _matches(key, IDENTIFIER_KEYS):
             kept.append(f"{key}={REDACTED}")
             continue
         decoded = unquote_plus(value)
         scrubbed = _scrub_plain(decoded)
-        if norm in _KEEP_QUERY_KEYS and scrubbed == decoded:
+        if _matches(key, _KEEP_QUERY_KEYS) and scrubbed == decoded:
             kept.append(pair)
         elif scrubbed == decoded:
             kept.append(pair)
-        elif norm in _KEEP_QUERY_KEYS:
+        elif _matches(key, _KEEP_QUERY_KEYS):
             kept.append(f"{key}={scrubbed}")
         else:
             kept.append(f"{key}={REDACTED}")
@@ -284,12 +294,11 @@ def scrub_structure(value: Any, *, depth: int = 0) -> Any:
     if isinstance(value, Mapping):
         cleaned: dict[Any, Any] = {}
         for key, item in value.items():
-            norm = _norm_key(key)
-            if norm in NOTE_TEXT_KEYS:
+            if _matches(key, NOTE_TEXT_KEYS):
                 continue
-            if norm in IDENTIFIER_KEYS:
+            if _matches(key, IDENTIFIER_KEYS):
                 cleaned[key] = REDACTED
-            elif norm in _TIMING_KEYS:
+            elif _matches(key, _TIMING_KEYS):
                 cleaned[key] = (
                     scrub_text(item, depth=depth + 1, redact_dates=False)
                     if isinstance(item, str)
@@ -459,14 +468,13 @@ def _scrub_log_record(record: logging.LogRecord) -> None:
     for key in list(record.__dict__):
         if key in _RESERVED_RECORD_ATTRS:
             continue
-        norm = _norm_key(key)
-        if norm in NOTE_TEXT_KEYS:
+        if _matches(key, NOTE_TEXT_KEYS):
             del record.__dict__[key]
             continue
         value = record.__dict__[key]
-        if norm in IDENTIFIER_KEYS:
+        if _matches(key, IDENTIFIER_KEYS):
             record.__dict__[key] = REDACTED
-        elif norm in _TIMING_KEYS and isinstance(value, str):
+        elif _matches(key, _TIMING_KEYS) and isinstance(value, str):
             record.__dict__[key] = scrub_text(value, redact_dates=False)
         else:
             record.__dict__[key] = scrub_structure(value)
