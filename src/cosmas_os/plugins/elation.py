@@ -4,6 +4,9 @@ These tools do not hold tokens or choose a vendor. They call
 ``POST /connections/ehr/reads`` through the current application session.
 A result is one page. Not connected and unsupported stay separate from a
 successful read, a wrong practice, and a discarded stale result.
+
+Chart rows are returned to the signed-in tool caller. This module does not log
+them. Handlers that do log go through the plugin process scrubber.
 """
 
 from __future__ import annotations
