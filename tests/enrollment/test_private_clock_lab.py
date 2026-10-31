@@ -24,7 +24,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 from tests.enrollment.clock_harness import ProviderDouble, signed_event
 
@@ -347,6 +347,57 @@ def test_prepare_and_factory_require_single_scope_and_no_public_clock_inputs(lab
         json={"expected_revision": 0, "customer_id": "cus_other", "frozen_time": 1},
     )
     assert response.status_code == 422
+
+
+def test_interrupted_preparation_replays_same_binding_without_resetting_journal(lab, postgres_journal, tmp_path):
+    binding = lab.binding.model_copy(update={"customer_id": "cus_interruptedexample"})
+    lab.provider.customer["id"] = binding.customer_id
+    path = tmp_path / "interrupted-binding.json"
+
+    def prepare():
+        prepare_clock_binding(
+            lab.settings, lab.engine, binding.model_dump(), binding_path=path,
+            journal_engine=postgres_journal.engine, **lab.ports,
+        )
+
+    def interrupt_insert(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.startswith("INSERT INTO private_stripe_clock_journal"):
+            raise RuntimeError("Synthetic journal-write interruption")
+
+    event.listen(postgres_journal.engine, "before_cursor_execute", interrupt_insert)
+    try:
+        with pytest.raises(RuntimeError, match="Synthetic journal-write interruption"):
+            prepare()
+    finally:
+        event.remove(postgres_journal.engine, "before_cursor_execute", interrupt_insert)
+
+    assert json.loads(path.read_text()) == binding.model_dump()
+    with postgres_journal.engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT count(*) FROM private_stripe_clock_journal WHERE binding_sha256=:binding"
+        ), {"binding": binding.sha256}).scalar_one() == 0
+    prepare()
+    journal = PostgresClockJournal(postgres_journal.engine, binding)
+    initial = journal.read()
+    assert initial["subscription_id"] is None and initial["high_water"] == binding.initial_frozen_time
+
+    path.write_text(json.dumps(binding.model_dump(), indent=2))
+    equivalent = path.read_bytes()
+    prepare()
+    assert path.read_bytes() == equivalent and journal.read() == initial
+
+    stamp = binding.initial_frozen_time
+    journal.subscription({"id": "sub_preservedexample", "trial_start": stamp, "trial_end": stamp + 14 * 86400})
+    journal.observe(stamp + 1)
+    journal.target("before")
+    preserved = journal.read()
+    assert PostgresClockJournal.prepare_database(postgres_journal.engine, binding).read() == preserved
+
+    path.write_text(json.dumps({**binding.model_dump(), "owner_subject": "user_other"}))
+    foreign = path.read_bytes()
+    with pytest.raises(EnrollmentError):
+        prepare()
+    assert path.read_bytes() == foreign and journal.read() == preserved
 
 
 def test_exact_account_origin_cors_on_direct_roster_denial_and_preflight(lab):

@@ -22,7 +22,8 @@ from uuid import UUID, uuid5
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import JSON, String, insert, select, update
+from sqlalchemy import JSON, String, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 from .auth import ClerkEnrollmentVerifier
@@ -79,7 +80,16 @@ def private_directory(path: Path) -> None:
 
 def write_new(path: Path, value: dict[str, Any]) -> None:
     private_directory(path.parent)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        try:
+            existing = unique_json(protected_read(path))
+        except (ValueError, TypeError):
+            raise refused() from None
+        if canonical_hash(existing) != canonical_hash(value):
+            raise refused() from None
+        return
     with os.fdopen(fd, "wb") as out:
         out.write(json.dumps(value, sort_keys=True).encode())
         out.flush()
@@ -193,7 +203,8 @@ class PostgresClockJournal:
         with engine.begin() as connection:
             connection.execute(insert(ClockState).values(binding_sha256=binding.sha256, state={
                 "binding_sha256": binding.sha256, "high_water": binding.initial_frozen_time, "pending_target": None,
-                "subscription_id": None, "trial_start": None, "trial_end": None}))
+                "subscription_id": None, "trial_start": None, "trial_end": None})
+                .on_conflict_do_nothing(index_elements=[ClockState.binding_sha256]))
         return cls(engine, binding)
 
     def _state(self, connection):
