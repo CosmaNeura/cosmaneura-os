@@ -13,7 +13,7 @@ import threading
 import traceback
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import unquote_plus
+from urllib.parse import unquote, unquote_plus
 
 REDACTED = "[redacted]"
 
@@ -233,7 +233,9 @@ def _redact_bare_date(match: re.Match[str]) -> str:
 
 
 def _scrub_plain(text: str, *, redact_dates: bool = True) -> str:
-    text = _NOTE_FIELD.sub(_replace_value, text)
+    # Decode before identifier rules so alex.example%40example.invalid is an email.
+    text = unquote(text)
+    text = _NOTE_FIELD.sub("", text)
     for pattern in (_NAME, _DOB, _MRN, _INSURANCE, _LABELED_SSN):
         text = pattern.sub(_replace_value, text)
     text = _ADDRESS.sub(REDACTED, text)
@@ -401,20 +403,18 @@ def format_scrubbed_traceback(exc_info: tuple[type[BaseException], BaseException
 
 
 def _scrub_argument(value: Any) -> Any:
-    """Scrub a format argument by key when it carries fields."""
-    if isinstance(value, Mapping):
-        return scrub_structure(dict(value))
+    """Scrub a format argument. Other objects are stringified, never inspected."""
     if isinstance(value, str):
         return scrub_text(value)
+    if isinstance(value, bytes | bytearray):
+        return scrub_text(bytes(value).decode("utf-8", "replace"))
+    if isinstance(value, Mapping):
+        return scrub_structure(dict(value))
     if isinstance(value, list | tuple):
         return scrub_structure(value)
-    fields = getattr(value, "__dict__", None)
-    if isinstance(fields, dict) and fields:
-        original = dict(fields)
-        scrubbed = scrub_structure(original)
-        if scrubbed != original:
-            return scrubbed
-    return value
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    return scrub_text(str(value))
 
 
 def _rendered_message(record: logging.LogRecord) -> str:

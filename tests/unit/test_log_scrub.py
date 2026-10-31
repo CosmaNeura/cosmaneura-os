@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import io
 import json
 import logging
@@ -11,6 +12,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from celery.signals import after_setup_logger
 from uvicorn.logging import AccessFormatter
@@ -20,6 +22,7 @@ from cosmas_os.log_scrub import (
     NOTE_TEXT_KEYS,
     REDACTED,
     LogScrubFilter,
+    _scrub_argument,
     scrub_structure,
     scrub_text,
 )
@@ -425,4 +428,33 @@ def test_mapping_arg_is_scrubbed_before_percent_format() -> None:
     assert "note_text" not in text
     assert "req-synth-100" in text
     assert "201" in text
+    assert "37" in text
+
+
+def test_percent_encoded_email_string_is_redacted() -> None:
+    encoded = "alex.example%40example.invalid"
+    redacted = scrub_text(f"contact {encoded} on 10/30/2026 at /appointments/10/30/2026")
+    for part in ("alex.example", "example.invalid", "%40", "10/30/2026"):
+        assert part not in redacted
+    assert "2026-10-30" not in scrub_text("open /appointments/2026-10-30")
+    assert "10/30/2026" not in scrub_text("on 10/30/2026")
+
+
+def test_httpx_url_query_email_is_redacted() -> None:
+    assert "__dict__" not in inspect.getsource(_scrub_argument)
+    url = httpx.URL(
+        "https://files.example.test/appointments/10/30/2026"
+        "?email=alex.example%40example.invalid&request_id=req-synth-100&duration_ms=37"
+    )
+    logger, stream, previous = _capture("cosmas_os.urlargs")
+    try:
+        logger.info("url %s", url)
+    finally:
+        _restore(logger, previous)
+    text = stream.getvalue()
+    assert "url %s" not in text
+    for part in ("alex.example", "example.invalid", "%40", "10/30/2026"):
+        assert part not in text
+    assert "files.example.test" in text
+    assert "req-synth-100" in text
     assert "37" in text
