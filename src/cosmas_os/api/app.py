@@ -2214,8 +2214,11 @@ app.add_middleware(EhrReadBoundary)
 allowed_headers.append("X-Cosmas-Ehr-Read")
 
 
+from cosmas_os.api.patient_deletion_routes import router as patient_deletion_router  # noqa: E402
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: E402
 from cosmas_os.standalone_runtime import StandaloneRequestBoundary  # noqa: E402
+
+app.include_router(patient_deletion_router(get_session=get_session, identity=_identity))
 
 app.add_middleware(StandaloneRequestBoundary, runtime=lambda: settings)
 app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
