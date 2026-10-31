@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import shlex
 import shutil
 import stat
 import subprocess
@@ -27,7 +28,11 @@ def private(path, value):
 def build_case(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
-    for name in ("Dockerfile", "Dockerfile.web", "Dockerfile.web.dockerignore", ".dockerignore", ".github/workflows/synth-ci.yml"):
+    for name in ("Dockerfile", "Dockerfile.web", "Dockerfile.web.dockerignore", ".dockerignore", ".github/workflows/synth-ci.yml",
+                 "infra/enrollment/database-job/Dockerfile", "infra/enrollment/database-job/database.py",
+                 "infra/enrollment/private-clock/Dockerfile", "infra/enrollment/private-clock/database.py",
+                 "src/cosmas_os/enrollment/models.py", "src/cosmas_os/enrollment/migration.py",
+                 "src/cosmas_os/enrollment/private_clock_lab.py"):
         destination = source / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / name, destination)
@@ -192,3 +197,128 @@ def test_receipt_requires_actual_completed_run_and_matching_registry_digest(buil
         data = json.loads(receipt.read_text())
         assert data["image_validation_passed"] is (status == "Succeeded")
         assert data["deployed"] is False and data["hosted_journey_qualified"] is False
+
+
+def app_receipt(c):
+    f = images.foundation(c.foundation)
+    return private(c.public.parent / "api-image-receipt.json", {
+        "contract_version": "enrollment-image-receipt.v1", "source_commit": c.commit,
+        "kind": "api", "run_id": "cjsynthetic1", "status": "Succeeded",
+        "image": f["registry_server"] + "/enrollment/api@sha256:" + "a" * 64,
+        "context_sha256": "b" * 64, "buildkit": True, "image_validation_passed": True,
+        "trivy_passed": True, "pushed_verified": True, "deployed": False,
+        "hosted_journey_qualified": False, "reference_marker": "invented-reference-never-upload-this-file",
+    })
+
+
+def prepare_job(c, kind="database-job", *, fix=None):
+    return images.prepare_job(c.source, c.commit, kind, c.foundation, app_receipt(c), c.commit,
+                              [c.secret], c.output, fix)
+
+
+def test_database_job_uses_exact_verified_base_and_minimal_unchanged_context(build_case):
+    c = build_case
+    assert prepare_job(c)["contexts"] == 1
+    m, job = images.load_prepared(c.output, "database-job")
+    context = c.output / "database-job"
+    assert {str(p.relative_to(context)) for p in context.rglob("*") if p.is_file()} == {
+        ".dockerignore", images.RECIPE, "infra/enrollment/database-job/Dockerfile", "infra/enrollment/database-job/database.py"}
+    for name in ("Dockerfile", "database.py"):
+        assert (context / "infra/enrollment/database-job" / name).read_bytes() == (c.source / "infra/enrollment/database-job" / name).read_bytes()
+    task = json.loads((context / images.RECIPE).read_text())
+    build = shlex.split(task["steps"][0]["build"])
+    assert build[build.index("--build-arg") + 1] == "APP_IMAGE=" + m["application_image_receipt"]["image"]
+    assert sum(token == "--build-arg" for token in build) == 1
+    assert task["steps"][0]["env"] == ["DOCKER_BUILDKIT=1"]
+    assert task["steps"][-1]["when"] == ["scan"]
+    code = shlex.split(task["steps"][1]["cmd"])[-1]
+    compile(code, "<database image validation>", "exec")
+    assert "os.getuid()==10001" in code and "enrollment_runtime" in code and "result.returncode==1" in code
+    assert "invented-reference-never-upload-this-file" not in "".join(p.read_text() for p in context.rglob("*") if p.is_file())
+    assert job["dockerfile_sha256"] and m["database_job_qualified"] is False
+
+
+@pytest.mark.parametrize("change", ["unscanned", "foreign-image", "wrong-source"])
+def test_job_denies_unverified_foreign_or_mixed_application_receipt(build_case, change):
+    c = build_case
+    receipt = app_receipt(c)
+    data = json.loads(receipt.read_text())
+    if change == "unscanned":
+        data["trivy_passed"] = False
+    elif change == "foreign-image":
+        data["image"] = "existingbeta.azurecr.io/enrollment/api@sha256:" + "a" * 64
+    else:
+        data["source_commit"] = "a" * 40
+    private(receipt, data)
+    with pytest.raises(ValueError, match="application receipt"):
+        images.prepare_job(c.source, c.commit, "database-job", c.foundation, receipt, c.commit, [c.secret], c.output)
+    assert not c.output.exists()
+
+
+def test_job_receipt_authority_tamper_prevents_queue_before_azure(build_case, monkeypatch):
+    c = build_case
+    prepare_job(c)
+    receipt = c.public.parent / "api-image-receipt.json"
+    data = json.loads(receipt.read_text())
+    data["reference_marker"] = "changed"
+    private(receipt, data)
+    monkeypatch.setattr(images, "azure", lambda *args: pytest.fail("changed authority may not reach Azure"))
+    with pytest.raises(ValueError, match="authority changed"):
+        images.queue(c.output, "database-job")
+
+
+@pytest.mark.parametrize("fix", [None, "not-a-commit"])
+def test_private_clock_is_closed_without_explicit_committed_fix(build_case, fix):
+    c = build_case
+    with pytest.raises(ValueError, match="clock retry fix"):
+        prepare_job(c, "private-clock", fix=fix)
+    assert not c.output.exists()
+
+
+def test_private_clock_rejects_old_base_and_accepts_only_matching_fixed_source(build_case):
+    c = build_case
+    old = c.commit
+    with pytest.raises(ValueError, match="regression source"):
+        prepare_job(c, "private-clock", fix=old)
+    lab = c.source / "src/cosmas_os/enrollment/private_clock_lab.py"
+    lab.write_text(lab.read_text() + "\n# Synthetic publisher gate fixture; no clock qualification.\n")
+    regression = c.source / "tests/enrollment/test_private_clock_lab.py"
+    regression.parent.mkdir(parents=True)
+    regression.write_text("# Synthetic accepted-source ancestry fixture only.\n")
+    subprocess.run(["git", "add", "."], cwd=c.source, check=True)
+    subprocess.run(["git", "-c", "user.name=Synthetic operator", "-c", "user.email=operator@example.invalid", "commit", "--quiet", "-m", "synthetic clock source gate"], cwd=c.source, check=True)
+    fixed = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=c.source).decode().strip()
+    with pytest.raises(ValueError, match="same exact"):
+        images.prepare_job(c.source, fixed, "private-clock", c.foundation, app_receipt(c), old, [c.secret], c.output, fixed)
+    c.commit = fixed
+    assert prepare_job(c, "private-clock", fix=fixed)["prepared"] is True
+    manifest, _ = images.load_prepared(c.output, "private-clock")
+    assert manifest["clock_retry_fix_commit"] == fixed and manifest["private_clock_qualified"] is False
+    task = json.loads((c.output / "private-clock" / images.RECIPE).read_text())
+    compile(shlex.split(task["steps"][1]["cmd"])[-1], "<private clock job validation>", "exec")
+
+
+def test_database_job_queue_and_collect_preserve_digest_and_unqualified_database_state(build_case, monkeypatch):
+    c = build_case
+    prepare_job(c)
+    fake_azure(c, monkeypatch)
+    assert images.queue(c.output, "database-job")["run_id_recorded"] is True
+    m, job = images.load_prepared(c.output, "database-job")
+    repository_tag = job["image_tag"].split("/", 1)[1]
+    repository, tag = repository_tag.rsplit(":", 1)
+    digest = "sha256:" + "c" * 64
+    def run(command, timeout=60):
+        if command[:3] == ["acr", "task", "show-run"]:
+            data = {"runId": "cjsynthetic1", "status": "Succeeded", "outputImages": [{"registry": m["foundation"]["registry_server"], "repository": repository, "tag": tag, "digest": digest}]}
+        elif command[:3] == ["acr", "repository", "show"]:
+            data = {"digest": digest}
+        else:
+            pytest.fail("unexpected Azure operation")
+        return SimpleNamespace(stdout=json.dumps(data).encode())
+    monkeypatch.setattr(images, "azure", run)
+    receipt = c.output / "job-image.json"
+    assert images.collect(c.output, "database-job", receipt)["pushed_verified"] is True
+    data = json.loads(receipt.read_text())
+    assert data["base_application_image"] == m["application_image_receipt"]["image"]
+    assert data["database_job_qualified"] is False and data["private_clock_qualified"] is False
+    assert data["hosted_journey_qualified"] is False and data["deployed"] is False

@@ -32,6 +32,15 @@ PUBLIC_NAMES = {
 ACCOUNT = "https://onboarding.staging.cosmas.ai"
 API = "https://enrollment-api.staging.cosmas.ai"
 RECIPE = "cosmabot-acr-task.yaml"
+KINDS = ("api", "account", "database-job", "private-clock")
+JOB_MODULES = {
+    "database-job": ("/app/enrollment_database_admin.py", "cosmabot_enrollment",
+                     {"admin": "enrollment_bootstrap", "migration": "enrollment_migrator", "runtime": "enrollment_runtime"},
+                     "enrollment_database_preparation_failed"),
+    "private-clock": ("/app/private_clock_database.py", "cosmabot_enrollment_clock_lab",
+                      {"admin": "clock_bootstrap", "a": "clock_journal_a", "b": "clock_journal_b"},
+                      "private_clock_database_failed"),
+}
 
 
 def private_read(path: Path, limit: int = 1_000_000) -> bytes:
@@ -212,6 +221,10 @@ finally:
         shell += "nginx -g 'daemon off;' & pid=$!; trap 'kill $pid; wait $pid || true' EXIT; "
         shell += "i=0; until curl --fail --silent http://127.0.0.1:8080/healthz >/dev/null; do i=$((i+1)); test $i -lt 30; sleep 1; done"
         validation = {"cmd": image + " -ec " + shlex.quote(shell), "entryPoint": "/bin/sh"}
+    return publication_recipe(arguments, validation, image, trivy)
+
+
+def publication_recipe(arguments: list[str], validation: dict, image: str, trivy: str) -> dict:
     return {"version": "v1.1.0", "stepTimeout": 1800, "steps": [
         {"id": "build", "build": shlex.join(arguments), "env": ["DOCKER_BUILDKIT=1"]},
         {"id": "validate", **validation, "when": ["build"], "timeout": 120},
@@ -220,6 +233,119 @@ finally:
          "when": ["validate"], "timeout": 900},
         {"id": "push", "push": [image], "when": ["scan"], "timeout": 600},
     ]}
+
+
+def application_receipt(path: Path, f: dict, source_commit: str) -> tuple[dict, str]:
+    raw = private_read(path)
+    r = json.loads(raw)
+    if (r.get("contract_version") != "enrollment-image-receipt.v1" or r.get("kind") != "api"
+            or r.get("status") != "Succeeded" or r.get("source_commit") != source_commit
+            or not re.fullmatch(r"[0-9a-f]{40}", source_commit)
+            or any(r.get(flag) is not True for flag in ("buildkit", "image_validation_passed", "trivy_passed", "pushed_verified"))
+            or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", r.get("run_id", ""))
+            or not re.fullmatch(r"[0-9a-f]{64}", r.get("context_sha256", ""))
+            or not re.fullmatch(re.escape(f["registry_server"] + "/enrollment/api@sha256:") + r"[0-9a-f]{64}", r.get("image", ""))):
+        raise ValueError("verified owned application receipt and exact source required")
+    return r, hashlib.sha256(raw).hexdigest()
+
+
+def clock_source_gate(source: Path, commit: str, accepted_fix: str | None) -> None:
+    if not accepted_fix or not re.fullmatch(r"[0-9a-f]{40}", accepted_fix):
+        raise ValueError("explicit accepted committed clock retry fix required")
+    subprocess.run(["git", "merge-base", "--is-ancestor", accepted_fix, commit], cwd=source,
+                   check=True, capture_output=True, timeout=30)
+    changed = subprocess.run(["git", "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", accepted_fix],
+                             cwd=source, check=True, capture_output=True, timeout=30).stdout.decode().splitlines()
+    if not {"src/cosmas_os/enrollment/private_clock_lab.py", "tests/enrollment/test_private_clock_lab.py"}.issubset(changed):
+        raise ValueError("accepted clock fix must include its lab and regression source")
+
+
+def job_recipe(kind: str, image: str, app_image: str, trivy: str, hashes: dict[str, str]) -> dict:
+    module_path, database, roles, error_code = JOB_MODULES[kind]
+    code = f"""import hashlib,importlib.util,json,os,subprocess,sys
+assert os.getuid()==10001
+expected={hashes!r}
+for path,digest in expected.items():
+ with open(path,'rb') as stream: assert hashlib.sha256(stream.read()).hexdigest()==digest
+spec=importlib.util.spec_from_file_location('selected_database_job',{module_path!r})
+module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+assert module.DATABASE=={database!r} and module.LOGINS=={roles!r}
+assert callable(module.bootstrap) and callable(module.check) and callable(module.main)
+env={{'PATH':os.environ['PATH'],'PYTHONPATH':'/app/src','ENROLLMENT_ENABLED':'false','ENROLLMENT_DATA_MODE':'synthetic'}}
+result=subprocess.run([sys.executable,{module_path!r},'check'],env=env,capture_output=True,timeout=20)
+assert result.returncode==1 and result.stdout==b''
+assert json.loads(result.stderr)=={{'error':{error_code!r},'class':'ValueError'}}
+"""
+    arguments = ["-t", image, "-f", f"infra/enrollment/{kind}/Dockerfile", "--build-arg", "APP_IMAGE=" + app_image, "."]
+    return publication_recipe(arguments, {"cmd": image + " -B -c " + shlex.quote(code), "entryPoint": "python"}, image, trivy)
+
+
+def prepare_job(source: Path, commit: str, kind: str, foundation_path: Path, app_receipt_path: Path,
+                app_source_commit: str, secret_paths: list[Path], output: Path, clock_retry_fix_commit: str | None = None) -> dict:
+    if kind not in JOB_MODULES or commit != app_source_commit:
+        raise ValueError("job and application must use the same exact accepted source")
+    if not output.is_absolute() or output.exists() or output.resolve().is_relative_to(source.resolve()):
+        raise ValueError("fresh private job output outside source required")
+    f, values = foundation(foundation_path), protected_values(secret_paths)
+    app, receipt_hash = application_receipt(app_receipt_path, f, app_source_commit)
+    if kind == "private-clock":
+        clock_source_gate(source, commit, clock_retry_fix_commit)
+    elif clock_retry_fix_commit is not None:
+        raise ValueError("clock source authority is not a database-job input")
+    archive = git_archive(source, commit)
+    module_path = JOB_MODULES[kind][0]
+    runtime_paths = ("src/cosmas_os/enrollment/models.py", "src/cosmas_os/enrollment/migration.py") if kind == "database-job" else ("src/cosmas_os/enrollment/private_clock_lab.py",)
+    target = f"infra/enrollment/{kind}"
+    selected = {"Dockerfile", ".github/workflows/synth-ci.yml", target + "/Dockerfile", target + "/database.py", *runtime_paths}
+    contents = {}
+    with tarfile.open(fileobj=io.BytesIO(archive)) as stream:
+        for member in stream:
+            if member.name in selected:
+                if not member.isfile():
+                    raise ValueError("regular committed job inputs required")
+                with stream.extractfile(member) as content:
+                    contents[member.name] = content.read()
+    if set(contents) != selected:
+        raise ValueError("complete committed job and runtime source required")
+    if b"RUN --network=none" not in contents["Dockerfile"] or b"@sha256:" not in contents["Dockerfile"]:
+        raise ValueError("reviewed offline pinned application source required")
+    instructions = [line.strip() for line in contents[target + "/Dockerfile"].decode().splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    if instructions != ["ARG APP_IMAGE", "FROM ${APP_IMAGE}",
+                        f"COPY --chown=10001:10001 {target}/database.py {module_path}",
+                        'ENTRYPOINT ["python", ' + json.dumps(module_path) + ']']:
+        raise ValueError("unchanged one-purpose inherited application Dockerfile required")
+    pins = re.findall(r"aquasec/trivy@sha256:[0-9a-f]{64}", contents[".github/workflows/synth-ci.yml"].decode())
+    if len(set(pins)) != 1:
+        raise ValueError("one committed CI Trivy digest required")
+    output.mkdir(mode=0o700)
+    try:
+        context = output / kind
+        context.mkdir(mode=0o700)
+        for name in (target + "/Dockerfile", target + "/database.py"):
+            path = context / name
+            path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+            path.write_bytes(contents[name])
+            path.chmod(0o644)
+        policy = "*\n!.dockerignore\n!" + RECIPE + "\n!infra/\n!infra/enrollment/\n!" + target + "/\n!" + target + "/Dockerfile\n!" + target + "/database.py\n"
+        (context / ".dockerignore").write_text(policy)
+        (context / ".dockerignore").chmod(0o600)
+        hashes = {module_path: hashlib.sha256(contents[target + "/database.py"]).hexdigest()}
+        hashes.update({"/app/" + name: hashlib.sha256(contents[name]).hexdigest() for name in runtime_paths})
+        image = f["registry_server"] + "/enrollment/" + kind + ":" + commit + "-" + secrets.token_hex(6)
+        write(context / RECIPE, job_recipe(kind, image, app["image"], pins[0], hashes))
+        manifest = {"contract_version": "enrollment-image-build.v1", "source_commit": commit, "source_repository": str(source),
+                    "foundation": f, "jobs": {kind: {"image_tag": image, "context_sha256": scan(context, values),
+                    "dockerfile_sha256": hashlib.sha256(contents[target + "/Dockerfile"]).hexdigest(),
+                    "validation_module_sha256": hashes, "ignore_sha256": hashlib.sha256(policy.encode()).hexdigest()}},
+                    "application_image_receipt": {"file": str(app_receipt_path), "sha256": receipt_hash, "source_commit": app_source_commit, "image": app["image"]},
+                    "clock_retry_fix_commit": clock_retry_fix_commit, "protected_secret_files": [str(path) for path in secret_paths],
+                    "credential_values_uploaded": False, "prepared": True, "queued": False, "pushed": False,
+                    "database_job_qualified": False, "private_clock_qualified": False, "hosted_journey_qualified": False}
+        write(output / "prepared.json", manifest)
+        return {"prepared": True, "kind": kind, "contexts": 1, "queued": False, "pushed": False, "credentials_found": 0}
+    except BaseException:
+        shutil.rmtree(output)
+        raise
 
 
 def prepare(source: Path, commit: str, public_path: Path, foundation_path: Path, secret_paths: list[Path], output: Path) -> dict:
@@ -272,7 +398,7 @@ def azure(command: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
 
 def load_prepared(directory: Path, kind: str) -> tuple[dict, dict]:
     m = json.loads(private_read(directory / "prepared.json"))
-    if m.get("contract_version") != "enrollment-image-build.v1" or kind not in {"api", "account"}:
+    if m.get("contract_version") != "enrollment-image-build.v1" or kind not in KINDS:
         raise ValueError("prepared owned build required")
     m["foundation"] = owned_foundation(m["foundation"])
     job = m["jobs"][kind]
@@ -281,6 +407,13 @@ def load_prepared(directory: Path, kind: str) -> tuple[dict, dict]:
         raise ValueError("owned image and source binding required")
     if scan(directory / kind, protected_values([Path(path) for path in m["protected_secret_files"]])) != job["context_sha256"]:
         raise ValueError("prepared build changed")
+    if kind in JOB_MODULES:
+        selected = m["application_image_receipt"]
+        app, receipt_hash = application_receipt(Path(selected["file"]), m["foundation"], m["source_commit"])
+        if receipt_hash != selected["sha256"] or app["image"] != selected["image"] or app["source_commit"] != selected["source_commit"]:
+            raise ValueError("application image authority changed")
+        if kind == "private-clock":
+            clock_source_gate(Path(m["source_repository"]), m["source_commit"], m["clock_retry_fix_commit"])
     return m, job
 
 
@@ -346,6 +479,10 @@ def collect(directory: Path, kind: str, receipt: Path) -> dict:
               "run_id": queued["run_id"], "status": run["status"], "image": image, "context_sha256": job["context_sha256"],
               "buildkit": True, "image_validation_passed": bool(image), "trivy_passed": bool(image),
               "pushed_verified": bool(image), "deployed": False, "hosted_journey_qualified": False}
+    if kind in JOB_MODULES:
+        result.update(base_application_image=m["application_image_receipt"]["image"],
+                      application_image_receipt_sha256=m["application_image_receipt"]["sha256"],
+                      database_job_qualified=False, private_clock_qualified=False)
     if not receipt.is_absolute() or receipt.is_relative_to(directory / kind):
         raise ValueError("receipt must stay outside uploaded context")
     write(receipt, result)
@@ -360,16 +497,27 @@ def main() -> int:
         p.add_argument("--" + name, type=Path, required=True)
     p.add_argument("--commit", required=True)
     p.add_argument("--secret-file", type=Path, action="append", required=True)
+    p = commands.add_parser("prepare-job")
+    for name in ("source", "foundation", "app-image-receipt", "output"):
+        p.add_argument("--" + name, type=Path, required=True)
+    p.add_argument("--commit", required=True)
+    p.add_argument("--app-source-commit", required=True)
+    p.add_argument("--kind", choices=tuple(JOB_MODULES), required=True)
+    p.add_argument("--clock-retry-fix-commit")
+    p.add_argument("--secret-file", type=Path, action="append", required=True)
     for command in ("queue", "collect"):
         p = commands.add_parser(command)
         p.add_argument("--prepared", type=Path, required=True)
-        p.add_argument("--kind", choices=("api", "account"), required=True)
+        p.add_argument("--kind", choices=KINDS, required=True)
         if command == "collect":
             p.add_argument("--receipt", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "prepare":
             result = prepare(args.source, args.commit, args.public_config, args.foundation, args.secret_file, args.output)
+        elif args.command == "prepare-job":
+            result = prepare_job(args.source, args.commit, args.kind, args.foundation, args.app_image_receipt,
+                                 args.app_source_commit, args.secret_file, args.output, args.clock_retry_fix_commit)
         elif args.command == "queue":
             result = queue(args.prepared, args.kind)
         else:

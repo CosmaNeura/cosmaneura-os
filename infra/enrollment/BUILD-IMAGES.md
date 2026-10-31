@@ -126,3 +126,56 @@ python -m pytest -q infra/enrollment/tests/test_build_images.py
 ```
 
 The queue/digest tests use invented Azure responses and perform no cloud calls.
+
+## One-purpose database and private-clock images
+
+`prepare-job` reuses the same BuildKit, validation, pinned Trivy, explicit push,
+queue recovery and actual digest collection. It requires the original
+protected **successful API image receipt**, including its measured scan and
+startup flags, plus the explicitly selected full application source commit.
+The job source must be that same commit, and the base must be the owned
+`enrollment/api@sha256:` image recorded in that receipt. It cannot consume a
+tag, foreign image, unscanned receipt or unrelated application source. This
+uses actual image evidence; it does not create a CI-qualification assertion.
+
+```bash
+python infra/enrollment/build-images.py prepare-job \
+  --source /path/to/canonical-checkout --commit FULL_APP_SOURCE_COMMIT \
+  --app-source-commit FULL_APP_SOURCE_COMMIT \
+  --app-image-receipt /protected/successful-api-image-receipt.json \
+  --foundation /protected/foundation.json --kind database-job \
+  --secret-file /protected/clerk.env --secret-file /protected/stripe.env \
+  --secret-file /protected/runtime-database.url \
+  --output /protected/new-database-image
+```
+
+Only the selected unchanged `infra/enrollment/database-job/Dockerfile` and
+`database.py`, a minimal root ignore policy and generated public task enter the
+context. The original application receipt, foundation, source/evidence paths
+and credential files remain outside it. `APP_IMAGE` is the sole build
+argument. The inherited base preserves the pinned runtime and existing offline
+installation; this helper does not alter either Dockerfile.
+
+Image validation checks UID10001, the actual copied job and required runtime
+module byte hashes, imports, exact database/role constants and the actual
+`check` entrypoint's closed failure without any database credentials. It never
+connects to PostgreSQL or creates/migrates roles. Successful image publication
+keeps `database_job_qualified`, `private_clock_qualified`, `deployed` and
+`hosted_journey_qualified` false. Actual bootstrap/migrate/check jobs retain
+their separate frozen credentials and scoped role/TLS qualification.
+
+For the optional `--kind private-clock`, additionally supply
+`--clock-retry-fix-commit FULL_ACCEPTED_CLOCK_FIX_COMMIT`. Root must first
+review and accept that committed retry fix and publish a new verified API
+image containing it. The helper requires the fix to be in the selected
+application/job source ancestry and to include both the private clock lab and
+its regression source. This verifies the operator's exact committed selection;
+it does not substitute file presence for clock testing or hosted qualification.
+An older application image cannot be combined with a newer clock job. Without
+that explicit accepted commit, clock preparation stays closed. Its context
+likewise includes only the unchanged private-clock Dockerfile/database module.
+
+Root then uses the existing operator-only `queue` and `collect` commands with
+`--kind database-job` or `--kind private-clock`. Collection binds the successful
+job image to its original application receipt hash and measured base digest.
+Changing that receipt after preparation prevents queue/collection.
