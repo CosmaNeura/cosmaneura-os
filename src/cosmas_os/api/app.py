@@ -1474,6 +1474,7 @@ def health() -> dict[str, str]:
 def enrollment_runtime_config(response: Response):
     response.headers["Cache-Control"] = "no-store"
     return {"enrollment_managed": getattr(settings, "workspace_enrollment_managed", False),
+            "enrollment_account_origin": getattr(settings, "enrollment_account_origin", None),
             "enrollment_recovery_url": getattr(settings, "enrollment_recovery_url", None)}
 
 

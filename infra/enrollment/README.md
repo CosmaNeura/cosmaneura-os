@@ -1,5 +1,8 @@
 # Customer enrollment deployment preparation
 
+For the independently built staging account web app, exact public DNS records
+and verified managed-certificate stage, use [STAGING-HOSTING.md](STAGING-HOSTING.md).
+
 This component serves customer account/practice setup, BAA receipts and SaaS
 subscription state. It stores no clinical records and grants no access to the
 clinical database, Blob storage, Core services or another product's credentials.
@@ -69,6 +72,12 @@ networked Container Apps environment, ACR, private PostgreSQL, private Key Vault
 and telemetry. Reuse the already established Azure components and deploy
 identity pattern; do not share Core or clinical workspace state. Provision the
 central enrollment database and runtime role independently from per-Box data.
+
+The staging-only [foundation](foundation/README.md) and unscheduled
+[database job](database-job/README.md) now provide the concrete independent
+resource/role preparation. They do not deploy an app or qualify a journey.
+Staging browser testing uses `https://onboarding.staging.cosmas.ai` with
+`https://enrollment-api.staging.cosmas.ai`, leaving the current beta origin intact.
 
 `runtime/main.tf` consumes those owned foundation resources and the rendered
 directory. It rejects cross-resource-group vault/registry/environment inputs.

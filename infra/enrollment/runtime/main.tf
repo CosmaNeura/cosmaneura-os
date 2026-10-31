@@ -1,7 +1,8 @@
 terraform {
   required_version = ">= 1.9.0"
   required_providers {
-    azurerm = { source = "registry.opentofu.org/hashicorp/azurerm", version = "~> 4.81" }
+    azurerm  = { source = "registry.opentofu.org/hashicorp/azurerm", version = "~> 4.81" }
+    external = { source = "registry.opentofu.org/hashicorp/external", version = "2.3.5" }
   }
   backend "azurerm" { use_azuread_auth = true }
 }
@@ -84,6 +85,10 @@ resource "terraform_data" "guard" {
       error_message = "All versioned secrets must resolve in the selected dedicated enrollment vault."
     }
     precondition {
+      condition     = alltrue([for reference in values(local.secrets.secret_definitions) : !contains(["enrollment-bootstrap-database-url", "enrollment-migration-database-url"], split("/", trimprefix(reference, "${var.key_vault_uri}secrets/"))[0])])
+      error_message = "Bootstrap and migration database credentials must never be mounted or authorized in product runtime."
+    }
+    precondition {
       condition     = !var.deploy_workload || var.database_preparation_qualified
       error_message = "Qualify the independent enrollment database/schema and non-admin runtime role before startup."
     }
@@ -112,7 +117,10 @@ resource "azurerm_role_assignment" "registry" {
 }
 
 resource "azurerm_role_assignment" "secrets" {
-  scope                = var.key_vault_id
+  # The vault also holds bootstrap/migration credentials; product runtime must
+  # read only the rendered application secret names, never the whole vault.
+  for_each             = toset([for reference in values(local.secrets.secret_definitions) : split("/", trimprefix(reference, "${var.key_vault_uri}secrets/"))[0]])
+  scope                = "${var.key_vault_id}/secrets/${each.value}"
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_user_assigned_identity.enrollment.principal_id
 }
@@ -177,7 +185,7 @@ resource "azurerm_container_app" "enrollment" {
       readiness_probe {
         transport               = "HTTP"
         port                    = 8000
-        path                    = "/ready"
+        path                    = "/operational-ready"
         interval_seconds        = 10
         timeout                 = 5
         failure_count_threshold = 3

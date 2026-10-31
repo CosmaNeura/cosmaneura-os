@@ -123,6 +123,7 @@ class StripeCommerce:
             raise EnrollmentError("negotiated_quote_required", "Contact us for negotiated pricing above ten humans.")
         data = {
             "mode": "subscription", "payment_method_collection": "always",
+            "payment_method_types[0]": "card",
             "line_items[0][price]": self.settings.stripe_base_price_id,
             "line_items[0][quantity]": "1",
             "client_reference_id": request["practice_id"],

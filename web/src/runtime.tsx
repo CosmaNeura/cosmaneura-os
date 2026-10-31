@@ -95,6 +95,7 @@ type RuntimeAppProps = {
   authenticatedWorkspace?: boolean;
   workspaceEnabled?: boolean;
   enrollmentEnabled?: boolean;
+  enrollmentAccountOnly?: boolean;
   enrollmentApiBase?: string;
   enrollmentClerkKey?: string;
 };
@@ -120,10 +121,20 @@ function RuntimeRoutes({
   authenticatedWorkspace = WORKSPACE_AUTHENTICATED_BUILD,
   workspaceEnabled = WORKSPACE_BUILD,
   enrollmentEnabled = import.meta.env.VITE_ENROLLMENT_ENABLED === 'true',
+  enrollmentAccountOnly = import.meta.env.VITE_ENROLLMENT_ACCOUNT_ONLY === 'true',
   enrollmentApiBase = import.meta.env.VITE_ENROLLMENT_API_BASE,
   enrollmentClerkKey = import.meta.env.VITE_ENROLLMENT_CLERK_PUBLISHABLE_KEY,
 }: RuntimeAppProps) {
-  if (enrollmentRouteRequested(enrollmentEnabled)) {
+  // A dedicated account image never mounts workspace/native branches, even at
+  // an obsolete bookmark or when a caller supplies mixed runtime props.
+  if (enrollmentAccountOnly) {
+    if (enrollmentEnabled && ['http:', 'https:'].includes(window.location.protocol)) {
+      return <EnrollmentEntry apiBase={enrollmentApiBase} publishableKey={enrollmentClerkKey}/>;
+    }
+    return <StatusScreen title="Account setup is not available yet"
+      detail="Return to the account host when account enrollment is available."/>;
+  }
+  if (enrollmentRouteRequested(enrollmentEnabled,undefined,enrollmentAccountOnly)) {
     return <EnrollmentEntry apiBase={enrollmentApiBase} publishableKey={enrollmentClerkKey}/>;
   }
   if (hostedWorkspaceRequested()) {

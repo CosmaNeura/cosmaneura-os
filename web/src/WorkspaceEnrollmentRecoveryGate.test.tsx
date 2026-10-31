@@ -20,7 +20,7 @@ beforeEach(()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);billing='allowed'
   vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>{
     const path=new URL(String(input)).pathname;
     if(path==='/practice-access/compatibility')return response(descriptor);
-    if(path==='/config')return response({enrollment_recovery_url:'https://app.cosmas.ai/onboarding'});
+    if(path==='/config')return response({enrollment_managed:true,enrollment_account_origin:'https://app.cosmas.ai',enrollment_recovery_url:'https://app.cosmas.ai/onboarding'});
     if(billing!=='allowed'){const code=billing==='unavailable'?'workspace_enrollment_admission_unavailable':'workspace_enrollment_access_required';return response({detail:code},billing==='unavailable'?503:403,{'X-Cosmas-Enrollment-Admission':code});}
     return response(path==='/account/identity'?{allowed:true}:[]);
   }));
@@ -50,24 +50,58 @@ it('withholds access when admission is unavailable and suppresses a late success
   finish(response({private:'late private content'}));expect(await late).toMatchObject({status:403});
   expect(host.textContent).not.toContain('Invented private content');expect(host.textContent).toContain('could not confirm your practice account');
 });
-it('accepts only the exact owned recovery destination without staging or URL input',()=>{
-  expect(enrollmentRecoveryDestination('https://app.cosmas.ai/onboarding')).toBe('https://app.cosmas.ai/onboarding');
-  for(const value of [null,'https://staging.cosmas.ai/onboarding','https://app.cosmas.ai.evil.invalid/onboarding','https://user@app.cosmas.ai/onboarding','https://app.cosmas.ai/onboarding?trial=new','https://app.cosmas.ai/sign-in'])expect(enrollmentRecoveryDestination(value)).toBeNull();
+it('accepts only the exact owned recovery destination bound by the managed runtime',()=>{
+  expect(enrollmentRecoveryDestination('https://app.cosmas.ai/onboarding',undefined,'https://app.cosmas.ai')).toBe('https://app.cosmas.ai/onboarding');
+  expect(enrollmentRecoveryDestination('https://app.cosmas.ai/onboarding')).toBeNull();
+  for(const value of [null,'https://staging.cosmas.ai/onboarding','https://app.cosmas.ai.evil.invalid/onboarding','https://user@app.cosmas.ai/onboarding','https://app.cosmas.ai/onboarding?trial=new','https://app.cosmas.ai/sign-in'])expect(enrollmentRecoveryDestination(value,undefined,'https://app.cosmas.ai')).toBeNull();
 });
 it('admits only an explicitly configured stage recovery URL with the trusted staging API, and keeps production separate',()=>{
   const stage='https://staging.cosmas.ai/onboarding',production='https://app.cosmas.ai/onboarding';
   for(const origin of ['https://staging.cosmas.ai','https://api.staging.cosmas.ai','https://api.invented-clinic.staging.cosmas.ai']){
-    expect(enrollmentRecoveryDestination(stage,origin)).toBe(stage);expect(enrollmentRecoveryDestination(null,origin)).toBeNull();expect(enrollmentRecoveryDestination(production,origin)).toBeNull();
+    expect(enrollmentRecoveryDestination(stage,origin,'https://staging.cosmas.ai')).toBe(stage);expect(enrollmentRecoveryDestination(null,origin,'https://staging.cosmas.ai')).toBeNull();expect(enrollmentRecoveryDestination(production,origin,'https://app.cosmas.ai')).toBeNull();
   }
   for(const origin of ['https://api.cosmas.ai','https://api.invented-clinic.workspace.cosmas.ai']){
-    expect(enrollmentRecoveryDestination(production,origin)).toBe(production);expect(enrollmentRecoveryDestination(stage,origin)).toBeNull();
+    expect(enrollmentRecoveryDestination(production,origin,'https://app.cosmas.ai')).toBe(production);expect(enrollmentRecoveryDestination(stage,origin,'https://staging.cosmas.ai')).toBeNull();
   }
-  for(const api of ['http://staging.cosmas.ai','https://staging.cosmas.ai.evil.invalid','https://staging.cosmas.ai:8443','https://user@staging.cosmas.ai','https://staging.cosmas.ai?next=evil','https://staging.cosmas.ai/#redirect'])expect(enrollmentRecoveryDestination(stage,api)).toBeNull();
-  for(const value of [stage+'?next=https://app.cosmas.ai',stage+'#redirect','https://staging.cosmas.ai/sign-in','https://user@staging.cosmas.ai/onboarding','https://other.invalid/onboarding'])expect(enrollmentRecoveryDestination(value,'https://staging.cosmas.ai')).toBeNull();
+  for(const api of ['http://staging.cosmas.ai','https://staging.cosmas.ai.evil.invalid','https://staging.cosmas.ai:8443','https://user@staging.cosmas.ai','https://staging.cosmas.ai?next=evil','https://staging.cosmas.ai/#redirect'])expect(enrollmentRecoveryDestination(stage,api,'https://staging.cosmas.ai')).toBeNull();
+  for(const value of [stage+'?next=https://app.cosmas.ai',stage+'#redirect','https://staging.cosmas.ai/sign-in','https://user@staging.cosmas.ai/onboarding','https://other.invalid/onboarding'])expect(enrollmentRecoveryDestination(value,'https://staging.cosmas.ai','https://staging.cosmas.ai')).toBeNull();
+});
+it('uses the separate staging account host only when it matches the immutable account binding',()=>{
+  const account='https://onboarding.staging.cosmas.ai',url=account+'/onboarding',api='https://api.invented-clinic.staging.cosmas.ai';
+  expect(enrollmentRecoveryDestination(url,api,account)).toBe(url);
+  expect(enrollmentRecoveryDestination(url,api,'https://staging.cosmas.ai')).toBeNull();
+  expect(enrollmentRecoveryDestination('https://staging.cosmas.ai/onboarding',api,account)).toBeNull();
+  for(const binding of [undefined,null,account+'/',account+':443',account+'?next=evil','https://user@onboarding.staging.cosmas.ai','https://onboarding.staging.cosmas.ai.evil.invalid','https://other.invalid'])
+    expect(enrollmentRecoveryDestination(url,api,binding)).toBeNull();
+  expect(enrollmentRecoveryDestination('https://other.invalid/onboarding',api,'https://other.invalid')).toBeNull();
+  expect(enrollmentRecoveryDestination(url,'https://api.cosmas.ai',account)).toBeNull();
+});
+it('renders recovery at the separately bound staging account host after a real hold',async()=>{
+  const stageApi='https://api.invented-clinic.staging.cosmas.ai',account='https://onboarding.staging.cosmas.ai';
+  vi.stubEnv('VITE_API_BASE',stageApi);vi.stubEnv('VITE_WORKSPACE_HOSTED_API_ORIGIN',stageApi);
+  const existing=vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation((input,init)=>new URL(String(input)).pathname==='/config'
+    ?Promise.resolve(response({enrollment_managed:true,enrollment_account_origin:account,enrollment_recovery_url:account+'/onboarding'})):existing(input,init));
+  const id=identity();await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><p>Invented work</p></WorkspaceCompatibilityGate>));
+  billing='canceled';await act(async()=>{await expect(workspaceApi.catalog(id)).rejects.toMatchObject({status:403});});
+  await wait(()=>expect(host.querySelector('a')?.getAttribute('href')).toBe(account+'/onboarding'));
+});
+it('does not release an existing hold when the signed session becomes obsolete during recovery',async()=>{
+  let current=true;const id={...identity(),nativeSession:{revision:'invented-session',isCurrent:()=>current}};
+  await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><p>Invented private work</p></WorkspaceCompatibilityGate>));
+  billing='canceled';await act(async()=>{await expect(workspaceApi.catalog(id)).rejects.toMatchObject({status:403});});
+  let finish!:(value:Response)=>void;const existing=vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation((input,init)=>new URL(String(input)).pathname==='/account/identity'
+    ?new Promise(resolve=>{finish=resolve;}):existing(input,init));
+  billing='allowed';await act(async()=>{host.querySelector<HTMLButtonElement>('.workspace-enrollment-recovery button')!.click();});
+  await wait(()=>expect(finish).toBeTypeOf('function'));current=false;
+  await act(async()=>{finish(response({allowed:true}));});
+  await wait(()=>expect(host.textContent).toContain('Practice access is still paused'));
+  expect(workspaceEnrollmentHold(id)).toBe('workspace_enrollment_access_required');expect(host.textContent).not.toContain('Invented private work');
 });
 it('returns no recovery URL for missing, foreign or malformed API origins',()=>{
   for(const origin of ['', 'https://api.example.invalid','https://cosmas.ai','https://app.cosmas.ai','https://enrollment-api.staging.cosmas.ai','https://api.clinic.staging.cosmas.ai.evil.invalid','https://api.-clinic.staging.cosmas.ai','https://api.clinic-.workspace.cosmas.ai','https://api.clinic.extra.workspace.cosmas.ai','https://api.cosmas.ai/config','https://api.cosmas.ai?next=evil','https://api.cosmas.ai/#redirect','https://user@api.cosmas.ai','https://api.cosmas.ai:443','https://api.cosmas.ai/'])
-    for(const value of ['https://app.cosmas.ai/onboarding','https://staging.cosmas.ai/onboarding'])expect(enrollmentRecoveryDestination(value,origin)).toBeNull();
+    for(const account of ['https://app.cosmas.ai','https://staging.cosmas.ai','https://onboarding.staging.cosmas.ai'])expect(enrollmentRecoveryDestination(account+'/onboarding',origin,account)).toBeNull();
   vi.stubEnv('VITE_WORKSPACE_HOSTED_ENABLED','false');vi.stubEnv('VITE_API_BASE',undefined);expect(enrollmentRecoveryDestination('https://app.cosmas.ai/onboarding')).toBeNull();
 });
 it('cancels an enrollment denial without reading its opaque response body',async()=>{

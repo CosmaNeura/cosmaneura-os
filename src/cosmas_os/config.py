@@ -799,10 +799,15 @@ class Settings(BaseSettings):
         return []
 
     @property
-    def enrollment_recovery_url(self) -> str | None:
+    def enrollment_account_origin(self) -> str | None:
         if self.workspace_enrollment_managed and not self.workspace_enrollment_configuration_errors() and self.workspace_enrollment_account_origin:
-            return self.workspace_enrollment_account_origin + "/onboarding"
+            return self.workspace_enrollment_account_origin
         return None
+
+    @property
+    def enrollment_recovery_url(self) -> str | None:
+        origin = self.enrollment_account_origin
+        return origin + "/onboarding" if origin else None
 
     def _beta_configuration_errors(self) -> list[str]:
         """Independent cloud prerequisites; never call workspace_available here."""

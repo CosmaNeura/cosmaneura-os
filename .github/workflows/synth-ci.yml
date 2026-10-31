@@ -130,6 +130,17 @@ jobs:
       - name: Build
         working-directory: web
         run: pnpm build
+      - name: Build separate fail-closed staging account artifact
+        working-directory: web
+        env:
+          VITE_ENROLLMENT_ENABLED: 'true'
+          VITE_ENROLLMENT_ACCOUNT_ONLY: 'true'
+          VITE_ENROLLMENT_ACCOUNT_ORIGIN: https://onboarding.staging.cosmas.ai
+          VITE_ENROLLMENT_API_BASE: https://enrollment-api.staging.cosmas.ai
+          VITE_ENROLLMENT_CLERK_ISSUER: https://invented-clinic.clerk.accounts.dev
+          VITE_ENROLLMENT_CLERK_PUBLISHABLE_KEY: pk_test_aW52ZW50ZWQtY2xpbmljLmNsZXJrLmFjY291bnRzLmRldiQ
+          VITE_BUILD_SHA: ${{ github.sha }}
+        run: pnpm run build:enrollment
       - name: Build fail-closed beta artifact with public synthetic configuration
         working-directory: web
         env:
@@ -305,6 +316,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: opentofu/setup-opentofu@v1
         with:
           tofu_version: 1.12.5
@@ -321,10 +335,53 @@ jobs:
           bash -n infra/beta/*.sh infra/beta/tests/*.sh
           bash infra/beta/tests/deployment-guards.sh
       - name: Enrollment configuration contract
-        run: node --test infra/enrollment/render.test.mjs
+        run: |
+          node --test infra/enrollment/render.test.mjs infra/enrollment/verify-staging-hosts.test.mjs web/scripts/enrollment-hosting.test.mjs infra/enrollment/workspaces/render.test.mjs
+          python3 -m unittest discover -s infra/enrollment/runtime/tests -p test_dns.py -v
       - name: Validate independent enrollment runtime
         working-directory: infra/enrollment/runtime
-        run: tofu fmt -check && tofu init -backend=false -input=false && tofu validate -no-color
+        run: tofu fmt -check && tofu init -backend=false -input=false -lockfile=readonly && tofu validate -no-color && tofu test -no-color
+      - name: Validate isolated staging enrollment foundation
+        working-directory: infra/enrollment/foundation
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          foundation_fixture="$(mktemp -d "$RUNNER_TEMP/enrollment-foundation-mock.XXXXXX")"
+          trap 'rm -rf "$foundation_fixture"' EXIT
+          printf '%s\n' 'synthetic-foundation-encryption-fixture-never-live' > "$foundation_fixture/encryption.passphrase"
+          export TF_VAR_bootstrap_key_file="$foundation_fixture/encryption.passphrase"
+          export TF_DATA_DIR="$foundation_fixture/tofu-data"
+          tofu fmt -check
+          tofu init -backend=false -input=false -lockfile=readonly
+          tofu validate -no-color
+          tofu test -no-color
+      - name: Validate isolated two-practice workspace mock plans
+        working-directory: infra/enrollment/workspaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          workspace_fixture="$(mktemp -d "$RUNNER_TEMP/enrollment-workspace-mock.XXXXXX")"
+          trap 'rm -rf "$workspace_fixture"; rm -f tests/.generated-stores.json tests/.generated-migrate.json tests/.generated-workloads.json' EXIT
+          printf '%s\n' 'synthetic-workspace-encryption-fixture-never-live' > "$workspace_fixture/encryption.passphrase"
+          export TF_VAR_encryption_key_file="$workspace_fixture/encryption.passphrase"
+          export TF_DATA_DIR="$workspace_fixture/tofu-data"
+          export TF_VAR_deployment_file="$PWD/tests/.generated-stores.json"
+          export TF_VAR_postgres_admin_passwords='{"a":"synthetic-only-admin-password-a-never-live","b":"synthetic-only-admin-password-b-never-live"}'
+          node fixtures.mjs
+          tofu fmt -check
+          tofu init -backend=false -input=false -lockfile=readonly
+          tofu validate -no-color
+          tofu test -no-color
+      - name: Validate private enrollment database job
+        working-directory: infra/enrollment/database-job
+        run: tofu fmt -check && tofu init -backend=false -input=false && tofu validate -no-color && tofu test -no-color
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Protected staging credential preparation
+        run: uv run --extra dev pytest infra/enrollment/foundation/tests/test_bootstrap.py -q
 
   enrollment-journey:
     name: enrollment-journey
@@ -363,6 +420,28 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+      - name: Install native PostgreSQL 16 for private bootstrap rehearsals
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql-16 postgresql-server-dev-16
+          test -x /usr/lib/postgresql/16/bin/initdb
+          test -x /usr/lib/postgresql/16/bin/pg_ctl
+          test -x /usr/lib/postgresql/16/bin/pg_config
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
+      - name: Actual private enrollment bootstrap migrations and SQL role checks
+        env:
+          ENROLLMENT_FOUNDATION_POSTGRES_BIN: /usr/lib/postgresql/16/bin
+        run: uv run pytest infra/enrollment/database-job/tests/test_roles.py -q --basetemp="$RUNNER_TEMP/enrollment-foundation-role-pytest"
+      - name: Two isolated practice databases and signed setup HTTP recovery
+        env:
+          ENROLLMENT_WORKSPACE_LOCAL_REHEARSAL: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(pg_config --bindir)" = /usr/lib/postgresql/16/bin
+          uv run pytest infra/enrollment/workspaces/test_bridge.py -q --basetemp="$RUNNER_TEMP/enrollment-workspace-pytest"
       - run: corepack enable
       - run: ./scripts/install-client-deps.sh
       - name: Browser journey against actual synthetic HTTP API

@@ -42,6 +42,7 @@ from .models import (
     Practice,
     StripeInbox,
 )
+from .period_time import PeriodTime
 from .stripe import EVENT_TYPES, hosted_url
 from .workspace import WorkspaceConfirmationRequest, WorkspaceConfirmer
 
@@ -51,8 +52,20 @@ def identifier() -> str:
 
 
 class EnrollmentService:
-    def __init__(self, sessions: sessionmaker, settings: EnrollmentSettings, commerce: CommercePort):
+    def __init__(self, sessions: sessionmaker, settings: EnrollmentSettings, commerce: CommercePort,
+                 *, period_time: PeriodTime | None = None):
         self.sessions, self.settings, self.commerce = sessions, settings, commerce
+        if period_time is not None and settings.data_mode != "synthetic":
+            raise ValueError("Synthetic period time cannot be installed in production enrollment")
+        self._period_time = period_time
+
+    def _period_now(self) -> datetime:
+        if self._period_time is not None and self.settings.data_mode != "synthetic":
+            raise ValueError("Synthetic period time cannot be used in production enrollment")
+        value = self._period_time.now() if self._period_time is not None else now_utc()
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("Period time must be timezone aware")
+        return value.astimezone(UTC)
 
     def _account(self, session: Session, identity: HumanIdentity) -> Account:
         account = session.scalar(select(Account).where(Account.issuer == identity.issuer,
@@ -93,9 +106,9 @@ class EnrollmentService:
         if not practice.billing_verified_at or utc(practice.billing_verified_at) < current - timedelta(minutes=5):
             return False
         if practice.subscription_status == "trialing":
-            return bool(practice.trial_ends_at and utc(practice.trial_ends_at) > current)
+            return bool(practice.trial_ends_at and utc(practice.trial_ends_at) > self._period_now())
         return bool(practice.subscription_status == "active" and practice.paid_period_ends_at
-                    and utc(practice.paid_period_ends_at) > current)
+                    and utc(practice.paid_period_ends_at) > self._period_now())
 
     def _view(self, session: Session, account: Account) -> dict[str, Any]:
         result: dict[str, Any] = {"contract_version": CONTRACT, "revision": account.revision,
@@ -140,8 +153,8 @@ class EnrollmentService:
             result["stage"] = "canceled"
         elif action:
             result["stage"] = "payment_action_required"
-        elif ((status == "trialing" and practice.trial_ends_at and utc(practice.trial_ends_at) <= now_utc())
-              or (status == "active" and practice.paid_period_ends_at and utc(practice.paid_period_ends_at) <= now_utc())):
+        elif ((status == "trialing" and practice.trial_ends_at and utc(practice.trial_ends_at) <= self._period_now())
+              or (status == "active" and practice.paid_period_ends_at and utc(practice.paid_period_ends_at) <= self._period_now())):
             result["stage"] = "payment_action_required"
             result["billing"]["payment_action_required"] = True
             result["action_required"] = "Your billing period ended. Check billing to restore access."
@@ -165,8 +178,8 @@ class EnrollmentService:
                 practice, _ = self._practice(session, account)
                 if practice.stripe_subscription_id and (not practice.billing_verified_at
                         or utc(practice.billing_verified_at) <= now_utc() - timedelta(minutes=5)
-                        or practice.subscription_status == "trialing" and practice.trial_ends_at and utc(practice.trial_ends_at) <= now_utc()
-                        or practice.subscription_status == "active" and practice.paid_period_ends_at and utc(practice.paid_period_ends_at) <= now_utc()):
+                        or practice.subscription_status == "trialing" and practice.trial_ends_at and utc(practice.trial_ends_at) <= self._period_now()
+                        or practice.subscription_status == "active" and practice.paid_period_ends_at and utc(practice.paid_period_ends_at) <= self._period_now()):
                     # Any currently authorized human may refresh provider evidence.
                     # This grants no billing controls and performs no Stripe writes.
                     self._refresh_subscription(session, practice)
@@ -212,15 +225,21 @@ class EnrollmentService:
                     reason = "workspace_not_ready"
                 else:
                     if (not practice.billing_verified_at or utc(practice.billing_verified_at) <= now_utc() - timedelta(minutes=5)
-                            or practice.subscription_status == "trialing" and practice.trial_ends_at and utc(practice.trial_ends_at) <= now_utc()
-                            or practice.subscription_status == "active" and practice.paid_period_ends_at and utc(practice.paid_period_ends_at) <= now_utc()):
+                            or practice.subscription_status == "trialing" and practice.trial_ends_at and utc(practice.trial_ends_at) <= self._period_now()
+                            or practice.subscription_status == "active" and practice.paid_period_ends_at and utc(practice.paid_period_ends_at) <= self._period_now()):
                         self._refresh_subscription(session, practice)
                     allowed, reason = self._entitled(practice), "billing_required"
                     if allowed:
                         reason = "setup_qualified" if request.purpose == "qualification" else "entitled"
                         end = practice.trial_ends_at if practice.subscription_status == "trialing" else practice.paid_period_ends_at
                         assert end and practice.billing_verified_at
-                        expires = min(expires, utc(end).timestamp(), (utc(practice.billing_verified_at) + timedelta(minutes=5)).timestamp())
+                        # Project virtual business duration onto wall-time TTL;
+                        # JWT, signature and nonce clocks never move with Stripe.
+                        wall_now = now_utc()
+                        period_now = self._period_now() if self._period_time is not None else wall_now
+                        remaining = (utc(end) - period_now).total_seconds()
+                        expires = min(expires, wall_now.timestamp() + remaining,
+                                      (utc(practice.billing_verified_at) + timedelta(minutes=5)).timestamp())
             return {**request.model_dump(exclude={"token_sha256", "issued_at"}), "request_issued_at": request.issued_at,
                     "decision": "allow" if allowed else "deny", "reason": reason,
                     "member_role": member.role if allowed and member else None,

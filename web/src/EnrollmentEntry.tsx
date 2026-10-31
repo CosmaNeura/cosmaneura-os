@@ -6,9 +6,9 @@ import { EnrollmentFlow } from './EnrollmentFlow';
 import { prepareEnrollmentWorkspaceToken } from './enrollment-clerk';
 import './enrollment.css';
 
-export function enrollmentRouteRequested(enabled=import.meta.env.VITE_ENROLLMENT_ENABLED==='true',href=window.location.href):boolean {
+export function enrollmentRouteRequested(enabled=import.meta.env.VITE_ENROLLMENT_ENABLED==='true',href=window.location.href,accountOnly=import.meta.env.VITE_ENROLLMENT_ACCOUNT_ONLY==='true'):boolean {
   try{const page=new URL(href);return enabled&&['http:','https:'].includes(page.protocol)&&
-    ['/onboarding','/enroll','/sign-in','/sign-up'].includes(page.pathname.replace(/\/$/,''));}catch{return false;}
+    (accountOnly&&page.pathname==='/'||['/onboarding','/enroll','/sign-in','/sign-up'].includes(page.pathname.replace(/\/$/,'')));}catch{return false;}
 }
 function returnPath(search:string):string {
   const input=new URLSearchParams(search),safe=new URLSearchParams();

@@ -42,12 +42,14 @@ The current Checkout explicitly adds no tax, discounts, fees or add-ons.
 
 The two fixed recurring Stripe prices are independently verified: $300 × 1 and
 $100 × (humans − 1), USD monthly licensed/per-unit, with an exact 14-day trial
-and payment-method collection always. Root deployment operators must create
-Cosmas-specific products/prices and a pinned portal configuration; the adapter
+and card-only payment-method collection always. Root deployment operators must
+create Cosmas-specific products/prices and a pinned portal configuration; the adapter
 performs no account/catalog mutation. The portal allows payment methods/invoices
 and cancellation at period end; plan/customer edits are disabled. Verify in a
 real Stripe test clock that trial cancellation prevents the first charge and
 that configured reminders are delivered. Mocked transports do not prove this.
+The [TEST operator procedure](../../../docs/STRIPE_TEST_QUALIFICATION.md) lists
+the exact setup and distinguishes provider clocks from the bound runtime journey.
 
 Checkout starts only after the private provisioner records a qualified ready
 workspace. The browser cannot mark a workspace ready. Root's provisioner owns

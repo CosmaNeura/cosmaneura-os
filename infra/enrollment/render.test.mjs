@@ -23,7 +23,17 @@ test('a prepared configuration does not grant registration, trial access or depl
   assert.equal(files['deployment-contract.json'].pricing.above_limit, 'negotiated');
   assert.equal(files['public-env.json'].ENROLLMENT_CLERK_SESSION_POLICY, 'default_session');
   assert.equal(files['web-build-env.json'].VITE_ENROLLMENT_API_BASE, sample().api_origin);
+  assert.equal(files['web-build-env.json'].VITE_ENROLLMENT_ACCOUNT_ONLY, 'true');
   assert.equal('ENROLLMENT_CLERK_AUDIENCE' in files['public-env.json'], false);
+});
+
+test('the separate staging account build owns its root without replacing beta workspace configuration', () => {
+  const files = render({ ...sample(), app_origin: 'https://onboarding.staging.cosmas.ai' });
+  assert.equal(files['public-env.json'].ENROLLMENT_PUBLIC_APP_ORIGIN, 'https://onboarding.staging.cosmas.ai');
+  assert.equal(files['web-build-env.json'].VITE_ENROLLMENT_ACCOUNT_ONLY, 'true');
+  assert.equal(files['web-build-env.json'].VITE_ENROLLMENT_API_BASE, 'https://enrollment-api.staging.cosmas.ai');
+  assert.equal('VITE_CLERK_PUBLISHABLE_KEY' in files['web-build-env.json'], false);
+  assert.equal('VITE_API_BASE' in files['web-build-env.json'], false);
 });
 
 test('wrong product origins and mismatched Clerk identity are rejected', () => {

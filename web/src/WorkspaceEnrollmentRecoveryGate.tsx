@@ -10,14 +10,18 @@ import {WorkspaceStartupShell} from './WorkspaceStartupShell';
 import './workspace-enrollment.css';
 import {hostedWorkspaceConfiguration} from './hosted-workspace';
 
-export function enrollmentRecoveryDestination(value:unknown,apiBase=hostedWorkspaceConfiguration()?.apiOrigin??import.meta.env.VITE_API_BASE):string|null{
+export function enrollmentRecoveryDestination(value:unknown,apiBase=hostedWorkspaceConfiguration()?.apiOrigin??import.meta.env.VITE_API_BASE,accountOrigin?:unknown):string|null{
   try{
     if(typeof apiBase!=='string')return null;const api=new URL(apiBase);
     if(apiBase!==api.origin||api.protocol!=='https:'||api.username||api.password||api.port||api.search||api.hash||api.pathname!=='/')return null;
     const staging=['staging.cosmas.ai','api.staging.cosmas.ai'].includes(api.hostname)||/^api\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.staging\.cosmas\.ai$/.test(api.hostname);
     const production=api.hostname==='api.cosmas.ai'||/^api\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.workspace\.cosmas\.ai$/.test(api.hostname);
     if(!staging&&!production)return null;
-    const expected=staging?'https://staging.cosmas.ai/onboarding':'https://app.cosmas.ai/onboarding';return value===expected?expected:null;
+    // The runtime supplies its validated immutable account binding. Never infer
+    // a destination from an API hostname or accept a browser-provided redirect.
+    const allowed=staging?['https://staging.cosmas.ai','https://onboarding.staging.cosmas.ai']:['https://app.cosmas.ai'];
+    if(typeof accountOrigin!=='string'||!allowed.includes(accountOrigin))return null;
+    const expected=accountOrigin+'/onboarding';return value===expected?expected:null;
   }catch{return null;}
 }
 async function bounded<T>(signal:AbortSignal|undefined,work:(signal:AbortSignal)=>Promise<T>):Promise<T>{
@@ -44,7 +48,7 @@ async function recoveryLink(identity:AuthenticatedWorkspaceIdentity,signal:Abort
   try{for(;;){signal.throwIfAborted();const part=await reader.read();signal.throwIfAborted();if(part.done)break;
     if(part.value.length>bytes.length-size)throw new WorkspaceApiError(503);bytes.set(part.value,size);size+=part.value.length;}
     const value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(0,size)));
-    return enrollmentRecoveryDestination(value?.enrollment_recovery_url);
+    return value?.enrollment_managed===true?enrollmentRecoveryDestination(value?.enrollment_recovery_url,undefined,value?.enrollment_account_origin):null;
   }finally{signal.removeEventListener('abort',cancel);cancel();}
 }
 export function WorkspaceEnrollmentRecoveryGate({identity,accountControls,children}:{identity:AuthenticatedWorkspaceIdentity;accountControls?:ReactNode;children:ReactNode}){

@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 import {resolveHostedWorkspace} from "../clients/shared/hosted-workspace-config.mjs";
 import {resolveBetaFeatureProfile} from "../clients/shared/beta-feature-profile.mjs";
 import {resolveCommitSha, utcStamp, versionAsset} from "./scripts/version-json.mjs";
+import {resolveEnrollmentBuild} from "./scripts/enrollment-build-config.mjs";
 
 let hostedBuild: ReturnType<typeof resolveHostedWorkspace> = null;
 let featureBuild: ReturnType<typeof resolveBetaFeatureProfile> | null = null;
+let enrollmentBuild: ReturnType<typeof resolveEnrollmentBuild> | null = null;
 
 function resolveBuildSha(env: Record<string, string>) {
   const configured = env.VITE_BUILD_SHA?.trim();
@@ -36,6 +38,10 @@ export default defineConfig(({mode}) => {
       const buildEnv = loadEnv(buildMode, config.envDir ?? fileURLToPath(new URL('./', import.meta.url)), "VITE_");
       featureBuild = null;
       hostedBuild = null;
+      enrollmentBuild = null;
+      if (buildEnv.VITE_ENROLLMENT_ACCOUNT_ONLY === 'true') {
+        enrollmentBuild = resolveEnrollmentBuild(buildEnv);
+      }
       if (buildEnv.VITE_WORKSPACE_HOSTED_ENABLED === 'true' || buildEnv.VITE_WORKSPACE_FEATURE_PROFILE) {
         featureBuild = resolveBetaFeatureProfile(buildEnv);
         hostedBuild = resolveHostedWorkspace(featureBuild.env);
@@ -59,6 +65,17 @@ export default defineConfig(({mode}) => {
         source: JSON.stringify({version: 1, ...hostedBuild}) + "\n"});
       if (featureBuild) this.emitFile({type: 'asset', fileName: 'cosmas-beta-features.json',
         source: JSON.stringify(featureBuild.manifest) + '\n'});
+      if (enrollmentBuild) this.emitFile({type: 'asset', fileName: 'cosmas-enrollment-build.json',
+        source: JSON.stringify(enrollmentBuild) + '\n'});
+    },
+    transformIndexHtml(html) {
+      if (!enrollmentBuild) return html;
+      return html.replace('CosmasOS · Provider workspace', 'CosmaBot · Account setup')
+        .replace('Opening your workspace…', 'Opening your account…')
+        .replace('If this screen remains, close and reopen CosmasOS. Your saved work has not been reset.',
+          'If this screen remains, reload this page. Your saved account setup has not been reset.')
+        .replace('Check any unconfirmed requests before retrying. If the app still cannot open, contact your beta administrator.',
+          'Your trial starts after your workspace is ready. If account setup remains unavailable, contact john@cosmaneura.com.');
     },
   }],
   resolve: { alias: {

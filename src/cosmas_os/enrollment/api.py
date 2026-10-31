@@ -220,6 +220,14 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
     def health():
         return {"status": "ok", "component": "enrollment", "data_mode": settings.data_mode}
 
+    @app.get("/operational-ready")
+    def operational_ready():
+        # Keep closed enrollment reachable for configuration/recovery messages.
+        # Registration, billing and workspace admission remain separate gates.
+        available = bool(db_ready and schema_ready(engine))
+        return JSONResponse({"component": "enrollment", "operational_ready": available},
+                            status_code=200 if available else 503)
+
     @app.get("/ready")
     def ready():
         config = current_config()

@@ -3,6 +3,8 @@
 interface ImportMetaEnv {
   /** Independent enrollment service; never inherit the clinical API/Org configuration. */
   readonly VITE_ENROLLMENT_ENABLED?: string;
+  /** Only the dedicated central account build replaces its root with enrollment. */
+  readonly VITE_ENROLLMENT_ACCOUNT_ONLY?: string;
   readonly VITE_ENROLLMENT_API_BASE?: string;
   readonly VITE_ENROLLMENT_CLERK_PUBLISHABLE_KEY?: string;
   readonly VITE_WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED?: string;

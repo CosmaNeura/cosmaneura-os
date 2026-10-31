@@ -162,6 +162,7 @@ def test_real_stripe_transport_freezes_approved_price_total_exact_trial_and_card
     assert data["line_items[1][quantity]"] == ["9"]
     assert data["subscription_data[trial_period_days]"] == ["14"]
     assert data["payment_method_collection"] == ["always"]
+    assert data["payment_method_types[0]"] == ["card"]
     assert data["metadata[monthly_total_cents]"] == ["120000"]
     assert data["automatic_tax[enabled]"] == ["false"]
     assert data["subscription_data[trial_settings][end_behavior][missing_payment_method]"] == ["pause"]

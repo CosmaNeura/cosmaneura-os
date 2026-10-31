@@ -152,7 +152,10 @@ export function render(input) {
   return {
     'public-env.json': publicEnv,
     'secret-references.json': { secret_definitions: secretDefinitions, secret_env: secretEnv },
-    'web-build-env.json': { VITE_ENROLLMENT_ENABLED: 'true', VITE_ENROLLMENT_API_BASE: api },
+    'web-build-env.json': { VITE_ENROLLMENT_ENABLED: 'true', VITE_ENROLLMENT_ACCOUNT_ONLY: 'true',
+      VITE_ENROLLMENT_ACCOUNT_ORIGIN: app, VITE_ENROLLMENT_API_BASE: api,
+      VITE_ENROLLMENT_CLERK_ISSUER: issuer, VITE_ENROLLMENT_CLERK_PUBLISHABLE_KEY: input.clerk.publishable_key,
+      VITE_BUILD_SHA: input.source_commit },
     'workspace-account-env.json': Object.fromEntries(workspaceOrigins.map(workspace => [workspace, {
       CLERK_ISSUER: issuer,
       CLERK_JWKS_URL: `${issuer}/.well-known/jwks.json`,
