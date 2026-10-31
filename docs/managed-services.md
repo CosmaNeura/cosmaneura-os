@@ -168,7 +168,7 @@ provider request.
 The server inspects received PDFs in a separate process: at most 1 MiB and 50
 pages, five seconds elapsed, three seconds CPU and a 256 MiB memory bound. It
 rejects encrypted documents, embedded files, forms, scripts and external actions.
-The pinned optional dependency is `pypdf==6.21.2`. For a local runtime, install the
+The pinned optional dependency is `pypdf==6.21.4`. For a local runtime, install the
 `efax-inbound` extra from the reviewed lock. The API image includes this extra;
 an absent parser or unsupported resource fence leaves image acquisition
 unavailable. This inspection supplies a page count, not OCR or a transcription.
