@@ -1,4 +1,9 @@
-"""Bounded authenticated HTTP execution; no lab fixtures or vendor credentials."""
+"""Bounded authenticated HTTP execution; no lab fixtures or vendor credentials.
+
+This module does not log requests. httpx writes the request URL, including the
+query string, on the ``httpx`` logger. The plugin server installs the shared
+log scrubber before the first request, and tool results are not passed through it.
+"""
 
 import base64
 import hashlib
