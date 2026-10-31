@@ -58,8 +58,17 @@ settings; the browser obtains public Clerk/pricing/readiness from `/enrollment/v
 
 `readiness` contains explicit booleans corresponding to the backend admission
 flags. All omitted flags are false. `qualification.source_commit` binds the
-selected source; enabling registration/verified methods/acquisition also needs
-the staged `journey_sha256`. Production registration additionally requires the
+selected source. The fixed synthetic Development account host can admit intake
+with a separately trusted, source-bound [staging preflight](STAGING-PREFLIGHT.md),
+while acquisition and activation remain false. This resolves the first saved
+practice dependency using actual configured-method metadata without claiming
+completed password/OAuth sign-ins. Those end-to-end checks follow admitted
+intake and remain part of the full journey. The existing
+`clerk_methods_verified` readiness flag represents the checked configuration
+for this narrow preflight, while ordinary live JWT/BAPI verification is still
+required for every actual sign-in. Acquisition and
+activation still need the staged `journey_sha256`; production cannot use the
+intake preflight. Production registration additionally requires the
 actual `production_sha256` and `production_qualified`. These are reviewed
 receipt references, not new user approval prompts or a replacement for runtime
 validation. Unusable workspaces never start a fourteen-day trial.

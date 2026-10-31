@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { verifyStagingPreflight } from './staging-preflight.mjs';
 
 const SECRET_NAMES = new Set([
   'ENROLLMENT_DATABASE_URL', 'ENROLLMENT_CLERK_SECRET_KEY', 'ENROLLMENT_INVITATION_SECRET', 'ENROLLMENT_RUNTIME_ADMISSION_SECRET',
@@ -39,7 +40,7 @@ function origin(value, environment, label) {
   return url.origin;
 }
 
-export function render(input) {
+export function render(input, { preflightTrustFile } = {}) {
   exact(input, ['version', 'environment', 'source_commit', 'image', 'app_origin', 'api_origin',
     'workspace_origins', 'clerk', 'stripe', 'secret_references', 'readiness', 'qualification'], 'enrollment manifest');
   requireValue(input.version === 1 && ['staging', 'production'].includes(input.environment), 'Unsupported enrollment environment.');
@@ -88,9 +89,19 @@ export function render(input) {
   exact(input.readiness, [...FLAGS], 'readiness');
   requireValue(Object.values(input.readiness).every(value => typeof value === 'boolean'), 'Readiness fields must be booleans.');
   const flags = Object.fromEntries([...FLAGS].map(name => [name, input.readiness[name] ?? false]));
-  exact(input.qualification, ['source_commit', 'journey_sha256', 'production_sha256'], 'qualification');
+  exact(input.qualification, ['source_commit', 'journey_sha256', 'production_sha256', 'staging_preflight'], 'qualification');
   requireValue(input.qualification.source_commit === input.source_commit, 'Qualification must bind the selected source.');
-  if (flags.enabled || flags.clerk_methods_verified || flags.stripe_acquisition_enabled) {
+  const journeyQualified = /^[0-9a-f]{64}$/.test(input.qualification.journey_sha256 ?? '');
+  let stagingPreflight;
+  if (input.qualification.staging_preflight !== undefined) {
+    requireValue(environment === 'staging' && !flags.stripe_acquisition_enabled && !flags.activation_available && !flags.production_qualified,
+      'Development intake preflight cannot authorize acquisition, activation or production.');
+    stagingPreflight = verifyStagingPreflight(input, input.qualification.staging_preflight, preflightTrustFile);
+  }
+  if (flags.enabled || flags.clerk_methods_verified) {
+    requireValue(journeyQualified || stagingPreflight, 'Enabled registration needs a trusted configured-method staging intake preflight or full journey receipt.');
+  }
+  if (flags.stripe_acquisition_enabled || flags.activation_available) {
     requireValue(/^[0-9a-f]{64}$/.test(input.qualification.journey_sha256 ?? ''), 'Enabled enrollment needs its staged journey receipt.');
   }
   if (flags.production_qualified) {
@@ -145,7 +156,8 @@ export function render(input) {
     pricing: { currency: 'usd', interval: 'month', first_human_cents: 30000,
       additional_human_cents: 10000, max_self_serve_humans: 10, trial_days: 14,
       paid_roles: 'every_human_user', above_limit: 'negotiated' },
-    qualification: input.qualification, startup_command: ['uvicorn', 'cosmas_os.enrollment.api:app', '--host', '0.0.0.0', '--port', '8000'],
+    qualification: { ...input.qualification, ...(stagingPreflight ? { staging_preflight_sha256: stagingPreflight } : {}) },
+    startup_command: ['uvicorn', 'cosmas_os.enrollment.api:app', '--host', '0.0.0.0', '--port', '8000'],
     migration_command: ['python', '-m', 'cosmas_os.enrollment.migration', 'upgrade'],
     rendered_only: true, deployed: false,
   };
@@ -174,11 +186,12 @@ export function render(input) {
 
 async function main() {
   const args = process.argv.slice(2);
-  requireValue(args.length === 4 && args[0] === '--input' && args[2] === '--output',
-    'Usage: node infra/enrollment/render.mjs --input reviewed.json --output new-directory');
+  requireValue([4, 6].includes(args.length) && args[0] === '--input' && args[2] === '--output' &&
+    (args.length === 4 || args[4] === '--preflight-trust'),
+    'Usage: node infra/enrollment/render.mjs --input reviewed.json --output new-directory [--preflight-trust protected-public-key.pem]');
   const input = JSON.parse(await readFile(resolve(args[1]), 'utf8'));
   const output = resolve(args[3]);
-  const files = render(input);
+  const files = render(input, { preflightTrustFile: args.length === 6 ? resolve(args[5]) : undefined });
   await mkdir(output, { mode: 0o700 });
   const hashes = {};
   for (const [name, value] of Object.entries(files)) {

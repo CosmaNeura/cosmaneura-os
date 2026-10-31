@@ -27,9 +27,11 @@ workspace/native build profiles keep their existing behavior.
 
 ## Deployment order
 
-1. Qualify the existing CosmaBot Clerk development instance's password,
-   Google and Microsoft sign-in, authorized account origin and organization
-   binding. Keep its existing beta production instance untouched.
+1. Measure the existing CosmaBot Clerk Development instance's configured
+   password, Google and Microsoft methods, authorized account origin and
+   invite-only policy from actual provider metadata. These configuration checks
+   precede intake; completed end-to-end sign-ins and organization binding follow
+   after intake is admitted. Keep its existing beta production instance untouched.
 2. Qualify the separate Stripe TEST catalog, card-only Checkout, immutable
    pricing and 14-day trial, portal restrictions, webhook signatures and
    canonical reconciliation. Use protected references rather than key values
@@ -56,12 +58,23 @@ workspace/native build profiles keep their existing behavior.
    measured database receipt, exact image digests and protected renderer output.
    Verify CNAME/asuid records against both documented resolvers, bind managed TLS
    and run the deployed-host verifier from `infra/enrollment/STAGING-HOSTING.md`.
-6. Prepare two saved synthetic practices using
+6. Confirm actual matching Development Clerk invite-only and three configured
+   method receipts. Use the separately trusted signed
+   [intake preflight](../infra/enrollment/STAGING-PREFLIGHT.md) to admit only
+   synthetic profile/practice/BAA intake, with acquisition and activation false.
+   This permits the first saved practice before a full journey exists; signing
+   attests reviewed configuration evidence and does not itself measure a
+   provider, complete a sign-in or deploy. Then perform real password and both
+   OAuth end-to-end sign-ins through the admitted account host as journey checks.
+7. Prepare two saved synthetic practices using
    `infra/enrollment/workspaces/README.md`. Perform owner reservation, migration,
    signed owner setup and qualification before registering either workspace as
-   ready or opening Checkout. Give each Box only its derived admission key and
-   own storage/database access.
-7. Complete the hosted acceptance gates below, then enable staging enrollment.
+   ready. Give each Box only its derived admission key and own storage/database
+   access. The protected private clock composition can then admit TEST Checkout
+   for its one immutable saved owner/practice/BAA/Box/Org scope and separate
+   durable journal; public acquisition stays closed.
+8. Complete the hosted acceptance gates below, then enable public staging
+   acquisition and activation using the full staged journey receipt.
    Publish the companion marketing change only after its link reaches this
    verified journey. Production remains on the owner's explicit hold and needs
    a subsequent deployment decision after staging and production qualification.
@@ -81,9 +94,11 @@ probe nor a Terraform mock plan grants customer access.
 All qualification and admission flags start false and remain false until their
 corresponding actual measurements are recorded against the selected source.
 `database_preparation_qualified`, workspace-ready switches and renderer readiness
-booleans are not measurement tools. Enabling registration or acquisition also
-requires the real staged journey receipt; a placeholder Boolean or invented
-receipt hash cannot replace it. Keep runtime access limited to its own ACR and
+booleans are not measurement tools. Synthetic Development intake alone can use
+the actual trusted staging preflight; acquisition and activation require the
+real staged journey receipt. Every production path retains its full journey
+and production requirements. A placeholder Boolean or invented receipt hash
+cannot replace actual evidence. Keep runtime access limited to its own ACR and
 exact application-secret scopes, and give the static account image only AcrPull.
 Bootstrap/migration, state, clinical, Core and other-Box authority never enter
 either public account container.
