@@ -1,0 +1,17 @@
+{
+  "contract_version": "enrollment-foundation.v1",
+  "environment": "staging",
+  "subscription_id": "00000000-0000-4000-8000-000000000001",
+  "tenant_id": "00000000-0000-4000-8000-000000000002",
+  "resource_group_name": "rg-cosmabot-enrollment-staging-mock1234",
+  "location": "centralus",
+  "postgres_database": "cosmabot_enrollment",
+  "postgres_fqdn": "psql-cosmabot-enrollment-staging-mock1234.postgres.database.azure.com",
+  "container_app_environment_id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-enrollment-staging-mock1234/providers/Microsoft.App/managedEnvironments/cae",
+  "container_registry_id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-enrollment-staging-mock1234/providers/Microsoft.ContainerRegistry/registries/acrcbotenrstgmock1234",
+  "registry_server": "acrcbotenrstgmock1234.azurecr.io",
+  "key_vault_id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-enrollment-staging-mock1234/providers/Microsoft.KeyVault/vaults/kv-cbot-enr-stg-mock1234",
+  "key_vault_uri": "https://kv-cbot-enr-stg-mock1234.vault.azure.net/",
+  "vnet_id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-enrollment-staging-mock1234/providers/Microsoft.Network/virtualNetworks/vnet-cosmabot-enrollment-staging-mock1234",
+  "postgres_subnet_id": "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-enrollment-staging-mock1234/providers/Microsoft.Network/virtualNetworks/vnet-cosmabot-enrollment-staging-mock1234/subnets/snet-postgres"
+}

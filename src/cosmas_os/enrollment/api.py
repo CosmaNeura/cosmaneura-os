@@ -389,3 +389,21 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
 
 
 app = create_app()
+
+
+def main() -> None:
+    import argparse
+
+    import uvicorn
+
+    parser = argparse.ArgumentParser(description="Serve the independent enrollment API.")
+    parser.add_argument("--host", choices=("0.0.0.0", "127.0.0.1"), default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    if not 0 <= args.port <= 65535:
+        parser.error("port must be between 0 and 65535")
+    uvicorn.run(app, host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()
