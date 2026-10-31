@@ -30,6 +30,7 @@ practice, one page at a time. Athena appointment, medication, allergy, and
 visit-link tools only read the connected practice. Not connected and not
 supported are separate from a returned page. They never prescribe, sign, book,
 or change Elation or Athena.
+Atlas.md read tools do not call Atlas.md. They say this read is not supported yet.
 """
 
 

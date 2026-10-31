@@ -19,6 +19,7 @@ from cosmas_os.api.microsoft_connection_routes import router as microsoft_router
 from cosmas_os.api.plugin_catalog import CONTRACT, META
 from cosmas_os.plugins import runtime as runtime_module
 from cosmas_os.plugins.athena import NAMES as ATHENA_NAMES
+from cosmas_os.plugins.atlas_md import NAMES as ATLAS_NAMES
 from cosmas_os.plugins.configure import generate
 from cosmas_os.plugins.elation import NAMES as ELATION_NAMES
 from cosmas_os.plugins.runtime import AuthenticatedSession, PluginError, PluginRuntime
@@ -68,7 +69,8 @@ async def test_real_mcp_lists_reads_and_preserves_current_workspace_without_get_
                 async with ClientSession(*client_streams) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    assert [row.name for row in tools.tools] == ["workspace_read", *ELATION_NAMES, *ATHENA_NAMES]
+                    assert [row.name for row in tools.tools] == [
+                        "workspace_read", *ELATION_NAMES, *ATLAS_NAMES, *ATHENA_NAMES]
                     assert set(tools.tools[0].input_schema["required"]) == {"workspace_id"}
                     result = await session.call_tool("workspace_read", {"workspace_id": UUID})
                     assert not result.is_error and result.structured_content["result"]["revision"] == 7
@@ -419,5 +421,5 @@ def test_injected_server_check_reports_only_catalog_not_connected_account(capsys
     assert main(["--origin", "https://fixture.invalid", "--check"], session=adapter) == 0
     receipt = json.loads(capsys.readouterr().out)
     assert receipt == {"ready": True, "transport": "current_app_session",
-                       "tools": ["workspace_read", *ELATION_NAMES, *ATHENA_NAMES],
+                       "tools": ["workspace_read", *ELATION_NAMES, *ATLAS_NAMES, *ATHENA_NAMES],
                        "account_status": "not_checked"}

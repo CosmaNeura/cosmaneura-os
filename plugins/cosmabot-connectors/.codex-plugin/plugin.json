@@ -6,7 +6,7 @@
   "interface": {
     "displayName": "CosmaBot Connectors",
     "shortDescription": "Connected sources, private team drafts and recovery.",
-    "longDescription": "Calls configured first-party CosmaBot operations using current sign-in and server grants. Elation appointment, problem, medication, and lab tools, and Athena appointment, medication, allergy, and visit-link tools, are read-only and say when that record system is not connected or a read is not supported. Human review and destination approval remain in CosmaBot.",
+    "longDescription": "Calls configured first-party CosmaBot operations using current sign-in and server grants. Elation appointment, problem, medication, and lab tools, and Athena appointment, medication, allergy, and visit-link tools, are read-only and say when that record system is not connected or a read is not supported. Atlas.md read tools say this read is not supported yet and do not call Atlas.md. Human review and destination approval remain in CosmaBot.",
     "developerName": "CosmaNeura",
     "category": "Productivity",
     "capabilities": ["Read", "Write", "Interactive"],

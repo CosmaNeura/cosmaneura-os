@@ -87,6 +87,10 @@ EHR read route. They say in plain language when that record system is not
 connected or when that read is not supported. They do not prescribe, sign, book,
 or change the chart. See `docs/plugins/elation-reads.md` and
 `docs/plugins/athena-reads.md`.
+Atlas.md read tools say this read is not supported yet. They do not call an
+endpoint. A calendar file a person reports as Atlas.md is a separate
+staff-supplied import and does not connect to Atlas.md. See
+`docs/plugins/atlas-md.md`.
 Enabled tools depend on signed server configuration; current grants are checked
 again when called. Spruce fax images remain unavailable until verified download
 hosts exist. Spruce's installed registry supports retained inbox work; fresh inbox
