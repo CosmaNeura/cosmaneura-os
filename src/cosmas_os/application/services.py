@@ -741,7 +741,7 @@ def execute_operation(c: Container, operation_id: str) -> Operation:
 
     _require_legacy_work_path(c, ticket)
 
-    if settings.workspace_enrollment_managed:
+    if getattr(settings, "workspace_enrollment_managed", False):
         from cosmas_os.application.enrollment_access import require_worker_admission
         decision = c.session.scalar(select(Decision).where(Decision.box_id == op.box_id,
             Decision.ticket_id == ticket.id, Decision.action_revision_id == rev.id,
@@ -766,7 +766,7 @@ def execute_operation(c: Container, operation_id: str) -> Operation:
     c.session.commit()
 
     try:
-        if settings.workspace_enrollment_managed:
+        if getattr(settings, "workspace_enrollment_managed", False):
             require_worker_admission(c.session, settings, box=op.box_id, owner=decision.actor_principal_id,
                                      operation_id=op.id, approval_sha256=rev.payload_hash)
         receipt = c.notify.send(

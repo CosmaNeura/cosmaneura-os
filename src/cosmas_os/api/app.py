@@ -270,7 +270,7 @@ def _runtime_admission_adapter() -> EnrollmentAdmissionAdapter:
 
 
 def _install_enrollment_commit_fence(request, session, authorization, box_header, actor_header):
-    if not settings.workspace_enrollment_managed or session.info.get("enrollment_request_fence") is request:
+    if not getattr(settings, "workspace_enrollment_managed", False) or session.info.get("enrollment_request_fence") is request:
         return
     selected = settings
     session.info["enrollment_request_fence"] = request
@@ -298,7 +298,7 @@ def _identity(
     x_actor_principal_id: str | None = Header(default=None),
 ) -> RequestIdentity:
     try:
-        if settings.workspace_enrollment_managed and request.method != "GET" and request.url.path.startswith("/admin/identities/"):
+        if getattr(settings, "workspace_enrollment_managed", False) and request.method != "GET" and request.url.path.startswith("/admin/identities/"):
             raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
         check_capture_deadline()
         verifier = _request_clerk_verifier(request.headers.getlist("origin")) if settings.auth_mode == "clerk_jwt" else None
@@ -310,7 +310,7 @@ def _identity(
             box_header=x_box_id,
             actor_header=x_actor_principal_id,
             verifier=verifier,
-            admission_adapter=_runtime_admission_adapter() if settings.workspace_enrollment_managed else None,
+            admission_adapter=_runtime_admission_adapter() if getattr(settings, "workspace_enrollment_managed", False) else None,
         )
         _install_enrollment_commit_fence(request, session, authorization, x_box_id, x_actor_principal_id)
         check_capture_deadline()
@@ -1473,8 +1473,8 @@ def health() -> dict[str, str]:
 @app.get("/config")
 def enrollment_runtime_config(response: Response):
     response.headers["Cache-Control"] = "no-store"
-    return {"enrollment_managed": settings.workspace_enrollment_managed,
-            "enrollment_recovery_url": settings.enrollment_recovery_url}
+    return {"enrollment_managed": getattr(settings, "workspace_enrollment_managed", False),
+            "enrollment_recovery_url": getattr(settings, "enrollment_recovery_url", None)}
 
 
 @app.get("/account/identity")

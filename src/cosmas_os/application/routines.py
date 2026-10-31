@@ -216,7 +216,7 @@ def run_once(s, box, owner, address, *, incoming_sources=None):
     state, scheduled = _eligibility(s, bot, revision, now)
     if state != "due":
         return {"status": state}
-    if settings.workspace_enrollment_managed:
+    if getattr(settings, "workspace_enrollment_managed", False):
         from cosmas_os.application.enrollment_access import require_worker_admission
         require_worker_admission(s, settings, box=box, owner=owner, operation_id=revision.id,
                                  approval_sha256=revision.request_hash)
@@ -243,7 +243,7 @@ def run_once(s, box, owner, address, *, incoming_sources=None):
         if checked != snapshot["incoming"]:
             raise ws.WorkspaceError("routine_sources_changed")
     _local(s)
-    if settings.workspace_enrollment_managed:
+    if getattr(settings, "workspace_enrollment_managed", False):
         require_worker_admission(s, settings, box=box, owner=owner, operation_id=revision.id,
                                  approval_sha256=revision.request_hash)
     row = RoutineRun(agent_id=bot.agent_id, box_id=box, owner_id=owner,

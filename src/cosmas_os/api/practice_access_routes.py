@@ -107,7 +107,7 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
             return response({"detail": "invalid_practice_access_request"}, 422)
         try:
             config = runtime()
-            if config.workspace_enrollment_managed and method == "POST" and request.url.path not in {"/practice-access/setup/complete", "/practice-access/members"}:
+            if getattr(config, "workspace_enrollment_managed", False) and method == "POST" and request.url.path not in {"/practice-access/setup/complete", "/practice-access/members"}:
                 verified(config, request.headers["authorization"], verifier(request.headers.getlist("origin")))
                 raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
             body = bytearray()
@@ -125,12 +125,12 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                     raise access.PracticeAccessError("practice_access_not_found", 404)
                 token_verifier = verifier(request.headers.getlist("origin"))
                 member = verified(config, request.headers["authorization"], token_verifier)
-                if config.workspace_enrollment_managed and method == "POST" and request.url.path not in {"/practice-access/setup/complete", "/practice-access/members"}:
+                if getattr(config, "workspace_enrollment_managed", False) and method == "POST" and request.url.path not in {"/practice-access/setup/complete", "/practice-access/members"}:
                     raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
                 purpose = "qualification" if request.url.path in {"/practice-access/enrollment-qualification", "/practice-access/setup", "/practice-access/setup/complete"} else "workspace"
                 checked_admission = require_runtime_admission(config, request.headers["authorization"], member.subject,
                     purpose=purpose, adapter=admission_adapter() if admission_adapter else None)
-                if (config.workspace_enrollment_managed and request.url.path == "/practice-access/setup/complete"
+                if (getattr(config, "workspace_enrollment_managed", False) and request.url.path == "/practice-access/setup/complete"
                         and (checked_admission is None or checked_admission["member_role"] != "owner")):
                     raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
 

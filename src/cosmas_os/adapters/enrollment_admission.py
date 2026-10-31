@@ -37,7 +37,8 @@ class EnrollmentAdmissionAdapter:
     def authorize(self, token: str, subject: str, *, purpose: Literal["workspace", "qualification", "worker"] = "workspace",
                   operation_id: str | None = None, approval_sha256: str | None = None) -> dict:
         runtime = self.runtime
-        if not runtime.workspace_enrollment_managed or runtime.workspace_enrollment_configuration_errors():
+        if (not getattr(runtime, "workspace_enrollment_managed", False) or not isinstance(runtime, Settings)
+                or runtime.workspace_enrollment_configuration_errors()):
             raise RuntimeAdmissionError(ADMISSION_UNAVAILABLE, 503)
         secret = runtime.workspace_enrollment_admission_secret
         assert secret
@@ -100,7 +101,7 @@ class EnrollmentAdmissionAdapter:
 def require_runtime_admission(runtime: Settings, authorization: str | None, subject: str, *,
                               purpose: Literal["workspace", "qualification"] = "workspace",
                               adapter: EnrollmentAdmissionAdapter | None = None) -> dict | None:
-    if not runtime.workspace_enrollment_managed:
+    if not getattr(runtime, "workspace_enrollment_managed", False):
         return None
     if not authorization or not authorization.startswith("Bearer ") or len(authorization) > 8200:
         raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)

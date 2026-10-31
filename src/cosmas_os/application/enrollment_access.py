@@ -18,7 +18,7 @@ from cosmas_os.practice_setup_models import PracticeSetupProfile
 
 def prepare_registered_member(s, runtime, member, checked, *, fence):
     """Create only a non-owner local human from measured capped registry authority."""
-    if not runtime.workspace_enrollment_managed or checked is None:
+    if not getattr(runtime, "workspace_enrollment_managed", False) or checked is None:
         return
     if (checked.get("enforced") is not True or checked.get("purpose") != "qualification"
             or checked.get("practice_id") != runtime.workspace_enrollment_practice_id):
@@ -59,7 +59,7 @@ def prepare_registered_member(s, runtime, member, checked, *, fence):
 
 def require_worker_admission(s, runtime, *, box, owner, operation_id, approval_sha256,
                              external_identity_id=None, adapter=None):
-    if not runtime.workspace_enrollment_managed:
+    if not getattr(runtime, "workspace_enrollment_managed", False):
         return
     if box != runtime.beta_box_id or not re.fullmatch(r"[a-f0-9]{64}", approval_sha256 or ""):
         raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)

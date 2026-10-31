@@ -1085,7 +1085,7 @@ def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
         raise
     if source_digest(context) != row.source_sha256:
         raise ws.WorkspaceError("source_changed")
-    if team.runtime_settings.workspace_enrollment_managed:
+    if getattr(team.runtime_settings, "workspace_enrollment_managed", False):
         if row.external_identity_id is None or digest(row.prepared_envelope) != row.envelope_sha256:
             raise ws.WorkspaceError("source_changed")
         try:
@@ -1191,7 +1191,7 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_ex
     if digest(claimed.envelope) != claimed.envelope_sha256:
         raise ModelCallFailure()
     def current_managed_admission():
-        if not team.runtime_settings.workspace_enrollment_managed:
+        if not getattr(team.runtime_settings, "workspace_enrollment_managed", False):
             return
         from cosmas_os.db import make_session_factory
         factory = session_factory or make_session_factory()
