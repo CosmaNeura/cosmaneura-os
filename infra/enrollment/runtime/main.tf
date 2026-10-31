@@ -90,7 +90,7 @@ resource "terraform_data" "guard" {
     precondition {
       condition = (alltrue([for name in keys(local.public_env) : startswith(name, "ENROLLMENT_")]) &&
         alltrue([for name in keys(local.secrets.secret_env) : contains([
-          "ENROLLMENT_DATABASE_URL", "ENROLLMENT_CLERK_SECRET_KEY", "ENROLLMENT_INVITATION_SECRET", "ENROLLMENT_STRIPE_SECRET_KEY", "ENROLLMENT_STRIPE_WEBHOOK_SECRET"
+          "ENROLLMENT_DATABASE_URL", "ENROLLMENT_CLERK_SECRET_KEY", "ENROLLMENT_INVITATION_SECRET", "ENROLLMENT_RUNTIME_ADMISSION_SECRET", "ENROLLMENT_STRIPE_SECRET_KEY", "ENROLLMENT_STRIPE_WEBHOOK_SECRET"
       ], name)]))
       error_message = "The enrollment runtime must not inherit clinical, Core or unrelated provider credentials."
     }

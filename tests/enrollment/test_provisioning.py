@@ -79,12 +79,30 @@ def prepare(provisioner, practice):
                                image_sha256="2" * 64)
 
 
-def runtime(plan, *, role="owner", ready=True, access="connected", patch=None):
+def runtime(plan, *, role="owner", ready=True, access="connected", patch=None,
+            setup_state="owner_ready", setup_writes=None, lost_setup=False):
     def respond(request):
+        nonlocal setup_state, lost_setup
+        if request.url.path in {"/practice-access/setup", "/practice-access/setup/complete"}:
+            if request.method == "POST":
+                import json
+
+                if setup_writes is not None:
+                    setup_writes.append(json.loads(request.content))
+                setup_state = "owner_ready"
+                if lost_setup:
+                    lost_setup = False
+                    raise httpx.ReadTimeout("Synthetic lost setup response")
+            return httpx.Response(200, json={"contract_version": 1, "state": setup_state,
+                "can_start_practice": setup_state == "solo_setup_available"},
+                headers={"Cache-Control": "no-store", "X-Cosmas-Workspace-Protocol": "1"})
         if request.url.path == "/practice-access/enrollment-qualification":
             return httpx.Response(200, json={"contract_version": 1, "state": access, "role": role,
                 "box_id": plan.box_id, "organization_id": plan.organization_id, "issuer": plan.issuer,
                 "subject": plan.owner_subject, "source_commit": plan.source_commit, "image_sha256": plan.image_sha256,
+                "enrollment_admission": {"contract_version": "cosmas-enrollment-admission.v1", "enforced": True,
+                    "practice_id": plan.practice_id, "purpose": "qualification"},
+                "initial_setup_complete": True,
                 **(patch or {})},
                                   headers={"Cache-Control": "no-store", "X-Cosmas-Workspace-Protocol": "1"})
         if request.url.path == "/ready" and not ready:
@@ -121,7 +139,8 @@ def test_only_matching_live_runtime_access_can_qualify_member(lab):
                                   subject=plan.owner_subject, bearer=bearer(plan), client=runtime(plan))
     for probe in [runtime(plan, ready=False), runtime(plan, role="member"), runtime(plan, access="request_required"),
                   runtime(plan, patch={"box_id": str(uuid4())}), runtime(plan, patch={"image_sha256": "3" * 64}),
-                  runtime(plan, patch={"source_commit": "4" * 40})]:
+                  runtime(plan, patch={"source_commit": "4" * 40}), runtime(plan, patch={"enrollment_admission": None}),
+                  runtime(plan, patch={"initial_setup_complete": False})]:
         with pytest.raises(EnrollmentError):
             provisioner.qualify_member(plan, subject=plan.owner_subject, bearer=bearer(plan), client=probe)
         assert client.get("/enrollment/v1/status", headers=headers).json()["stage"] == "activation_pending"
@@ -131,6 +150,32 @@ def test_only_matching_live_runtime_access_can_qualify_member(lab):
     assert state["stage"] == "payment"
     assert state["workspace"]["url"] is None
     assert state["billing"]["status"] == "none" and state["billing"]["trial_ends_at"] is None
+
+
+def test_owner_setup_reuses_saved_details_and_recovers_lost_reply_without_second_write(lab):
+    client, headers, provisioner, _, practice = lab
+    plan = prepare(provisioner, practice)
+    writes = []
+    probe = runtime(plan, setup_state="solo_setup_available", setup_writes=writes, lost_setup=True)
+    with pytest.raises(EnrollmentError):
+        provisioner.qualify_member(plan, subject=plan.owner_subject, bearer=bearer(plan), client=probe)
+    assert client.get("/enrollment/v1/status", headers=headers).json()["stage"] == "activation_pending"
+    proof = provisioner.qualify_member(plan, subject=plan.owner_subject, bearer=bearer(plan), client=probe)
+    assert len(proof["sha256"]) == 64 and len(writes) == 1
+    assert writes[0]["display_name"] == "Alex Example"
+    assert writes[0]["practice_name"] == "Example Practice"
+    assert writes[0]["confirm"] is True and writes[0]["specialty"] is None
+    assert client.get("/enrollment/v1/status", headers=headers).json()["billing"]["trial_ends_at"] is None
+
+
+def test_owner_setup_cannot_claim_unreserved_runtime(lab):
+    _, _, provisioner, _, practice = lab
+    plan = prepare(provisioner, practice)
+    writes = []
+    with pytest.raises(EnrollmentError):
+        provisioner.qualify_member(plan, subject=plan.owner_subject, bearer=bearer(plan),
+                                  client=runtime(plan, setup_state="join_existing", setup_writes=writes))
+    assert writes == []
 
 
 def test_fresh_staff_membership_is_prepared_without_workspace_access_and_rechecks_private_binding(lab):

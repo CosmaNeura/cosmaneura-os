@@ -221,6 +221,8 @@ class EnrollmentProvisioner:
                     or plan.issuer != self.service.settings.clerk_issuer):
                 raise EnrollmentError("provisioning_member_invalid", "This human does not match the saved practice workspace.")
             role = "owner" if member.role == "owner" else "member"
+            assert account is not None
+            setup_names = (account.display_name, practice.display_name) if role == "owner" else None
         app = urlparse(plan.workspace_url)
         api = urlparse(plan.api_origin)
         if (f"https://{app.netloc}" not in self.service.settings.allowed_workspace_origins
@@ -242,6 +244,8 @@ class EnrollmentProvisioner:
                        "X-Cosmas-Draft-Recovery": "2", "X-Cosmas-Workspace-Protocol": "1", "Accept": "application/json"}
             qualification_path = "/practice-access/enrollment-qualification"
             for path in ("/health", "/ready", qualification_path):
+                if path == qualification_path and setup_names is not None:
+                    self._complete_owner_setup(plan, setup_names, probe, headers)
                 response = probe.get(plan.api_origin + path, headers=headers)
                 response.raise_for_status()
                 value = response.json()
@@ -257,6 +261,13 @@ class EnrollmentProvisioner:
                                 "image_sha256": plan.image_sha256}
                     if any(value.get(field) != selected for field, selected in expected.items()):
                         raise ValueError("runtime binding or release mismatch")
+                    if value.get("enrollment_admission") != {
+                        "contract_version": "cosmas-enrollment-admission.v1", "enforced": True,
+                        "practice_id": plan.practice_id, "purpose": "qualification",
+                    }:
+                        raise ValueError("runtime enrollment admission not enforced")
+                    if value.get("initial_setup_complete") is not True:
+                        raise ValueError("runtime first-use setup not complete")
                 elif value.get("status") != ("ready" if path == "/ready" else "ok"):
                     raise ValueError("runtime unavailable")
                 observations[path] = value
@@ -273,6 +284,44 @@ class EnrollmentProvisioner:
             self.service.record_membership_ready(plan.practice_id, issuer=plan.issuer, subject=subject,
                                                  organization_id=plan.organization_id, proof_sha256=proof)
         return {"receipt": receipt, "sha256": proof}
+
+    @staticmethod
+    def _complete_owner_setup(plan: WorkspacePlan, names: tuple[str, str],
+                              client: httpx.Client, headers: dict[str, str]) -> None:
+        """Reuse saved owner details after the human confirms this practice.
+
+        The runtime must already have its protected first-owner reservation.
+        This can consume that exact reservation; it cannot select a Box, claim
+        another owner, create an unreserved practice or overwrite saved setup.
+        A lost completion reply is recovered by the next signed status read.
+        """
+        def read(response: httpx.Response) -> dict:
+            response.raise_for_status()
+            value = response.json()
+            if (not isinstance(value, dict) or value.get("contract_version") != 1
+                    or "no-store" not in response.headers.get("cache-control", "")
+                    or response.headers.get("x-cosmas-workspace-protocol") != "1"):
+                raise ValueError("unqualified setup response")
+            return value
+
+        state = read(client.get(plan.api_origin + "/practice-access/setup", headers=headers))
+        if state.get("state") == "owner_ready":
+            return
+        if (state.get("state") not in {"owner_setup", "solo_setup_available"}
+                or state.get("state") == "solo_setup_available" and state.get("can_start_practice") is not True):
+            raise ValueError("first owner reservation required")
+        display_name, practice_name = names
+        if not display_name or not practice_name or max(len(display_name), len(practice_name)) > 120:
+            raise ValueError("saved setup names exceed runtime contract")
+        body = {"display_name": display_name, "practice_name": practice_name,
+                "specialty": None, "confirm": True}
+        body["idempotency_key"] = str(uuid5(BOX_NAMESPACE, canonical_hash({
+            "contract": "enrollment-owner-setup.v1", "practice": plan.practice_id,
+            "box": plan.box_id, "owner": plan.owner_subject, "request": body,
+        })))
+        completed = read(client.post(plan.api_origin + "/practice-access/setup/complete", headers=headers, json=body))
+        if completed.get("state") != "owner_ready":
+            raise ValueError("runtime first-use setup not complete")
 
 
 class BoundWorkspaceConfirmer(ProductionWorkspaceConfirmer):
@@ -327,6 +376,9 @@ def main() -> int:
     members = commands.add_parser("prepare-memberships")
     members.add_argument("--practice-id", required=True)
     members.add_argument("--output", required=True)
+    admission_key = commands.add_parser("prepare-admission-key")
+    admission_key.add_argument("--practice-id", required=True)
+    admission_key.add_argument("--output", required=True)
     args = parser.parse_args()
     engine = None
     try:
@@ -343,6 +395,12 @@ def main() -> int:
                 workspace_url=args.workspace_url, source_commit=args.source_commit, image_sha256=args.image_sha256))
         elif args.action == "prepare-memberships":
             result = {"prepared_memberships": provisioner.prepare_memberships(args.practice_id), "workspace_ready": False}
+        elif args.action == "prepare-admission-key":
+            from .admission import derive_runtime_admission_key
+
+            plan = provisioner.saved_plan(args.practice_id)
+            result = derive_runtime_admission_key(settings.runtime_admission_secret.get_secret_value(),
+                plan.practice_id, plan.box_id, plan.organization_id)
         else:
             token_path = Path(args.token_file)
             mode = token_path.lstat().st_mode
@@ -355,8 +413,13 @@ def main() -> int:
             result = provisioner.qualify_member(plan, subject=args.subject, bearer=token_path.read_text().strip())
         descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w") as output:
-            output.write(json.dumps(result, sort_keys=True, indent=2) + "\n")
-        print("Saved protected practice provisioning evidence; billing was not activated by this command.")
+            if args.action == "prepare-admission-key":
+                if not isinstance(result, str):
+                    raise ValueError("admission key must be a protected string")
+                output.write(result + "\n")
+            else:
+                output.write(json.dumps(result, sort_keys=True, indent=2) + "\n")
+        print("Saved protected practice provisioning output; billing was not activated by this command.")
         return 0
     except Exception:
         print("Practice provisioning could not finish. Preserve the saved practice and retry after reviewing its configuration.")

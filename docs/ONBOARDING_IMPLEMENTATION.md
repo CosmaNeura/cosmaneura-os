@@ -24,7 +24,11 @@ Scribe sources, services, identities and databases were not changed.
   identities, progress and data.
 - Trial activation remains pending until a separately provisioned workspace is
   usable. Confirm practice account prepares actual Clerk membership, selects
-  the saved Org and measures the exact human's signed workspace access.
+  the saved Org and measures the exact human's signed workspace access. The
+  owner setup reuses the previously saved names to consume an existing protected
+  first-owner reservation. It cannot claim an unreserved Box or overwrite setup;
+  a lost response recovers through the signed runtime status. Qualification also
+  requires the actual completed practice profile and enforced enrollment admission.
 - Stripe-hosted Checkout freezes the server-owned offer and original attempt;
   returns/retries recover it. Signed durable events and current provider reads
   confirm trial/payment state. Portal access handles billing recovery and
@@ -33,6 +37,10 @@ Scribe sources, services, identities and databases were not changed.
   workspace proof and fresh authoritative billing. Failed-payment/expiry holds
   do not create a new free trial. Log out and account switching clear transient
   browser setup state; no credentials/cards are stored in browser storage.
+- Workspace recovery has its own small account/billing screen. It resumes saved
+  work only after a fresh protected identity check succeeds; an ordinary healthy
+  server check cannot clear a payment or membership hold. Recovery links are
+  explicit and restricted to the matching owned staging/production origins.
 
 ## Source and deployment map
 

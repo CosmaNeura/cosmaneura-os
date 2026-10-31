@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
 const SECRET_NAMES = new Set([
-  'ENROLLMENT_DATABASE_URL', 'ENROLLMENT_CLERK_SECRET_KEY', 'ENROLLMENT_INVITATION_SECRET',
+  'ENROLLMENT_DATABASE_URL', 'ENROLLMENT_CLERK_SECRET_KEY', 'ENROLLMENT_INVITATION_SECRET', 'ENROLLMENT_RUNTIME_ADMISSION_SECRET',
   'ENROLLMENT_STRIPE_SECRET_KEY', 'ENROLLMENT_STRIPE_WEBHOOK_SECRET',
 ]);
 const PUBLIC_NAMES = new Set([
@@ -122,6 +122,8 @@ export function render(input) {
     requireValue(secretEnv.ENROLLMENT_STRIPE_SECRET_KEY && secretEnv.ENROLLMENT_STRIPE_WEBHOOK_SECRET &&
       [...PUBLIC_NAMES].every(name => stripe[name]), 'Stripe integration needs the complete product/portal and secret references.');
   }
+  requireValue(!flags.activation_available || secretEnv.ENROLLMENT_RUNTIME_ADMISSION_SECRET,
+    'Trial activation requires the private runtime admission master reference.');
   const publicEnv = {
     ...Object.fromEntries(Object.entries(flags).map(([name, value]) => [`ENROLLMENT_${name.toUpperCase()}`, String(value)])),
     ENROLLMENT_DATA_MODE: environment === 'production' ? 'production' : 'synthetic',

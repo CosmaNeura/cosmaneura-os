@@ -49,7 +49,7 @@ configuration and resulting objects before it trusts billing.
 `secret_references` is an environment-name map of exact versioned
 `https://<owned-vault>.vault.azure.net/secrets/<name>/<32-hex-version>` references
 for the independent database, Clerk backend key, stable invitation-signing key,
-Stripe key and Stripe webhook secret. Keep references in protected deployment inputs; actual values remain
+runtime admission master, Stripe key and Stripe webhook secret. Keep references in protected deployment inputs; actual values remain
 in Key Vault. Browser build output receives only enrollment enable/origin
 settings; the browser obtains public Clerk/pricing/readiness from `/enrollment/v1/config`.
 
@@ -137,6 +137,15 @@ it takes no caller-supplied destination, Box, role or ready flag. Verification
 must pass the independent runtime's actual local human access checks. The
 registry stores the proof hash, never the session token. Membership creation
 alone does not grant local runtime authority or start a trial.
+
+The enrollment runtime admission master remains only in its own vault/process.
+Each Box receives a derived admission key bound to its immutable practice, Box
+and Org. Never distribute the master or reuse an invitation/Stripe credential
+for that purpose. Key transfer remains protected operator work. Runtime admission
+uses current registry membership/agreement/billing and a signed scoped protocol;
+the public setup status and a saved bookmark cannot substitute for that check.
+Qualification must report the actual successful admission check for setup and
+must not expose workspace data before a valid paid/trial entitlement.
 
 The private `prepare-memberships`/`qualify-member` commands remain available for
 controlled cohort operations and recovery. Token files must be regular files
