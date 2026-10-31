@@ -78,8 +78,8 @@ Athena appointment, medication, allergy, and visit-link status. Elation tools
 call the existing signed EHR read route. Athena appointment and visit-link tools
 call the existing Core connection route; medication and allergy tools call the
 EHR read route. They say in plain language when that record system is not
-connected or when that read is not supported. They do not prescribe, sign, book,
-or change the chart. See `docs/plugins/elation-reads.md` and
+connected, when access expired or was revoked, or when that read is not supported.
+They do not prescribe, sign, book, or change the chart. See `docs/plugins/elation-reads.md` and
 `docs/plugins/athena-reads.md`.
 Atlas.md read tools say this read is not supported yet. They do not call an
 endpoint. A calendar file a person reports as Atlas.md is a separate

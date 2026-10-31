@@ -98,6 +98,8 @@ EXPIRED_DETAILS = {
     "ehr_read_binding_unavailable",
     "workspace_access_denied",
     "ehr_read_source_unavailable",
+    "ehr_read_core_grant_unavailable",
+    "ehr_read_core_medication_grant_unavailable",
     "core_connection_access_denied",
 }
 MALFORMED_DETAILS = {

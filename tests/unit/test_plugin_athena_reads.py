@@ -372,6 +372,76 @@ def test_revoked_binding_code_is_the_expired_state():
         runtime.close()
 
 
+@pytest.mark.parametrize("name", NAMES)
+@pytest.mark.parametrize("status_code,detail", [
+    (503, "ehr_read_binding_changed"),
+    (403, "workspace_access_denied"),
+    (403, "core_connection_access_denied"),
+])
+def test_expired_or_revoked_access_tells_the_user_to_reconnect(name, status_code, detail):
+    def handler(route, body, _state):
+        if route == "ehr" and body["action"] == "status":
+            return httpx.Response(200, json=ehr_status(name))
+        if route == "schedule" and body["action"] == "athena_connection":
+            return httpx.Response(200, json=connection_response(body["request_nonce"]))
+        return httpx.Response(status_code, json={"detail": detail})
+
+    runtime, _, calls = runtime_for(handler)
+    try:
+        result = runtime.call(name, arguments_for(name))["result"]
+        assert result["state"] == "expired" and result["message"] == EXPIRED
+        assert "Reconnect Athena in CosmaBot" in result["message"]
+        assert result["read_only"] is True and result["confirmed"] is False
+        assert result.get("automatic_retry") is not True and "rows" not in result
+        shown = json.dumps(result)
+        assert "Alex" not in shown and ALLERGEN not in shown and MEDICATION not in shown
+        suffix = "/connections/ehr/reads" if route_for(name) == "ehr" else "/connections/cosmaneura/read"
+        sent = bodies(calls, suffix)
+        assert len(sent) == 2
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("name,detail", [
+    ("athena_read_allergies", "ehr_read_core_grant_unavailable"),
+    ("athena_read_medications", "ehr_read_core_medication_grant_unavailable"),
+])
+def test_withdrawn_grant_tells_the_user_to_reconnect(name, detail):
+    def handler(route, body, _state):
+        if body["action"] == "status":
+            return httpx.Response(200, json=ehr_status(name))
+        return httpx.Response(409, json={"detail": detail})
+
+    runtime, _, calls = runtime_for(handler)
+    try:
+        result = runtime.call(name, arguments_for(name))["result"]
+        assert result == {"state": "expired", "message": EXPIRED, "read_only": True, "confirmed": False}
+        assert "rows" not in result and ALLERGEN not in json.dumps(result) and MEDICATION not in json.dumps(result)
+        assert len(bodies(calls, "/connections/ehr/reads")) == 2
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("name,detail", [
+    ("athena_read_allergies", "ehr_read_core_grant_changed"),
+    ("athena_read_medications", "ehr_read_core_medication_grant_changed"),
+])
+def test_changed_grant_stays_a_discarded_result(name, detail):
+    def handler(route, body, _state):
+        if body["action"] == "status":
+            return httpx.Response(200, json=ehr_status(name))
+        return httpx.Response(409, json={"detail": detail})
+
+    runtime, _, calls = runtime_for(handler)
+    try:
+        result = runtime.call(name, arguments_for(name))["result"]
+        assert result["state"] == "stale" and result["message"] == STALE
+        assert "rows" not in result and "Alex" not in json.dumps(result) and "Reconnect" not in result["message"]
+        assert len(bodies(calls, "/connections/ehr/reads")) == 2
+    finally:
+        runtime.close()
+
+
 def test_revoked_schedule_access_is_the_expired_state():
     def handler(route, body, _state):
         if body["action"] == "athena_connection":
