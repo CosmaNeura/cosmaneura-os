@@ -1,8 +1,9 @@
 """Delete one patient's live records and stored files.
 
-The practice owner is the admin. The check lives in this function so the API
-and the admin command cannot bypass it. Dry-run is the default: it counts rows
-and files and writes nothing. A confirmed delete is safe to repeat.
+The practice owner is the admin. Dry-run counts rows and files and writes
+nothing. A confirmed delete runs only through the admin database command: it
+calls the security-definer function owned by ``cosmas_patient_deletion``. The
+HTTP route must not confirm. A repeat call is safe.
 
 Backups are not opened or rewritten here. The append-only audit event stores
 the actor, the time, and the patient's internal id only.
@@ -10,6 +11,7 @@ the actor, the time, and the patient's internal id only.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections import defaultdict
@@ -117,12 +119,11 @@ def delete_patient_records(
         )
 
     try:
-        # Immutability triggers keep ordinary edits append-only. This confirmed
-        # admin delete is the exception, and only for the rows collected above.
-        # The setting lasts until this transaction ends.
-        _suspend_history_guards(session)
+        # Row changes run inside the security-definer function. This session
+        # only supplies the ordered plan, then removes files and writes the
+        # deletion audit after the patient identifiers are already gone.
+        _apply_secure_deletion(session, patient_id, rows)
         _delete_files(blob, files, file_roots, _deleted_ids(rows))
-        _delete_rows(session, rows)
         session.expunge_all()
         session.add(
             AuditEvent(
@@ -358,24 +359,13 @@ def _key_clause(
     return " OR ".join(groups), params
 
 
-def _suspend_history_guards(session: Session) -> None:
-    # Any database role can set this transaction-local flag. The immutability
-    # triggers that guard ordinary clinical history allow a delete only while
-    # it is on. A superuser connection also skips the remaining specialty
-    # triggers for this transaction; the setting ends when the transaction does.
-    session.execute(text("SELECT set_config('cosmas.patient_deletion', 'on', true)"))
-    savepoint = session.begin_nested()
-    try:
-        session.execute(text("SET LOCAL session_replication_role = replica"))
-    except Exception:
-        savepoint.rollback()
-        return
-    savepoint.commit()
+def _deletion_plan(
+    session: Session, rows: Mapping[str, set[tuple[str, ...]]]
+) -> list[dict[str, object]]:
+    """Child-first deletes. Nullable foreign keys are cleared before a cycle."""
 
-
-def _delete_rows(session: Session, rows: Mapping[str, set[tuple[str, ...]]]) -> None:
     keys, edges, _columns = _load_catalog(session)
-    session.execute(text("SET CONSTRAINTS ALL DEFERRED"))
+    plan: list[dict[str, object]] = []
     remaining = {table for table, found in rows.items() if found and table not in _PRESERVE}
     edges_left = [
         edge
@@ -389,29 +379,40 @@ def _delete_rows(session: Session, rows: Mapping[str, set[tuple[str, ...]]]) -> 
             nullable = next((edge for edge in edges_left if all(edge.nullable)), None)
             if nullable is None:
                 raise DomainError("patient records could not be deleted")
-            _null_edge(session, nullable, keys[nullable.child], rows[nullable.child])
+            plan.append(
+                {
+                    "op": "null",
+                    "table": nullable.child,
+                    "columns": list(nullable.child_cols),
+                    "pk": list(keys[nullable.child].columns),
+                    "rows": [list(row) for row in rows[nullable.child]],
+                }
+            )
             edges_left = [edge for edge in edges_left if edge is not nullable]
             continue
         for table in ready:
-            if table not in blocked:
-                _delete_table(session, keys[table], rows[table])
-                remaining.remove(table)
+            plan.append(
+                {
+                    "op": "delete",
+                    "table": table,
+                    "pk": list(keys[table].columns),
+                    "rows": [list(row) for row in rows[table]],
+                }
+            )
+            remaining.remove(table)
+    return plan
 
 
-def _null_edge(session: Session, edge: _Edge, child_key: _Key, child_rows: set[tuple[str, ...]]) -> None:
-    assignments = ", ".join(f"{_quote(column)} = NULL" for column in edge.child_cols)
-    for chunk in _chunks(tuple(child_rows), 200):
-        where, params = _key_clause("c", child_key.columns, chunk, "pk")
-        session.execute(
-            text(f"UPDATE public.{_quote(edge.child)} AS c SET {assignments} WHERE {where}"),
-            params,
-        )
-
-
-def _delete_table(session: Session, key: _Key, row_keys: set[tuple[str, ...]]) -> None:
-    for chunk in _chunks(tuple(row_keys), 200):
-        where, params = _key_clause("t", key.columns, chunk, "pk")
-        session.execute(text(f"DELETE FROM public.{_quote(key.table)} AS t WHERE {where}"), params)
+def _apply_secure_deletion(
+    session: Session, patient_id: str, rows: Mapping[str, set[tuple[str, ...]]]
+) -> None:
+    session.execute(
+        text(
+            "SELECT public.delete_patient_keyed_records("
+            "CAST(:patient AS uuid), CAST(:plan AS jsonb))"
+        ),
+        {"patient": patient_id, "plan": json.dumps(_deletion_plan(session, rows))},
+    )
 
 
 def _deleted_ids(rows: Mapping[str, set[tuple[str, ...]]]) -> set[str]:

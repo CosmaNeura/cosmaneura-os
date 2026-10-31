@@ -31,13 +31,20 @@ def router(*, get_session, identity):
         actor: RequestIdentity = Depends(identity),
     ) -> dict[str, object]:
         response.headers["Cache-Control"] = "no-store"
+        # This route uses the application runtime database role. That role cannot
+        # call the deletion function, so confirmation is refused here as well.
+        if body.confirm:
+            raise HTTPException(
+                status_code=403,
+                detail="patient record deletion is only available to the admin command",
+            )
         container = Container(session)
         try:
             return delete_patient_records(
                 session,
                 actor_principal_id=actor.principal_id,
                 patient_link_id=patient_link_id,
-                confirm=body.confirm,
+                confirm=False,
                 blob=container.blob,
                 file_roots=storage_roots(container.blob),
             )

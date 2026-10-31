@@ -2,4 +2,4 @@ from __future__ import annotations
 
 # Both API and worker readiness must reject a database that has not reached the
 # exact application revision shipped in the image.
-EXPECTED_SCHEMA_REVISION = "z35c2d09e853"
+EXPECTED_SCHEMA_REVISION = "a47e4b21f975"

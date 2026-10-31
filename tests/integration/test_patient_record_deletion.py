@@ -15,7 +15,7 @@ from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.orm import Session
 from typer.testing import CliRunner
 
@@ -439,6 +439,14 @@ def test_dry_run_returns_counts_and_deletes_nothing(practice) -> None:
     assert api.json()["deleted"] is False
     assert api.json()["files"] == {"audio": 1, "uploads": 2, "exports": 1}
     assert str(names["label"]) not in api.text
+    blocked = TestClient(app).post(
+        f"/admin/patients/{patient_id}/records",
+        json={"confirm": True},
+        headers={"X-Box-Id": str(practice["box_id"]), "X-Actor-Principal-Id": owner},
+    )
+    assert blocked.status_code == 403
+    assert "admin command" in blocked.text
+    assert str(names["label"]) not in blocked.text
 
     assert session.get(PatientLink, patient_id) is not None
     assert _patient_link_counts(session, patient_id) == before
@@ -603,6 +611,272 @@ def test_repeat_delete_is_a_safe_no_op(practice) -> None:
     ) == 1
 
 
+GUARDED_TABLES = (
+    "workspace_entries",
+    "workspace_replies",
+    "scheduling_patient_setup_requests",
+    "scheduling_patient_accounts",
+)
+
+
+_GUARD_MESSAGE = {
+    "reject_workspace_history_change": "workspace history is immutable",
+    "reject_provider_history_change": "provider history is immutable",
+    "immutable_patient_setup": "patient setup history is immutable",
+    "reject_scheduling_account_change": "Scheduling correspondence is immutable",
+}
+
+
+def _literal(column_type: str) -> str:
+    if column_type == "uuid":
+        return "'11111111-1111-4111-8111-111111111111'::uuid"
+    if column_type == "jsonb":
+        return "'{}'::jsonb"
+    if column_type == "boolean":
+        return "true"
+    if column_type in {"integer", "bigint", "smallint"}:
+        return "2"
+    if column_type == "date":
+        return "DATE '2026-09-10'"
+    if column_type.startswith("timestamp"):
+        return "TIMESTAMPTZ '2026-09-10 12:00:00+00'"
+    if column_type == "text":
+        return "'a'"
+    matched = re.fullmatch(r"character varying(?:\((\d+)\))?", column_type)
+    if matched:
+        length = int(matched.group(1) or "1")
+        return "'" + ("a" * min(length, 32)) + "'"
+    raise AssertionError(f"unsupported column type {column_type}")
+
+
+def _guarded_triggers(connection) -> list[tuple[str, str]]:
+    rows = connection.execute(
+        text(
+            "SELECT c.relname, p.proname FROM pg_trigger t "
+            "JOIN pg_proc p ON p.oid = t.tgfoid "
+            "JOIN pg_class c ON c.oid = t.tgrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND NOT t.tgisinternal "
+            "AND p.proname = ANY(:names) "
+            "GROUP BY c.relname, p.proname ORDER BY c.relname"
+        ),
+        {"names": list(GUARD_FUNCTIONS)},
+    ).all()
+    return [(str(table), str(function)) for table, function in rows]
+
+
+def _insert_guard_row(connection, table: str) -> None:
+    columns = connection.execute(
+        text(
+            "SELECT a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull, "
+            "pg_get_expr(ad.adbin, ad.adrelid) IS NOT NULL "
+            "FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum "
+            "WHERE n.nspname = 'public' AND c.relname = :table "
+            "AND a.attnum > 0 AND NOT a.attisdropped AND a.attgenerated = '' "
+            "ORDER BY a.attnum"
+        ),
+        {"table": table},
+    ).all()
+    names: list[str] = []
+    values: list[str] = []
+    for name, column_type, required, has_default in columns:
+        if has_default and str(column_type).startswith("timestamp"):
+            continue
+        if not required:
+            continue
+        names.append(_quote(str(name)))
+        values.append(_literal(str(column_type)))
+    if names:
+        connection.execute(text(
+            f"INSERT INTO public.{_quote(table)} ({', '.join(names)}) VALUES ({', '.join(values)})"
+        ))
+    else:
+        connection.execute(text(f"INSERT INTO public.{_quote(table)} DEFAULT VALUES"))
+
+
+def _autocommit(session: Session, statement: str) -> None:
+    bind = session.get_bind()
+    with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.execute(text(statement))
+
+
+def _runtime_engine(session: Session, role: str):
+    url = make_url(os.environ.get("DATABASE_URL", settings.database_url))
+    database = str(session.scalar(text("SELECT current_database()")))
+    password = "invented-runtime-password-123456"
+    _autocommit(
+        session,
+        f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
+        f"PASSWORD '{password}'",
+    )
+    _autocommit(session, f'GRANT CONNECT ON DATABASE "{database}" TO {role}')
+    _autocommit(session, f"GRANT USAGE ON SCHEMA public TO {role}")
+    return create_engine(url.set(drivername="postgresql+psycopg", username=role, password=password, database=database))
+
+
+def _drop_runtime_role(session: Session, role: str) -> None:
+    _autocommit(session, f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role}")
+    _autocommit(session, f"REVOKE ALL ON SCHEMA public FROM {role}")
+    database = str(session.scalar(text("SELECT current_database()")))
+    _autocommit(session, f'REVOKE CONNECT ON DATABASE "{database}" FROM {role}')
+    _autocommit(session, f"DROP ROLE IF EXISTS {role}")
+
+
+def test_runtime_role_cannot_delete_guarded_tables_with_the_flag() -> None:
+    """A runtime login that sets the flag by hand still cannot delete any guarded table."""
+
+    url = make_url(os.environ.get("DATABASE_URL", settings.database_url))
+    assert url.host in {"127.0.0.1", "localhost"}
+    database = "patdel_guard_" + uuid4().hex[:12]
+    role = "patient_runtime_" + uuid4().hex[:12]
+    password = "invented-runtime-password-123456"
+    admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    target = create_engine(url.set(database=database))
+    runtime = None
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{database}"'))
+    try:
+        _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
+        with admin.connect() as connection:
+            connection.execute(text(
+                f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
+                f"PASSWORD '{password}'"
+            ))
+            connection.execute(text(f'GRANT CONNECT ON DATABASE "{database}" TO {role}'))
+        with target.begin() as connection:
+            connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
+            guarded = _guarded_triggers(connection)
+            tables = [table for table, _function in guarded]
+            assert set(GUARDED_TABLES) <= set(tables)
+            checks = connection.execute(
+                text(
+                    "SELECT c.relname, con.conname FROM pg_constraint con "
+                    "JOIN pg_class c ON c.oid = con.conrelid "
+                    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE con.contype = 'c' AND n.nspname = 'public' AND c.relname = ANY(:tables)"
+                ),
+                {"tables": tables},
+            ).all()
+            for table, constraint in checks:
+                connection.execute(text(
+                    f"ALTER TABLE public.{_quote(str(table))} DROP CONSTRAINT {_quote(str(constraint))}"
+                ))
+            connection.execute(text("SET LOCAL session_replication_role = replica"))
+            for table in tables:
+                _insert_guard_row(connection, table)
+            connection.execute(text(
+                "GRANT SELECT, DELETE ON "
+                + ", ".join(f"public.{_quote(table)}" for table in tables)
+                + f" TO {role}"
+            ))
+        runtime = create_engine(url.set(
+            drivername="postgresql+psycopg", username=role, password=password, database=database
+        ))
+        for table, function in guarded:
+            message = _GUARD_MESSAGE[function]
+            with runtime.connect() as connection:
+                transaction = connection.begin()
+                refused = False
+                try:
+                    connection.execute(text("SELECT set_config('cosmas.patient_deletion', 'on', true)"))
+                    connection.execute(text(
+                        f"DELETE FROM public.{_quote(table)} "
+                        f"WHERE ctid = (SELECT ctid FROM public.{_quote(table)} LIMIT 1)"
+                    ))
+                except (ProgrammingError, IntegrityError) as exc:
+                    refused = message in str(exc)
+                finally:
+                    transaction.rollback()
+            assert refused, table
+            with target.connect() as connection:
+                assert connection.scalar(text(f"SELECT count(*) FROM public.{_quote(table)}")) == 1
+    finally:
+        if runtime is not None:
+            runtime.dispose()
+        target.dispose()
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
+            connection.execute(text(f"DROP ROLE IF EXISTS {role}"))
+        admin.dispose()
+
+
+def test_runtime_role_cannot_execute_the_deletion_function(practice) -> None:
+    session = practice["session"]
+    role = "patient_runtime_" + uuid4().hex[:12]
+    runtime = _runtime_engine(session, role)
+    try:
+        assert session.scalar(text(
+            "SELECT NOT EXISTS (SELECT 1 FROM pg_auth_members m "
+            "JOIN pg_roles granted ON granted.oid = m.roleid "
+            "JOIN pg_roles member ON member.oid = m.member "
+            "WHERE granted.rolname = 'cosmas_patient_deletion' AND member.rolname = :role)"
+        ), {"role": role}) is True
+        with runtime.begin() as connection:
+            with pytest.raises(ProgrammingError, match="permission denied"):
+                connection.execute(text("SET ROLE cosmas_patient_deletion"))
+        with runtime.begin() as connection:
+            connection.execute(text("SELECT set_config('cosmas.patient_deletion', 'on', true)"))
+            with pytest.raises(ProgrammingError, match="permission denied"):
+                connection.execute(text(
+                    "SELECT public.delete_patient_keyed_records(CAST(:patient AS uuid), '[]'::jsonb)"
+                ), {"patient": practice["casey"]["patient_id"]})
+        assert session.scalar(text(
+            "SELECT has_function_privilege(:role, "
+            "'public.delete_patient_keyed_records(uuid, jsonb)', 'EXECUTE')"
+        ), {"role": role}) is False
+    finally:
+        runtime.dispose()
+        _drop_runtime_role(session, role)
+
+
+def test_audit_log_rows_survive_with_identifiers_removed(practice) -> None:
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    names = practice["names"]
+    patient_id = str(casey["patient_id"])
+    attested = session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "patient_link.attested",
+            AuditEvent.aggregate_id == patient_id,
+        )
+    )
+    assert attested is not None
+    attested_id = attested.id
+    attested_actor = attested.actor_principal_id
+    attested_at = attested.created_at
+    _calls(session, owner, patient_id, blob, confirm=True)
+    session.expire_all()
+    kept = session.get(AuditEvent, attested_id)
+    assert kept is not None
+    assert kept.actor_principal_id == attested_actor
+    assert kept.created_at == attested_at
+    assert kept.event_type == "patient_link.attested"
+    assert kept.aggregate_id == "redacted"
+    assert kept.aggregate_id != patient_id
+    assert kept.detail == {}
+    stored = session.scalar(
+        text("SELECT row_to_json(audit_events)::text FROM audit_events WHERE id = :id"),
+        {"id": attested_id},
+    )
+    assert isinstance(stored, str)
+    assert patient_id not in stored
+    assert str(names["label"]) not in stored
+    assert str(names["note"]) not in stored
+    deletion = session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "patient.records_deleted",
+            AuditEvent.aggregate_id == patient_id,
+        )
+    )
+    assert deletion is not None
+    assert deletion.id != attested_id
+
+
 def _migrate(target, revision: str, *, downgrade: bool) -> None:
     config = Config(str(ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(ROOT / "migrations"))
@@ -677,12 +951,30 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
 
         _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
         assert _revision(target) == EXPECTED_SCHEMA_REVISION
-        assert all("cosmas.patient_deletion" in body for body in _guard_bodies(target).values())
+        assert all("cosmas_patient_deletion" in body for body in _guard_bodies(target).values())
         with Session(target) as session:
             session.execute(text("SELECT set_config('cosmas.patient_deletion', 'on', true)"))
+            with pytest.raises(ProgrammingError, match="workspace history is immutable"):
+                session.execute(
+                    text("DELETE FROM private_recording_finishes WHERE id = :id"),
+                    {"id": finish_id},
+                )
+                session.commit()
+            session.rollback()
             session.execute(
-                text("DELETE FROM private_recording_finishes WHERE id = :id"),
-                {"id": finish_id},
+                text(
+                    "SELECT public.delete_patient_keyed_records("
+                    "CAST(:patient AS uuid), CAST(:plan AS jsonb))"
+                ),
+                {
+                    "patient": arranged["casey"]["patient_id"],
+                    "plan": json.dumps([{
+                        "op": "delete",
+                        "table": "private_recording_finishes",
+                        "pk": ["id"],
+                        "rows": [[str(finish_id)]],
+                    }]),
+                },
             )
             session.commit()
             assert session.get(PrivateRecordingFinish, finish_id) is None
