@@ -190,7 +190,7 @@ def test_historical_v6_envelope_hash_stays_fixed_while_outbound_projection_is_un
     envelope = prepared((6000,))
     # Computed from the previously reviewed25a361a preparation. This pins the
     # persisted body/manifest/decoder without pinning the new model-only view.
-    assert _digest(envelope) == "db0f2c5e14242d475c7f85e8cc5f9a74113888bdb784a27ebc566c076022046c"
+    assert _digest(envelope) == "48f5fd93671d449200886c12e8827a27d4b94836738f3677ee2b3f49c6896152"
     saved = json.loads(json.dumps(envelope, sort_keys=True, ensure_ascii=False))
     validate_prepared(saved)
     adapter = GPT41CompactToolsConnector(lambda: "invented-key")

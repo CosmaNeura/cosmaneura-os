@@ -10,7 +10,7 @@ function candidate({model=true,google=true,owned=false,host='staging.cosmas.ai'}
     value.api_origin=`https://api.${host}`;value.identity.apiOrigin=value.api_origin;
     value.tls.hostnames=[host,`api.${host}`];}
   value.beta_features={model:model?{origin:'https://invented-owned-chief.openai.azure.com',
-    endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'}:null,
+    endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1-dzus'}:null,
     google:google?{client_id:'invented-client.apps.googleusercontent.com',
       callback_uri:value.api_origin+'/connections/google/callback',return_origin:value.web_origin}:null};
   return value;
@@ -21,6 +21,12 @@ test('optional public features bind server, clients, private field names and exp
     const value=candidate({model,google}),files=render(value),env=files['api-public.json'];
     const contract=files['host-preparation.json'];
     assert.equal(env.WORKSPACE_LLM_BACKEND,model?'azure_gpt41':'disabled');
+    if(model){
+      assert.equal(env.WORKSPACE_LLM_DEPLOYMENT,'gpt-4.1-dzus');
+      assert.equal(env.WORKSPACE_LLM_ENDPOINT,'https://invented-owned-chief.openai.azure.com/openai/v1');
+    }else{
+      assert.equal(env.WORKSPACE_LLM_DEPLOYMENT,undefined);
+    }
     assert.equal(env.WORKSPACE_GOOGLE_CONNECTION_ENABLED,String(google));
     for(const client of ['web','desktop','apple']){
       const profile=files['clients/standalone-profile.json'].clients[client];

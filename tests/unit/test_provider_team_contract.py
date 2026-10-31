@@ -230,7 +230,7 @@ def test_gpt41_request_is_fixed_bounded_and_source_scoped():
     request = calls[0]
     body = json.loads(request.content)
     assert str(request.url) == ENDPOINT
-    assert body["model"] == "gpt-4.1" and body["store"] is False
+    assert body["model"] == "gpt-4.1-dzus" and body["store"] is False
     assert body["max_completion_tokens"] == 1600 and "tools" not in body
     assert body["response_format"]["json_schema"]["strict"] is True
     assert (

@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from cosmas_os.adapters.gpt41 import (
     ENDPOINT,
-    MODEL,
+    RESPONSE_MODELS,
     GPT41Connector,
     _checked_envelope,
     _context,
@@ -168,7 +168,7 @@ class GPT41ToolsConnector:
                         hashes.append(hashlib.sha256(raw).hexdigest())
                         response_hash = _digest({"contract": "cosmas-agent-model-response-chain.v1", "responses": hashes})
                         data = _json_unique(raw)
-                        usage = data.get("usage") if isinstance(data, dict) and data.get("model") in {MODEL, "gpt-4.1-2025-04-14"} else None
+                        usage = data.get("usage") if isinstance(data, dict) and data.get("model") in RESPONSE_MODELS else None
                         values = [usage.get("prompt_tokens"), usage.get("completion_tokens")] if isinstance(usage, dict) else []
                         if len(values) == 2 and type(values[0]) is int and type(values[1]) is int and (
                             0 <= values[0] < 1_000_000 and 0 <= values[1] < 1_000_000
@@ -180,7 +180,7 @@ class GPT41ToolsConnector:
                         else:
                             usage_verified = False
                         response.raise_for_status()
-                    if self.monotonic() > deadline or not isinstance(data, dict) or data.get("model") not in {MODEL, "gpt-4.1-2025-04-14"}:
+                    if self.monotonic() > deadline or not isinstance(data, dict) or data.get("model") not in RESPONSE_MODELS:
                         raise ValueError("unexpected or late operational response")
                     choices = data.get("choices")
                     if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):

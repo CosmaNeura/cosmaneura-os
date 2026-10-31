@@ -112,7 +112,7 @@ def test_six_signed_fax_chief_human_revision_acceptance_graphs(long_fax, monkeyp
             assert str(request.url) == ENDPOINT
             assert request.headers["Authorization"] == "Bearer invented-product-http-key"
             body = json.loads(request.content)
-            assert body["model"] == "gpt-4.1" and body["store"] is False
+            assert body["model"] == "gpt-4.1-dzus" and body["store"] is False
             bodies.append(body)
             # Check this dispatch's sessions, rather than global owner-lock
             # availability: mounted UI refreshes legitimately read under that

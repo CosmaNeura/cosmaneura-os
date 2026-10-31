@@ -86,10 +86,11 @@ replay durations do not measure provider delivery time.
 
 Azure mode uses the existing Azure CLI login with the fixed CosmaBot endpoint
 `https://cosmascode.services.ai.azure.com/openai/v1/chat/completions` and deployment
-`gpt-4.1`. It sends only generated case data. Credentials stay in memory and are
-never included in artifacts. There is no arbitrary endpoint, shell, browser,
-send, approval or booking tool in the agent tool set. The clinic adds two bounded
-synthetic account-read tools for Visit Prep only. Defaults and CLI limits bound calls,
+`gpt-4.1-dzus` (Data Zone Standard US; underlying model gpt-4.1 2025-04-14). It
+sends only generated case data. Credentials stay in memory and are never included
+in artifacts. There is no arbitrary endpoint, shell, browser, send, approval or
+booking tool in the agent tool set. The clinic adds two bounded synthetic
+account-read tools for Visit Prep only. Defaults and CLI limits bound calls,
 tokens, elapsed time, agent turns, tool count and concurrent workers.
 
 The tool-enabled runner is an experiment alongside the product. The deployed

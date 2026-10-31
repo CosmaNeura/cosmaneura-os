@@ -112,7 +112,7 @@ def tool_http(engine, claimed, *, handoffs=(), teammate=False, mutate_at_round=N
         assert str(request.url) == ENDPOINT
         assert request.headers["Authorization"] == "Bearer invented-product-http-key"
         body = json.loads(request.content)
-        assert body["model"] == "gpt-4.1" and body["store"] is False
+        assert body["model"] == "gpt-4.1-dzus" and body["store"] is False
         # The provider HTTP must not hold the admitting owner/workspace lock.
         with Session(engine) as check:
             assert check.scalar(select(Principal).where(Principal.id == claimed.owner).with_for_update(nowait=True))

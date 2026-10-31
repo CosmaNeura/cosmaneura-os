@@ -22,9 +22,13 @@ from cosmas_os.ports.bot_capabilities import (
     SourcePassage,
 )
 from cosmas_os.ports.task_brief import TaskRequirements
+from cosmas_os.workspace_llm import DEPLOYMENT
 
 ENDPOINT = "https://cosmascode.services.ai.azure.com/openai/v1/chat/completions"
-MODEL = "gpt-4.1"
+# Azure OpenAI v1 request "model" field is the deployment name.
+MODEL = DEPLOYMENT
+# Responses may echo the deployment name or the underlying gpt-4.1 version id.
+RESPONSE_MODELS = frozenset({DEPLOYMENT, "gpt-4.1", "gpt-4.1-2025-04-14"})
 
 CURRENT_PREPARED_CONTRACT = "cosmas-gpt41-prepared.v4"
 SUPPORTED_PREPARED_CONTRACTS = frozenset({
@@ -399,7 +403,7 @@ class GPT41Connector:
                     response_sha256 = hashlib.sha256(raw).hexdigest()
                     response.raise_for_status()
                     data = json.loads(raw)
-            if isinstance(data, dict) and data.get("model") in {"gpt-4.1", "gpt-4.1-2025-04-14"}:
+            if isinstance(data, dict) and data.get("model") in RESPONSE_MODELS:
                 usage = data.get("usage")
                 if isinstance(usage, dict):
                     values = [usage.get("prompt_tokens"), usage.get("completion_tokens")]
@@ -431,7 +435,7 @@ def decode_response(envelope, data, *, input_tokens=None, output_tokens=None, re
     )
     if not isinstance(data, dict):
         raise ValueError("invalid response")
-    if data.get("model") not in {"gpt-4.1", "gpt-4.1-2025-04-14"}:
+    if data.get("model") not in RESPONSE_MODELS:
         raise ValueError("unexpected model")
     choice = data["choices"][0]
     if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):

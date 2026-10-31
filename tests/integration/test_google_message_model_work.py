@@ -180,7 +180,7 @@ def model_http(f, claimed, *, offer=False, cite_google=True, change_at_round=Non
         assert str(request.url) == ENDPOINT
         body = json.loads(request.content)
         calls.append(body)
-        assert body["store"] is False and body["model"] == "gpt-4.1"
+        assert body["store"] is False and body["model"] == "gpt-4.1-dzus"
         with Session(f.engine) as check:
             assert check.scalar(select(Principal).where(Principal.id == f.owner).with_for_update(nowait=True))
         if change_at_round == len(calls):

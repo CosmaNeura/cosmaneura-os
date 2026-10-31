@@ -147,7 +147,7 @@ def test_actual_signed_multi_specialist_ui_completes_six_revision_and_acceptance
             body = json.loads(request.content)
             assert (
                 str(request.url) == ENDPOINT
-                and body["model"] == "gpt-4.1"
+                and body["model"] == "gpt-4.1-dzus"
                 and body["store"] is False
             )
             tool_messages = [m for m in body["messages"] if m["role"] == "tool"]

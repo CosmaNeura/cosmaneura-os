@@ -143,7 +143,7 @@ def chief(case, monkeypatch):
 def reply(c, request, *, extra=None):
     assert str(request.url) == MODEL_ORIGIN + "/openai/v1/chat/completions"
     body = json.loads(request.content)
-    assert body["model"] == "gpt-4.1" and body["store"] is False and "tools" not in body
+    assert body["model"] == "gpt-4.1-dzus" and body["store"] is False and "tools" not in body
     schema = body["response_format"]["json_schema"]["schema"]
     assert "handoffs" not in schema["properties"]
     c.requests.append(body)
