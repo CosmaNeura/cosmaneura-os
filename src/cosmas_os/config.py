@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
-    clerk_session_policy: Literal["audience", "shared_staging"] = "audience"
+    clerk_session_policy: Literal["audience", "shared_staging", "enrollment_default"] = "audience"
     clerk_organization_id: str | None = None
     clerk_authorized_parties: str = ""
     beta_box_id: str | None = None
@@ -69,6 +69,17 @@ class Settings(BaseSettings):
     workspace_authenticated_enabled: bool = False
     # Hosted workspace is explicit and retains all early-adopter deployment gates.
     workspace_hosted_enabled: bool = False
+    # Protected deployer injects exact release identity for signed enrollment
+    # qualification. Empty defaults keep the additive endpoint unavailable.
+    workspace_release_source_commit: str = ""
+    workspace_release_image_sha256: str = ""
+    workspace_enrollment_managed: bool = False
+    workspace_enrollment_practice_id: str = ""
+    workspace_enrollment_api_origin: str = ""
+    workspace_enrollment_origin_allowlist: str = ""
+    # Per-Box derived key only; the central master never enters a workspace.
+    workspace_enrollment_admission_secret: SecretStr | None = None
+    workspace_enrollment_account_origin: str = ""
     workspace_apple_hosted_transport_enabled: bool = False
     workspace_desktop_hosted_transport_enabled: bool = False
     # Paired client/backend gate; hosted profiles also require the workspace protocol.
@@ -491,6 +502,7 @@ class Settings(BaseSettings):
         if self.cosmas_env in STANDALONE_ENVS:
             return self._standalone_configuration_errors()
         errors: list[str] = []
+        errors.extend(self.workspace_enrollment_configuration_errors())
         if (self.standalone_instance_id or self.standalone_root or self.standalone_jwks_path
                 or self.standalone_clerk_issuer_allowlist or self.standalone_model_origin_allowlist):
             errors.append("Standalone settings require the explicit standalone synthetic profile")
@@ -746,6 +758,13 @@ class Settings(BaseSettings):
     def clerk_session_configuration_errors(self) -> list[str]:
         if self.clerk_session_policy == "audience":
             return [] if self.clerk_audience else ["CLERK_AUDIENCE is required"]
+        if self.clerk_session_policy == "enrollment_default":
+            if (not self.workspace_enrollment_managed or self.clerk_audience != ""
+                    or self.auth_mode != "clerk_jwt" or self.cosmas_env != "early_adopter_beta"
+                    or not self._is_exact_https_origin(self.clerk_issuer or "")
+                    or self.workspace_enrollment_configuration_errors()):
+                return ["Enrollment default sessions require managed admission, exact issuer and explicitly empty audience"]
+            return []
         if (self.clerk_session_policy != "shared_staging" or self.clerk_audience != ""
                 or self.cosmas_env not in {"early_adopter_beta", "standalone_clerk_synthetic"}
                 or self.data_mode != "synthetic"
@@ -755,9 +774,45 @@ class Settings(BaseSettings):
             return ["Shared Clerk sessions require synthetic beta, a development issuer and explicitly empty audience"]
         return []
 
+    def workspace_enrollment_configuration_errors(self) -> list[str]:
+        if not self.workspace_enrollment_managed:
+            if self.clerk_session_policy == "enrollment_default":
+                return ["Enrollment default sessions require managed runtime admission"]
+            return []
+        try:
+            valid_practice = str(UUID(self.workspace_enrollment_practice_id)) == self.workspace_enrollment_practice_id
+            valid_box = str(UUID(self.beta_box_id or "")) == self.beta_box_id
+        except ValueError:
+            valid_practice = valid_box = False
+        origin = self.workspace_enrollment_api_origin
+        allowlist = self._csv(self.workspace_enrollment_origin_allowlist)
+        key = self.workspace_enrollment_admission_secret
+        account = self.workspace_enrollment_account_origin
+        if (self.cosmas_env != "early_adopter_beta" or self.auth_mode != "clerk_jwt"
+                or not valid_practice or not valid_box or not self.clerk_organization_id
+                or not self._is_exact_https_origin(origin) or origin not in allowlist
+                or any(not self._is_exact_https_origin(value) for value in allowlist)
+                or key is None or not re.fullmatch(r"[a-f0-9]{64}", key.get_secret_value())
+                or account and (not self._is_exact_https_origin(account)
+                                or account not in allowlist)):
+            return ["Managed enrollment requires an immutable practice/Box/Org, exact allowed HTTPS control/account origins and a derived admission key"]
+        return []
+
+    @property
+    def enrollment_account_origin(self) -> str | None:
+        if self.workspace_enrollment_managed and not self.workspace_enrollment_configuration_errors() and self.workspace_enrollment_account_origin:
+            return self.workspace_enrollment_account_origin
+        return None
+
+    @property
+    def enrollment_recovery_url(self) -> str | None:
+        origin = self.enrollment_account_origin
+        return origin + "/onboarding" if origin else None
+
     def _beta_configuration_errors(self) -> list[str]:
         """Independent cloud prerequisites; never call workspace_available here."""
         errors = self.clerk_session_configuration_errors()
+        errors.extend(self.workspace_enrollment_configuration_errors())
 
         required = {
             "BETA_BOX_ID": self.beta_box_id,
@@ -842,7 +897,8 @@ class Settings(BaseSettings):
         elif not all((self._is_hosted_workspace_origin(value) if self.workspace_hosted_enabled
                       else self._is_exact_https_origin(value)) for value in self.authorized_parties):
             errors.append("CLERK_AUTHORIZED_PARTIES must contain exact https origins")
-        elif not set(self.authorized_parties).issubset(set(self.allowed_origins)):
+        elif not set(self.authorized_parties).issubset(set(self.allowed_origins) |
+                ({self.workspace_enrollment_account_origin} if self.workspace_enrollment_managed else set())):
             errors.append("CLERK_AUTHORIZED_PARTIES must be a subset of CORS_ALLOWED_ORIGINS")
 
         redis = urlparse(self.redis_url)

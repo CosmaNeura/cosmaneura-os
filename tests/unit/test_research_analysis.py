@@ -388,6 +388,28 @@ def test_unchanged_selected_context_revalidates_without_io_or_whole_workspace(mo
     assert work._current_input(s, row)[0] is w
 
 
+def test_managed_selected_context_still_requires_current_worker_admission(monkeypatch):
+    from cosmas_os.adapters.enrollment_admission import ACCESS_REQUIRED, RuntimeAdmissionError
+
+    case = fixture()
+    s, _ = gates(monkeypatch, case)
+    row, _ = row_and_context(case)
+    row.id = str(uuid4())
+    row.envelope_sha256 = work.digest(row.prepared_envelope)
+    work.team.runtime_settings.workspace_enrollment_managed = True
+    calls = []
+
+    def denied(_session, _runtime, **scope):
+        calls.append(scope)
+        raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
+
+    monkeypatch.setattr(work, "require_worker_admission", denied)
+    with pytest.raises(WorkspaceError, match=ACCESS_REQUIRED):
+        work._current_input(s, row)
+    assert calls == [{"box": row.box_id, "owner": row.owner_id, "operation_id": row.id,
+        "approval_sha256": row.envelope_sha256, "external_identity_id": row.external_identity_id}]
+
+
 @pytest.mark.parametrize("revoke", ["identity", "team", "model", "research", "restriction", "source", "agent", "selection"])
 def test_existing_claim_and_settlement_input_check_rejects_revocation(monkeypatch, revoke):
     case = fixture()

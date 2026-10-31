@@ -13,6 +13,10 @@ from jwt import PyJWKClient, PyJWTError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from cosmas_os.adapters.enrollment_admission import (
+    EnrollmentAdmissionAdapter,
+    require_runtime_admission,
+)
 from cosmas_os.config import Settings
 from cosmas_os.domain.enums import PrincipalState, PrincipalType
 from cosmas_os.models import ExternalIdentity, Principal
@@ -249,7 +253,7 @@ class ClerkTokenVerifier:
                 signing_key.key,
                 algorithms=["RS256"],
                 issuer=self._settings.clerk_issuer,
-                audience=None if self._settings.clerk_session_policy == "shared_staging" else self._settings.clerk_audience,
+                audience=None if self._settings.clerk_session_policy in {"shared_staging", "enrollment_default"} else self._settings.clerk_audience,
                 options=options,
                 leeway=5,
             )
@@ -266,7 +270,7 @@ class ClerkTokenVerifier:
         # verify_aud above still rejects tokens intended for another API.
         if (not isinstance(subject, str) or not subject or len(subject) > 255
                 or not isinstance(session_id, str) or not session_id or len(session_id) > 255
-                or self._settings.clerk_session_policy == "shared_staging" and "aud" in claims):
+                or self._settings.clerk_session_policy in {"shared_staging", "enrollment_default"} and "aud" in claims):
             raise AuthenticationFailed("invalid bearer token")
         # Clerk native clients authenticate with Authorization and cannot send
         # Origin alongside it. Their signed session JWT can therefore omit azp.
@@ -328,6 +332,7 @@ def authenticate_request(
     box_header: str | None,
     actor_header: str | None,
     verifier: TokenVerifier | None = None,
+    admission_adapter: EnrollmentAdmissionAdapter | None = None,
 ) -> RequestIdentity:
     if runtime_settings.auth_mode == "synth_headers":
         if runtime_settings.cosmas_env != "synth_os":
@@ -381,6 +386,7 @@ def authenticate_request(
     ):
         raise AccessDenied("identity is outside the configured Box")
     _active_human(session, binding.principal_id, binding.box_id)
+    require_runtime_admission(runtime_settings, authorization, subject, adapter=admission_adapter)
     return RequestIdentity(
         box_id=binding.box_id,
         principal_id=binding.principal_id,
