@@ -173,6 +173,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const inboxNavigationConsumed=useRef<object|null>(null);
   const [recordingMinimized,setRecordingMinimized]=useState(false);
   const savedRecordingHost=useRef<HTMLDivElement>(null);
+  const savedRecordingScrollLive=useRef(false);
   const recordingHome=useRef<HTMLDivElement|null>(null),recordingHost=useRef<HTMLDivElement|null>(null),previousRecordingOpen=useRef(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false),[googleMessageVisited,setGoogleMessageVisited]=useState(false);
   const googleWorkOpening=useRef(0);
@@ -950,8 +951,15 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     !localModelPending.body.research_analysis&&!localModelPending.body.inbox_analysis&&!localModelPending.body.membership_analysis&&!localModelPending.body.session_prep_analysis;
   const nativeSavedRecording=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&!privateRecordingEntry&&CAPTURE_WORKSPACE_BUILD&&!!team&&
     !!savedRecordingEntry&&savedRecordingEntry.identity===authenticated&&savedRecordingEntry.workspaceId===workspace?.id&&journal.current?.scope===savedRecordingEntry.scope;
-  const savedRecordingNotebookOpen=nativeSavedRecording&&savedRecordingNotebook===savedRecordingEntry;
+  const savedRecordingNotebookOpen=!!(nativeSavedRecording&&savedRecordingNotebook&&savedRecordingEntry&&
+    savedRecordingNotebook.recordingId===savedRecordingEntry.recordingId&&
+    savedRecordingNotebook.workspaceId===savedRecordingEntry.workspaceId&&
+    savedRecordingNotebook.scope===savedRecordingEntry.scope&&
+    savedRecordingNotebook.identity===savedRecordingEntry.identity);
   const savedRecordingFocused=nativeSavedRecording&&!savedRecordingNotebookOpen;
+  // Live focus is sampled when a deferred frame runs. Cancel alone can miss a
+  // callback that already left the cancellable table under load.
+  savedRecordingScrollLive.current=!!(savedRecordingFocused&&nativeChatOwner&&savedRecordingEntry);
   const nativeChat=!visitSourceTaskOpen&&!messagesMode&&!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!!workspace&&practicePage==='notebook'&&mobilePanel==='Conversation'&&
     !settingsOpen&&!practiceOpen&&!privateRecordingEntry&&(!savedRecordingEntry||savedRecordingNotebookOpen)&&!scribeRecordingOpen&&!scribeSourceBusy&&!reviewHandoffId&&!conflict&&!recoveryBlocked&&!recoveryOffers.length&&(!pending||busy||nativeConversationPending);
   const nativeWorkspace=!visitSourceTaskOpen&&!messagesMode&&!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!nativeHome&&!nativeChat&&!privateRecordingEntry&&!settingsOpen&&!practiceOpen;
@@ -978,9 +986,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     void prepareClinicalDrafts(noteSelection(workspace.note.latest,workspace.revision)).catch(()=>{});
   }
   useLayoutEffect(()=>{
-    if(!savedRecordingFocused||!nativeChatOwner||!savedRecordingEntry)return;
+    if(!savedRecordingScrollLive.current||!nativeChatOwner||!savedRecordingEntry)return;
     const owner=nativeChatOwner,current=generation.current,host=savedRecordingHost.current;
-    const scroll=()=>{if(previousIdentity.current===owner&&owner.nativeSession?.isCurrent()&&generation.current===current&&host===savedRecordingHost.current&&host?.isConnected)
+    const scroll=()=>{if(!savedRecordingScrollLive.current)return;
+      if(previousIdentity.current===owner&&owner.nativeSession?.isCurrent()&&generation.current===current&&host===savedRecordingHost.current&&host?.isConnected)
       host?.scrollIntoView?.({block:'start'});};
     if(!window.requestAnimationFrame){scroll();return;}
     const frame=window.requestAnimationFrame(scroll);return()=>window.cancelAnimationFrame?.(frame);
