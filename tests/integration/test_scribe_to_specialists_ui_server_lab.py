@@ -628,7 +628,7 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
             body = json.loads(request.content)
             assert (
                 str(request.url) == ENDPOINT
-                and body["model"] == "gpt-4.1"
+                and body["model"] == "gpt-4.1-dzus"
                 and body["store"] is False
             )
             tool_messages = [m for m in body["messages"] if m["role"] == "tool"]

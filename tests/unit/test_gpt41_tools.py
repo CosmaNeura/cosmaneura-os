@@ -57,7 +57,7 @@ def connector(responses, requests, *, monotonic=None):
         assert str(request.url) == gpt41.ENDPOINT
         assert request.headers["Authorization"] == "Bearer invented-key"
         body = json.loads(request.content)
-        assert body["model"] == "gpt-4.1" and body["store"] is False
+        assert body["model"] == "gpt-4.1-dzus" and body["store"] is False
         requests.append(body)
         value = next(values)
         if isinstance(value, Exception):

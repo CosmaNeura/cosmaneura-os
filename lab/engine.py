@@ -9,11 +9,13 @@ from typing import Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from cosmas_os.workspace_llm import DEPLOYMENT
 from lab.cases import JOBS, ROLES, Case
 from lab.store import LabError, Store
 
 ENDPOINT = "https://cosmascode.services.ai.azure.com/openai/v1/chat/completions"
-MODEL = "gpt-4.1"
+MODEL = DEPLOYMENT
+RESPONSE_MODELS = frozenset({DEPLOYMENT, "gpt-4.1", "gpt-4.1-2025-04-14"})
 
 
 class Arguments(BaseModel):
@@ -121,7 +123,7 @@ class AzureModel:
                         raise LabError("model_response_limit")
                     raw.extend(chunk)
         data = json.loads(raw)
-        if data.get("model") not in {MODEL, "gpt-4.1-2025-04-14"}:
+        if data.get("model") not in RESPONSE_MODELS:
             raise LabError("unexpected_model")
         choice = data["choices"][0]
         if choice.get("finish_reason") not in {"stop", "tool_calls"} or choice["message"].get("refusal"):

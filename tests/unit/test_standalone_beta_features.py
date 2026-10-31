@@ -22,7 +22,7 @@ clerk_standalone = clerk_tests.clerk_standalone
 
 
 def model_values():
-    return {"workspace_llm_backend": "azure_gpt41", "workspace_llm_deployment": "gpt-4.1",
+    return {"workspace_llm_backend": "azure_gpt41", "workspace_llm_deployment": "gpt-4.1-dzus",
         "workspace_llm_endpoint": MODEL_ORIGIN + "/openai/v1",
         "standalone_model_origin_allowlist": MODEL_ORIGIN,
         "workspace_llm_api_key": SecretStr("invented-model-key")}
@@ -154,7 +154,7 @@ def test_adapter_uses_exact_selected_endpoint_without_tools_or_fallback():
     def respond(request):
         assert str(request.url) == endpoint
         body = json.loads(request.content)
-        assert body["model"] == "gpt-4.1" and body["store"] is False and "tools" not in body
+        assert body["model"] == "gpt-4.1-dzus" and body["store"] is False and "tools" not in body
         requests.append(body)
         return httpx.Response(200, json={"model": "gpt-4.1",
             "usage": {"prompt_tokens": 100, "completion_tokens": 20},

@@ -50,7 +50,7 @@ def model_dispatch(engine, claim):
     def provider(request):
         assert str(request.url) == ENDPOINT
         body = json.loads(request.content)
-        assert body["model"] == "gpt-4.1" and body["store"] is False
+        assert body["model"] == "gpt-4.1-dzus" and body["store"] is False
         tools = [m for m in body["messages"] if m["role"] == "tool"]
         message = {"role": "assistant", "content": None}
         if not tools:

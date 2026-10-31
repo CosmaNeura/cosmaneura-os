@@ -12,6 +12,8 @@ const object=(value,keys,code)=>{
   if(!value||typeof value!=='object'||Array.isArray(value)||
     Object.keys(value).length!==keys.length||keys.some(key=>!Object.hasOwn(value,key)))refuse(code);
 };
+// Keep equal to cosmas_os.workspace_llm.DEPLOYMENT (Data Zone Standard US).
+const WORKSPACE_LLM_DEPLOYMENT='gpt-4.1-dzus';
 // Synthetic web addresses, and the matching api.<host> names. Every other
 // cosmas.ai or cosmaneura.com hostname stays refused.
 const syntheticWebHosts=['staging.cosmas.ai','beta.cosmas.ai'];
@@ -35,7 +37,7 @@ function betaFeatures(value){
     const model=features.model;
     if(typeof model.origin!=='string'||model.origin!==model.origin.trim()||
       !/^https:\/\/[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)$/.test(model.origin)||
-      model.endpoint!==model.origin+'/openai/v1'||model.deployment!=='gpt-4.1')refuse('exact_owned_model_selection_required');
+      model.endpoint!==model.origin+'/openai/v1'||model.deployment!==WORKSPACE_LLM_DEPLOYMENT)refuse('exact_owned_model_selection_required');
   }
   if(features.google!==null){
     object(features.google,['client_id','callback_uri','return_origin'],'public_google_shape');

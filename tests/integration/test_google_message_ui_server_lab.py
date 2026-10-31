@@ -277,7 +277,7 @@ def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_k
 
         def provider(request):
             body = json.loads(request.content)
-            assert body["store"] is False and body["model"] == "gpt-4.1"
+            assert body["store"] is False and body["model"] == "gpt-4.1-dzus"
             rounds.append(
                 dict(
                     admission_id=claim.admission_id,

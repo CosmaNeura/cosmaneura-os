@@ -37,7 +37,7 @@ const webHost=process.argv[3]==='beta'?'beta.cosmas.ai':'staging.cosmas.ai';
 if(process.argv[2]==='features'){
   input.resource_scope='owned-cosmabot-vm-instance';input.web_origin='https://'+webHost;input.api_origin='https://api.'+webHost;
   input.identity.apiOrigin=input.api_origin;input.tls.hostnames=[webHost,'api.'+webHost];
-  input.beta_features={model:{origin:'https://invented-owned-chief.openai.azure.com',endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'},
+  input.beta_features={model:{origin:'https://invented-owned-chief.openai.azure.com',endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1-dzus'},
     google:{client_id:'invented-client.apps.googleusercontent.com',callback_uri:input.api_origin+'/connections/google/callback',return_origin:input.web_origin}};
 }
 const files=render(input);console.log(JSON.stringify({environment:files['api-public.json'],contract:files['host-preparation.json']}));

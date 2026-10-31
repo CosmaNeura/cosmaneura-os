@@ -49,7 +49,7 @@ def test_actual_product_ui_runs_six_human_revision_acceptance_loops(engine, monk
         def provider(request):
             body = json.loads(request.content)
             assert str(request.url).endswith("/openai/v1/chat/completions")
-            assert body["model"] == "gpt-4.1" and body["store"] is False
+            assert body["model"] == "gpt-4.1-dzus" and body["store"] is False
             rounds.append(
                 {
                     "admission_id": claim.admission_id,

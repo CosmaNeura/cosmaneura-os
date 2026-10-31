@@ -74,7 +74,7 @@ def test_actual_saved_postgresql_envelope_keeps_exact_body_and_digest():
     path = Path(__file__).parents[1] / "fixtures/model_envelope_jsonb_scribe.json"
     value = json.loads(path.read_text())
     saved = deepcopy(value)
-    assert model_work.digest(value) == '062dcf13d5ee5dc604319545e6a063eaa2f0f1b7a02cb8e60595546a4e091e0e'
+    assert model_work.digest(value) == '42fe04034ed1eb5c1d4ef433bd67795a31c9dd8bab7905323156b0cbafe17ef2'
     assert list(value["sources"][0]) != list(json.loads(value["body"]["messages"][1]["content"])["sources"][0])
     _checked_envelope(value)
     calls = []

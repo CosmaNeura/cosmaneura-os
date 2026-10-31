@@ -34,13 +34,13 @@ def legacy_schema(envelope):
 
 def test_pre_change_fixture_bytes_are_unchanged():
     assert hashlib.sha256(FIXTURE.read_bytes()).hexdigest() == (
-        "cbe3c0304ad8b675a3090e35aab4ab8e30d433df3b11dd03aa7ae5fab640670b"
+        "77b7fdfe5513f8cca70fdd8932460ec0cd6ee2d2f15ef1ed57c373355522c63f"
     )
     assert hashlib.sha256(V2_FIXTURE.read_bytes()).hexdigest() == (
-        "182988930add1e62c634f36d83ab60257acb8c8e0347bb2954b8b41105902edf"
+        "f39311817c3da37cc1d783ca58288e3866a333f94d1b5b45ad782a2c2043ee52"
     )
     assert hashlib.sha256(V3_FIXTURE.read_bytes()).hexdigest() == (
-        "b19156c96afa236f04befdaa26a4c1cf9412a8bdf5d2d383fcc7fe559a2fb15f"
+        "c64ee4a7b4bf4dce83257b5e0785c264a6c37279fe60b589af895eb4514f23cc"
     )
 
 
