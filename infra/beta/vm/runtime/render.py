@@ -96,9 +96,12 @@ def validate_manifest(value: dict) -> dict:
         r"[A-Za-z0-9:/._-]{8,240}", value["image_review_reference"]
     ):
         raise Refused("reviewed_image_identity_required")
-    if (
-        value["web_origin"] != "https://staging.cosmas.ai"
-        or value["api_origin"] != "https://api.staging.cosmas.ai"
+    # staging.cosmas.ai and beta.cosmas.ai, each with its own api.<host>.
+    # Every other hostname, including other Cosmas addresses, is refused.
+    synthetic_web_hosts = ("staging.cosmas.ai", "beta.cosmas.ai")
+    if not any(
+        value["web_origin"] == f"https://{host}" and value["api_origin"] == f"https://api.{host}"
+        for host in synthetic_web_hosts
     ):
         raise Refused("selected_staging_origins_required")
     images = value["images"]
@@ -509,23 +512,44 @@ save ""
 
 
 def caddy(value):
+    """Proxy config. Access logs keep status, duration, and request_id.
+
+    Query strings and request or response bodies are not written.
+    """
     web, api = value["web_origin"][8:], value["api_origin"][8:]
     roll = LOGS.caddy_global_lines(LOG_CONFIG)
     return f"""{{
-    admin off
-    http_port 8080
-    https_port 8443{roll}
+	admin off
+	http_port 8080
+	https_port 8443{roll}
+}}
+(cosmas_access_log) {{
+	log {{
+		output stdout
+		format filter {{
+			request>uri regexp \\?.* [redacted-query]
+			request>headers delete
+			request>body delete
+			resp_headers delete
+			response>body delete
+			wrap json
+		}}
+	}}
+	log_append request_id {{http.request.uuid}}
 }}
 http://{web}, http://{api} {{
-    redir https://{{host}}{{uri}} permanent
+	import cosmas_access_log
+	redir https://{{host}}{{uri}} permanent
 }}
 https://{web} {{
-    reverse_proxy web:8080
+	import cosmas_access_log
+	reverse_proxy web:8080
 }}
 https://{api} {{
-    @private path /health /ready /docs /redoc /openapi.json
-    respond @private 404
-    reverse_proxy api:8000
+	import cosmas_access_log
+	@private path /health /ready /docs /redoc /openapi.json
+	respond @private 404
+	reverse_proxy api:8000
 }}
 """
 

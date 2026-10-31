@@ -4,8 +4,9 @@ import {resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {readVersionDocument} from "../web/scripts/version-json.mjs";
 
-// The only origin this helper knows. It has no host, registry, or subscription argument.
+// Allowed synthetic web hosts. No registry, subscription, or deploy argument.
 export const STAGING_WEB_ORIGIN = "https://staging.cosmas.ai";
+const ALLOWED_WEB_HOSTS = ["staging.cosmas.ai", "beta.cosmas.ai"];
 
 export const PRODUCTION_NAMES = [
   "app.cosmaneura.com",
@@ -18,7 +19,27 @@ export const PRODUCTION_NAMES = [
   "www.cosmas.ai",
 ];
 
-const REFUSED = /(?:^|[^a-z])(production|terraform|kubectl|azure)(?:[^a-z]|$)|(?:^|\s)az(?:\s|$)/i;
+const REFUSED = /(?:^|[^a-z])(production|terraform|kubectl|azure|authorized_beta)(?:[^a-z]|$)|(?:^|\s)az(?:\s|$)/i;
+
+function allowedWebOrigin(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.origin !== value || url.protocol !== "https:" || url.username || url.password) return null;
+  if (!ALLOWED_WEB_HOSTS.includes(url.hostname)) return null;
+  return url.origin;
+}
+
+function mentionsForbiddenHost(value) {
+  const lower = value.toLowerCase();
+  if (PRODUCTION_NAMES.some(name => lower.includes(name))) return true;
+  if (lower.includes(".cosmaneura.com") || /(^|[^a-z0-9.])cosmaneura\.com([^a-z0-9.]|$)/.test(lower)) return true;
+  // Apex only. staging.cosmas.ai and beta.cosmas.ai contain the suffix and stay allowed.
+  return /(^|[^a-z0-9.])cosmas\.ai([^a-z0-9.]|$)/.test(lower);
+}
 
 export function assertStagingArguments(argv) {
   if (!Array.isArray(argv) || argv.some(arg => typeof arg !== "string")) {
@@ -26,20 +47,23 @@ export function assertStagingArguments(argv) {
   }
   if (REFUSED.test(argv.join("\n"))) throw new Error("staging_web_package_refused");
   for (const arg of argv) {
-    const lower = arg.toLowerCase();
-    if (PRODUCTION_NAMES.some(name => lower.includes(name))) {
-      throw new Error("staging_web_package_refused");
-    }
     if (/^https?:\/\//i.test(arg)) {
-      let url;
-      try {
-        url = new URL(arg);
-      } catch {
-        throw new Error("staging_web_package_refused");
-      }
-      if (url.origin !== STAGING_WEB_ORIGIN) throw new Error("staging_web_package_refused");
+      if (!allowedWebOrigin(arg)) throw new Error("staging_web_package_refused");
+      continue;
     }
+    if (mentionsForbiddenHost(arg)) throw new Error("staging_web_package_refused");
   }
+}
+
+function selectedWebOrigin(argv) {
+  const found = [];
+  for (const arg of argv) {
+    const origin = /^https?:\/\//i.test(arg) ? allowedWebOrigin(arg) : null;
+    if (origin) found.push(origin);
+  }
+  const unique = [...new Set(found)];
+  if (unique.length > 1) throw new Error("staging_web_package_refused");
+  return unique[0] ?? STAGING_WEB_ORIGIN;
 }
 
 function regularDirectory(path) {
@@ -64,7 +88,7 @@ export function packageStagingWeb({distDir, outputDir, argv = []}) {
   if (packed.status !== 0) throw new Error("staging_web_archive_failed");
   const receipt = {
     schema: "cosmabot-staging-web-package/v1",
-    target: STAGING_WEB_ORIGIN,
+    target: selectedWebOrigin(argv),
     commit: document.commit,
     built_at: document.built_at,
     archive: archiveName,
@@ -82,10 +106,17 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const args = process.argv.slice(2);
   try {
     assertStagingArguments(args);
-    if (args.length !== 4 || args[0] !== "--dist" || args[2] !== "--output") {
-      throw new Error("staging_web_package_refused");
+    const flags = {};
+    if (args.length % 2 !== 0) throw new Error("staging_web_package_refused");
+    for (let index = 0; index < args.length; index += 2) {
+      const name = args[index];
+      if (!["--dist", "--output", "--target"].includes(name) || Object.hasOwn(flags, name)) {
+        throw new Error("staging_web_package_refused");
+      }
+      flags[name] = args[index + 1];
     }
-    const receipt = packageStagingWeb({distDir: args[1], outputDir: args[3], argv: args});
+    if (!flags["--dist"] || !flags["--output"]) throw new Error("staging_web_package_refused");
+    const receipt = packageStagingWeb({distDir: flags["--dist"], outputDir: flags["--output"], argv: args});
     process.stdout.write(`${JSON.stringify({target: receipt.target, deployed: receipt.deployed, commit: receipt.commit})}\n`);
   } catch {
     process.stderr.write("Staging web package refused.\n");

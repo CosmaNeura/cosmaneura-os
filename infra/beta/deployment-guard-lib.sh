@@ -1109,6 +1109,12 @@ guard_validate_network_public_configuration() {
          (.public_configuration.web_custom_domain | strings |
            test("^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$")
          ) and
+         ((.public_configuration.web_custom_domain == "staging.cosmas.ai") or
+          (.public_configuration.web_custom_domain == "beta.cosmas.ai") or
+          (((.public_configuration.web_custom_domain == "cosmas.ai") or
+            (.public_configuration.web_custom_domain | endswith(".cosmas.ai")) or
+            (.public_configuration.web_custom_domain == "cosmaneura.com") or
+            (.public_configuration.web_custom_domain | endswith(".cosmaneura.com"))) | not)) and
          .public_configuration.web_origin == ("https://" + .public_configuration.web_custom_domain)
        end) and
       (.public_configuration.acr_login_server | strings |
@@ -1149,6 +1155,9 @@ guard_validate_domain_verification_artifact() {
        .selected_hostname != "staging-app.cosmaneura.com" and
        .selected_hostname != "chat.cosmaneura.com" and
        .selected_hostname != "staging-chat.cosmaneura.com") and
+      ((.selected_hostname == "staging.cosmas.ai") or (.selected_hostname == "beta.cosmas.ai") or
+       (((.selected_hostname == "cosmas.ai") or (.selected_hostname | endswith(".cosmas.ai")) or
+         (.selected_hostname == "cosmaneura.com") or (.selected_hostname | endswith(".cosmaneura.com"))) | not)) and
       (.state | keys | sort) == (["lineage", "serial", "sha256"] | sort) and
       (.state.lineage | strings | test("^[0-9a-fA-F-]{36}$")) and
       (.state.serial | numbers | floor == . and . >= 0) and

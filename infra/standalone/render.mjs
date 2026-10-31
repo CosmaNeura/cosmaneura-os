@@ -12,13 +12,17 @@ const object=(value,keys,code)=>{
   if(!value||typeof value!=='object'||Array.isArray(value)||
     Object.keys(value).length!==keys.length||keys.some(key=>!Object.hasOwn(value,key)))refuse(code);
 };
-const platformHosts=new Set(['cosmas.ai','app.cosmas.ai','api.cosmas.ai','staging.cosmas.ai','api.staging.cosmas.ai']);
+// Synthetic web addresses, and the matching api.<host> names. Every other
+// cosmas.ai or cosmaneura.com hostname stays refused.
+const syntheticWebHosts=['staging.cosmas.ai','beta.cosmas.ai'];
+const ownedSyntheticHosts=new Set(syntheticWebHosts.flatMap(host=>[host,`api.${host}`]));
+const platformHosts=new Set(['cosmas.ai','www.cosmas.ai','app.cosmas.ai','api.cosmas.ai','bot.cosmas.ai',...ownedSyntheticHosts]);
 function origin(value,ownedStaging=false){
   let url;try{url=new URL(value);}catch{refuse('exact_https_origin_required');}
   if(typeof value!=='string'||url.origin!==value||url.protocol!=='https:'||url.port||
     !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(url.hostname)||
     url.hostname==='cosmaneura.com'||url.hostname.endsWith('.cosmaneura.com')||
-    platformHosts.has(url.hostname)&&!(ownedStaging&&['staging.cosmas.ai','api.staging.cosmas.ai'].includes(url.hostname)))
+    platformHosts.has(url.hostname)&&!(ownedStaging&&ownedSyntheticHosts.has(url.hostname)))
     refuse('dedicated_https_origin_required');
   return url.hostname;
 }
@@ -51,8 +55,8 @@ export function validateInput(value){
   const ownedVm=value.resource_scope==='owned-cosmabot-vm-instance';
   if(value.version!==1||!['dedicated-new-cosmabot-host','owned-cosmabot-vm-instance'].includes(value.resource_scope))refuse('dedicated_host_required');
   const features=betaFeatures(value);
-  if(ownedVm&&(features.profile!=='independent-beta-v1'||value.web_origin!=='https://staging.cosmas.ai'||
-    value.api_origin!=='https://api.staging.cosmas.ai'))refuse('exact_owned_cosmabot_routes_required');
+  const ownedPair=syntheticWebHosts.some(host=>value.web_origin===`https://${host}`&&value.api_origin===`https://api.${host}`);
+  if(ownedVm&&(features.profile!=='independent-beta-v1'||!ownedPair))refuse('exact_owned_cosmabot_routes_required');
   if(typeof value.instance_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.instance_id))refuse('instance_uuid_required');
   if(typeof value.box_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.box_id)||value.box_id===value.instance_id)refuse('distinct_fresh_box_uuid_required');
   if(!/^[0-9a-f]{40}$/.test(value.source_commit))refuse('source_commit_required');

@@ -633,9 +633,10 @@ pre/post-plan state lineage, serial, and hash.
 The production web custom domain is selected before the foundation plan because
 Clerk production cannot use the shared `azurecontainerapps.io` hostname. On
 2026-09-25 the owner confirmed `staging.cosmas.ai` for testing, reserving
-`bot.cosmas.ai` for the user-facing CosmaBot app. This replaces the earlier
-staging hostname recommendations; approval of each exact deployment plan and
-the identity/DNS gates remains required. Set
+`bot.cosmas.ai` for the user-facing CosmaBot app. Synthetic scripts also accept
+`beta.cosmas.ai` beside it; synthetic mode stays on and nothing is deployed.
+This replaces the earlier staging hostname recommendations; approval of each
+exact deployment plan and the identity/DNS gates remains required. Set
 `web_custom_domain = "staging.cosmas.ai"` in the foundation and retain it in
 every later tfvars object with `web_custom_domain_dns_ready = false`. The
 app-specific verification value does not exist before the web Container App,
