@@ -85,7 +85,11 @@ Ruff/Pyright. Eighteen migrated PostgreSQL journeys cover actual owner/staff
 setup, protected API/Chief actions, recovery and queued worker failures; the
 independent review also checked three runtime and three worker cases. The
 integrated browser passed 63 focused checks, one fresh actual synthetic HTTP
-owner/staff journey, TypeScript and Vite build. Seven renderer checks and
+owner/staff journey, TypeScript and Vite build. Full CI identified native error
+contract regressions in the added non-hosted recovery fence; the repair preserves
+the existing caller checks while canceling stale bytes. Its 195 focused account,
+Inbox/handoff, protocol and recovery regression checks passed without test changes.
+Seven renderer checks and
 OpenTofu format/validation passed; no plan or apply was run. The copied BAA's exact SHA-256 is
 verified inside the built package. These checks use invented identities and
 fake external providers; they do not prove live Google/Microsoft/password or
