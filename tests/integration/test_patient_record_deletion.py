@@ -375,22 +375,27 @@ def test_staff_and_agent_are_refused_by_the_api_and_the_cli(practice) -> None:
     assert all(path.is_file() for path in files)
     client = TestClient(app)
     path = f"/admin/patients/{patient_id}/records"
-
-    for actor, headers in (
-        (staff, {"X-Box-Id": owner_box, "X-Actor-Principal-Id": staff}),
-        (agent, {"X-Box-Id": owner_box, "X-Actor-Principal-Id": agent}),
-    ):
-        refused = client.post(path, json={"confirm": True}, headers=headers)
-        assert refused.status_code == 403
-        assert str(names["label"]) not in refused.text
-        assert str(names["note"]) not in refused.text
-        cli = CliRunner().invoke(
-            cli_app, ["delete-patient-records", patient_id, "--actor", actor, "--confirm"]
-        )
-        assert cli.exit_code == 1
-        assert "admin authority required" in (cli.stderr or "")
-        assert str(names["label"]) not in (cli.stderr or "")
-        assert str(names["note"]) not in (cli.stderr or "")
+    admin_role, admin_url = _separate_admin_identity(session)
+    try:
+        for actor, headers in (
+            (staff, {"X-Box-Id": owner_box, "X-Actor-Principal-Id": staff}),
+            (agent, {"X-Box-Id": owner_box, "X-Actor-Principal-Id": agent}),
+        ):
+            refused = client.post(path, json={"confirm": True}, headers=headers)
+            assert refused.status_code == 403
+            assert str(names["label"]) not in refused.text
+            assert str(names["note"]) not in refused.text
+            cli = CliRunner().invoke(
+                cli_app,
+                ["delete-patient-records", patient_id, "--actor", actor, "--confirm"],
+                env={"COSMAS_ADMIN_DATABASE_URL": admin_url},
+            )
+            assert cli.exit_code == 1
+            assert "admin authority required" in (cli.stderr or "")
+            assert str(names["label"]) not in (cli.stderr or "")
+            assert str(names["note"]) not in (cli.stderr or "")
+    finally:
+        _drop_admin_identity(session, admin_role)
 
     assert session.get(PatientLink, patient_id) is not None
     assert all(path.is_file() for path in files)
@@ -595,9 +600,15 @@ def test_repeat_delete_is_a_safe_no_op(practice) -> None:
     assert second["dry_run"] is False
     assert second["tables"] == {}
     assert second["files"] == {"audio": 0, "uploads": 0, "exports": 0}
-    cli = CliRunner().invoke(
-        cli_app, ["delete-patient-records", patient_id, "--actor", owner, "--confirm"]
-    )
+    admin_role, admin_url = _separate_admin_identity(session)
+    try:
+        cli = CliRunner().invoke(
+            cli_app,
+            ["delete-patient-records", patient_id, "--actor", owner, "--confirm"],
+            env={"COSMAS_ADMIN_DATABASE_URL": admin_url},
+        )
+    finally:
+        _drop_admin_identity(session, admin_role)
     assert cli.exit_code == 0
     assert json.loads(cli.stdout)["deleted"] is False
     assert session.get(PatientLink, patient_id) is None
@@ -801,6 +812,98 @@ def test_runtime_role_cannot_delete_guarded_tables_with_the_flag() -> None:
             connection.execute(text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
             connection.execute(text(f"DROP ROLE IF EXISTS {role}"))
         admin.dispose()
+
+
+def _separate_admin_identity(session: Session) -> tuple[str, str]:
+    runtime_url = os.environ.get("DATABASE_URL", settings.database_url)
+    parsed = make_url(runtime_url)
+    role = "patient_admin_" + uuid4().hex[:12]
+    password = parsed.password
+    assert isinstance(password, str) and password
+    quoted = session.scalar(text("SELECT quote_literal(:password)"), {"password": password})
+    assert isinstance(quoted, str)
+    _autocommit(session, f"CREATE ROLE {role} LOGIN SUPERUSER PASSWORD {quoted}")
+    admin_url = parsed.set(username=role).render_as_string(hide_password=False)
+    assert admin_url != runtime_url
+    assert make_url(admin_url).username == role
+    assert make_url(admin_url).username != parsed.username
+    return role, admin_url
+
+
+def _drop_admin_identity(session: Session, role: str) -> None:
+    _autocommit(session, f"DROP ROLE IF EXISTS {role}")
+
+
+def test_runtime_role_cannot_set_role_to_the_deletion_role(practice) -> None:
+    session = practice["session"]
+    role = "patient_runtime_" + uuid4().hex[:12]
+    runtime = _runtime_engine(session, role)
+    try:
+        chain = session.scalar(text(
+            "WITH RECURSIVE granted_roles AS ("
+            "  SELECT m.roleid FROM pg_auth_members m "
+            "  JOIN pg_roles member ON member.oid = m.member "
+            "  WHERE member.rolname = :role "
+            "  UNION "
+            "  SELECT m.roleid FROM pg_auth_members m "
+            "  JOIN granted_roles parent ON m.member = parent.roleid"
+            ") "
+            "SELECT EXISTS ("
+            "  SELECT 1 FROM granted_roles granted_role "
+            "  JOIN pg_roles granted ON granted.oid = granted_role.roleid "
+            "  WHERE granted.rolname = 'cosmas_patient_deletion'"
+            ")"
+        ), {"role": role})
+        assert chain is False
+        with runtime.connect() as connection:
+            transaction = connection.begin()
+            try:
+                for privilege in ("MEMBER", "USAGE", "SET"):
+                    allowed = connection.scalar(
+                        text(
+                            "SELECT pg_has_role(current_user, 'cosmas_patient_deletion', :privilege)"
+                        ),
+                        {"privilege": privilege},
+                    )
+                    assert allowed is False
+                with pytest.raises(ProgrammingError, match="permission denied"):
+                    connection.execute(text("SET ROLE cosmas_patient_deletion"))
+            finally:
+                transaction.rollback()
+    finally:
+        runtime.dispose()
+        _drop_runtime_role(session, role)
+
+
+def test_admin_cli_refuses_a_missing_or_runtime_database_url(practice, monkeypatch) -> None:
+    session = practice["session"]
+    patient_id = str(practice["casey"]["patient_id"])
+    owner = str(practice["owner_id"])
+    runtime_url = os.environ.get("DATABASE_URL", settings.database_url)
+    monkeypatch.delenv("COSMAS_ADMIN_DATABASE_URL", raising=False)
+    missing = CliRunner().invoke(
+        cli_app, ["delete-patient-records", patient_id, "--actor", owner, "--confirm"]
+    )
+    assert missing.exit_code == 1
+    assert "admin database identity is not configured" in (missing.stderr or "")
+    assert "admin authority required" not in (missing.stderr or "")
+    monkeypatch.setenv("COSMAS_ADMIN_DATABASE_URL", runtime_url)
+    same = CliRunner().invoke(
+        cli_app, ["delete-patient-records", patient_id, "--actor", owner, "--confirm"]
+    )
+    assert same.exit_code == 1
+    assert "admin database identity is not configured" in (same.stderr or "")
+    renamed = make_url(runtime_url).set(query={"application_name": "patient-deletion"}).render_as_string(
+        hide_password=False
+    )
+    assert renamed != runtime_url
+    monkeypatch.setenv("COSMAS_ADMIN_DATABASE_URL", renamed)
+    same_role = CliRunner().invoke(
+        cli_app, ["delete-patient-records", patient_id, "--actor", owner, "--confirm"]
+    )
+    assert same_role.exit_code == 1
+    assert "admin database identity is not configured" in (same_role.stderr or "")
+    assert session.get(PatientLink, patient_id) is not None
 
 
 def test_runtime_role_cannot_execute_the_deletion_function(practice) -> None:

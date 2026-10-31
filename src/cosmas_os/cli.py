@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 from pydantic import ValidationError
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from cosmas_os.config import settings
@@ -17,6 +18,32 @@ app = typer.Typer(help="Cosmas OS local synthetic CLI")
 
 def _session() -> Session:
     return make_session_factory(make_engine())()
+
+
+def _require_admin_database_url() -> str:
+    """Return the admin command's database URL, never the runtime URL."""
+
+    admin_url = os.environ.get("COSMAS_ADMIN_DATABASE_URL", "").strip()
+    runtime_env = os.environ.get("DATABASE_URL", "").strip()
+    runtime_url = runtime_env or settings.database_url.strip()
+    if (
+        not admin_url
+        or admin_url == runtime_env
+        or admin_url == runtime_url
+        or admin_url == settings.database_url.strip()
+    ):
+        typer.echo("admin database identity is not configured", err=True)
+        raise typer.Exit(1)
+    try:
+        admin_name = make_url(admin_url).username
+        runtime_name = make_url(runtime_url).username
+    except Exception:
+        typer.echo("admin database identity is not configured", err=True)
+        raise typer.Exit(1) from None
+    if not admin_name or admin_name == runtime_name:
+        typer.echo("admin database identity is not configured", err=True)
+        raise typer.Exit(1)
+    return admin_url
 
 
 @app.command("seed-synth")
@@ -667,8 +694,12 @@ def delete_patient_records_cmd(
     from cosmas_os.application.services import Container
     from cosmas_os.domain.rules import AuthorizationError
 
-    session = _session()
+    admin_url = _require_admin_database_url()
+    engine = None
+    session = None
     try:
+        engine = make_engine(admin_url)
+        session = make_session_factory(engine)()
         container = Container(session)
         report = delete_patient_records(
             session,
@@ -685,7 +716,10 @@ def delete_patient_records_cmd(
         typer.echo("patient records could not be deleted", err=True)
         raise typer.Exit(1) from None
     finally:
-        session.close()
+        if session is not None:
+            session.close()
+        if engine is not None:
+            engine.dispose()
     typer.echo(json.dumps(report, sort_keys=True))
 
 
