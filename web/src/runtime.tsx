@@ -9,6 +9,7 @@ import { permittedDesktopWorkspaceApi } from "./workspace-origin";
 import {hostedWorkspaceConfiguration, hostedWorkspaceRequested} from "./hosted-workspace";
 import {permittedHostedWorkspace} from "../../clients/shared/hosted-workspace-config.mjs";
 import { attachBuildInfo } from "./attach-build-info";
+import { EnrollmentEntry, enrollmentRouteRequested } from './EnrollmentEntry';
 import {
   App,
   ClerkBetaApp,
@@ -93,6 +94,9 @@ type RuntimeAppProps = {
   apiBase?: string;
   authenticatedWorkspace?: boolean;
   workspaceEnabled?: boolean;
+  enrollmentEnabled?: boolean;
+  enrollmentApiBase?: string;
+  enrollmentClerkKey?: string;
 };
 
 function RuntimeReady({ children }: { children: ReactNode }) {
@@ -115,7 +119,13 @@ function RuntimeRoutes({
   apiBase = import.meta.env.VITE_API_BASE,
   authenticatedWorkspace = WORKSPACE_AUTHENTICATED_BUILD,
   workspaceEnabled = WORKSPACE_BUILD,
+  enrollmentEnabled = import.meta.env.VITE_ENROLLMENT_ENABLED === 'true',
+  enrollmentApiBase = import.meta.env.VITE_ENROLLMENT_API_BASE,
+  enrollmentClerkKey = import.meta.env.VITE_ENROLLMENT_CLERK_PUBLISHABLE_KEY,
 }: RuntimeAppProps) {
+  if (enrollmentRouteRequested(enrollmentEnabled)) {
+    return <EnrollmentEntry apiBase={enrollmentApiBase} publishableKey={enrollmentClerkKey}/>;
+  }
   if (hostedWorkspaceRequested()) {
     const hosted = hostedWorkspaceConfiguration();
     if (!hosted || !workspaceEnabled || !authenticatedWorkspace || runtimeMode !== "early_adopter_beta" ||
