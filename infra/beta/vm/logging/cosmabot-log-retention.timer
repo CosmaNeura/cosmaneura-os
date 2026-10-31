@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily dry-run plan for app, API, worker, and proxy log retention
+
+[Timer]
+OnCalendar=*-*-* 06:15:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+Unit=cosmabot-log-retention.service
+
+[Install]
+WantedBy=timers.target

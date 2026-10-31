@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "enabled": false,
+  "dry_run": true,
+  "docker": {
+    "driver": "local",
+    "max_size": "10m",
+    "max_file": 3
+  },
+  "services": ["web", "api", "worker", "proxy"],
+  "journald": {
+    "system_max_use": "200M",
+    "max_retention_sec": "7day",
+    "max_file_sec": "1day"
+  },
+  "caddy": {
+    "enabled": false,
+    "path": "/data/logs/access.log",
+    "roll_size": "10MiB",
+    "roll_keep": 5,
+    "roll_keep_for": "168h"
+  },
+  "standalone": {
+    "rotate": 7,
+    "max_size": "10M"
+  }
+}

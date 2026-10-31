@@ -289,7 +289,16 @@ def ask(
 
 
 def record_reply(s, w, entry, version, bot, settings, context, reply):
+    from cosmas_os.adapters.open_visit import OpenVisitContext
+    from cosmas_os.application import model_work
+
     wid, box, owner = w.id, w.box_id, w.owner_id
+    shown = reply.content
+    if context.role == "chief":
+        visit = model_work.open_visit_passage(s, w, settings)
+        shown = OpenVisitContext.with_notice(
+            shown, entry.content, visit, context.question, draft_only=context.draft_only
+        )
     s.add(
         WorkspaceReply(
             entry_id=entry.id,
@@ -302,7 +311,7 @@ def record_reply(s, w, entry, version, bot, settings, context, reply):
             role=context.role,
             backend=reply.backend,
             context_revision=context.context_revision,
-            content=reply.content,
+            content=shown,
             citations=[
                 {
                     "entry_id": source.entry_id,

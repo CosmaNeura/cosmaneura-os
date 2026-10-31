@@ -1,4 +1,9 @@
-"""Bounded authenticated HTTP execution; no lab fixtures or vendor credentials."""
+"""Bounded authenticated HTTP execution; no lab fixtures or vendor credentials.
+
+This module does not log requests. httpx writes the request URL, including the
+query string, on the ``httpx`` logger. The plugin server installs the shared
+log scrubber before the first request, and tool results are not passed through it.
+"""
 
 import base64
 import hashlib
@@ -298,10 +303,10 @@ class PluginRuntime:
         rows = [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
         if not self.plugins or "elation" in self.plugins:
             rows.extend(elation.tool_definitions())
-        if not self.plugins or "athena" in self.plugins:
-            rows.extend(athena.tool_definitions())
         if not self.plugins or "atlas_md" in self.plugins:
             rows.extend(atlas_md.tool_definitions())
+        if not self.plugins or "athena" in self.plugins:
+            rows.extend(athena.tool_definitions())
         if not self.plugins or "tebra" in self.plugins:
             rows.extend(tebra.tool_definitions())
         return rows
