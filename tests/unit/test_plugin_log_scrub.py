@@ -38,13 +38,17 @@ def _secrets() -> tuple[str, ...]:
     return (MRN, EMAIL, PHONE, SSN, DOB, NAME, NOTE, "stuffed penguin", "Ada")
 
 
-def _capture(name: str) -> tuple[logging.Logger, io.StringIO, tuple[int, bool, list[logging.Handler]]]:
+def _capture(name: str) -> tuple[logging.Logger, io.StringIO, tuple[int, bool, list[logging.Handler], bool]]:
     arm_plugin_loggers()
     logger = logging.getLogger(name)
-    previous = (logger.level, logger.propagate, list(logger.handlers))
+    # Alembic fileConfig disables loggers that already exist. The full suite
+    # does that before this test, which would drop the record and leave an
+    # empty capture.
+    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
     logger.handlers = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
+    logger.disabled = False
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.setFormatter(logging.Formatter("%(message)s"))
@@ -52,11 +56,14 @@ def _capture(name: str) -> tuple[logging.Logger, io.StringIO, tuple[int, bool, l
     return logger, stream, previous
 
 
-def _restore(logger: logging.Logger, previous: tuple[int, bool, list[logging.Handler]]) -> None:
-    level, propagate, handlers = previous
+def _restore(
+    logger: logging.Logger, previous: tuple[int, bool, list[logging.Handler], bool]
+) -> None:
+    level, propagate, handlers, disabled = previous
     logger.handlers = handlers
     logger.setLevel(level)
     logger.propagate = propagate
+    logger.disabled = disabled
 
 
 def test_plugin_logger_redacts_identifiers_drops_note_fields_and_redacts_queries() -> None:
@@ -162,10 +169,11 @@ def test_httpx_and_runner_logs_scrub_urls_and_exceptions() -> None:
 
 def test_preexisting_httpx_handler_is_armed() -> None:
     logger = logging.getLogger("httpx")
-    previous = (logger.level, logger.propagate, list(logger.handlers))
+    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
     logger.handlers = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
+    logger.disabled = False
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.setFormatter(logging.Formatter("%(message)s"))
