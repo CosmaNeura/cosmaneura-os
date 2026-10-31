@@ -53,6 +53,7 @@ resource "azurerm_container_app" "staging_web" {
   name                         = "ca-cosmabot-enroll-web-staging"
   resource_group_name          = var.resource_group_name
   container_app_environment_id = var.container_app_environment_id
+  workload_profile_name        = "Consumption"
   revision_mode                = "Single"
   max_inactive_revisions       = 3
   tags                         = local.tags
