@@ -4,9 +4,9 @@ The plugin process uses the same log scrubber as the CosmaBot service. Scrubbing
 
 Labeled and strongly patterned identifiers are redacted. That includes MRN, date of birth, SSN, phone, email, name, and the other identifier fields the shared scrubber already knows. Clinical note fields are dropped by field name. Query strings in logged URLs are redacted. Operational values such as a request id and an HTTP status stay.
 
-Tool results on the MCP protocol stream are not logs. A successful Elation read still returns the page the signed-in caller asked for.
+Tool results on the MCP protocol stream are not logs. A successful Elation or Athena read still returns the page the signed-in caller asked for.
 
-`athena.py` and `atlas_md.py` are not part of this plugin tree. Any logger those modules add later in this process is covered by the same startup install.
+Athena tools live in `src/cosmas_os/plugins/athena.py` and do not log chart rows. The same startup install covers that module. `atlas_md.py` is not part of this plugin tree. Any logger it adds later in this process is covered by the same install.
 
 ## Paths that are scrubbed
 

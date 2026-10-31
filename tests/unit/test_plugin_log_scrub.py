@@ -15,6 +15,7 @@ from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
 from cosmas_os.logging_setup import _original_add_handler
+from cosmas_os.plugins.athena import NAMES as ATHENA_NAMES
 from cosmas_os.plugins.elation import NAMES, tool_definitions
 from cosmas_os.plugins.log_setup import arm_plugin_loggers, scrub_diverted_stdout
 from cosmas_os.plugins.runtime import AuthenticatedSession
@@ -325,7 +326,7 @@ def test_check_receipt_tool_set_is_unchanged(capsys: pytest.CaptureFixture[str])
     )
     assert main(["--origin", "https://fixture.invalid", "--check"], session=adapter) == 0
     receipt = json.loads(capsys.readouterr().out)
-    assert set(receipt["tools"]) == {"workspace_read", *NAMES}
+    assert set(receipt["tools"]) == {"workspace_read", *NAMES, *ATHENA_NAMES}
     assert receipt["account_status"] == "not_checked"
     assert receipt["ready"] is True
     for secret in _secrets():

@@ -1,5 +1,6 @@
 import copy
 import datetime
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -144,3 +145,135 @@ def test_application_failure_does_not_erase_independent_backup_health(monkeypatc
     monkeypatch.setattr(probe, "containers", unavailable)
     application, backup, _ = probe.observe()
     assert not application and backup
+
+
+def use_release(monkeypatch, tmp_path, release_id="stg-active-release"):
+    root = tmp_path / "releases"
+    root.mkdir()
+    monkeypatch.setattr(probe, "RELEASE_ROOT", root)
+    monkeypatch.setattr(probe, "POINTER", tmp_path / "active-release")
+    return root, root / release_id
+
+
+def point_at(release):
+    probe.POINTER.write_text(f"RELEASE_DIR={release}\n")
+
+
+def write_release(release):
+    release.mkdir(exist_ok=True)
+    services = {name: {} for name in sorted(probe.SERVICES)}
+    services["proxy"] = {"ports": ["80:8080", "443:8443"]}
+    services["database_prepare"] = {"profiles": ["prepare"]}
+    plan = {"name": "cosmabot-staging", "services": services}
+    raw = json.dumps(plan, indent=2).encode() + b"\n"
+    (release / "compose.json").write_bytes(raw)
+    manifest = {"version": 1, "files": {"compose.json": hashlib.sha256(raw).hexdigest()}}
+    (release / "RENDER.json").write_bytes(json.dumps(manifest).encode() + b"\n")
+    return plan
+
+
+def prepare_units(monkeypatch):
+    units, _ = healthy()
+    monkeypatch.setattr(probe, "unit_observations", lambda _: units)
+    monkeypatch.setattr(probe.time, "monotonic", lambda: 1000)
+    return units
+
+
+def test_missing_active_release_pointer_fails_clearly(monkeypatch, tmp_path):
+    use_release(monkeypatch, tmp_path)
+    prepare_units(monkeypatch)
+    monkeypatch.setattr(probe, "command", lambda _: "observed")
+    with pytest.raises(ValueError, match="^active release pointer is missing$"):
+        probe.resolve_active_release()
+    application, backup, _ = probe.observe()
+    assert application is False and backup is True
+
+
+@pytest.mark.parametrize("shape", ["absent", "symlink"])
+def test_dangling_active_release_pointer_fails_clearly(monkeypatch, tmp_path, shape):
+    root, release = use_release(monkeypatch, tmp_path, "stg-dangling-release")
+    prepare_units(monkeypatch)
+    monkeypatch.setattr(probe, "command", lambda _: "observed")
+    if shape == "symlink":
+        release.symlink_to(root / "stg-missing-target")
+    point_at(release)
+    with pytest.raises(ValueError, match="^active release pointer is dangling$"):
+        probe.resolve_active_release()
+    application, backup, _ = probe.observe()
+    assert application is False and backup is True
+
+
+def test_present_pointer_checks_only_that_release_and_ignores_stopped_leftovers(monkeypatch, tmp_path):
+    _root, release = use_release(monkeypatch, tmp_path)
+    plan = write_release(release)
+    point_at(release)
+    prepare_units(monkeypatch)
+    _manifest, loaded = probe.read_release(release)
+    assert loaded["name"] == plan["name"]
+    assert probe.published_ports(loaded) == (80, 443)
+    (release / "compose.json").write_bytes(b'{"name":"tampered"}\n')
+    with pytest.raises(ValueError, match="active release plan does not match its manifest"):
+        probe.read_release(release)
+    write_release(release)
+
+    end = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    active = {
+        f"{index:064x}": {
+            "service": name,
+            "config": str(release / "compose.json"),
+            "state": {
+                "Running": True,
+                "Status": "running",
+                "Health": {"Status": "healthy", "Log": [{"End": end, "ExitCode": 0}]},
+            },
+        }
+        for index, name in enumerate(sorted(probe.SERVICES), start=1)
+    }
+    leftover = "f" * 64
+    active[leftover] = {
+        "service": "api",
+        "config": str(release.parent / "stg-older-release" / "compose.json"),
+        "state": {"Running": False, "Status": "exited", "ExitCode": 0},
+    }
+    checked = []
+
+    def command(arguments):
+        if arguments[0] == "/usr/bin/systemctl":
+            return ""
+        if arguments[:3] == ["/usr/bin/docker", "container", "ls"]:
+            selected = ""
+            prefix = "label=com.docker.compose.project.config_files="
+            for item in arguments:
+                if item.startswith(prefix):
+                    selected = item[len(prefix) :]
+            assert selected == str(release / "compose.json")
+            matched = [cid for cid, row in active.items() if row["config"] == selected]
+            assert leftover not in matched
+            return "\n".join(matched) + "\n"
+        if arguments[:3] == ["/usr/bin/docker", "container", "inspect"]:
+            assert leftover not in arguments
+            rows = []
+            for cid in arguments[5:]:
+                row = active[cid]
+                rows.append(
+                    json.dumps(
+                        {"service": row["service"], "config": row["config"], "state": row["state"]}
+                    )
+                )
+            return "\n".join(rows) + "\n"
+        raise AssertionError(arguments)
+
+    def healthy_web():
+        checked.append(443)
+        return True
+
+    def open_port(port):
+        checked.append(port)
+        return True
+
+    monkeypatch.setattr(probe, "command", command)
+    monkeypatch.setattr(probe, "web_healthy", healthy_web)
+    monkeypatch.setattr(probe, "port_open", open_port)
+    application, backup, _ = probe.observe()
+    assert application is True and backup is True
+    assert checked == [80, 443]

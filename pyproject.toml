@@ -29,7 +29,7 @@ calendar-import = [
     "icalendar==7.3.0",
 ]
 efax-inbound = [
-    "pypdf==6.21.2",
+    "pypdf==6.21.4",
 ]
 mcp = [
     "mcp==2.2.0",
