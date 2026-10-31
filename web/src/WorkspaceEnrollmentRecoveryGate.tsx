@@ -11,9 +11,14 @@ import './workspace-enrollment.css';
 import {hostedWorkspaceConfiguration} from './hosted-workspace';
 
 export function enrollmentRecoveryDestination(value:unknown,apiBase=hostedWorkspaceConfiguration()?.apiOrigin??import.meta.env.VITE_API_BASE):string|null{
-  let staging=false;try{const api=new URL(apiBase??'');staging=api.origin==='https://staging.cosmas.ai'&&!api.username&&!api.password&&!api.search&&!api.hash&&api.pathname==='/';}catch{/* Missing trusted configuration admits no staging link. */}
-  const expected=staging?'https://staging.cosmas.ai/onboarding':'https://app.cosmas.ai/onboarding';
-  return value===expected?expected:null;
+  try{
+    if(typeof apiBase!=='string')return null;const api=new URL(apiBase);
+    if(apiBase!==api.origin||api.protocol!=='https:'||api.username||api.password||api.port||api.search||api.hash||api.pathname!=='/')return null;
+    const staging=['staging.cosmas.ai','api.staging.cosmas.ai'].includes(api.hostname)||/^api\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.staging\.cosmas\.ai$/.test(api.hostname);
+    const production=api.hostname==='api.cosmas.ai'||/^api\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.workspace\.cosmas\.ai$/.test(api.hostname);
+    if(!staging&&!production)return null;
+    const expected=staging?'https://staging.cosmas.ai/onboarding':'https://app.cosmas.ai/onboarding';return value===expected?expected:null;
+  }catch{return null;}
 }
 async function bounded<T>(signal:AbortSignal|undefined,work:(signal:AbortSignal)=>Promise<T>):Promise<T>{
   const controller=new AbortController(),abort=()=>controller.abort();

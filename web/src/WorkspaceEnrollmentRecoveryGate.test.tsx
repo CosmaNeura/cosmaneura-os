@@ -7,7 +7,7 @@ import {workspaceApi} from './workspace-api';
 import {REQUIRED_WORKSPACE_CONTRACTS,workspaceFetch} from './workspace-protocol';
 import {workspaceEnrollmentHold} from './workspace-enrollment-state';
 
-const api='https://api.example.invalid',headers={'X-Cosmas-Workspace-Protocol':'1','Content-Type':'application/json','Cache-Control':'no-store'};
+const api='https://api.invented-clinic.workspace.cosmas.ai',headers={'X-Cosmas-Workspace-Protocol':'1','Content-Type':'application/json','Cache-Control':'no-store'};
 const descriptor={contract_version:1,workspace_protocol:1,requests_require_protocol:true,contracts:{...REQUIRED_WORKSPACE_CONTRACTS}};
 const response=(value:unknown,status=200,extra:Record<string,string>={})=>new Response(JSON.stringify(value),{status,headers:{...headers,...extra}});
 let root:Root,host:HTMLDivElement,billing:'allowed'|'canceled'|'unpaid'|'unavailable';
@@ -56,12 +56,19 @@ it('accepts only the exact owned recovery destination without staging or URL inp
 });
 it('admits only an explicitly configured stage recovery URL with the trusted staging API, and keeps production separate',()=>{
   const stage='https://staging.cosmas.ai/onboarding',production='https://app.cosmas.ai/onboarding';
-  expect(enrollmentRecoveryDestination(stage,'https://staging.cosmas.ai')).toBe(stage);
-  expect(enrollmentRecoveryDestination(null,'https://staging.cosmas.ai')).toBeNull();
-  expect(enrollmentRecoveryDestination(production,'https://staging.cosmas.ai')).toBeNull();
-  expect(enrollmentRecoveryDestination(stage,'https://api.cosmas.ai')).toBeNull();
+  for(const origin of ['https://staging.cosmas.ai','https://api.staging.cosmas.ai','https://api.invented-clinic.staging.cosmas.ai']){
+    expect(enrollmentRecoveryDestination(stage,origin)).toBe(stage);expect(enrollmentRecoveryDestination(null,origin)).toBeNull();expect(enrollmentRecoveryDestination(production,origin)).toBeNull();
+  }
+  for(const origin of ['https://api.cosmas.ai','https://api.invented-clinic.workspace.cosmas.ai']){
+    expect(enrollmentRecoveryDestination(production,origin)).toBe(production);expect(enrollmentRecoveryDestination(stage,origin)).toBeNull();
+  }
   for(const api of ['http://staging.cosmas.ai','https://staging.cosmas.ai.evil.invalid','https://staging.cosmas.ai:8443','https://user@staging.cosmas.ai','https://staging.cosmas.ai?next=evil','https://staging.cosmas.ai/#redirect'])expect(enrollmentRecoveryDestination(stage,api)).toBeNull();
   for(const value of [stage+'?next=https://app.cosmas.ai',stage+'#redirect','https://staging.cosmas.ai/sign-in','https://user@staging.cosmas.ai/onboarding','https://other.invalid/onboarding'])expect(enrollmentRecoveryDestination(value,'https://staging.cosmas.ai')).toBeNull();
+});
+it('returns no recovery URL for missing, foreign or malformed API origins',()=>{
+  for(const origin of ['', 'https://api.example.invalid','https://cosmas.ai','https://app.cosmas.ai','https://enrollment-api.staging.cosmas.ai','https://api.clinic.staging.cosmas.ai.evil.invalid','https://api.-clinic.staging.cosmas.ai','https://api.clinic-.workspace.cosmas.ai','https://api.clinic.extra.workspace.cosmas.ai','https://api.cosmas.ai/config','https://api.cosmas.ai?next=evil','https://api.cosmas.ai/#redirect','https://user@api.cosmas.ai','https://api.cosmas.ai:443','https://api.cosmas.ai/'])
+    for(const value of ['https://app.cosmas.ai/onboarding','https://staging.cosmas.ai/onboarding'])expect(enrollmentRecoveryDestination(value,origin)).toBeNull();
+  vi.stubEnv('VITE_WORKSPACE_HOSTED_ENABLED','false');vi.stubEnv('VITE_API_BASE',undefined);expect(enrollmentRecoveryDestination('https://app.cosmas.ai/onboarding')).toBeNull();
 });
 it('cancels an enrollment denial without reading its opaque response body',async()=>{
   const id=identity();await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><p>Private workspace</p></WorkspaceCompatibilityGate>));
