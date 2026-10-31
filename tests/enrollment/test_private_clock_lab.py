@@ -733,6 +733,8 @@ def postgres_journal():
                 str(work / "password"),
                 "--auth-local=trust",
                 "--auth-host=scram-sha-256",
+                "--no-locale",
+                "--encoding=UTF8",
             ]
         )
         start = [
@@ -767,6 +769,8 @@ def postgres_journal():
                 hide_parameters=True,
                 pool_pre_ping=True,
             )
+            with engine.connect() as connection:
+                assert connection.execute(text("SHOW server_encoding")).scalar_one() == "UTF8"
 
             def restart():
                 engine.dispose()

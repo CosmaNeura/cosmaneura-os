@@ -51,3 +51,50 @@ qualification; never expose an API/bootstrap shortcut or grant runtime that URL.
 Failures print only a fixed code and exception class, never SQL, URL, provider
 error or environment. Actual private Azure connectivity, restart/restore,
 runtime readiness and vendor/browser qualification are root deployment work.
+
+## Provider-owned database policy and v2 receipt
+
+The separate CosmaBot server contains exactly the enrollment database,
+`postgres`, `template0`, `template1`, `azure_maintenance` and `azure_sys`.
+Microsoft identifies the managed `azure_superuser` role and
+[`azure_maintenance`](https://learn.microsoft.com/en-us/azure/postgresql/configure-maintain/concepts-servers),
+and documents PUBLIC views in the
+[`azure_sys` Query Store](https://learn.microsoft.com/en-us/azure/postgresql/monitor/concepts-query-store).
+PostgreSQL gives databases PUBLIC `CONNECT/TEMPORARY` by default and owners
+`CREATE/CONNECT/TEMPORARY`, with implicit owner grant options
+([privileges](https://www.postgresql.org/docs/16/ddl-priv.html)).
+
+Our initial strict provider-owner allowlist is only `azure_superuser`. From the
+existing enrollment connection, the check reads `pg_database`/`pg_roles` and
+expands `COALESCE(datacl, acldefault('d', datdba))` with
+[`aclexplode`](https://www.postgresql.org/docs/16/functions-info.html#FUNCTIONS-INFO-ACCESS-TABLE).
+Each of the two provider databases must retain the three standard owner ACL
+privileges. PUBLIC may have any subset of `CONNECT/TEMPORARY`, including no
+access. All entries must be granted by that owner without explicit grant
+options. Application owners/grantees, unknown owners,
+grantees/grantors, PUBLIC `CREATE`, missing provider databases or additional
+privileges fail closed. A mismatch emits only the fixed database names,
+allowlisted role/privilege tags and booleans, with at most eight ACL rows per
+database. Unknown names are redacted; this does not automatically extend the
+allowlist.
+
+The check never connects to a provider database or changes its permissions,
+objects, Query Store or functions. Source custody is explicit: bootstrap's
+database REVOKEs target only `cosmabot_enrollment`, `postgres` and `template1`;
+its created/altered roles are only the two enrollment logins. Migration uses
+the bound enrollment connection and changes its enrollment tables/schema
+grants. The local role rehearsal measures provider ownership/ACLs before and
+after actual bootstrap, migration and check, and verifies all preparation
+connections stay in the enrollment database. That local evidence is not an
+Azure pre-change fingerprint.
+
+Success is `enrollment-database-check.v2`, preserving the schema/runtime-role/
+immutable-receipt/table-count fields and adding
+`managed_database_ownership_acl_checked: true`,
+`provider_database_default_access_allowed: true`, `provider_database_count: 2`.
+The second flag describes this accepted metadata policy, not a successful
+provider-database connection. `azure_connectivity_qualified`,
+`restore_qualified` and `journey_qualified` remain false. The runtime retains
+its exact TLS database URL, no role memberships, NOINHERIT and non-DDL/non-TEMP
+authority in the enrollment database, with exact table grants including
+immutable BAA receipts.

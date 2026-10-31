@@ -26,7 +26,7 @@ customer or a caller-supplied manifest.
 Deploy the source-bound closed central images first, using the real owned
 foundation and restricted enrollment runtime database credentials. Retain the
 actual database job execution metadata and its
-`enrollment-database-check.v1` receipt. Run the existing
+`enrollment-database-check.v2` receipt. Run the existing
 [HTTPS host verifier](STAGING-HOSTING.md) against the fixed custom domains and
 retain its `enrollment-staging-hosts` JSON. It must show the selected account
 source, real TLS/routes and the central database operational, while enrollment,
@@ -64,7 +64,15 @@ Its runtime reference is the exact version of `enrollment-database-url` in that
 vault. Every selected application secret reference must belong to the same
 owned vault. The database check must confirm the current
 `enrollment_20261031_v1` schema, restricted runtime role, immutable receipts and
-nine grant tables. Its existing connectivity/restore/journey qualification
+nine grant tables. The v2 receipt must additionally report
+`managed_database_ownership_acl_checked: true`,
+`provider_database_default_access_allowed: true` and
+`provider_database_count: 2`. These checks recognize only the known provider
+databases' owner/default ACL policy on the isolated owned PostgreSQL server;
+they do not grant application roles, mutate provider databases, permit unknown
+owners/ACLs or allow PUBLIC CREATE. Application database roles, TLS and table
+limits remain exact. Legacy v1, missing/false checks and other counts are
+rejected. Its existing connectivity/restore/journey qualification
 fields remain false; the operator reviews actual execution and host evidence
 separately and does not rewrite those fields to claim wider qualification.
 

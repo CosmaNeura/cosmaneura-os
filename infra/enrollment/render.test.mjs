@@ -154,8 +154,9 @@ function intakeFixture(t) {
       database: 'cosmabot_enrollment', runtime_login: 'enrollment_runtime',
       runtime_secret_reference: input.secret_references.ENROLLMENT_DATABASE_URL,
       execution_evidence_sha256: '', check: {
-        contract_version: 'enrollment-database-check.v1', schema_version: 'enrollment_20261031_v1',
+        contract_version: 'enrollment-database-check.v2', schema_version: 'enrollment_20261031_v1',
         runtime_role_checked: true, immutable_receipt_checked: true, grant_table_count: 9,
+        managed_database_ownership_acl_checked: true, provider_database_default_access_allowed: true, provider_database_count: 2,
         azure_connectivity_qualified: false, restore_qualified: false, journey_qualified: false,
       },
     },
@@ -326,6 +327,22 @@ test('operator attestation requires retained evidence, exact methods/invite poli
   assert.throws(() => signStagingPreflight(payload, key, evidenceFiles));
 });
 
+test('v2 database evidence requires both managed ownership/ACL checks and exactly two known provider databases', t => {
+  const { payload, key, evidenceFiles } = intakeFixture(t);
+  for (const change of [
+    value => { value.database.check.contract_version = 'enrollment-database-check.v1'; },
+    value => { value.database.check.managed_database_ownership_acl_checked = false; },
+    value => { value.database.check.provider_database_default_access_allowed = false; },
+    value => { value.database.check.provider_database_count = 1; },
+    value => { value.database.check.provider_database_count = 3; },
+    value => { value.database.check.provider_database_count = '2'; },
+    value => { delete value.database.check.managed_database_ownership_acl_checked; },
+  ]) {
+    const changed = structuredClone(payload); change(changed);
+    assert.throws(() => signStagingPreflight(changed, key, evidenceFiles));
+  }
+});
+
 test('arbitrary configured flags cannot replace successful structured FAPI/BAPI metadata', t => {
   const fixture = intakeFixture(t);
   const originalEnvironment = JSON.parse(readFileSync(fixture.evidenceFiles.clerk_environment));
@@ -383,6 +400,9 @@ test('renderer independently rejects a trusted signature over expired or unsafe 
   for (const change of [
     value => { value.expires_at = value.issued_at - 1; },
     value => { value.database.check.runtime_role_checked = false; },
+    value => { value.database.check.managed_database_ownership_acl_checked = false; },
+    value => { value.database.check.provider_database_default_access_allowed = false; },
+    value => { value.database.check.provider_database_count = 3; },
     value => { value.clerk.invite_only = false; },
     value => { value.clerk.authorized_parties.push('https://staging.cosmas.ai'); },
     value => { value.clerk.configuration.sign_up_mode = 'public'; },

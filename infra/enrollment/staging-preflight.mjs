@@ -129,9 +129,12 @@ function measurements(payload) {
     new RegExp(`^${db.key_vault_uri.replaceAll('.', '\\.')}secrets/enrollment-database-url/[0-9a-f]{32}$`).test(db.runtime_secret_reference) &&
     sha(db.execution_evidence_sha256), 'the database/image must bind the actual owned foundation and runtime secret');
   exact(db.check, ['contract_version', 'schema_version', 'runtime_role_checked', 'immutable_receipt_checked',
-    'grant_table_count', 'azure_connectivity_qualified', 'restore_qualified', 'journey_qualified']);
-  requireValue(db.check.contract_version === 'enrollment-database-check.v1' && db.check.schema_version === 'enrollment_20261031_v1' &&
+    'grant_table_count', 'azure_connectivity_qualified', 'restore_qualified', 'journey_qualified',
+    'managed_database_ownership_acl_checked', 'provider_database_default_access_allowed', 'provider_database_count']);
+  requireValue(db.check.contract_version === 'enrollment-database-check.v2' && db.check.schema_version === 'enrollment_20261031_v1' &&
     db.check.runtime_role_checked === true && db.check.immutable_receipt_checked === true && db.check.grant_table_count === 9 &&
+    db.check.managed_database_ownership_acl_checked === true && db.check.provider_database_default_access_allowed === true &&
+    db.check.provider_database_count === 2 &&
     db.check.azure_connectivity_qualified === false && db.check.restore_qualified === false && db.check.journey_qualified === false,
   'require the actual restricted-role/schema receipt without inventing restore or journey qualification');
 

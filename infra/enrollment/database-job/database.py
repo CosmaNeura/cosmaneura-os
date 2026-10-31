@@ -22,6 +22,11 @@ from cosmas_os.enrollment.models import EnrollmentBase
 DATABASE = "cosmabot_enrollment"
 LOGINS = {"admin": "enrollment_bootstrap", "migration": "enrollment_migrator", "runtime": "enrollment_runtime"}
 BAA = "enrollment_baa_acceptances"
+PROVIDER_DATABASES = frozenset({"azure_maintenance", "azure_sys"})
+PROVIDER_OWNER = "azure_superuser"
+PROVIDER_ROLE_TAGS = frozenset({PROVIDER_OWNER, "azure_pg_admin", "PUBLIC", *LOGINS.values()})
+DATABASE_PRIVILEGES = frozenset({"CREATE", "CONNECT", "TEMPORARY"})
+PROVIDER_ROW_FIELDS = frozenset({"database", "owner", "grantee_oid", "grantee", "grantor", "privilege", "grantable"})
 FAILURE_CODES = {
     "server contains an unrelated database": "unrelated_database",
     "owned staging PostgreSQL host required": "invalid_owned_host",
@@ -45,22 +50,94 @@ FAILURE_CODES = {
 FAILURE_CLASSES = frozenset({"ValueError", "RuntimeError", "DBAPIError", "OperationalError", "ProgrammingError", "IntegrityError", "InterfaceError", "TimeoutError"})
 
 
-def failure_receipt(operation: str, stage: str, error: Exception) -> dict[str, str]:
+class ProviderBaselineMismatch(ValueError):
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        super().__init__("managed service database ownership or ACL differs from provider default")
+        self.rows = rows
+
+
+def provider_projection(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Project fixed database names and enum tags only, never raw role/ACL text."""
+    def role(value: object) -> str:
+        return value if isinstance(value, str) and value in PROVIDER_ROLE_TAGS else "unknown"
+
+    result = []
+    for name in sorted(PROVIDER_DATABASES):
+        selected = [row for row in rows if row.get("database") == name]
+        acl = []
+        for row in selected[:8]:
+            privilege = row.get("privilege")
+            acl.append({"grantee": "PUBLIC" if type(row.get("grantee_oid")) is int and row.get("grantee_oid") == 0 else role(row.get("grantee")),
+                        "grantor": role(row.get("grantor")),
+                        "privilege": privilege if isinstance(privilege, str) and privilege in DATABASE_PRIVILEGES else "unknown",
+                        "grantable": row.get("grantable") is True,
+                        "grantable_known": type(row.get("grantable")) is bool})
+        result.append({"database": name, "present": bool(selected),
+                       "owner": role(selected[0].get("owner")) if selected else "unknown",
+                       "acl": acl, "acl_truncated": len(selected) > 8})
+    return result
+
+
+def failure_receipt(operation: str, stage: str, error: Exception) -> dict[str, object]:
     # Only classify exact built-in ValueError arguments. Unknown exception text
     # can include driver SQL, URLs or credentials and never enters the receipt.
     message = error.args[0] if type(error) is ValueError and len(error.args) == 1 and isinstance(error.args[0], str) else None
-    return {"error": "enrollment_database_preparation_failed",
+    receipt: dict[str, object] = {"error": "enrollment_database_preparation_failed",
             "class": type(error).__name__ if type(error).__name__ in FAILURE_CLASSES else "Exception",
             "operation": operation, "stage": stage,
             "code": FAILURE_CODES.get(message, "operation_failed")}
+    if type(error) is ProviderBaselineMismatch:
+        receipt.update({"class": "ValueError", "code": "managed_database_ownership_acl",
+                        "provider_baseline_projection": provider_projection(error.rows)})
+    return receipt
 
 
 def database_names(connection) -> set[str]:
     names = set(connection.execute(text("SELECT datname FROM pg_database")).scalars())
     required = {DATABASE, "postgres", "template0", "template1"}
-    if not required.issubset(names) or names - required - {"azure_maintenance", "azure_sys"}:
+    if not required.issubset(names) or names - required - PROVIDER_DATABASES:
         raise ValueError("server contains an unrelated database")
     return names
+
+
+def check_provider_databases(connection) -> int:
+    # Cluster metadata is readable from the bound enrollment connection. Never
+    # open a provider database or change its ACL, owner, views or functions.
+    rows = [dict(row) for row in connection.execute(text("""
+        SELECT d.datname AS database, owner.rolname AS owner,
+               acl.grantee AS grantee_oid, grantee.rolname AS grantee,
+               grantor.rolname AS grantor, acl.privilege_type AS privilege,
+               acl.is_grantable AS grantable
+        FROM pg_database d
+        LEFT JOIN pg_roles owner ON owner.oid=d.datdba
+        LEFT JOIN LATERAL aclexplode(COALESCE(d.datacl,acldefault('d',d.datdba))) acl ON true
+        LEFT JOIN pg_roles grantee ON grantee.oid=acl.grantee
+        LEFT JOIN pg_roles grantor ON grantor.oid=acl.grantor
+        WHERE d.datname IN ('azure_maintenance','azure_sys')
+        ORDER BY d.datname, acl.grantee, acl.grantor, acl.privilege_type
+        LIMIT 33
+    """)).mappings()]
+    for row in rows:
+        if (set(row) != PROVIDER_ROW_FIELDS or type(row.get("database")) is not str
+                or row["database"] not in PROVIDER_DATABASES or type(row.get("owner")) is not str
+                or type(row.get("grantee_oid")) is not int or row["grantee_oid"] < 0
+                or (row["grantee_oid"] == 0 and row.get("grantee") is not None)
+                or (row["grantee_oid"] != 0 and type(row.get("grantee")) is not str)
+                or type(row.get("grantor")) is not str or type(row.get("privilege")) is not str
+                or type(row.get("grantable")) is not bool):
+            raise ProviderBaselineMismatch(rows)
+    owner_defaults = {(PROVIDER_OWNER, PROVIDER_OWNER, privilege, False)
+                      for privilege in DATABASE_PRIVILEGES}
+    permitted = owner_defaults | {(PROVIDER_OWNER, "PUBLIC", privilege, False)
+                                  for privilege in ("CONNECT", "TEMPORARY")}
+    for name in PROVIDER_DATABASES:
+        selected = [row for row in rows if row["database"] == name]
+        observed = {(row["grantor"], "PUBLIC" if row["grantee_oid"] == 0 else row["grantee"],
+                     row["privilege"], row["grantable"]) for row in selected}
+        if (len(selected) != len(observed) or any(row["owner"] != PROVIDER_OWNER for row in selected)
+                or not owner_defaults.issubset(observed) or not observed.issubset(permitted)):
+            raise ProviderBaselineMismatch(rows)
+    return len(PROVIDER_DATABASES)
 
 
 def engines_from_environment(operation: str) -> dict[str, Engine]:
@@ -97,6 +174,7 @@ def bootstrap(engines: dict[str, Engine]) -> None:
         if connection.execute(text("SELECT current_database()")).scalar_one() != DATABASE:
             raise ValueError("wrong database")
         database_names(connection)
+        check_provider_databases(connection)
         # Refuse all non-enrollment tables before changing any authority.
         if any(not name.startswith("enrollment_") for name in inspect(connection).get_table_names()):
             raise ValueError("database contains unrelated tables")
@@ -164,12 +242,7 @@ def check(engines: dict[str, Engine]) -> dict[str, object]:
             flags = connection.execute(text("SELECT has_database_privilege(current_user,:database,'CREATE'),has_database_privilege(current_user,:database,'TEMP'),has_database_privilege(current_user,:database,'CONNECT')"), {"database": database}).first()
             if flags != (False, False, database == DATABASE):
                 raise ValueError("runtime database privilege exceeds scope")
-        # Azure's own managed databases are never modified by bootstrap. They
-        # are allowed in the inventory only while their provider access remains
-        # closed to the application login.
-        for database in connection.execute(text("SELECT datname FROM pg_database WHERE datname IN ('azure_maintenance','azure_sys')")).scalars():
-            if connection.execute(text("SELECT has_database_privilege(current_user,:database,'CONNECT') OR has_database_privilege(current_user,:database,'CREATE') OR has_database_privilege(current_user,:database,'TEMP')"), {"database": database}).scalar_one():
-                raise ValueError("runtime may not access managed service databases")
+        provider_database_count = check_provider_databases(connection)
         if connection.execute(text("SELECT has_schema_privilege(current_user,'public','CREATE')")).scalar_one():
             raise ValueError("runtime may not create objects")
         for table in sorted(set(EnrollmentBase.metadata.tables) | {"enrollment_schema_versions"}):
@@ -181,8 +254,10 @@ def check(engines: dict[str, Engine]) -> dict[str, object]:
         trigger = connection.execute(text("SELECT count(*) FROM pg_trigger WHERE tgrelid=CAST(:table AS regclass) AND tgname='enrollment_baa_immutable' AND NOT tgisinternal AND tgenabled='O'"), {"table": BAA}).scalar_one()
         if trigger != 1:
             raise ValueError("immutable agreement trigger missing")
-    return {"contract_version": "enrollment-database-check.v1", "schema_version": SCHEMA_VERSION,
+    return {"contract_version": "enrollment-database-check.v2", "schema_version": SCHEMA_VERSION,
             "runtime_role_checked": True, "immutable_receipt_checked": True, "grant_table_count": len(EnrollmentBase.metadata.tables) + 1,
+            "managed_database_ownership_acl_checked": True, "provider_database_default_access_allowed": True,
+            "provider_database_count": provider_database_count,
             "azure_connectivity_qualified": False, "restore_qualified": False, "journey_qualified": False}
 
 
