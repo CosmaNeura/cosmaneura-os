@@ -1,6 +1,7 @@
+// @vitest-environment node
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import test from 'node:test';
+const {test} = await import(process.env.VITEST ? 'vitest' : 'node:test');
 import { resolveEnrollmentBuild } from './enrollment-build-config.mjs';
 import { renderEnrollmentNginx } from './render-enrollment-nginx.mjs';
 const sample = () => ({ VITE_ENROLLMENT_ENABLED: 'true', VITE_ENROLLMENT_ACCOUNT_ONLY: 'true',
