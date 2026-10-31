@@ -678,8 +678,8 @@ async def test_mcp_lists_athena_reads_as_read_only():
                 async with ClientSession(*client_streams) as session:
                     await session.initialize()
                     listed = await session.list_tools()
-                    names = [row.name for row in listed.tools]
-                    assert names[-4:] == list(NAMES)
+                    names = {row.name for row in listed.tools}
+                    assert set(NAMES) <= names
                     for row in listed.tools:
                         if row.name in NAMES:
                             assert row.annotations.read_only_hint is True

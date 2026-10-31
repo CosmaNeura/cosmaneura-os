@@ -21,6 +21,7 @@ from cosmas_os.plugins.elation import NAMES, tool_definitions
 from cosmas_os.plugins.log_setup import arm_plugin_loggers, scrub_diverted_stdout
 from cosmas_os.plugins.runtime import AuthenticatedSession
 from cosmas_os.plugins.server import create_server, main, serve
+from cosmas_os.plugins.tebra import NAMES as TEBRA_NAMES
 
 MRN = "000-TEST-123"
 EMAIL = "ada.invented@example.test"
@@ -327,7 +328,8 @@ def test_check_receipt_tool_set_is_unchanged(capsys: pytest.CaptureFixture[str])
     )
     assert main(["--origin", "https://fixture.invalid", "--check"], session=adapter) == 0
     receipt = json.loads(capsys.readouterr().out)
-    assert set(receipt["tools"]) == {"workspace_read", *NAMES, *ATHENA_NAMES, *ATLAS_NAMES}
+    assert set(receipt["tools"]) == {"workspace_read", *NAMES, *ATLAS_NAMES, *ATHENA_NAMES, *TEBRA_NAMES}
+    assert len(receipt["tools"]) == 1 + len(NAMES) + len(ATLAS_NAMES) + len(ATHENA_NAMES) + len(TEBRA_NAMES)
     assert receipt["account_status"] == "not_checked"
     assert receipt["ready"] is True
     for secret in _secrets():
