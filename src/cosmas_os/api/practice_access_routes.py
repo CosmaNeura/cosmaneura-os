@@ -39,6 +39,7 @@ PATHS = {"/practice-access/invitations": ("GET", None, practice_invites.list_inv
          "/practice-access/invitation/join": ("POST", JoinInvitation, practice_invites.join),
          "/practice-access/compatibility": ("GET", None, compatibility),
          "/practice-access": ("GET", None, access.status),
+         "/practice-access/enrollment-qualification": ("GET", None, access.enrollment_qualification),
          "/practice-access/setup": ("GET", None, practice_setup.status),
          "/practice-access/setup/complete": ("POST", CompletePracticeSetup, practice_setup.complete),
          "/practice-access/request": ("POST", SubmitAccess, access.submit),

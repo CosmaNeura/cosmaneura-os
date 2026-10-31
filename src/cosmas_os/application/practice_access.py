@@ -114,6 +114,26 @@ def status(s, runtime, member, *, fence):
     return result
 
 
+def enrollment_qualification(s, runtime, member, *, fence):
+    """Signed, existing-binding read; grants no practice or clinical authority."""
+    for value, length in ((runtime.workspace_release_source_commit, 40),
+                          (runtime.workspace_release_image_sha256, 64)):
+        if len(value) != length or any(c not in "0123456789abcdef" for c in value):
+            raise PracticeAccessError("practice_access_not_found", 404)
+    _scope(s, runtime, member, fence)
+    principal = _binding(s, member)
+    if principal is None:
+        raise PracticeAccessError("practice_access_denied", 403)
+    result = {"contract_version": 1, "state": "connected", "role": "owner" if principal.is_owner else "member",
+              "box_id": runtime.beta_box_id, "organization_id": runtime.clerk_organization_id,
+              "issuer": runtime.clerk_issuer, "subject": member.subject,
+              "source_commit": runtime.workspace_release_source_commit,
+              "image_sha256": runtime.workspace_release_image_sha256}
+    fence()
+    s.commit()
+    return result
+
+
 def submit(s, runtime, member, command, *, fence, commit=True):
     _scope(s, runtime, member, fence)
     principal = _binding(s, member)

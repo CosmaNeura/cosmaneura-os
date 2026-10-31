@@ -320,13 +320,75 @@ jobs:
         run: |
           bash -n infra/beta/*.sh infra/beta/tests/*.sh
           bash infra/beta/tests/deployment-guards.sh
+      - name: Enrollment configuration contract
+        run: node --test infra/enrollment/render.test.mjs
+      - name: Validate independent enrollment runtime
+        working-directory: infra/enrollment/runtime
+        run: tofu fmt -check && tofu init -backend=false -input=false && tofu validate -no-color
+
+  enrollment-journey:
+    name: enrollment-journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.9
+        env:
+          POSTGRES_USER: enrollment_test
+          POSTGRES_PASSWORD: synthetic_test_only
+          POSTGRES_DB: runtime_synthetic
+        ports: ["54329:5432"]
+        options: >-
+          --health-cmd "pg_isready -U enrollment_test -d runtime_synthetic"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://enrollment_test:synthetic_test_only@127.0.0.1:54329/runtime_synthetic
+      ENROLLMENT_TEST_DATABASE_URL: postgresql+psycopg://enrollment_test:synthetic_test_only@127.0.0.1:54329/enrollment_synthetic
+      COSMAS_ENROLLMENT_LAB_URL: http://127.0.0.1:8041
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import
+      - name: Create separate synthetic registry database
+        run: uv run python -c "import psycopg; c=psycopg.connect('postgresql://enrollment_test:synthetic_test_only@127.0.0.1:54329/runtime_synthetic',autocommit=True); c.execute('CREATE DATABASE enrollment_synthetic'); c.close()"
+      - name: Account, agreement, billing and trusted workspace checks
+        run: uv run pytest tests/enrollment -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: corepack enable
+      - run: ./scripts/install-client-deps.sh
+      - name: Browser journey against actual synthetic HTTP API
+        shell: bash
+        run: |
+          uv run python -m cosmas_os.enrollment.synthetic --port 8041 > "$RUNNER_TEMP/enrollment-api.log" 2>&1 &
+          enrollment_pid=$!
+          trap 'kill "$enrollment_pid" 2>/dev/null || true; wait "$enrollment_pid" 2>/dev/null || true' EXIT
+          uv run python <<'PY'
+          import time
+          import urllib.request
+          for _ in range(20):
+              try:
+                  urllib.request.urlopen("http://127.0.0.1:8041/health", timeout=1).close()
+                  break
+              except OSError:
+                  time.sleep(.5)
+          else:
+              raise SystemExit("Synthetic enrollment API did not start")
+          PY
+          cd web
+          corepack pnpm exec vitest run src/EnrollmentServerJourney.test.tsx --maxWorkers=1
 
   synth-gate:
     name: synth-ci-gate
     runs-on: ubuntu-latest
-    needs: [python-quality, python-tests, web, container-image, beta-infra-static]
+    needs: [python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey]
     steps:
       - name: Confirm all synth gates passed
         run: |
-          echo "python-quality, python-tests, web, container-image, beta-infra-static all green"
+          echo "python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey all green"
           echo "No production secrets used. No deploy performed."

@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     workspace_authenticated_enabled: bool = False
     # Hosted workspace is explicit and retains all early-adopter deployment gates.
     workspace_hosted_enabled: bool = False
+    # Protected deployer injects exact release identity for signed enrollment
+    # qualification. Empty defaults keep the additive endpoint unavailable.
+    workspace_release_source_commit: str = ""
+    workspace_release_image_sha256: str = ""
     workspace_apple_hosted_transport_enabled: bool = False
     workspace_desktop_hosted_transport_enabled: bool = False
     # Paired client/backend gate; hosted profiles also require the workspace protocol.
