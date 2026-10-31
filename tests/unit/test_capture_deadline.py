@@ -1,6 +1,7 @@
 """Actual ASGI/dependency ownership and retained application phase tests, offline."""
 
 import asyncio
+import gc
 import json
 import time
 from contextlib import AsyncExitStack
@@ -388,6 +389,10 @@ def test_every_installed_core_callback_route_bounds_slow_body(monkeypatch, index
             return await asyncio.Future()
         async def send(message):
             messages.append(message)
+        # This shard has already built a large object graph. A generation-2
+        # collection during the deadline wait blocks the loop past the bound.
+        # Collect that backlog before the clock starts.
+        gc.collect()
         started = time.monotonic()
         await product.app(scope, receive, send)
         assert time.monotonic() - started < 0.35
