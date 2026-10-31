@@ -85,12 +85,17 @@ Ruff/Pyright. Eighteen migrated PostgreSQL journeys cover actual owner/staff
 setup, protected API/Chief actions, recovery and queued worker failures; the
 independent review also checked three runtime and three worker cases. The
 integrated browser passed 63 focused checks, one fresh actual synthetic HTTP
-owner/staff journey, TypeScript and Vite build. Full CI identified native error
-contract regressions in the added non-hosted recovery fence; the repair preserves
-the existing caller checks while canceling stale bytes. Its 195 focused account,
-Inbox/handoff, protocol and recovery regression checks passed without test changes.
-Seven renderer checks and
-OpenTofu format/validation passed; no plan or apply was run. The copied BAA's exact SHA-256 is
+owner/staff journey, TypeScript and Vite build. Full CI identified shared native response regressions in the new recovery
+handling. The repair leaves ordinary responses and their private-byte/session
+checks with the existing callers; only a recognized enrollment denial adds a
+currency check. An obsolete session cannot set a recovery hold. Its 343 focused
+checks and the complete local web suite passed with existing tests unchanged:
+5,876 passed, 112 skipped, zero failures, using two workers and permitted
+loopback. Backend compatibility repairs also preserve legacy unmanaged runtime
+configuration while retaining explicit managed-account admission. Their 246
+focused runtime checks, 35 admission/Clerk checks and 18 migrated PostgreSQL
+journeys passed, including new denial tests for research and bounded records.
+Seven renderer checks and OpenTofu format/validation passed; no plan or apply was run. The copied BAA's exact SHA-256 is
 verified inside the built package. These checks use invented identities and
 fake external providers; they do not prove live Google/Microsoft/password or
 Stripe cancellation/reminder delivery.
