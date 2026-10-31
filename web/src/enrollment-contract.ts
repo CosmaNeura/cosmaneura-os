@@ -1,4 +1,5 @@
 export const ENROLLMENT_CONTRACT = 'enrollment.v1' as const;
+export const ENROLLMENT_WORKSPACE_NAME_MAX = 120;
 /** Existing public company contact, verified against the marketing source. */
 export const ENROLLMENT_CONTACT = 'mailto:john@cosmaneura.com?subject=CosmaBot%20practice%20setup';
 export const BAA = {
@@ -67,6 +68,9 @@ function integer(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): number
   return Number.isSafeInteger(value) && (value as number) >= min && (value as number) <= max ? value as number : invalid();
 }
 function nullableText(value: unknown, max = 255): string | null { return value === null ? null : text(value, max); }
+function workspaceName(value:unknown):string {const name=text(value,ENROLLMENT_WORKSPACE_NAME_MAX);
+  if(name!==name.trim()||/[\u0000-\u001f\u007f]/.test(name))return invalid();return name;
+}
 function timestamp(value: unknown): string | null {
   const result = nullableText(value, 50);
   if (result !== null && !Number.isFinite(Date.parse(result))) return invalid();
@@ -121,9 +125,10 @@ export function validateEnrollmentStatus(value: unknown): EnrollmentStatus {
   if (agreement) documentIdentity(agreement);
   const status: EnrollmentStatus = {
     contract_version: ENROLLMENT_CONTRACT, revision: integer(v.revision), stage: v.stage as EnrollmentStage,
-    profile: profile ? { display_name: text(profile.display_name, 160, v.stage==='account'), title: text(profile.title, 120, true), email: text(profile.email, 320) } : null,
+    // An unsaved provider prefill remains editable; confirmed runtime names use the 120-character contract.
+    profile: profile ? { display_name: v.stage==='account'?text(profile.display_name,160,true):workspaceName(profile.display_name), title: text(profile.title, 120, true), email: text(profile.email, 320) } : null,
     practice: practice ? { id: text(practice.id), legal_name: text(practice.legal_name, 160),
-      display_name: text(practice.display_name, 160), address_line1: text(practice.address_line1, 200),
+      display_name: workspaceName(practice.display_name), address_line1: text(practice.address_line1, 200),
       address_line2: text(practice.address_line2, 200, true), city: text(practice.city, 100), region: text(practice.region, 80),
       postal_code: text(practice.postal_code, 20), country: 'US', administrative_email: text(practice.administrative_email,320),
       human_seats: integer(practice.human_seats, 1, 1000), role: practice.role as EnrollmentPractice['role'],covered_entity:bool(practice.covered_entity),can_sign:bool(practice.can_sign) } : null,
@@ -170,7 +175,7 @@ export function validateEnrollmentPractices(value:unknown):EnrollmentPractices {
   const v=object(value);if(!Array.isArray(v.practices)||v.practices.length>1000)return invalid();
   const practices=v.practices.map(item=>{const p=object(item);
     if(!['owner','admin','staff'].includes(String(p.role))||!['pending','provisioning','ready','failed'].includes(String(p.workspace_status)))return invalid();
-    return {id:text(p.id),legal_name:text(p.legal_name,160),display_name:text(p.display_name,160),role:p.role as EnrollmentPractices['practices'][number]['role'],workspace_status:p.workspace_status as EnrollmentPractices['practices'][number]['workspace_status']};});
+    return {id:text(p.id),legal_name:text(p.legal_name,160),display_name:workspaceName(p.display_name),role:p.role as EnrollmentPractices['practices'][number]['role'],workspace_status:p.workspace_status as EnrollmentPractices['practices'][number]['workspace_status']};});
   const active=nullableText(v.active_practice_id);if(active&&!practices.some(item=>item.id===active))return invalid();
   return {active_practice_id:active,practices};
 }

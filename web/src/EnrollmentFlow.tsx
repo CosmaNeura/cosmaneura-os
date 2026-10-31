@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { EnrollmentError, BAA, ENROLLMENT_CONTACT, type EnrollmentConfig, type EnrollmentDocument, type EnrollmentInvitation,
+import { EnrollmentError, BAA, ENROLLMENT_CONTACT, ENROLLMENT_WORKSPACE_NAME_MAX, type EnrollmentConfig, type EnrollmentDocument, type EnrollmentInvitation,
   type EnrollmentPractices,type EnrollmentReceipt, type EnrollmentStage, type EnrollmentStatus, type PracticeInput } from './enrollment-contract';
 import { stripeDestination, workspaceDestination, type EnrollmentApi, type EnrollmentIdentity } from './enrollment-api';
 import { dollars, EnrollmentPricing, initialSeatSelection, selectionForSeats, type SeatSelection } from './EnrollmentPricing';
@@ -15,6 +15,7 @@ const steps = ['Account','Practice','Agreement','Trial','Chief'];
 function stageIndex(stage:EnrollmentStage) { return stage==='account'?0:stage==='practice'?1:stage==='agreement'?2:stage==='ready'?4:3; }
 const formatDate = (date:string|null) => date ? new Intl.DateTimeFormat('en-US',{dateStyle:'long'}).format(new Date(date)) : 'Not started';
 const validEmail = (value:string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length<=320;
+const runtimeNameControls=(value:string)=>/[\u0000-\u001f\u007f]/.test(value);
 function failure(error:unknown):string {
   if (error instanceof EnrollmentError) {
     if (error.code==='enrollment_signer_required') return 'An authorized representative must sign for this practice. Your progress is saved.';
@@ -32,7 +33,7 @@ function Field({name,label,value,onChange,error,autoComplete,type='text',require
   name:string;label:string;value:string;onChange:(value:string)=>void;error?:string;autoComplete?:string;type?:string;required?:boolean;disabled?:boolean;
 }) { return <label className="enrollment-field" htmlFor={`enrollment-${name}`}>{label}
   <input id={`enrollment-${name}`} name={name} value={value} type={type} autoComplete={autoComplete} required={required}
-    maxLength={name.includes('email')?320:name.includes('title')?120:['name','signature_name','legal_name','display_name'].includes(name)?160:200} disabled={disabled} aria-invalid={error?true:undefined}
+    maxLength={name.includes('email')?320:name.includes('title')||['name','display_name'].includes(name)?ENROLLMENT_WORKSPACE_NAME_MAX:['signature_name','legal_name'].includes(name)?160:200} disabled={disabled} aria-invalid={error?true:undefined}
     aria-describedby={error?`enrollment-error-${name}`:undefined} onChange={event=>onChange(event.target.value)}/>
   {error&&<span id={`enrollment-error-${name}`} className="enrollment-field-error">{error}</span>}</label>; }
 function AgreementDocument({document}:{document:EnrollmentDocument}) {
@@ -126,17 +127,20 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
   const validate=(found:Errors)=>{setErrors(found);if(Object.keys(found).length){setMessage('Review the highlighted fields.');return false;}setMessage('');return true;};
   const updatePractice=(field:keyof PracticeDraft,value:string)=>setPractice(previous=>({...previous,[field]:value}));
   const saveProfile=(event:FormEvent)=>{event.preventDefault();if(!status)return;
-    if(!validate({...((name.trim().length<2)?{name:'Enter your full name.'}:{}),...(name.trim().length>160?{name:'Use 160 characters or fewer.'}:{}),...(title.trim().length>120?{title:'Use 120 characters or fewer.'}:{})}))return;
+    if(!validate({...((name.trim().length<2)?{name:'Enter your full name.'}:{}),...(name.trim().length>ENROLLMENT_WORKSPACE_NAME_MAX?{name:'Use 120 characters or fewer.'}:{}),...(runtimeNameControls(name)?{name:'Use a name without tabs, line breaks or control characters.'}:{}),...(title.trim().length>120?{title:'Use 120 characters or fewer.'}:{})}))return;
     const body={expected_revision:status.revision,display_name:name.trim(),title:title.trim()};mutation(async(key,signal)=>({enrollment:await api.profile(identity,body,key,signal)}));};
   const savePractice=(event:FormEvent)=>{event.preventDefault();if(!status)return;
     const required:(keyof PracticeDraft)[]=['legal_name','address_line1','city','region','postal_code','administrative_email'];
     const found:Errors={};required.forEach(field=>{if(!practice[field].trim())found[field]='Enter this information.';});
+    const displayName=practice.display_name.trim()||practice.legal_name.trim();
+    if(displayName.length>ENROLLMENT_WORKSPACE_NAME_MAX)found.display_name='Enter a practice display name with 120 characters or fewer.';
+    if(runtimeNameControls(practice.display_name)||!practice.display_name.trim()&&runtimeNameControls(practice.legal_name))found.display_name='Use a display name without tabs, line breaks or control characters.';
     if(!validEmail(practice.administrative_email.trim()))found.administrative_email='Enter a valid administrative email.';
     if(!covered)found.covered='Confirm eligibility or contact us for the appropriate agreement.';
     if(!Number.isInteger(seats.humanSeats)||seats.humanSeats<1||seats.humanSeats>1000)found.seats='Enter 1–1,000 human users, or contact us for a larger practice.';
     if(!validate(found))return;
     const body:PracticeInput={...Object.fromEntries(Object.entries(practice).map(([key,value])=>[key,value.trim()])) as PracticeDraft,
-      display_name:practice.display_name.trim()||practice.legal_name.trim(),expected_revision:status.revision,country:'US',human_seats:seats.humanSeats,covered_entity:true};
+      display_name:displayName,expected_revision:status.revision,country:'US',human_seats:seats.humanSeats,covered_entity:true};
     mutation(async(key,signal)=>({enrollment:await api.practice(identity,body,key,signal)}));};
   const join=(event:FormEvent)=>{event.preventDefault();if(!status)return;if(!validate(inviteToken.trim()?{}:{invite:'Enter the invitation code from your practice owner.'}))return;
     const body={expected_revision:status.revision,token:inviteToken.trim()};mutation(async(key,signal)=>({enrollment:await api.join(identity,body,key,signal),joined:true}));};
@@ -198,6 +202,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
       stage==='account'?<><p className="enrollment-eyebrow">Your account</p><h1>Welcome to CosmaBot</h1><p>Confirm your name. Your sign-in is managed by Clerk.</p>
         <form className="enrollment-form" onSubmit={saveProfile} noValidate>
           <Field name="name" label="Your name" value={name} onChange={setName} error={errors.name} autoComplete="name" disabled={formDisabled}/>
+          <p className="enrollment-hint">Use up to 120 characters for your workspace name.</p>
           <Field name="title" label="Title (optional)" value={title} onChange={setTitle} error={errors.title} autoComplete="organization-title" required={false} disabled={formDisabled}/>
           <p className="enrollment-hint">Verified email: {status.profile?.email||initialEmail||'Provided by your signed-in account'}</p>
           <div className="enrollment-actions"><button className="primary" disabled={formDisabled}>Save and continue</button>{review&&<button type="button" onClick={()=>setReview(null)}>Back to saved setup</button>}</div>
@@ -211,7 +216,8 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
         <form className="enrollment-form" onSubmit={savePractice} noValidate>
           <p>Use the legal practice name and address for the agreement. Each legal practice has its own private workspace.</p>
           <Field name="legal_name" label="Legal practice name" value={practice.legal_name} onChange={v=>updatePractice('legal_name',v)} error={errors.legal_name} autoComplete="organization" disabled={formDisabled}/>
-          <Field name="display_name" label="Practice display name (optional)" value={practice.display_name} onChange={v=>updatePractice('display_name',v)} required={false} disabled={formDisabled}/>
+          <Field name="display_name" label="Practice display name (optional)" value={practice.display_name} onChange={v=>updatePractice('display_name',v)} error={errors.display_name} required={false} disabled={formDisabled}/>
+          <p className="enrollment-hint">Up to 120 characters. If your legal name is longer, enter a shorter display name for your workspace.</p>
           <Field name="address_line1" label="Street address" value={practice.address_line1} onChange={v=>updatePractice('address_line1',v)} error={errors.address_line1} autoComplete="address-line1" disabled={formDisabled}/>
           <Field name="address_line2" label="Suite or address line 2 (optional)" value={practice.address_line2} onChange={v=>updatePractice('address_line2',v)} required={false} autoComplete="address-line2" disabled={formDisabled}/>
           <div className="enrollment-grid"><Field name="city" label="City" value={practice.city} onChange={v=>updatePractice('city',v)} error={errors.city} autoComplete="address-level2" disabled={formDisabled}/>

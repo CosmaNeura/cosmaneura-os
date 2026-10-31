@@ -1,7 +1,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {createEnrollmentApi,enrollmentApiBase,stripeDestination,workspaceDestination} from './enrollment-api';
 import {enrollmentConfig,enrollmentDocument,enrollmentStatus} from './enrollment-test-fixture';
-import {validateEnrollmentConfig,validateEnrollmentStatus} from './enrollment-contract';
+import {validateEnrollmentConfig,validateEnrollmentPractices,validateEnrollmentStatus} from './enrollment-contract';
 const base='http://127.0.0.1:8910',api=createEnrollmentApi(base);
 const identity=()=>({getToken:vi.fn().mockResolvedValue('invented.signed.session'),isCurrent:vi.fn(()=>true)});
 const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
@@ -49,6 +49,18 @@ it('fails closed for forged ready state, wrong BAA, wrong price, or unqualified 
   expect(()=>validateEnrollmentStatus({...ready,quote:{...ready.quote,monthly_total_cents:30000}})).toThrow();
   expect(()=>validateEnrollmentConfig({...enrollmentConfig(),baa:{...enrollmentConfig().baa,sha256:'a'.repeat(64)}})).toThrow();
   expect(()=>validateEnrollmentConfig({...enrollmentConfig(),data_mode:'production',production_qualified:false})).toThrow();
+});
+it('accepts compatible saved runtime names while preserving the full legal practice name',()=>{
+  const status=enrollmentStatus('ready',5),name='N'.repeat(120);status.profile!.display_name=name;status.practice!.display_name=name;status.practice!.legal_name='L'.repeat(160);
+  expect(validateEnrollmentStatus(status).practice).toMatchObject({display_name:name,legal_name:'L'.repeat(160)});
+  const prefill={...enrollmentStatus(),profile:{display_name:'N'.repeat(160),title:'',email:'owner@example.invalid'}};
+  expect(validateEnrollmentStatus(prefill).profile?.display_name).toHaveLength(160);
+});
+it.each(['N'.repeat(121),'Invented\tName','Invented\nName','Invented\u007fName',' Invented Name '])('rejects incompatible saved profile, practice and roster names (%j)',name=>{
+  const status=enrollmentStatus('ready',5);
+  expect(()=>validateEnrollmentStatus({...status,profile:{...status.profile!,display_name:name}})).toThrow();
+  expect(()=>validateEnrollmentStatus({...status,practice:{...status.practice!,display_name:name}})).toThrow();
+  expect(()=>validateEnrollmentPractices({active_practice_id:status.practice!.id,practices:[{id:status.practice!.id,legal_name:status.practice!.legal_name,display_name:name,role:'owner',workspace_status:'ready'}]})).toThrow();
 });
 it('hashes the actual full agreement before presenting a claimed pinned document',async()=>{
   vi.mocked(fetch).mockResolvedValue(json(enrollmentDocument()));

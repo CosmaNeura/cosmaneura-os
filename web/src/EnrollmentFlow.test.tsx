@@ -25,6 +25,36 @@ it('saves account and legal practice with every human seat counted at the approv
   expect(host.textContent).toContain('Review and sign for Invented Legal Practice');expect(host.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
   expect(localStorage.length).toBe(0);expect(sessionStorage.length).toBe(0);
 });
+it('keeps an overlong provider name editable and saves only a valid 120-character workspace name',async()=>{
+  current.profile={display_name:'N'.repeat(121),title:'',email:'owner@example.invalid'};
+  const save=vi.spyOn(api,'profile').mockImplementation(async(_identity,body)=>{current={...enrollmentStatus('practice',1),profile:{...enrollmentStatus('practice',1).profile!,display_name:body.display_name}};return current;});
+  await render();expect(host.querySelector<HTMLInputElement>('#enrollment-name')?.maxLength).toBe(120);
+  await click('Save and continue');expect(host.textContent).toContain('Use 120 characters or fewer.');expect(save).not.toHaveBeenCalled();
+  await fill('name','Invented\tOwner');await click('Save and continue');expect(host.textContent).toContain('Use a name without tabs, line breaks or control characters.');expect(save).not.toHaveBeenCalled();
+  await fill('name',' '+ 'N'.repeat(120)+' ');await click('Save and continue');
+  expect(save).toHaveBeenCalledWith(id,{expected_revision:0,display_name:'N'.repeat(120),title:''},expect.any(String),expect.any(AbortSignal));
+  expect(host.textContent).toContain('Set up your practice');
+});
+it('requires a shorter workspace display name for a 160-character legal name before proceeding to the agreement',async()=>{
+  current=enrollmentStatus('practice',1);const legal='L'.repeat(160),display='D'.repeat(120);
+  const save=vi.spyOn(api,'practice').mockImplementation(async(_identity,body)=>{current={...enrollmentStatus('agreement',2),practice:{...enrollmentStatus('agreement',2).practice!,legal_name:body.legal_name,display_name:body.display_name}};return current;});
+  await render();expect(host.querySelector<HTMLInputElement>('#enrollment-legal_name')?.maxLength).toBe(160);expect(host.querySelector<HTMLInputElement>('#enrollment-display_name')?.maxLength).toBe(120);
+  for(const [field,value]of Object.entries({legal_name:legal,address_line1:'123 Invented Street',city:'Invented City',region:'NY',postal_code:'10001',administrative_email:'office@example.invalid'}))await fill(field,value);
+  await check('covered');await fill('display_name',' ');await click('Save and continue');
+  expect(host.textContent).toContain('Enter a practice display name with 120 characters or fewer.');expect(save).not.toHaveBeenCalled();expect(host.querySelector('iframe')).toBeNull();
+  await fill('display_name','D'.repeat(121));await click('Save and continue');expect(save).not.toHaveBeenCalled();
+  await fill('display_name','Invented\tPractice');await click('Save and continue');expect(host.textContent).toContain('Use a display name without tabs, line breaks or control characters.');expect(save).not.toHaveBeenCalled();
+  await fill('display_name',' '+display+' ');await click('Save and continue');
+  expect(save).toHaveBeenCalledWith(id,expect.objectContaining({expected_revision:1,legal_name:legal,display_name:display}),expect.any(String),expect.any(AbortSignal));
+  expect(host.textContent).toContain('Review and sign for '+legal);
+});
+it('validates the legal-name fallback when the optional display name contains only spaces',async()=>{
+  current=enrollmentStatus('practice',1);const save=vi.spyOn(api,'practice').mockImplementation(async()=>{current=enrollmentStatus('agreement',2);return current;});
+  await render();for(const [field,value]of Object.entries({legal_name:'Invented\tLegal Practice',display_name:' ',address_line1:'123 Invented Street',city:'Invented City',region:'NY',postal_code:'10001',administrative_email:'office@example.invalid'}))await fill(field,value);
+  await check('covered');await click('Save and continue');expect(host.textContent).toContain('Use a display name without tabs, line breaks or control characters.');expect(save).not.toHaveBeenCalled();
+  await fill('legal_name',' Invented Legal Practice ');await click('Save and continue');
+  expect(save).toHaveBeenCalledWith(id,expect.objectContaining({legal_name:'Invented Legal Practice',display_name:'Invented Legal Practice'}),expect.any(String),expect.any(AbortSignal));
+});
 it('offers authorized representative recovery when the server denies signing',async()=>{
   current=enrollmentStatus('agreement',2);vi.spyOn(api,'accept').mockRejectedValue(new EnrollmentError(403,'enrollment_signer_required'));
   await render();await check('authority');await check('accepted');await click('Accept agreement');
