@@ -41,6 +41,19 @@ Scribe sources, services, identities and databases were not changed.
   work only after a fresh protected identity check succeeds; an ordinary healthy
   server check cannot clear a payment or membership hold. Recovery links are
   explicit and restricted to the matching owned staging/production origins.
+- Managed runtime requests and commit fences enforce signed, immutable-scope
+  admission. A current registry/Clerk human, exact agreement, purchased capacity,
+  individual readiness and fresh trial/paid entitlement are required. Signed
+  cancellation/failure invalidates billing evidence before acknowledgement, so
+  the reconciliation queue cannot leave a canceled practice temporarily enabled.
+- Paid, invited staff can receive only a measured non-owner local binding.
+  Unregistered humans, pending/canceled subscriptions and revoked local bindings
+  cannot use this route to add seats, remap identities or become an owner.
+- Queued work retains its original human/action evidence and existing approval
+  checks. It also rechecks subscription and current Clerk user/Org membership,
+  without persisting a human bearer. A normal logout preserves approved work;
+  banning/removing that human or losing entitlement blocks it. Boxes receive
+  derived keys; the central enrollment master and Clerk backend key stay central.
 
 ## Source and deployment map
 
@@ -67,10 +80,13 @@ PostgreSQL enrollment database. Existing CI, Trivy and main protections remain.
 
 ## Verified scope and remaining activation gates
 
-Focused backend/browser checks and actual synthetic HTTP owner/staff journeys
-passed. The signed runtime qualification path was checked on a temporary owned
-PostgreSQL database. Ruff/Pyright and the browser build passed; OpenTofu runtime
-validation passed without a plan or apply. The copied BAA's exact SHA-256 is
+The integrated source passed 72 focused backend checks and full-source
+Ruff/Pyright. Eighteen migrated PostgreSQL journeys cover actual owner/staff
+setup, protected API/Chief actions, recovery and queued worker failures; the
+independent review also checked three runtime and three worker cases. The
+integrated browser passed 63 focused checks, one fresh actual synthetic HTTP
+owner/staff journey, TypeScript and Vite build. Seven renderer checks and
+OpenTofu format/validation passed; no plan or apply was run. The copied BAA's exact SHA-256 is
 verified inside the built package. These checks use invented identities and
 fake external providers; they do not prove live Google/Microsoft/password or
 Stripe cancellation/reminder delivery.
@@ -82,6 +98,13 @@ actual per-Box owner/team provisioning, backup/restore and release qualification
 The deployer must verify Azure's actual image digest, not infer it from runtime
 environment metadata. Tax, seat changes, cancellation/export/retention and
 account/service privacy terms still need the final commercial release policy.
+
+Managed native sessions are a separate, closed release gate: existing Apple/Mac
+tokens can omit `azp` or carry an exact native origin. Central admission currently
+admits only the HTTPS browser policy. A native extension must bind the selected
+transport into the signed admission request, qualify that exact per-practice
+transport and preserve strict browser verification. This milestone does not
+enable managed native transports or change existing unmanaged native entry.
 
 Production follows the successful staged customer journey, as requested.
 Production registration/marketing trial acquisition remain closed by default.
