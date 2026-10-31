@@ -75,7 +75,7 @@ class EnrollmentService:
     def _practice(self, session: Session, account: Account, *, owner: bool = False) -> tuple[Practice, Membership]:
         practice = session.scalar(select(Practice).where(Practice.id == account.active_practice_id).with_for_update()) if account.active_practice_id else None
         member = session.scalar(select(Membership).where(Membership.practice_id == account.active_practice_id,
-                                Membership.account_id == account.id, Membership.active.is_(True))) if practice else None
+                                Membership.account_id == account.id, Membership.active.is_(True)).with_for_update()) if practice else None
         if practice is None or member is None:
             raise EnrollmentError("practice_required", "Create or join your practice first.")
         if owner and member.role != "owner":
