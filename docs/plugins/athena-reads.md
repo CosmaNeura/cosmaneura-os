@@ -32,12 +32,13 @@ Every result has a `state` and a plain `message`.
 | `unsupported` | This CosmaBot workspace does not offer that Athena read | This Athena read is not supported. |
 | `wrong_practice` | The request names a different connection than the one on this sign-in | That request is for a different practice than the Athena account connected to this sign-in. |
 | `expired` | Access was revoked, the binding changed, or the account can no longer open the read | Athena access expired or was revoked. Reconnect Athena in CosmaBot before reading again. |
+| `unavailable` | The medication or allergy grant for this read cannot be opened (`ehr_read_core_grant_unavailable` or `ehr_read_core_medication_grant_unavailable`). The same message is used on all four Athena tools | Access to this patient's record isn't available for this read. No chart data is shown. |
 | `malformed` | The response was not the expected page | Athena returned a response CosmaBot could not read. No chart data is shown. |
 | `timeout` | The read timed out or the result was not confirmed | The Athena read timed out before a result was confirmed. Repeat this same request to recover it. A different request is not sent automatically. |
 | `stale` | The Athena account or the CosmaBot sign-in changed before the page could be shown | The Athena account changed while this was being read. The result was discarded. Check the connected practice and read again. |
 | `sign_in` | The CosmaBot session is signed out | Sign in to CosmaBot again before reading Athena. |
 
-Chart rows are returned only for `ready`. A stale, malformed, expired, or wrong-practice result does not include them.
+Chart rows are returned only for `ready`. A stale, malformed, expired, unavailable, or wrong-practice result does not include them. An expired or revoked result does not retry the read. When a grant cannot be opened, the unavailable message does not ask to reconnect. The tool sends that read once and does not retry it.
 
 The tools are marked read-only (`readOnlyHint` true, `destructiveHint` false).
 

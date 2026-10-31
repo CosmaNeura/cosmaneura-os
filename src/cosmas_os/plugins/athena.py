@@ -56,6 +56,9 @@ WRONG_PRACTICE = (
     "That request is for a different practice than the Athena account connected to this sign-in."
 )
 EXPIRED = "Athena access expired or was revoked. Reconnect Athena in CosmaBot before reading again."
+RECORD_ACCESS = (
+    "Access to this patient's record isn't available for this read. No chart data is shown."
+)
 MALFORMED = "Athena returned a response CosmaBot could not read. No chart data is shown."
 TIMEOUT = (
     "The Athena read timed out before a result was confirmed. "
@@ -99,6 +102,10 @@ EXPIRED_DETAILS = {
     "workspace_access_denied",
     "ehr_read_source_unavailable",
     "core_connection_access_denied",
+}
+RECORD_ACCESS_DETAILS = {
+    "ehr_read_core_grant_unavailable",
+    "ehr_read_core_medication_grant_unavailable",
 }
 MALFORMED_DETAILS = {
     "ehr_read_response_invalid",
@@ -501,6 +508,8 @@ def _failure(payload: object) -> dict[str, Any] | None:
         return _state("unsupported", UNSUPPORTED)
     if detail == "core_connection_required":
         return _state("not_connected", NOT_CONNECTED)
+    if detail in RECORD_ACCESS_DETAILS:
+        return _state("unavailable", RECORD_ACCESS)
     if detail in EXPIRED_DETAILS or status == 403:
         return _state("expired", EXPIRED)
     if detail == "ehr_read_provider_mismatch":

@@ -14,9 +14,12 @@ from cosmas_os.api.plugin_catalog import CONTRACT, META
 from cosmas_os.domain.hashing import canonical_json, payload_hash
 from cosmas_os.plugins.athena import (
     EXPIRED,
+    EXPIRED_DETAILS,
     MALFORMED,
     NAMES,
     NOT_CONNECTED,
+    RECORD_ACCESS,
+    RECORD_ACCESS_DETAILS,
     STALE,
     TIMEOUT,
     UNSUPPORTED,
@@ -368,6 +371,109 @@ def test_revoked_binding_code_is_the_expired_state():
     try:
         result = runtime.call("athena_read_allergies", arguments_for("athena_read_allergies"))["result"]
         assert result == {"state": "expired", "message": EXPIRED, "read_only": True, "confirmed": False}
+    finally:
+        runtime.close()
+
+
+def test_expired_codes_are_only_the_link_and_account_codes():
+    assert EXPIRED_DETAILS == {
+        "ehr_read_binding_changed",
+        "ehr_read_binding_unavailable",
+        "workspace_access_denied",
+        "ehr_read_source_unavailable",
+        "core_connection_access_denied",
+    }
+    assert RECORD_ACCESS_DETAILS == {
+        "ehr_read_core_grant_unavailable",
+        "ehr_read_core_medication_grant_unavailable",
+    }
+    assert EXPIRED_DETAILS.isdisjoint(RECORD_ACCESS_DETAILS)
+
+
+@pytest.mark.parametrize("name", NAMES)
+@pytest.mark.parametrize("status_code,detail", [
+    (503, "ehr_read_binding_changed"),
+    (409, "ehr_read_binding_unavailable"),
+    (403, "workspace_access_denied"),
+    (409, "ehr_read_source_unavailable"),
+    (403, "core_connection_access_denied"),
+])
+def test_expired_or_revoked_access_tells_the_user_to_reconnect(name, status_code, detail):
+    def handler(route, body, _state):
+        if route == "ehr" and body["action"] == "status":
+            return httpx.Response(200, json=ehr_status(name))
+        if route == "schedule" and body["action"] == "athena_connection":
+            return httpx.Response(200, json=connection_response(body["request_nonce"]))
+        return httpx.Response(status_code, json={"detail": detail})
+
+    runtime, _, calls = runtime_for(handler)
+    try:
+        result = runtime.call(name, arguments_for(name))["result"]
+        assert result["state"] == "expired" and result["message"] == EXPIRED
+        assert "Reconnect Athena in CosmaBot" in result["message"]
+        assert result["read_only"] is True and result["confirmed"] is False
+        assert result.get("automatic_retry") is not True and "rows" not in result
+        shown = json.dumps(result)
+        assert "Alex" not in shown and ALLERGEN not in shown and MEDICATION not in shown
+        suffix = "/connections/ehr/reads" if route_for(name) == "ehr" else "/connections/cosmaneura/read"
+        sent = bodies(calls, suffix)
+        assert len(sent) == 2
+    finally:
+        runtime.close()
+
+
+READ_ACTION = {
+    "athena_read_appointments": "athena_appointments",
+    "athena_read_medications": "core_medications",
+    "athena_read_allergies": "core_allergies",
+    "athena_read_visit_link_status": "athena_visit_status",
+}
+
+
+@pytest.mark.parametrize("name", NAMES)
+@pytest.mark.parametrize("detail", sorted(RECORD_ACCESS_DETAILS))
+@pytest.mark.parametrize("status_code", [409, 403])
+def test_grant_unavailable_is_neutral_and_does_not_reconnect(name, detail, status_code):
+    def handler(route, body, _state):
+        if route == "ehr" and body["action"] == "status":
+            return httpx.Response(200, json=ehr_status(name))
+        if route == "schedule" and body["action"] == "athena_connection":
+            return httpx.Response(200, json=connection_response(body["request_nonce"]))
+        return httpx.Response(status_code, json={"detail": detail})
+
+    runtime, _, calls = runtime_for(handler)
+    try:
+        result = runtime.call(name, arguments_for(name))["result"]
+        assert result["state"] == "unavailable" and result["message"] == RECORD_ACCESS
+        assert "Reconnect" not in result["message"] and "reconnect" not in result["message"]
+        assert result["read_only"] is True and result["confirmed"] is False
+        assert result.get("automatic_retry") is not True and "rows" not in result
+        shown = json.dumps(result)
+        assert "Alex" not in shown and ALLERGEN not in shown and MEDICATION not in shown
+        suffix = "/connections/ehr/reads" if route_for(name) == "ehr" else "/connections/cosmaneura/read"
+        sent = bodies(calls, suffix)
+        assert len(sent) == 2
+        assert [body["action"] for body in sent].count(READ_ACTION[name]) == 1
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("name,detail", [
+    ("athena_read_allergies", "ehr_read_core_grant_changed"),
+    ("athena_read_medications", "ehr_read_core_medication_grant_changed"),
+])
+def test_changed_grant_stays_a_discarded_result(name, detail):
+    def handler(route, body, _state):
+        if body["action"] == "status":
+            return httpx.Response(200, json=ehr_status(name))
+        return httpx.Response(409, json={"detail": detail})
+
+    runtime, _, calls = runtime_for(handler)
+    try:
+        result = runtime.call(name, arguments_for(name))["result"]
+        assert result["state"] == "stale" and result["message"] == STALE
+        assert "rows" not in result and "Alex" not in json.dumps(result) and "Reconnect" not in result["message"]
+        assert len(bodies(calls, "/connections/ehr/reads")) == 2
     finally:
         runtime.close()
 
