@@ -55,6 +55,8 @@ class EnrollmentSettings(BaseSettings):
     production_qualified: bool = False
     provisioning_enabled: bool = False
     invitation_secret: SecretStr = SecretStr("")
+    # Central master only. Each Box receives a derived immutable-scope key.
+    runtime_admission_secret: SecretStr = SecretStr("")
 
     def auth_errors(self) -> list[str]:
         errors: list[str] = []

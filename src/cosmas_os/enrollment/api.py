@@ -1,6 +1,10 @@
 """Independent /enrollment/v1 API. No public provisioner-ready route exists."""
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
+import time
 from contextlib import asynccontextmanager
 from importlib import import_module
 from typing import Literal
@@ -8,11 +12,20 @@ from typing import Literal
 from fastapi import Depends, FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from starlette.requests import ClientDisconnect
 
+from .admission import (
+    ADMISSION_HEADER,
+    AdmissionRequest,
+    derive_runtime_admission_key,
+    encode,
+    signature,
+    verify_request,
+)
 from .auth import ClerkEnrollmentVerifier
 from .config import EnrollmentSettings
 from .domain import (
@@ -28,6 +41,17 @@ from .service import EnrollmentService
 from .stripe import StripeCommerce
 from .workspace import ProductionWorkspaceConfirmer, WorkspaceConfirmer
 
+ADMISSION_BODY_TIMEOUT_SECONDS = 5
+
+
+def _unique_json(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate field")
+        value[key] = item
+    return value
+
 
 class RevisionBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -35,20 +59,20 @@ class RevisionBody(BaseModel):
 
 
 class ProfileBody(RevisionBody):
-    display_name: str = Field(min_length=2, max_length=160)
+    display_name: str = Field(min_length=2, max_length=120)
     title: str = Field(default="", max_length=120)
 
     @field_validator("display_name")
     @classmethod
     def meaningful(cls, value: str) -> str:
-        if len(value.strip()) < 2:
+        if len(value.strip()) < 2 or any(ord(c) < 32 or ord(c) == 127 for c in value):
             raise ValueError("Enter your name and role.")
         return value.strip()
 
 
 class PracticeBody(RevisionBody):
     legal_name: str = Field(min_length=3, max_length=160)
-    display_name: str = Field(min_length=2, max_length=160)
+    display_name: str = Field(min_length=2, max_length=120)
     address_line1: str = Field(min_length=3, max_length=200)
     address_line2: str = Field(default="", max_length=200)
     city: str = Field(min_length=2, max_length=100)
@@ -58,6 +82,11 @@ class PracticeBody(RevisionBody):
     administrative_email: str = Field(min_length=3, max_length=320)
     human_seats: int = Field(ge=1, le=1000)
     covered_entity: bool
+
+    @field_validator("display_name")
+    @classmethod
+    def practice_display_name(cls, value: str) -> str:
+        return ProfileBody.meaningful(value)
 
     @field_validator("administrative_email")
     @classmethod
@@ -286,6 +315,55 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
             raise EnrollmentError("workspace_confirmation_not_configured", "Practice account confirmation is not available yet.", 503)
         return service.confirm_workspace(human, idempotency_key, body.expected_revision,
                                          body.workspace_token.get_secret_value(), workspace_confirmer)
+
+    @app.post("/enrollment/v1/runtime/admission")
+    async def runtime_admission(request: Request):
+        config = current_config()
+        if not config["enabled"] or service is None or verifier is None:
+            raise EnrollmentError("runtime_admission_unavailable", "Runtime admission is unavailable.", 503)
+        if (request.headers.getlist("content-type") != ["application/json"]
+                or request.headers.getlist("content-encoding") or request.scope.get("query_string")
+                or request.headers.getlist("transfer-encoding")
+                or len(request.headers.getlist("content-length")) > 1
+                or len(request.headers.getlist("authorization")) != 1
+                or len(request.headers.getlist(ADMISSION_HEADER)) != 1):
+            raise EnrollmentError("invalid_runtime_admission", "Runtime admission request is invalid.", 422)
+        raw = bytearray()
+        try:
+            async with asyncio.timeout(ADMISSION_BODY_TIMEOUT_SECONDS):
+                async for chunk in request.stream():
+                    if len(raw) + len(chunk) > 4096:
+                        raise EnrollmentError("invalid_runtime_admission", "Runtime admission request is invalid.", 413)
+                    raw.extend(chunk)
+        except (TimeoutError, ClientDisconnect):
+            raise EnrollmentError("runtime_admission_interrupted", "Runtime admission was interrupted. Retry safely.", 408) from None
+        try:
+            body = AdmissionRequest.model_validate(json.loads(raw, object_pairs_hook=_unique_json))
+        except (ValueError, TypeError):
+            raise EnrollmentError("invalid_runtime_admission", "Runtime admission request is invalid.", 422) from None
+        authorization = request.headers["authorization"]
+        token = authorization[7:] if authorization.startswith("Bearer ") else ""
+        if body.purpose == "worker" and authorization != "Cosmas-Worker":
+            raise EnrollmentError("invalid_runtime_admission", "Runtime admission request is invalid.", 422)
+        key = derive_runtime_admission_key(settings.runtime_admission_secret.get_secret_value(),
+                                          body.practice_id, body.box_id, body.organization_id)
+        verify_request(key, body, bytes(raw), token, request.headers[ADMISSION_HEADER])
+        try:
+            parties = service.runtime_authorized_parties(body)
+            human = (verifier.verify_registered_member(body.subject, body.organization_id) if body.purpose == "worker"
+                     else verifier.verify_scoped(token, body.organization_id, authorized_parties=parties))
+            result = service.runtime_admission(human, body)
+        except EnrollmentError as exc:
+            if exc.status not in (401, 403):
+                raise
+            now = int(time.time())
+            result = {**body.model_dump(exclude={"token_sha256", "issued_at"}), "request_issued_at": body.issued_at,
+                      "decision": "deny", "reason": "identity_required", "member_role": None, "display_name": None,
+                      "issued_at": now, "expires_at": now + 30}
+        result["request_sha256"] = hashlib.sha256(raw).hexdigest()
+        encoded = encode(result)
+        return Response(encoded, media_type="application/json", headers={"Cache-Control": "no-store",
+                        ADMISSION_HEADER: signature(key, encoded, direction="response", nonce=body.nonce)})
 
     @app.post("/enrollment/v1/webhooks/stripe")
     async def webhook(request: Request):

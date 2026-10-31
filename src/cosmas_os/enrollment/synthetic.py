@@ -41,7 +41,8 @@ def synthetic_settings() -> EnrollmentSettings:
         stripe_account_id="acct_synthetic", stripe_base_price_id="price_syntheticbase", stripe_additional_price_id="price_syntheticadditional",
         stripe_portal_configuration_id="bpc_synthetic", stripe_webhook_secret=SecretStr("whsec_synthetic"),
         commercial_terms_verified=True, activation_available=True, provisioning_enabled=True,
-        invitation_secret=SecretStr("synthetic-invitation-key-never-production"))
+        invitation_secret=SecretStr("synthetic-invitation-key-never-production"),
+        runtime_admission_secret=SecretStr("synthetic-control-admission-master-never-production"))
 
 
 class SyntheticIdentities:
@@ -50,6 +51,8 @@ class SyntheticIdentities:
     def __init__(self, settings: EnrollmentSettings):
         self.settings = settings
         self.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        self.blocked_users: set[str] = set()
+        self.removed_memberships: set[tuple[str, str]] = set()
         self.users = {"owner-a": ("owner-a@example.invalid", "Alex Example"),
                       "owner-b": ("owner-b@example.invalid", "Blair Example"),
                       "staff-a": ("staff-a@example.invalid", "Casey Example"),
@@ -77,6 +80,28 @@ class SyntheticIdentities:
             return HumanIdentity(self.settings.clerk_issuer, claims["sub"], claims["sid"], email, name)
         except (jwt.PyJWTError, ValueError, KeyError) as exc:
             raise EnrollmentError("invalid_identity", "Invalid synthetic session.", 401) from exc
+
+    def verify_scoped(self, token: str, organization_id: str, *, authorized_parties: list[str] | None = None) -> HumanIdentity:
+        claims = jwt.decode(token, self.key.public_key(), algorithms=["RS256"], issuer=self.settings.clerk_issuer)
+        user = claims["sub"].removeprefix("user_synthetic_")
+        if "aud" in claims or claims.get("azp") not in (authorized_parties or [self.settings.public_app_origin]) or user not in self.users:
+            raise EnrollmentError("invalid_identity", "Invalid synthetic session.", 401)
+        email, name = self.users[user]
+        human = HumanIdentity(self.settings.clerk_issuer, claims["sub"], claims["sid"], email, name)
+        compact = claims.get("o")
+        values = [v for v in (claims.get("org_id"), compact.get("id") if isinstance(compact, dict) else None)
+                  if isinstance(v, str) and v]
+        if not values or len(set(values)) != 1 or values[0] != organization_id:
+            raise EnrollmentError("runtime_scope_denied", "Select this synthetic practice.", 403)
+        self.verify_registered_member(human.subject, organization_id)
+        return human
+
+    def verify_registered_member(self, subject: str, organization_id: str) -> HumanIdentity:
+        user = subject.removeprefix("user_synthetic_")
+        if user not in self.users or subject in self.blocked_users or (subject, organization_id) in self.removed_memberships:
+            raise EnrollmentError("runtime_scope_denied", "Synthetic member is unavailable.", 403)
+        email, name = self.users[user]
+        return HumanIdentity(self.settings.clerk_issuer, subject, "", email, name)
 
 
 class SyntheticCommerce:
@@ -196,10 +221,11 @@ class SyntheticWorkspaceConfirmer:
         return WorkspaceConfirmationResult(hashlib.sha256(json.dumps(asdict(request), sort_keys=True).encode()).hexdigest())
 
 
-def create_synthetic_app() -> FastAPI:
+def create_synthetic_app(*, engine=None) -> FastAPI:
     settings = synthetic_settings()
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    event.listen(engine, "connect", lambda connection, _: connection.execute("PRAGMA foreign_keys=ON"))
+    if engine is None:
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        event.listen(engine, "connect", lambda connection, _: connection.execute("PRAGMA foreign_keys=ON"))
     upgrade(engine)
     identities, commerce = SyntheticIdentities(settings), SyntheticCommerce(settings)
     app = create_app(settings, engine=engine, verifier=identities, commerce=commerce,

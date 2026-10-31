@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from .admission import MAX_AGE_SECONDS, AdmissionRequest
 from .config import EnrollmentSettings
 from .domain import (
     BAA_DOC_ID,
@@ -170,6 +171,61 @@ class EnrollmentService:
                     # This grants no billing controls and performs no Stripe writes.
                     self._refresh_subscription(session, practice)
             return self._view(session, account)
+
+    def runtime_authorized_parties(self, request: AdmissionRequest) -> list[str]:
+        with self.sessions() as session:
+            practice = session.scalar(select(Practice).where(Practice.id == request.practice_id,
+                Practice.box_id == request.box_id, Practice.organization_id == request.organization_id))
+            url = urlparse(practice.workspace_url or "") if practice else None
+            origin = url.scheme + "://" + url.netloc if url else ""
+            if not origin or origin not in self.settings.allowed_workspace_origins:
+                raise EnrollmentError("runtime_scope_denied", "This workspace is not registered.", 403)
+            # Bootstrap is signed by the central onboarding browser before it can
+            # navigate to this Box. Only the bounded setup proof admits that origin.
+            return [origin, self.settings.public_app_origin] if request.purpose == "qualification" else [origin]
+
+    def runtime_admission(self, identity: HumanIdentity | None, request: AdmissionRequest) -> dict[str, Any]:
+        """Immutable Box lookup, independent of the browser's selected practice."""
+        with self.sessions.begin() as session:
+            account = session.scalar(select(Account).where(Account.issuer == request.issuer,
+                Account.subject == request.subject).with_for_update())
+            practice = session.scalar(select(Practice).where(Practice.id == request.practice_id,
+                Practice.box_id == request.box_id, Practice.organization_id == request.organization_id).with_for_update())
+            member = session.scalar(select(Membership).where(Membership.practice_id == request.practice_id,
+                Membership.account_id == account.id, Membership.active.is_(True)).with_for_update()) if account else None
+            reason = "membership_required"
+            allowed = False
+            expires = now_utc().timestamp() + MAX_AGE_SECONDS
+            actor_valid = identity is not None and identity.issuer == request.issuer and identity.subject == request.subject
+            if practice and member and actor_valid and request.issuer == self.settings.clerk_issuer:
+                used = session.scalar(select(func.count()).select_from(Membership).where(Membership.practice_id == practice.id)) or 0
+                reserved = session.scalar(select(func.count()).select_from(Invitation).where(Invitation.practice_id == practice.id,
+                    Invitation.used_by.is_(None), Invitation.expires_at > now_utc())) or 0
+                if not self._acceptance(session, practice):
+                    reason = "agreement_required"
+                elif used + reserved > practice.human_seats or practice.human_seats > 10:
+                    reason = "seat_registry_invalid"
+                elif request.purpose == "qualification" and member.role == "owner" and account.id == practice.owner_id:
+                    allowed, reason = True, "setup_qualified"
+                elif (practice.workspace_status != "ready" or not practice.workspace_proof_sha256
+                      or request.purpose != "qualification" and (not member.workspace_ready or not member.workspace_proof_sha256)):
+                    reason = "workspace_not_ready"
+                else:
+                    if (not practice.billing_verified_at or utc(practice.billing_verified_at) <= now_utc() - timedelta(minutes=5)
+                            or practice.subscription_status == "trialing" and practice.trial_ends_at and utc(practice.trial_ends_at) <= now_utc()
+                            or practice.subscription_status == "active" and practice.paid_period_ends_at and utc(practice.paid_period_ends_at) <= now_utc()):
+                        self._refresh_subscription(session, practice)
+                    allowed, reason = self._entitled(practice), "billing_required"
+                    if allowed:
+                        reason = "setup_qualified" if request.purpose == "qualification" else "entitled"
+                        end = practice.trial_ends_at if practice.subscription_status == "trialing" else practice.paid_period_ends_at
+                        assert end and practice.billing_verified_at
+                        expires = min(expires, utc(end).timestamp(), (utc(practice.billing_verified_at) + timedelta(minutes=5)).timestamp())
+            return {**request.model_dump(exclude={"token_sha256", "issued_at"}), "request_issued_at": request.issued_at,
+                    "decision": "allow" if allowed else "deny", "reason": reason,
+                    "member_role": member.role if allowed and member else None,
+                    "display_name": account.display_name if allowed and account else None,
+                    "issued_at": int(now_utc().timestamp()), "expires_at": int(expires)}
 
     def _refresh_subscription(self, session: Session, practice: Practice) -> bool:
         if not practice.stripe_subscription_id:
@@ -718,6 +774,13 @@ class EnrollmentService:
                     return True
                 session.add(StripeInbox(id=event["id"], event_type=event["type"], payload=minimal, payload_sha256=digest,
                                         state="pending", attempts=0, created_at=now_utc()))
+                if event["type"].startswith("customer.subscription."):
+                    practice = session.scalar(select(Practice).where(Practice.stripe_subscription_id == minimal["object_id"]).with_for_update())
+                    if practice:
+                        # A signed update revokes cached evidence before ack. Even
+                        # delayed events require a canonical read; payload cannot grant.
+                        practice.billing_verified_at = None
+                        practice.revision += 1
                 if event["type"] == "invoice.payment_failed":
                     practice = session.scalar(select(Practice).where(Practice.stripe_subscription_id == minimal["subscription"]).with_for_update())
                     event_at = datetime.fromtimestamp(event["created"], UTC)

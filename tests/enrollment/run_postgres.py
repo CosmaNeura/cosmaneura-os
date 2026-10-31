@@ -33,7 +33,9 @@ def main() -> None:
             subprocess.run([str(pg / "createdb"), "-h", "127.0.0.1", "-p", str(port), "-U", "enrollment_rehearsal", "enrollment_synthetic"],
                            check=True, env=env)
             env["ENROLLMENT_TEST_DATABASE_URL"] = f"postgresql+psycopg://enrollment_rehearsal:{password}@127.0.0.1:{port}/enrollment_synthetic"
-            result = subprocess.run([sys.executable, "-m", "pytest", "tests/enrollment/test_postgres.py", "-q"], cwd=root, env=env)
+            subprocess.run([str(pg / "createdb"), "-h", "127.0.0.1", "-p", str(port), "-U", "enrollment_rehearsal", "enrollment_runtime_synthetic"], check=True, env=env)
+            env["ENROLLMENT_RUNTIME_TEST_DATABASE_URL"] = f"postgresql+psycopg://enrollment_rehearsal:{password}@127.0.0.1:{port}/enrollment_runtime_synthetic"
+            result = subprocess.run([sys.executable, "-m", "pytest", "tests/enrollment/test_postgres.py", "tests/enrollment/test_runtime_workspace.py", "-q", "--tb=short", "-x"], cwd=root, env=env)
             if result.returncode:
                 raise SystemExit(result.returncode)
         finally:

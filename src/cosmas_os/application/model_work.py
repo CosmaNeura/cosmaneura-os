@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from sqlalchemy import and_, exists, func, or_, select
 
+from cosmas_os.adapters.enrollment_admission import RuntimeAdmissionError
 from cosmas_os.adapters.gpt41 import SUPPORTED_PREPARED_CONTRACTS as TEXT_PREPARED_CONTRACTS
 from cosmas_os.adapters.gpt41 import GPT41Connector, _context
 from cosmas_os.adapters.gpt41_tools import CURRENT_PREPARED_CONTRACT as TOOL_PREPARED_CONTRACT
@@ -45,6 +46,7 @@ from cosmas_os.application import handoff_briefs
 from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.application.encounter_access import patient_visible
+from cosmas_os.application.enrollment_access import require_worker_admission
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import (
     AppointmentObservation,
@@ -1083,6 +1085,14 @@ def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
         raise
     if source_digest(context) != row.source_sha256:
         raise ws.WorkspaceError("source_changed")
+    if team.runtime_settings.workspace_enrollment_managed:
+        if row.external_identity_id is None or digest(row.prepared_envelope) != row.envelope_sha256:
+            raise ws.WorkspaceError("source_changed")
+        try:
+            require_worker_admission(s, team.runtime_settings, box=row.box_id, owner=row.owner_id,
+                operation_id=row.id, approval_sha256=row.envelope_sha256, external_identity_id=row.external_identity_id)
+        except RuntimeAdmissionError as error:
+            raise ws.WorkspaceError(error.code, error.status) from None
     return workspace, version, bot, settings
 
 
@@ -1180,6 +1190,22 @@ def claim(s, box, owner, admission_id, *, reauthenticate=None, clock=None):
 def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_execution_factory=None):
     if digest(claimed.envelope) != claimed.envelope_sha256:
         raise ModelCallFailure()
+    def current_managed_admission():
+        if not team.runtime_settings.workspace_enrollment_managed:
+            return
+        from cosmas_os.db import make_session_factory
+        factory = session_factory or make_session_factory()
+        with factory() as admission_session:
+            row = admission_session.get(ModelWorkAdmission, claimed.admission_id)
+            if (row is None or row.state != "running" or row.box_id != claimed.box or row.owner_id != claimed.owner
+                    or row.dispatch_id != claimed.dispatch_id or row.envelope_sha256 != claimed.envelope_sha256
+                    or digest(row.prepared_envelope) != claimed.envelope_sha256):
+                raise ModelCallFailure(dispatch="not_dispatched")
+            try:
+                _current_input(admission_session, row)
+            except ws.WorkspaceError:
+                raise ModelCallFailure(dispatch="not_dispatched", outcome="authority_withheld") from None
+    current_managed_admission()
     key = team.runtime_settings.workspace_llm_api_key
     if getattr(team.runtime_settings, "cosmas_env", None) == "standalone_clerk_synthetic":
         runtime = team.runtime_settings
@@ -1197,6 +1223,7 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_ex
 
         factory = session_factory or make_session_factory()
         def execute(request):
+            current_managed_admission()
             with factory() as tool_session:
                 value = AgentToolExecutor(tool_session, claimed, session_factory=factory,
                     delivery_execution_factory=delivery_execution_factory).execute(request)
@@ -1220,6 +1247,20 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_ex
 
 
 def settle(s, claimed, result, *, reauthenticate=None, clock=None):
+    # Only this already-fenced settlement can retain immutable usage after access
+    # expires; successful output still passes _current_input before publication.
+    prior = s.info.get("enrollment_model_settlement")
+    s.info["enrollment_model_settlement"] = True
+    try:
+        return _settle(s, claimed, result, reauthenticate=reauthenticate, clock=clock)
+    finally:
+        if prior is None:
+            s.info.pop("enrollment_model_settlement", None)
+        else:
+            s.info["enrollment_model_settlement"] = prior
+
+
+def _settle(s, claimed, result, *, reauthenticate=None, clock=None):
     from cosmas_os.application import conversation
 
     s.rollback()

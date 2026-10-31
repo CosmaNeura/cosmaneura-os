@@ -20,12 +20,16 @@ from cosmas_os.enrollment.synthetic import SyntheticCommerce, synthetic_settings
 def identity_adapter():
     settings = synthetic_settings()
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    evidence = {"session_status": "active", "email_verified": True, "fetches": 0}
+    evidence = {"session_status": "active", "email_verified": True, "fetches": 0, "banned": False, "membership": True}
 
     def transport(request):
         if "/sessions/" in request.url.path:
             return httpx.Response(200, json={"id": "sess_example", "user_id": "user_example", "status": evidence["session_status"]})
+        if "/memberships" in request.url.path:
+            return httpx.Response(200, json={"data": [{"public_user_data": {"user_id": "user_example"},
+                "organization": {"id": "org_example"}}] if evidence["membership"] else []})
         return httpx.Response(200, json={"id": "user_example", "primary_email_address_id": "email_example",
+            "banned": evidence["banned"],
             "first_name": "Example", "last_name": "Human", "email_addresses": [{"id": "email_example", "email_address": "verified@example.invalid",
                 "verification": {"status": "verified" if evidence["email_verified"] else "unverified"}}]})
 
@@ -55,6 +59,35 @@ def test_real_shaped_default_clerk_session_has_no_audience_and_uses_live_email(i
     assert identity.email == "verified@example.invalid"
     assert identity.subject == "user_example" and identity.session_id == "sess_example"
     assert evidence["fetches"] == 1
+
+
+def test_runtime_scoped_party_and_live_session_do_not_relax_signup(identity_adapter):
+    verifier, token, evidence = identity_adapter
+    workspace = "https://practice.example.invalid"
+    scoped = token({"azp": workspace, "o": {"id": "org_example"}})
+    with pytest.raises(EnrollmentError):
+        verifier.verify(scoped)
+    assert verifier.verify_scoped(scoped, "org_example", authorized_parties=[workspace]).subject == "user_example"
+    with pytest.raises(EnrollmentError):
+        verifier.verify_scoped(scoped, "org_other", authorized_parties=[workspace])
+    with pytest.raises(EnrollmentError):
+        verifier.verify_scoped(token({"org_id": "org_example"}), "org_example", authorized_parties=[workspace])
+    evidence["session_status"] = "revoked"
+    with pytest.raises(EnrollmentError):
+        verifier.verify_scoped(scoped, "org_example", authorized_parties=[workspace])
+
+
+def test_worker_live_member_checks_do_not_retain_or_require_session(identity_adapter):
+    verifier, _, evidence = identity_adapter
+    evidence["session_status"] = "revoked"
+    assert verifier.verify_registered_member("user_example", "org_example").session_id == ""
+    evidence["banned"] = True
+    with pytest.raises(EnrollmentError):
+        verifier.verify_registered_member("user_example", "org_example")
+    evidence["banned"] = False
+    evidence["membership"] = False
+    with pytest.raises(EnrollmentError):
+        verifier.verify_registered_member("user_example", "org_example")
 
 
 @pytest.mark.parametrize("changes", [{"aud": "other-api"}, {"aud": None}, {"aud": []},

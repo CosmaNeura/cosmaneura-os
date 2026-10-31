@@ -76,6 +76,9 @@ inbox row commits before 200. Run `python -m cosmas_os.enrollment.reconcile` fro
 the private scheduler every minute. Worker outages leave durable retry state.
 Only fresh provider reads grant entitlement; signed failures can revoke pending
 verification. Event IDs deduplicate and older events cannot regress state.
+Every saved subscription update/deletion invalidates cached billing evidence
+before acknowledgement, including delayed events. Admission then reads the
+canonical subscription; provider outage cannot grant access from the old cache.
 
 Synthetic qualification: `python -m cosmas_os.enrollment.synthetic --port 8041`
 binds only loopback and uses its own in-memory synthetic registry, signed RSA
@@ -119,3 +122,45 @@ practice, destination and release binding still match. Staff cannot qualify the
 owner's unfinished workspace. Missing real callback disables activation config.
 The synthetic `/lab/session` accepts optional `organization_id` solely for this
 two-stage fixture proof. No synthetic proof is production qualification.
+
+Managed runtime admission is opt-in with `WORKSPACE_ENROLLMENT_MANAGED=true`.
+The Box receives immutable practice/Box/Org/issuer settings, exact owned control
+and account origins, and `WORKSPACE_ENROLLMENT_ADMISSION_SECRET`, a per-Box key
+derived with `derive_runtime_admission_key`. Only enrollment holds the master
+`ENROLLMENT_RUNTIME_ADMISSION_SECRET` and Clerk backend key. No Box receives either
+global secret. `CLERK_SESSION_POLICY=enrollment_default` requires managed admission
+and an explicitly empty audience; old audience/shared-staging profiles retain
+their policy. Managed native sessions without separately qualified origin proof
+remain unavailable.
+
+The owned HTTPS `/enrollment/v1/runtime/admission` authenticates request and
+response with scoped HMAC, nonce, immutable scope, token hash and a 30-second
+bound. Normal signed human requests additionally verify live Clerk session,
+verified user and exact current Org membership. Registry human/BAA/seat/billing
+checks apply on every identity and mutation fence, without a runtime cache.
+Default-session JWT verification in the Box never needs a Clerk backend key.
+Fixed denial headers distinguish `workspace_enrollment_access_required` (403)
+from `workspace_enrollment_admission_unavailable` (503). GET `/account/identity`
+is a protected recovery probe; public no-store `/config` returns only the pinned
+account recovery URL and managed flag. Local invite/approve/bind/reactivate and
+owner-change HTTP paths are unavailable on managed Boxes; paid roster reads stay
+available.
+
+Qualification is a bounded pre-billing exception for the exact registered owner
+after signed BAA. Reserved-owner setup must complete before actual qualification
+reports `initial_setup_complete=true`. The public enforcement marker has exactly
+four keys: contract_version/enforced/practice_id/purpose. Invited staff/admin can
+receive a non-owner local human binding only from paid, active capped registry
+authority and fresh signed qualification. This grants no patient/resource scope,
+never repairs revoked local bindings, and still requires the private verified
+membership-ready transition before normal workspace access.
+
+Queued Chief/private-handoff work checks retained immutable local human lineage
+before dispatch, each tool execution and result publication. The scoped worker
+purpose carries operation/revision hashes rather than a persisted bearer. Central
+live Clerk user/Org membership, registry and billing checks remain mandatory;
+logout alone does not revoke retained approved work. Routines and the legacy
+operation worker also require retained human authority; missing lineage denies
+managed execution. Denied model output is withheld while immutable observed usage
+and a failed authority outcome remain durable. No service admission grants human
+approval or external action authority.

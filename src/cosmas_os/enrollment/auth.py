@@ -64,7 +64,7 @@ class ClerkEnrollmentVerifier:
         except Exception as exc:
             raise EnrollmentError("identity_unavailable", "Identity verification is temporarily unavailable.", 503) from exc
 
-    def verify(self, token: str) -> HumanIdentity:
+    def _claims(self, token: str, authorized_parties: list[str] | None = None) -> dict[str, Any]:
         if not token or len(token) > 8192:
             raise EnrollmentError("invalid_identity", "Sign in to continue.", 401)
         self.refresh_keys()
@@ -83,13 +83,53 @@ class ClerkEnrollmentVerifier:
             if (not isinstance(sub, str) or not 1 <= len(sub) <= 255
                     or not isinstance(sid, str) or not 1 <= len(sid) <= 255
                     or "aud" in claims
-                    or claims.get("azp") not in self.settings.clerk_authorized_parties):
+                    or claims.get("azp") not in (authorized_parties if authorized_parties is not None else self.settings.clerk_authorized_parties)):
                 raise ValueError("invalid claims")
         except (jwt.PyJWTError, ValueError, TypeError) as exc:
             raise EnrollmentError("invalid_identity", "Sign in to continue.", 401) from exc
+        return claims
+
+    def verify(self, token: str) -> HumanIdentity:
+        return self._human(self._claims(token))
+
+    def verify_scoped(self, token: str, organization_id: str, *, authorized_parties: list[str] | None = None) -> HumanIdentity:
+        claims = self._claims(token, authorized_parties)
+        compact = claims.get("o")
+        values = [value for value in (claims.get("org_id"), compact.get("id") if isinstance(compact, dict) else None)
+                  if isinstance(value, str) and value]
+        if not values or len(set(values)) != 1 or values[0] != organization_id:
+            raise EnrollmentError("runtime_scope_denied", "Select the registered practice account.", 403)
+        human = self._human(claims)
+        self._membership(human.subject, organization_id)
+        return human
+
+    def _membership(self, subject: str, organization_id: str) -> None:
+        result = self._get("/organizations/" + quote(organization_id, safe="")
+                           + "/memberships?user_id=" + quote(subject, safe="") + "&limit=100")
+        rows = result.get("data")
+        if not isinstance(rows, list):
+            raise EnrollmentError("identity_unavailable", "Practice membership verification is unavailable.", 503)
+        matches = [r for r in rows if isinstance(r, dict)
+                   and (r.get("public_user_data") or {}).get("user_id") == subject
+                   and (r.get("organization") or {}).get("id") == organization_id]
+        if len(matches) != 1:
+            raise EnrollmentError("runtime_scope_denied", "This account is no longer a practice member.", 403)
+
+    def verify_registered_member(self, subject: str, organization_id: str) -> HumanIdentity:
+        # Retained approved work does not retain a bearer token or require a
+        # currently signed-in session. The central live user/Org check is mandatory.
+        human = self._user(subject, "")
+        self._membership(subject, organization_id)
+        return human
+
+    def _human(self, claims: dict[str, Any]) -> HumanIdentity:
+        sub, sid = claims["sub"], claims["sid"]
         session = self._get("/sessions/" + quote(sid, safe=""))
         if session.get("id") != sid or session.get("user_id") != sub or session.get("status") != "active":
             raise EnrollmentError("session_inactive", "Your session ended. Sign in again.", 401)
+        return self._user(sub, sid)
+
+    def _user(self, sub: str, sid: str) -> HumanIdentity:
         user = self._get("/users/" + quote(sub, safe=""))
         if user.get("id") != sub or user.get("banned") is True or user.get("locked") is True:
             raise EnrollmentError("invalid_identity", "This account is unavailable.", 401)

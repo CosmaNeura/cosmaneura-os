@@ -13,7 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.requests import Request
@@ -21,6 +21,13 @@ from starlette.requests import Request
 from cosmas_os.adapters.core_capture_admission import HttpCoreCaptureAdmission
 from cosmas_os.adapters.core_record_connection import record_connection as core_record_connection
 from cosmas_os.adapters.core_session_prep_connection import session_prep_connection
+from cosmas_os.adapters.enrollment_admission import (
+    ACCESS_REQUIRED,
+    ADMISSION_UNAVAILABLE,
+    PUBLIC_ADMISSION_HEADER,
+    EnrollmentAdmissionAdapter,
+    RuntimeAdmissionError,
+)
 from cosmas_os.adapters.google_connection_runtime import google_connection_lifespan
 from cosmas_os.adapters.managed_services import managed_services, managed_services_lifespan
 from cosmas_os.adapters.microsoft_connection_runtime import microsoft_connection_lifespan
@@ -258,6 +265,31 @@ def _request_clerk_verifier(origins: list[str]) -> ClerkTokenVerifier:
     return _clerk_verifier(native_origin) if native_origin else _clerk_verifier()
 
 
+def _runtime_admission_adapter() -> EnrollmentAdmissionAdapter:
+    return EnrollmentAdmissionAdapter(settings)
+
+
+def _install_enrollment_commit_fence(request, session, authorization, box_header, actor_header):
+    if not settings.workspace_enrollment_managed or session.info.get("enrollment_request_fence") is request:
+        return
+    selected = settings
+    session.info["enrollment_request_fence"] = request
+    def verify_before_commit(current):
+        # Model settlement rechecks its retained lineage and service admission;
+        # denied output still records immutable observed usage, never a new action.
+        if current.info.get("enrollment_model_settlement"):
+            return
+        if settings is not selected:
+            raise RuntimeAdmissionError(ADMISSION_UNAVAILABLE, 503)
+        authenticate_request(current, selected, authorization=authorization, box_header=box_header,
+            actor_header=actor_header, verifier=_request_clerk_verifier(request.headers.getlist("origin")),
+            admission_adapter=_runtime_admission_adapter())
+    event.listen(session, "before_commit", verify_before_commit)
+    listeners = getattr(request.state, "enrollment_commit_fences", [])
+    listeners.append((session, verify_before_commit))
+    request.state.enrollment_commit_fences = listeners
+
+
 def _identity(
     request: Request,
     session: Session = Depends(get_session),
@@ -266,6 +298,8 @@ def _identity(
     x_actor_principal_id: str | None = Header(default=None),
 ) -> RequestIdentity:
     try:
+        if settings.workspace_enrollment_managed and request.method != "GET" and request.url.path.startswith("/admin/identities/"):
+            raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
         check_capture_deadline()
         verifier = _request_clerk_verifier(request.headers.getlist("origin")) if settings.auth_mode == "clerk_jwt" else None
         check_capture_deadline()
@@ -276,7 +310,9 @@ def _identity(
             box_header=x_box_id,
             actor_header=x_actor_principal_id,
             verifier=verifier,
+            admission_adapter=_runtime_admission_adapter() if settings.workspace_enrollment_managed else None,
         )
+        _install_enrollment_commit_fence(request, session, authorization, x_box_id, x_actor_principal_id)
         check_capture_deadline()
         return result
     except AuthenticationFailed as exc:
@@ -287,11 +323,16 @@ def _identity(
         ) from exc
     except AccessDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
+    except RuntimeAdmissionError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.code,
+            headers={"Cache-Control": "no-store", PUBLIC_ADMISSION_HEADER: exc.code}) from None
 
 
 def _map_err(exc: Exception) -> HTTPException:
     if isinstance(exc, HTTPException):
         return exc
+    if isinstance(exc, RuntimeAdmissionError):
+        return HTTPException(status_code=exc.status, detail=exc.code, headers={PUBLIC_ADMISSION_HEADER: exc.code, "Cache-Control": "no-store"})
     if isinstance(exc, AuthorizationError):
         return HTTPException(status_code=403, detail=str(exc))
     if isinstance(exc, PolicyDenied):
@@ -327,8 +368,26 @@ async def workspace_error(_: Request, exc: ws.WorkspaceError):
         and exc.code in workspace_capture.CORE_CAPTURE_FAILURE_CODES
         and isinstance(exc.capture_phase, workspace_capture.CoreCaptureReadPhase)):
         content["capture_phase"] = exc.capture_phase.value
-    return JSONResponse(status_code=exc.status, content=content,
-                        headers={"Cache-Control": "no-store"})
+    headers = {"Cache-Control": "no-store"}
+    if exc.code in {ACCESS_REQUIRED, ADMISSION_UNAVAILABLE}:
+        headers[PUBLIC_ADMISSION_HEADER] = exc.code
+    return JSONResponse(status_code=exc.status, content=content, headers=headers)
+
+
+@app.exception_handler(RuntimeAdmissionError)
+async def admission_error(_request, exc: RuntimeAdmissionError):
+    return JSONResponse(status_code=exc.status, content={"detail": exc.code},
+                        headers={"Cache-Control": "no-store", PUBLIC_ADMISSION_HEADER: exc.code})
+
+
+@app.middleware("http")
+async def enrollment_request_cleanup(request, call_next):
+    try:
+        return await call_next(request)
+    finally:
+        for session, listener in getattr(request.state, "enrollment_commit_fences", []):
+            event.remove(session, "before_commit", listener)
+            session.info.pop("enrollment_request_fence", None)
 
 
 @app.exception_handler(RequestValidationError)
@@ -1074,7 +1133,8 @@ def _refresh_model_identity(request, session, identity):
     except HTTPException as error:
         # Admission settlement must retain observed usage even when the signed
         # identity expires or is revoked while the provider is responding.
-        raise ws.WorkspaceError("workspace_access_denied", error.status_code) from None
+        code = error.detail if error.detail in {ACCESS_REQUIRED, ADMISSION_UNAVAILABLE} else "workspace_access_denied"
+        raise ws.WorkspaceError(code, error.status_code) from None
 
 
 def _session_prep_analysis_sources(request, session, identity, workspace_id, body):
@@ -1408,6 +1468,19 @@ def link_workspace_work(workspace_id: UUID, body: WorkspaceWorkLink, session: Se
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "env": settings.cosmas_env}
+
+
+@app.get("/config")
+def enrollment_runtime_config(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return {"enrollment_managed": settings.workspace_enrollment_managed,
+            "enrollment_recovery_url": settings.enrollment_recovery_url}
+
+
+@app.get("/account/identity")
+def account_identity(response: Response, identity: RequestIdentity = Depends(_identity)):
+    response.headers["Cache-Control"] = "no-store"
+    return {"state": "allowed", "box_id": identity.box_id, "organization_id": identity.organization_id}
 
 
 @app.get("/ready")
@@ -2110,7 +2183,8 @@ if settings.compact_web_root:
 from cosmas_os.api.practice_access_routes import register as register_practice_access  # noqa: E402
 
 register_practice_access(app, runtime=lambda: settings, verifier=_request_clerk_verifier,
-                        session_factory=lambda: new_capture_session(SessionLocal))
+                        session_factory=lambda: new_capture_session(SessionLocal),
+                        admission_adapter=lambda: _runtime_admission_adapter())
 
 allowed_headers = ["X-Cosmas-Handoff-Review", "X-Cosmas-Practice-Access-Contract", "Authorization", "Content-Type", "X-Cosmas-Draft-Recovery", "X-Cosmas-Team-Contract", "X-Cosmas-Model-Contract", "X-Cosmas-Vendor-Contract", "X-Cosmas-Vendor-Setup-Contract", "X-Cosmas-Artifact-Write-Key", "X-Cosmas-Portal-Contract", "X-Cosmas-Portal-Work-Contract", "X-Cosmas-Finance-Contract", "X-Cosmas-Finance-Setup-Contract", "X-Cosmas-Membership-Contract", "X-Cosmas-Inbox-Contract", "X-Cosmas-Inbox-Handoff-Contract", "X-Cosmas-Routine-Contract"]
 allowed_headers.extend(["X-Cosmas-Research-Contract", "X-Cosmas-Scheduling-Login", "X-Cosmas-Microsoft-Connection", "X-Cosmas-Google-Connection", "X-Cosmas-Google-Messages", "X-Cosmas-Google-Calendar"])
@@ -2232,5 +2306,5 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT"],
     allow_headers=allowed_headers,
-    expose_headers=["X-Cosmas-Workspace-Protocol"],
+    expose_headers=["X-Cosmas-Workspace-Protocol", PUBLIC_ADMISSION_HEADER],
 )

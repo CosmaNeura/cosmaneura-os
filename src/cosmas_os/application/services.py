@@ -741,6 +741,20 @@ def execute_operation(c: Container, operation_id: str) -> Operation:
 
     _require_legacy_work_path(c, ticket)
 
+    if settings.workspace_enrollment_managed:
+        from cosmas_os.application.enrollment_access import require_worker_admission
+        decision = c.session.scalar(select(Decision).where(Decision.box_id == op.box_id,
+            Decision.ticket_id == ticket.id, Decision.action_revision_id == rev.id,
+            Decision.kind == DecisionKind.APPROVE.value).order_by(Decision.created_at.desc()))
+        audit = c.session.scalar(select(AuditEvent).where(AuditEvent.box_id == op.box_id,
+            AuditEvent.aggregate_id == ticket.id, AuditEvent.action_revision_id == rev.id,
+            AuditEvent.event_type == "decision.approved", AuditEvent.payload_hash == rev.payload_hash,
+            AuditEvent.approved_by_principal_id == decision.actor_principal_id)) if decision else None
+        if (decision is None or audit is None or rev.invalidated or payload_hash(rev.payload) != rev.payload_hash):
+            raise AuthorizationError("managed operation requires its retained immutable human approval")
+        require_worker_admission(c.session, settings, box=op.box_id, owner=decision.actor_principal_id,
+                                 operation_id=op.id, approval_sha256=rev.payload_hash)
+
     if op.status in {OperationStatus.SUCCEEDED.value}:
         return op
     if op.status == OperationStatus.UNKNOWN.value:
@@ -752,6 +766,9 @@ def execute_operation(c: Container, operation_id: str) -> Operation:
     c.session.commit()
 
     try:
+        if settings.workspace_enrollment_managed:
+            require_worker_admission(c.session, settings, box=op.box_id, owner=decision.actor_principal_id,
+                                     operation_id=op.id, approval_sha256=rev.payload_hash)
         receipt = c.notify.send(
             NotifyRequest(
                 operation_id=op.id,
