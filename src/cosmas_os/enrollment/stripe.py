@@ -75,8 +75,22 @@ class StripeCommerce:
         if config.get("id") != self.settings.stripe_portal_configuration_id or config.get("active") is not True:
             raise EnrollmentError("portal_configuration_invalid", "The billing portal configuration is unavailable.", 503)
         features = config.get("features")
-        if not isinstance(features, dict) or set(features) - {"customer_update", "invoice_history", "payment_method_update", "subscription_cancel", "subscription_update"}:
+        if not isinstance(features, dict) or set(features) - {"customer_update", "invoice_history", "payment_method_update", "subscription_cancel", "subscription_update", "subscription_pause"}:
             raise EnrollmentError("portal_configuration_invalid", "The billing portal contains unreviewed features.", 503)
+        if "subscription_pause" in features:
+            pause = features["subscription_pause"]
+            if not isinstance(pause, dict) or set(pause) - {"enabled", "duration"} or pause.get("enabled") is not False:
+                raise EnrollmentError("portal_configuration_invalid", "Subscription pauses must remain disabled in the billing portal.", 503)
+            if "duration" in pause:
+                duration = pause["duration"]
+                options = duration.get("interval_options") if isinstance(duration, dict) else None
+                if (not isinstance(duration, dict) or set(duration) != {"type", "interval_options"}
+                        or duration.get("type") != "interval_options" or not isinstance(options, list)
+                        or len(options) != 1 or not isinstance(options[0], dict)
+                        or set(options[0]) != {"interval", "interval_count"}
+                        or options[0].get("interval") != "month"
+                        or type(options[0].get("interval_count")) is not int or options[0]["interval_count"] != 1):
+                    raise EnrollmentError("portal_configuration_invalid", "The billing portal contains unreviewed pause duration settings.", 503)
         for key in ("subscription_update", "customer_update"):
             if (features.get(key) or {}).get("enabled") is not False:
                 raise EnrollmentError("portal_configuration_invalid", "Plan and customer edits must use Cosmas controls.", 503)

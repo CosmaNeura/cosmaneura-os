@@ -136,7 +136,9 @@ def stripe_adapter():
             return httpx.Response(200, json={"id": settings.stripe_portal_configuration_id, "livemode": False, "active": True,
                 "login_page": {"enabled": False}, "features": {"subscription_update": {"enabled": observed["portal_update"]},
                     "customer_update": {"enabled": False}, "invoice_history": {"enabled": True},
-                    "payment_method_update": {"enabled": True}, "subscription_cancel": {"enabled": True, "mode": "at_period_end"}}})
+                    "payment_method_update": {"enabled": True}, "subscription_cancel": {"enabled": True, "mode": "at_period_end"},
+                    "subscription_pause": {"enabled": False, "duration": {"type": "interval_options",
+                        "interval_options": [{"interval": "month", "interval_count": 1}]}}, **observed.get("portal_features", {})}})
         observed["posts"].append({"path": path, "data": parse_qs(request.content.decode()), "key": request.headers.get("Idempotency-Key")})
         if observed["fail_post"]:
             observed["fail_post"] -= 1
@@ -185,6 +187,76 @@ def test_configuration_drift_wrong_price_or_unsafe_portal_never_posts_checkout(s
     adapter.settings.stripe_base_price_id = "price_new"
     with pytest.raises(EnrollmentError, match="Reconcile"):
         adapter.create_checkout(request, "saved-key")
+
+
+@pytest.mark.parametrize("pause", [
+    {"enabled": False},
+    {"enabled": False, "duration": {"type": "interval_options", "interval_options": [{"interval": "month", "interval_count": 1}]}},
+])
+def test_known_disabled_subscription_pause_preserves_billing_portal_access(stripe_adapter, pause):
+    adapter, request, observed = stripe_adapter
+    observed["portal_features"] = {"subscription_pause": pause}
+    assert adapter.create_portal("cus_example", request["app_origin"] + "/onboarding") == "https://billing.stripe.com/p/session/example"
+    assert adapter.verified
+    assert [post["path"] for post in observed["posts"]] == ["/v1/billing_portal/sessions"]
+
+
+@pytest.mark.parametrize("feature,value", [
+    ("subscription_pause", {"enabled": True}),
+    ("subscription_pause", {"enabled": 0}),
+    ("subscription_pause", {"enabled": "false"}),
+    ("subscription_pause", {"enabled": None}),
+    ("subscription_pause", {}),
+    ("subscription_pause", None),
+    ("subscription_pause", False),
+    ("subscription_pause", []),
+    ("subscription_pause", {"enabled": False, "mode": "unreviewed"}),
+    ("unreviewed_feature", {"enabled": False}),
+])
+@pytest.mark.parametrize("operation", ["checkout", "portal"])
+def test_enabled_malformed_or_unknown_portal_features_never_post(stripe_adapter, feature, value, operation):
+    adapter, request, observed = stripe_adapter
+    observed["portal_features"] = {feature: value}
+    with pytest.raises(EnrollmentError) as rejected:
+        if operation == "checkout":
+            adapter.create_checkout(request, "saved-key")
+        else:
+            adapter.create_portal("cus_example", request["app_origin"] + "/onboarding")
+    assert rejected.value.code == "portal_configuration_invalid"
+    assert not adapter.verified
+    assert observed["posts"] == []
+
+
+@pytest.mark.parametrize("duration", [
+    pytest.param(None, id="null"),
+    pytest.param({}, id="empty"),
+    pytest.param({"type": "interval_options"}, id="missing-options"),
+    pytest.param({"type": "interval_options", "interval_options": None}, id="null-options"),
+    pytest.param({"type": "interval_options", "interval_options": []}, id="empty-options"),
+    pytest.param({"type": "unreviewed", "interval_options": [{"interval": "month", "interval_count": 1}]}, id="unknown-type"),
+    pytest.param({"type": "interval_options", "interval_options": [{"interval": "month", "interval_count": 1}], "extra": False}, id="unknown-duration-key"),
+    pytest.param({"type": "interval_options", "interval_options": [None]}, id="null-option"),
+    pytest.param({"type": "interval_options", "interval_options": [{"interval": "month"}]}, id="missing-count"),
+    pytest.param({"type": "interval_options", "interval_options": [{"interval": "year", "interval_count": 1}]}, id="unknown-interval"),
+    pytest.param({"type": "interval_options", "interval_options": [{"interval": "month", "interval_count": 0}]}, id="wrong-count"),
+    pytest.param({"type": "interval_options", "interval_options": [{"interval": "month", "interval_count": True}]}, id="boolean-count"),
+    pytest.param({"type": "interval_options", "interval_options": [{"interval": "month", "interval_count": 1.0}]}, id="float-count"),
+    pytest.param({"type": "interval_options", "interval_options": [{"interval": "month", "interval_count": "1"}]}, id="string-count"),
+    pytest.param({"type": "interval_options", "interval_options": [{"interval": "month", "interval_count": 1, "extra": False}]}, id="unknown-option-key"),
+    pytest.param({"type": "interval_options", "interval_options": [{"interval": "month", "interval_count": 1}] * 2}, id="extra-option"),
+])
+@pytest.mark.parametrize("operation", ["checkout", "portal"])
+def test_malformed_or_unreviewed_disabled_pause_duration_never_posts(stripe_adapter, duration, operation):
+    adapter, request, observed = stripe_adapter
+    observed["portal_features"] = {"subscription_pause": {"enabled": False, "duration": duration}}
+    with pytest.raises(EnrollmentError) as rejected:
+        if operation == "checkout":
+            adapter.create_checkout(request, "saved-key")
+        else:
+            adapter.create_portal("cus_example", request["app_origin"] + "/onboarding")
+    assert rejected.value.code == "portal_configuration_invalid"
+    assert not adapter.verified
+    assert observed["posts"] == []
 
 
 def test_retry_uses_original_key_after_malformed_error_body(stripe_adapter, monkeypatch):
