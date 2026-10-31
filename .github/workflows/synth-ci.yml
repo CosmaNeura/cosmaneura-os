@@ -356,6 +356,8 @@ jobs:
       - run: uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import
       - name: Create separate synthetic registry and managed workspace databases
         run: uv run python -c "import psycopg; c=psycopg.connect('postgresql://enrollment_test:synthetic_test_only@127.0.0.1:54329/runtime_synthetic',autocommit=True); c.execute('CREATE DATABASE enrollment_synthetic'); c.execute('CREATE DATABASE enrollment_runtime_synthetic'); c.close()"
+      - name: Migrate the separate runtime protocol fixture database
+        run: uv run alembic upgrade head
       - name: Account, agreement, billing and trusted workspace checks
         run: uv run pytest tests/enrollment -q
       - uses: actions/setup-node@v4
