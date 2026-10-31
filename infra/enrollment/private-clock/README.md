@@ -123,6 +123,34 @@ arguments, print a password/URL/manifest, or use debug transport logging.
 
 ## Private composition handoff and remaining hosted gate
 
+The separate explicit runner uses the existing factory without preparing a
+binding/schema or changing readiness, acquisition or clock state:
+
+```sh
+python -m cosmas_os.enrollment.private_clock_runner --configuration /protected/runner-a.json --binding /protected/original-binding-a.json --journal-url-file /protected/a.url --listen-port 8061 --intent RUN_PRIVATE_SYNTHETIC_CLOCK
+```
+
+All three inputs and their directories must be owner-only 0600/0700 files outside
+the checkout. The configuration has exactly `contract_version:
+"enrollment-private-clock-runner.v1"`, `synthetic_only: true`, the original
+`binding_sha256`, `journal_role: "clock_journal_a"` (or B), and `enrollment` with
+every `EnrollmentSettings` field explicitly present using JSON booleans/lists
+and protected secret strings. Missing fields cannot fall back to ambient
+`ENROLLMENT_*`. It requires the fixed central account/API origins, synthetic
+Development identity, explicitly enabled provisioning and the already-qualified
+restricted enrollment database plus its separate bound journal role/database.
+Nonlocal database URLs require exact owned hosts and verified TLS; loopback
+stores remain available only for synthetic local rehearsal. It calls only the
+existing real workspace confirmer and preserves the prior ASGI lifecycle while
+disposing both engines on failure/shutdown. Credentials are never CLI values.
+
+The listener is loopback (`127.0.0.1`, optionally `::1`) and creates no public
+route or dispatcher. This local/private operation does not complete the hosted
+account journey. Two immutable practice compositions still need independently
+reviewed private ingress/routing or sequential controlled staging deployment;
+their central origins alone are not evidence that browser traffic reaches them.
+The database-job image remains a SQL-only bootstrap/check image.
+
 Give each private composition only its own versioned journal credential and
 protected original binding. Construct `PostgresClockJournal` using that scoped
 SQLAlchemy `postgresql+psycopg` engine, then supply it to the existing

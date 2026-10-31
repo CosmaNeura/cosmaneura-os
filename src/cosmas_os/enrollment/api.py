@@ -7,6 +7,7 @@ import json
 import time
 from contextlib import asynccontextmanager
 from importlib import import_module
+from threading import Lock
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, Request
@@ -388,7 +389,23 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
     return app
 
 
-app = create_app()
+# Plain factory imports must not inspect ambient settings or contact services.
+# The documented ASGI target initializes only when its `app` is requested.
+app: FastAPI
+_default_app_lock = Lock()
+
+
+def _default_application() -> FastAPI:
+    with _default_app_lock:
+        if "app" not in globals():
+            globals()["app"] = create_app()
+        return globals()["app"]
+
+
+def __getattr__(name: str):
+    if name == "app":
+        return _default_application()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def main() -> None:
@@ -402,7 +419,7 @@ def main() -> None:
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:
         parser.error("port must be between 0 and 65535")
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(_default_application(), host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
