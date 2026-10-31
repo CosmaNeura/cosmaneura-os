@@ -91,6 +91,7 @@ Atlas.md read tools say this read is not supported yet. They do not call an
 endpoint. A calendar file a person reports as Atlas.md is a separate
 staff-supplied import and does not connect to Atlas.md. See
 `docs/plugins/atlas-md.md`.
+Tebra appointment, visit, authorized-patient, and medication tools are read-only pages on the EHR read route. They say when Tebra is not connected or a read is not supported. See `docs/plugins/tebra-reads.md`.
 Enabled tools depend on signed server configuration; current grants are checked
 again when called. Spruce fax images remain unavailable until verified download
 hosts exist. Spruce's installed registry supports retained inbox work; fresh inbox
