@@ -95,7 +95,7 @@ proxy/CDN targets do not pass this certificate gate. The TXT values are public
 DNS ownership material, not application credentials, but raw state and all
 unrelated outputs stay protected.
 
-## Second deployment: verify DNS, then request managed certificates
+## Second deployment: verify DNS, then register the two hostnames
 
 After propagation, change only `bind_staging_custom_domains` to `true` in the
 reviewed runtime variables. OpenTofu refreshes `verify-dns.py` for both apps in
@@ -104,12 +104,60 @@ the domain plan/apply. It requires each exact CNAME and `asuid` TXT at both
 beta, production, proxy, stale replacement-app or incomplete records fail.
 A Boolean, rendered file or previous receipt cannot replace that check.
 
-Review and promptly apply that fresh plan. AzureRM 4.81 then creates the two
-owned custom-domain resources and lets Azure issue/bind its managed
-certificates, matching the existing beta convention: asynchronous certificate
-fields are omitted and lifecycle-ignored. DNS publication, plan success and
-resource creation do not prove usable TLS. Wait for actual issuance, and run
-the read-only host verifier on the public HTTPS routes:
+Review and promptly apply that fresh plan. With certificate fields omitted,
+[AzureRM 4.81's create implementation](https://github.com/hashicorp/terraform-provider-azurerm/blob/v4.81.0/internal/services/containerapps/container_app_custom_domain_resource.go)
+registers each hostname with `bindingType: Disabled`; it does not request a
+managed certificate. Its lifecycle-ignored certificate fields allow a later
+binding outside Terraform. The computed
+`container_app_environment_managed_certificate_id` records that managed
+certificate after binding. Hostname registration alone does not enable TLS.
+
+## Third deployment: request and bind managed certificates
+
+Capture the actual managed-certificate inventory for the same owned enrollment
+environment and retain a protected intent for the exact two hostnames/apps.
+Review each hostname's existing certificates before writing: reuse one matching
+owned certificate in `Succeeded` state by its exact ID. For an existing `Pending`
+certificate, retain its exact ID and wait for actual `Succeeded` status before
+binding it. If none exists, the official CLI can create one and bind it. Multiple, failed, canceled
+or uncertain existing results require inspection before any retry. Do not
+blindly create another certificate or delete an existing one after an interrupted
+request. Certificate scope remains the existing enrollment environment; no
+beta/production certificate, app, DNS zone or permission is selected.
+
+[Microsoft's hostname-bind command](https://learn.microsoft.com/en-us/cli/azure/containerapp/hostname#az-containerapp-hostname-bind)
+looks for or creates a managed certificate when no certificate is supplied.
+After reviewing the current DNS records and inventory, execute these separately
+with the actual owned environment ID and explicit subscription/resource group:
+
+```bash
+az containerapp hostname bind --subscription "$owned_subscription" \
+  --resource-group "$owned_enrollment_group" \
+  --name ca-cosmabot-enroll-web-staging \
+  --hostname onboarding.staging.cosmas.ai \
+  --environment "$owned_enrollment_environment_id" --validation-method CNAME
+az containerapp hostname bind --subscription "$owned_subscription" \
+  --resource-group "$owned_enrollment_group" \
+  --name ca-cosmabot-enrollment-staging \
+  --hostname enrollment-api.staging.cosmas.ai \
+  --environment "$owned_enrollment_environment_id" --validation-method CNAME
+```
+
+For a reviewed existing certificate, pass its exact owned ID with `--certificate`
+instead of asking the CLI to create one. Retain the actual request/result and
+certificate ID/status privately, then verify each app's matching hostname has
+that certificate and `bindingType: SniEnabled`. Other app configuration, images,
+secrets, identities and the eight closed enrollment readiness flags stay fixed.
+Managed issuance also requires the running app to be publicly reachable by
+DigiCert, a direct CNAME, and an existing CAA policy that permits DigiCert when
+CAA is configured; see the
+[official certificate requirements](https://learn.microsoft.com/en-us/azure/container-apps/custom-domains-managed-certificates).
+Do not change CAA, ingress, DNS delegation or unrelated records as an implicit
+side effect of certificate binding.
+
+DNS publication, plan success, hostname registration and a successful write do
+not prove usable TLS. After actual issuance/binding, run the read-only host
+verifier on the public HTTPS routes:
 
 ```bash
 node infra/enrollment/verify-staging-hosts.mjs \
