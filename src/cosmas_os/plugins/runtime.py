@@ -106,8 +106,8 @@ class PluginRuntime:
                 raise PluginError("invalid_workspace") from None
         self.workspace_id = workspace_id
         self.plugins = tuple(plugins)
-        catalog_plugins = {operation.plugin for operation in definitions()} | {"elation"}
-        if plugins and not set(plugins) <= catalog_plugins:
+        known = {operation.plugin for operation in definitions()} | {"athena", "elation"}
+        if plugins and not set(plugins) <= known:
             raise PluginError("unknown_plugin")
         self.operations = {operation.id.replace(".", "_"): operation for operation in definitions()
                            if (operation.agent_callable or operation.id in LEGACY)
@@ -217,12 +217,25 @@ class PluginRuntime:
             raise PluginError("invalid_api_response") from None
 
     def _session_target(self, method, path, headers, body, query, timeout):
-        """No arbitrary proxy access through an application-session adapter."""
+        """No arbitrary proxy access through an application-session adapter.
+
+        An EHR read is allowed when either the Athena or Elation closed command
+        accepts it. A miss on one allowlist does not reject the other.
+        """
         if method == "POST" and path == "/connections/ehr/reads":
-            from cosmas_os.plugins.elation import command_allowed
+            from cosmas_os.plugins.athena import command_allowed as athena_allowed
+            from cosmas_os.plugins.elation import command_allowed as elation_allowed
 
             expected = {"Content-Type": "application/json", **HEADERS, "X-Cosmas-Ehr-Read": "1"}
-            if headers == expected and not query and command_allowed(body) and 0 < timeout <= 45:
+            if (headers == expected and not query and (athena_allowed(body) or elation_allowed(body))
+                    and 0 < timeout <= 45):
+                return
+            raise PluginError("invalid_tool_arguments")
+        if method == "POST" and path == "/connections/cosmaneura/read":
+            from cosmas_os.plugins.athena import schedule_command_allowed
+
+            expected = {"Content-Type": "application/json", **HEADERS, "X-Cosmas-Connection-Contract": "1"}
+            if headers == expected and not query and schedule_command_allowed(body) and 0 < timeout <= 30:
                 return
             raise PluginError("invalid_tool_arguments")
         if method == "GET" and path == "/connections/plugins":
@@ -277,21 +290,27 @@ class PluginRuntime:
             raise PluginError("invalid_catalog_response") from None
 
     def tool_definitions(self):
-        from cosmas_os.plugins.elation import tool_definitions
+        from cosmas_os.plugins import athena, elation
 
         enabled = self.catalog()
         rows = [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
         if not self.plugins or "elation" in self.plugins:
-            rows.extend(tool_definitions())
+            rows.extend(elation.tool_definitions())
+        if not self.plugins or "athena" in self.plugins:
+            rows.extend(athena.tool_definitions())
         return rows
 
     def call(self, name, arguments):
-        from cosmas_os.plugins import elation
+        from cosmas_os.plugins import athena, elation
 
         if name in elation.NAMES:
             if self.plugins and "elation" not in self.plugins:
                 raise PluginError("unknown_tool")
             return elation.call(self, name, arguments)
+        if name in athena.NAMES:
+            if self.plugins and "athena" not in self.plugins:
+                raise PluginError("unknown_tool")
+            return athena.call(self, name, arguments)
         operation = self.operations.get(name)
         if operation is None:
             raise PluginError("unknown_tool")

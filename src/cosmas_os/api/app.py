@@ -99,10 +99,13 @@ from cosmas_os.config import settings
 from cosmas_os.db import make_engine, make_session_factory
 from cosmas_os.domain.enums import CapabilityKey, DecisionKind
 from cosmas_os.domain.rules import AuthorizationError, DomainError, PolicyDenied
+from cosmas_os.logging_setup import install as install_log_scrubbing
 from cosmas_os.ports.core_capture import CoreCaptureAdmissionPort, CoreCaptureAdmissionSnapshot
 from cosmas_os.ports.core_notes import CoreDraftReceipt, CoreDraftReference, CoreNoteSelection
 from cosmas_os.ports.encounter_prep import CorePrepReceipt
 from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
+
+install_log_scrubbing()
 
 engine = make_engine()
 SessionLocal = make_session_factory(engine)
