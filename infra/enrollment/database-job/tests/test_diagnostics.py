@@ -37,7 +37,7 @@ def test_failed_runtime_check_reports_only_bounded_constraint_and_disposes_engin
 
 
 def test_provider_mismatch_projection_is_fixed_bounded_and_never_discloses_raw_names():
-    rows = [{"database": "azure_sys", "owner": "private-sentinel", "grantee_oid": 23,
+    rows = [{"database": "azure_sys", "owner": "private-sentinel", "owner_superuser": True, "grantee_oid": 23,
              "grantee": "private-sentinel", "grantor": "private-sentinel", "privilege": "private-sentinel",
              "grantable": True} for _ in range(33)]
     rows.append({"database": "private-sentinel", "owner": "private-sentinel"})
@@ -47,6 +47,6 @@ def test_provider_mismatch_projection_is_fixed_bounded_and_never_discloses_raw_n
     projection = receipt["provider_baseline_projection"]
     assert len(projection) == 2 and {row["database"] for row in projection} == {"azure_sys", "azure_maintenance"}
     managed = next(row for row in projection if row["database"] == "azure_sys")
-    assert managed == {"database": "azure_sys", "present": True, "owner": "unknown",
+    assert managed == {"database": "azure_sys", "present": True, "owner": "unknown", "owner_superuser": True,
         "acl": [{"grantee": "unknown", "grantor": "unknown", "privilege": "unknown", "grantable": True,
                  "grantable_known": True} for _ in range(8)], "acl_truncated": True}

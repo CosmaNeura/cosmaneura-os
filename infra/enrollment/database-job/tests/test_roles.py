@@ -51,7 +51,7 @@ def roles():
                 connection.execute(text("ALTER DATABASE template1 OWNER TO enrollment_bootstrap"))
                 # Model provider ownership and PostgreSQL's original PUBLIC cT
                 # default. Never pre-revoke it to make qualification pass.
-                connection.execute(text("CREATE ROLE azure_superuser NOLOGIN"))
+                connection.execute(text("CREATE ROLE azure_superuser SUPERUSER NOLOGIN"))
                 for name in ("azure_maintenance", "azure_sys"):
                     connection.execute(text(f"CREATE DATABASE {name} OWNER azure_superuser"))
             superuser.dispose()
@@ -114,6 +114,38 @@ def provider_admin(roles):
         yield fixture_admin
     finally:
         fixture_admin.dispose()
+
+
+def test_modern_azuresu_superuser_owner_qualifies_without_provider_acl_changes(roles, provider_admin):
+    with provider_admin.begin() as connection:
+        connection.execute(text("ALTER ROLE azure_superuser RENAME TO azuresu"))
+        original = list(connection.execute(text("SELECT d.datname,d.datdba,d.datacl,r.rolname,r.rolsuper FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba WHERE d.datname IN ('azure_sys','azure_maintenance') ORDER BY d.datname")))
+        assert all(row[3:] == ("azuresu", True) for row in original)
+    try:
+        database.bootstrap(roles)
+        database.migrate(roles)
+        receipt = database.check(roles)
+        assert receipt["contract_version"] == "enrollment-database-check.v2"
+        assert receipt["provider_database_count"] == 2 and receipt["managed_database_ownership_acl_checked"]
+        with provider_admin.connect() as connection:
+            assert list(connection.execute(text("SELECT d.datname,d.datdba,d.datacl,r.rolname,r.rolsuper FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba WHERE d.datname IN ('azure_sys','azure_maintenance') ORDER BY d.datname"))) == original
+    finally:
+        with provider_admin.begin() as connection:
+            connection.execute(text("ALTER ROLE azuresu RENAME TO azure_superuser"))
+
+
+def test_known_provider_name_without_superuser_authority_is_rejected(roles, provider_admin):
+    with provider_admin.begin() as connection:
+        connection.execute(text("ALTER ROLE azure_superuser NOSUPERUSER"))
+    try:
+        with pytest.raises(database.ProviderBaselineMismatch) as captured:
+            database.check(roles)
+        projection = database.failure_receipt("check", "check", captured.value)["provider_baseline_projection"]
+        assert all(row["owner"] == "azure_superuser" and row["owner_superuser"] is False for row in projection)
+    finally:
+        with provider_admin.begin() as connection:
+            connection.execute(text("ALTER ROLE azure_superuser SUPERUSER"))
+    assert database.check(roles)["runtime_role_checked"]
 
 
 @pytest.mark.parametrize("public_privileges", [None, "CONNECT", "TEMPORARY"])

@@ -23,10 +23,10 @@ DATABASE = "cosmabot_enrollment"
 LOGINS = {"admin": "enrollment_bootstrap", "migration": "enrollment_migrator", "runtime": "enrollment_runtime"}
 BAA = "enrollment_baa_acceptances"
 PROVIDER_DATABASES = frozenset({"azure_maintenance", "azure_sys"})
-PROVIDER_OWNER = "azure_superuser"
-PROVIDER_ROLE_TAGS = frozenset({PROVIDER_OWNER, "azure_pg_admin", "PUBLIC", *LOGINS.values()})
+PROVIDER_OWNERS = frozenset({"azuresu", "azure_superuser"})
+PROVIDER_ROLE_TAGS = frozenset({*PROVIDER_OWNERS, "azure_pg_admin", "PUBLIC", *LOGINS.values()})
 DATABASE_PRIVILEGES = frozenset({"CREATE", "CONNECT", "TEMPORARY"})
-PROVIDER_ROW_FIELDS = frozenset({"database", "owner", "grantee_oid", "grantee", "grantor", "privilege", "grantable"})
+PROVIDER_ROW_FIELDS = frozenset({"database", "owner", "owner_superuser", "grantee_oid", "grantee", "grantor", "privilege", "grantable"})
 FAILURE_CODES = {
     "server contains an unrelated database": "unrelated_database",
     "owned staging PostgreSQL host required": "invalid_owned_host",
@@ -74,6 +74,7 @@ def provider_projection(rows: list[dict[str, object]]) -> list[dict[str, object]
                         "grantable_known": type(row.get("grantable")) is bool})
         result.append({"database": name, "present": bool(selected),
                        "owner": role(selected[0].get("owner")) if selected else "unknown",
+                       "owner_superuser": bool(selected) and selected[0].get("owner_superuser") is True,
                        "acl": acl, "acl_truncated": len(selected) > 8})
     return result
 
@@ -104,7 +105,7 @@ def check_provider_databases(connection) -> int:
     # Cluster metadata is readable from the bound enrollment connection. Never
     # open a provider database or change its ACL, owner, views or functions.
     rows = [dict(row) for row in connection.execute(text("""
-        SELECT d.datname AS database, owner.rolname AS owner,
+        SELECT d.datname AS database, owner.rolname AS owner, owner.rolsuper AS owner_superuser,
                acl.grantee AS grantee_oid, grantee.rolname AS grantee,
                grantor.rolname AS grantor, acl.privilege_type AS privilege,
                acl.is_grantable AS grantable
@@ -120,21 +121,25 @@ def check_provider_databases(connection) -> int:
     for row in rows:
         if (set(row) != PROVIDER_ROW_FIELDS or type(row.get("database")) is not str
                 or row["database"] not in PROVIDER_DATABASES or type(row.get("owner")) is not str
+                or type(row.get("owner_superuser")) is not bool
                 or type(row.get("grantee_oid")) is not int or row["grantee_oid"] < 0
                 or (row["grantee_oid"] == 0 and row.get("grantee") is not None)
                 or (row["grantee_oid"] != 0 and type(row.get("grantee")) is not str)
                 or type(row.get("grantor")) is not str or type(row.get("privilege")) is not str
                 or type(row.get("grantable")) is not bool):
             raise ProviderBaselineMismatch(rows)
-    owner_defaults = {(PROVIDER_OWNER, PROVIDER_OWNER, privilege, False)
-                      for privilege in DATABASE_PRIVILEGES}
-    permitted = owner_defaults | {(PROVIDER_OWNER, "PUBLIC", privilege, False)
-                                  for privilege in ("CONNECT", "TEMPORARY")}
     for name in PROVIDER_DATABASES:
         selected = [row for row in rows if row["database"] == name]
+        if not selected or selected[0]["owner"] not in PROVIDER_OWNERS:
+            raise ProviderBaselineMismatch(rows)
+        owner = selected[0]["owner"]
+        owner_defaults = {(owner, owner, privilege, False) for privilege in DATABASE_PRIVILEGES}
+        permitted = owner_defaults | {(owner, "PUBLIC", privilege, False)
+                                      for privilege in ("CONNECT", "TEMPORARY")}
         observed = {(row["grantor"], "PUBLIC" if row["grantee_oid"] == 0 else row["grantee"],
                      row["privilege"], row["grantable"]) for row in selected}
-        if (len(selected) != len(observed) or any(row["owner"] != PROVIDER_OWNER for row in selected)
+        if (len(selected) != len(observed)
+                or any(row["owner"] != owner or row["owner_superuser"] is not True for row in selected)
                 or not owner_defaults.issubset(observed) or not observed.issubset(permitted)):
             raise ProviderBaselineMismatch(rows)
     return len(PROVIDER_DATABASES)

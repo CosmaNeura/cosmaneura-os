@@ -56,7 +56,9 @@ runtime readiness and vendor/browser qualification are root deployment work.
 
 The separate CosmaBot server contains exactly the enrollment database,
 `postgres`, `template0`, `template1`, `azure_maintenance` and `azure_sys`.
-Microsoft identifies the managed `azure_superuser` role and
+Microsoft documents modern Flexible Server's Microsoft-only superuser role
+[`azuresu`](https://learn.microsoft.com/en-us/azure/postgresql/security/security-access-control),
+and older documentation identifies `azure_superuser` and
 [`azure_maintenance`](https://learn.microsoft.com/en-us/azure/postgresql/configure-maintain/concepts-servers),
 and documents PUBLIC views in the
 [`azure_sys` Query Store](https://learn.microsoft.com/en-us/azure/postgresql/monitor/concepts-query-store).
@@ -64,17 +66,22 @@ PostgreSQL gives databases PUBLIC `CONNECT/TEMPORARY` by default and owners
 `CREATE/CONNECT/TEMPORARY`, with implicit owner grant options
 ([privileges](https://www.postgresql.org/docs/16/ddl-priv.html)).
 
-Our initial strict provider-owner allowlist is only `azure_superuser`. From the
+The strict provider-owner allowlist is `azuresu` or documented older
+`azure_superuser`, and the same `pg_roles` metadata must confirm that owner's
+`rolsuper` is exactly true. A known name alone does not qualify a role, and
+`azure_pg_admin` or the customer administrator never qualifies as the owner.
+From the
 existing enrollment connection, the check reads `pg_database`/`pg_roles` and
 expands `COALESCE(datacl, acldefault('d', datdba))` with
 [`aclexplode`](https://www.postgresql.org/docs/16/functions-info.html#FUNCTIONS-INFO-ACCESS-TABLE).
-Each of the two provider databases must retain the three standard owner ACL
-privileges. PUBLIC may have any subset of `CONNECT/TEMPORARY`, including no
+Each of the two provider databases must retain the three standard ACL privileges
+for its actual accepted owner, with that same role as the grantor.
+PUBLIC may have any subset of `CONNECT/TEMPORARY`, including no
 access. All entries must be granted by that owner without explicit grant
 options. Application owners/grantees, unknown owners,
 grantees/grantors, PUBLIC `CREATE`, missing provider databases or additional
 privileges fail closed. A mismatch emits only the fixed database names,
-allowlisted role/privilege tags and booleans, with at most eight ACL rows per
+allowlisted role/privilege tags and booleans (including `owner_superuser`), with at most eight ACL rows per
 database. Unknown names are redacted; this does not automatically extend the
 allowlist.
 
