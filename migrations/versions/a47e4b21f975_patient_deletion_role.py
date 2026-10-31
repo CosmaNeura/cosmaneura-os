@@ -27,7 +27,7 @@ def upgrade() -> None:
         END $$
         """
     )
-    op.execute(f"GRANT USAGE ON SCHEMA public TO {_ROLE}")
+    op.execute(f"GRANT USAGE, CREATE ON SCHEMA public TO {_ROLE}")
     op.execute(
         f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {_ROLE}"
     )
@@ -193,9 +193,42 @@ def upgrade() -> None:
         END $$
         """
     )
+    # PostgreSQL 16 lets the creator administer this role without letting them
+    # assume it. Ownership transfer needs SET, and that grant is removed before
+    # the migration finishes. The application runtime role is never a member.
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+          IF NOT pg_has_role(current_user, '{_ROLE}', 'SET') THEN
+            GRANT {_ROLE} TO CURRENT_USER WITH SET TRUE;
+          END IF;
+        END $$
+        """
+    )
     op.execute(
         f"ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb) OWNER TO {_ROLE}"
     )
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper
+          ) OR EXISTS (
+            SELECT 1 FROM pg_auth_members m
+            JOIN pg_roles granted ON granted.oid = m.roleid
+            JOIN pg_roles member ON member.oid = m.member
+            WHERE granted.rolname = '{_ROLE}'
+              AND member.rolname = current_user
+              AND m.admin_option
+          ) THEN
+            REVOKE {_ROLE} FROM CURRENT_USER;
+          END IF;
+        END $$
+        """
+    )
+    op.execute(f"REVOKE CREATE ON SCHEMA public FROM {_ROLE}")
     op.execute(
         "REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) FROM PUBLIC"
     )
