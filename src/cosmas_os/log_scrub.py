@@ -28,10 +28,13 @@ NOTE_TEXT_KEYS = frozenset(
         "draft",
         "draft_body",
         "draft_text",
+        "clinical_notes",
         "model_prompt",
         "model_response",
+        "note",
         "note_body",
         "note_text",
+        "notes",
         "objective",
         "plan",
         "prompt",
@@ -80,6 +83,26 @@ IDENTIFIER_KEYS = frozenset(
         "subscriber_id",
         "zip",
         "zip_code",
+    }
+)
+
+# Timing values stay intact, including a date-shaped duration and Caddy's ts.
+_TIMING_KEYS = frozenset(
+    {
+        "asctime",
+        "created",
+        "duration",
+        "duration_ms",
+        "elapsed",
+        "elapsed_ms",
+        "latency",
+        "latency_ms",
+        "msecs",
+        "relativecreated",
+        "request_time",
+        "response_time",
+        "timing",
+        "ts",
     }
 )
 
@@ -173,6 +196,18 @@ _LABELED_SSN = re.compile(
 )
 _QUERY = re.compile(r"\?[A-Za-z0-9%_.~+-]+=[^ \t\r\n]*")
 _CAMEL = re.compile(r"(?<=[a-z0-9])([A-Z])")
+_YEAR = r"(?:19|20)\d{2}"
+# Date-only shapes. A following clock time means a timestamp, which stays.
+_BARE_DATE = re.compile(
+    rf"(?<![A-Za-z0-9_])(?:{_YEAR}-\d{{2}}-\d{{2}}"
+    rf"|\d{{1,2}}/\d{{1,2}}/{_YEAR}"
+    rf"|\d{{2}}-\d{{2}}-{_YEAR})(?![A-Za-z0-9_])(?![ T]\d{{1,2}}:\d{{2}})"
+)
+_TIMING_PREFIX = re.compile(
+    r"(?i)(?:duration(?:_ms)?|elapsed(?:_ms)?|latency(?:_ms)?|timing|"
+    r"asctime|request_time|response_time|ts)\s*[:=]\s*$"
+)
+_NAMED_PLACEHOLDER = re.compile(r"%\([^)]+\)")
 
 _guard = threading.local()
 
@@ -190,7 +225,14 @@ def _replace_value(match: re.Match[str]) -> str:
     return match.string[match.start() : start] + REDACTED + match.string[end : match.end()]
 
 
-def _scrub_plain(text: str) -> str:
+def _redact_bare_date(match: re.Match[str]) -> str:
+    window = match.string[max(0, match.start() - 48) : match.start()]
+    if _TIMING_PREFIX.search(window):
+        return match.group(0)
+    return REDACTED
+
+
+def _scrub_plain(text: str, *, redact_dates: bool = True) -> str:
     text = _NOTE_FIELD.sub(_replace_value, text)
     for pattern in (_NAME, _DOB, _MRN, _INSURANCE, _LABELED_SSN):
         text = pattern.sub(_replace_value, text)
@@ -198,6 +240,8 @@ def _scrub_plain(text: str) -> str:
     text = _PHONE.sub(REDACTED, text)
     text = _EMAIL.sub(REDACTED, text)
     text = _SSN.sub(REDACTED, text)
+    if redact_dates:
+        text = _BARE_DATE.sub(_redact_bare_date, text)
     return text
 
 
@@ -243,6 +287,12 @@ def scrub_structure(value: Any, *, depth: int = 0) -> Any:
                 continue
             if norm in IDENTIFIER_KEYS:
                 cleaned[key] = REDACTED
+            elif norm in _TIMING_KEYS:
+                cleaned[key] = (
+                    scrub_text(item, depth=depth + 1, redact_dates=False)
+                    if isinstance(item, str)
+                    else item
+                )
             else:
                 cleaned[key] = scrub_structure(item, depth=depth + 1)
         return cleaned
@@ -291,7 +341,7 @@ def _scrub_embedded_json(text: str, depth: int) -> str:
     return "".join(pieces)
 
 
-def scrub_text(value: str, *, depth: int = 0) -> str:
+def scrub_text(value: str, *, depth: int = 0, redact_dates: bool = True) -> str:
     """Redact identifiers and note text in a log string."""
     if depth > 8:
         return REDACTED
@@ -312,7 +362,7 @@ def scrub_text(value: str, *, depth: int = 0) -> str:
             return leading + rendered + trailing
     scrubbed = _scrub_embedded_json(value, depth)
     scrubbed = _QUERY.sub(lambda match: _scrub_query(match.group(0)), scrubbed)
-    return _scrub_plain(scrubbed)
+    return _scrub_plain(scrubbed, redact_dates=redact_dates)
 
 
 def _scrub_traceback(exc: traceback.TracebackException) -> None:
@@ -350,24 +400,53 @@ def format_scrubbed_traceback(exc_info: tuple[type[BaseException], BaseException
     return _scrub_plain("".join(captured.format()))
 
 
+def _scrub_argument(value: Any) -> Any:
+    """Scrub a format argument by key when it carries fields."""
+    if isinstance(value, Mapping):
+        return scrub_structure(dict(value))
+    if isinstance(value, str):
+        return scrub_text(value)
+    if isinstance(value, list | tuple):
+        return scrub_structure(value)
+    fields = getattr(value, "__dict__", None)
+    if isinstance(fields, dict) and fields:
+        original = dict(fields)
+        scrubbed = scrub_structure(original)
+        if scrubbed != original:
+            return scrubbed
+    return value
+
+
+def _rendered_message(record: logging.LogRecord) -> str:
+    try:
+        return record.getMessage()
+    except Exception:
+        return str(record.msg)
+
+
+def _store_rendered(record: logging.LogRecord) -> None:
+    record.msg = scrub_text(_rendered_message(record))
+    record.args = ()
+
+
 def _scrub_message(record: logging.LogRecord) -> None:
     if record.name.startswith("uvicorn.access") and isinstance(record.args, tuple):
         record.args = tuple(
-            scrub_text(arg) if isinstance(arg, str) else arg for arg in record.args
+            scrub_text(arg) if isinstance(arg, str) else _scrub_argument(arg) for arg in record.args
         )
         return
+    # logging unwraps a single dict argument into record.args. That dict is
+    # the %s value, not a named-placeholder map, unless the template says so.
     if isinstance(record.args, Mapping):
-        record.args = scrub_structure(dict(record.args))
-        if isinstance(record.msg, str):
-            record.msg = scrub_text(record.msg)
+        scrubbed = scrub_structure(dict(record.args))
+        template = record.msg if isinstance(record.msg, str) else str(record.msg)
+        record.args = scrubbed if _NAMED_PLACEHOLDER.search(template) else (scrubbed,)
+        _store_rendered(record)
         return
     if record.args:
-        try:
-            rendered = record.getMessage()
-        except Exception:
-            rendered = str(record.msg)
-        record.msg = scrub_text(rendered)
-        record.args = ()
+        if isinstance(record.args, tuple):
+            record.args = tuple(_scrub_argument(arg) for arg in record.args)
+        _store_rendered(record)
         return
     if isinstance(record.msg, str):
         record.msg = scrub_text(record.msg)
@@ -387,6 +466,8 @@ def _scrub_log_record(record: logging.LogRecord) -> None:
         value = record.__dict__[key]
         if norm in IDENTIFIER_KEYS:
             record.__dict__[key] = REDACTED
+        elif norm in _TIMING_KEYS and isinstance(value, str):
+            record.__dict__[key] = scrub_text(value, redact_dates=False)
         else:
             record.__dict__[key] = scrub_structure(value)
     if record.exc_info and record.exc_info[0] is not None:
@@ -435,4 +516,6 @@ class ScrubbingFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         scrub_log_record(record)
-        return scrub_text(self.inner.format(record))
+        # asctime is added by the inner formatter. Date redaction already ran
+        # on the message and string fields, so this pass must leave the stamp.
+        return scrub_text(self.inner.format(record), redact_dates=False)

@@ -9,6 +9,7 @@ import logging
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from celery.signals import after_setup_logger
@@ -257,7 +258,7 @@ def test_app_and_worker_modules_install_scrubber() -> None:
     from cosmas_os.logging_setup import is_installed
 
     assert is_installed()
-    for key in ("transcript", "prompt", "response", "soap", "draft", "body"):
+    for key in ("transcript", "prompt", "response", "soap", "draft", "body", "note", "notes"):
         assert key in NOTE_TEXT_KEYS
     for key in ("patient_name", "dob", "mrn", "phone", "email", "address", "ssn", "insurance_id"):
         assert key in IDENTIFIER_KEYS
@@ -306,3 +307,122 @@ def test_proxy_config_drops_query_strings_and_bodies() -> None:
     for token in ("Zedstone", "zara.zedstone@example.test", "SOAP", "req-synth-100"):
         assert token not in redacted
     assert "request_id" in document
+    assert "ts" not in deleted
+
+
+def _caddy_document() -> str:
+    runtime = Path(__file__).resolve().parents[2] / "infra/beta/vm/runtime"
+    sys.path.insert(0, str(runtime))
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "cosmas_vm_renderer_log_scrub_dates", runtime / "render.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        assert spec is not None and spec.loader is not None
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(runtime))
+    return module.caddy(
+        {"web_origin": "https://app.example.test", "api_origin": "https://api.example.test"}
+    )
+
+
+def test_bare_dates_are_redacted_but_asctime_duration_and_caddy_ts_stay() -> None:
+    bare = "01/02/1970 1/2/1970 1970-01-02 02-01-1970"
+    redacted = scrub_text(f"saw {bare} duration_ms=37 elapsed=02-01-1970 ts=1761861234.778")
+    for token in ("01/02/1970", "1/2/1970", "1970-01-02"):
+        assert token not in redacted
+    assert redacted.count("02-01-1970") == 1
+    assert "duration_ms=37" in redacted
+    assert "elapsed=02-01-1970" in redacted
+    assert "ts=1761861234.778" in redacted
+    fields = scrub_structure(
+        {
+            "detail": "01/02/1970",
+            "when": "1/2/1970",
+            "iso": "1970-01-02",
+            "dmy": "02-01-1970",
+            "duration_ms": "37",
+            "elapsed": "02-01-1970",
+            "ts": "1761861234.778",
+            "request_id": "req-synth-100",
+        }
+    )
+    for key in ("detail", "when", "iso", "dmy"):
+        assert "1970" not in fields[key]
+    assert fields["duration_ms"] == "37"
+    assert fields["elapsed"] == "02-01-1970"
+    assert fields["ts"] == "1761861234.778"
+    assert fields["request_id"] == "req-synth-100"
+    formatter = logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d")
+    logger, stream, previous = _capture("cosmas_os.dates", formatter)
+    try:
+        logger.info("saw 1970-01-02 duration_ms=37")
+    finally:
+        _restore(logger, previous)
+    line = stream.getvalue().strip()
+    stamp, _, message = line.partition(" ")
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", stamp)
+    assert stamp != "1970-01-02"
+    assert "1970-01-02" not in message
+    assert "duration_ms=37" in message
+    document = _caddy_document()
+    deleted = set(re.findall(r"^\s*(\S+) delete$", document, re.M))
+    assert "ts" not in deleted
+    assert not re.search(r"^\s*ts\b", document, re.M)
+
+
+def test_note_and_near_miss_keys_are_dropped_case_insensitively() -> None:
+    for key in ("note", "notes", "note_body", "clinical_note", "clinical_notes"):
+        assert key in NOTE_TEXT_KEYS
+    payload = {
+        "Note": "synthetic headache for two days",
+        "NOTES": "stuffed penguin Zed",
+        "Note_Body": "Invented draft: the penguin felt fine.",
+        "Clinical-Note": "Zara Zedstone chart line",
+        "clinical_notes": "another synthetic note",
+        "request_id": "req-synth-100",
+        "status_code": 201,
+        "duration_ms": 37,
+    }
+    cleaned = scrub_structure(payload)
+    assert set(cleaned) == {"request_id", "status_code", "duration_ms"}
+    rendered = json.dumps(cleaned)
+    for token in ("synthetic headache", "stuffed penguin", "penguin felt fine", "Zedstone"):
+        assert token not in rendered
+    assert "req-synth-100" in rendered
+    logger, stream, previous = _capture("cosmas_os.notekeys")
+    try:
+        logger.info("Note=%s notes=%s", "synthetic headache for two days", "stuffed penguin Zed")
+    finally:
+        _restore(logger, previous)
+    text = stream.getvalue()
+    assert "synthetic headache" not in text
+    assert "stuffed penguin" not in text
+
+
+def test_mapping_arg_is_scrubbed_before_percent_format() -> None:
+    logger, stream, previous = _capture("cosmas_os.dictargs")
+    try:
+        logger.info(
+            "dict %s",
+            {"note_text": NOTE, "request_id": "req-synth-100", "status_code": 201, "duration_ms": 37},
+        )
+        logger.info(
+            "obj %s",
+            SimpleNamespace(note_text=NOTE, request_id="req-synth-100", status_code=201),
+        )
+        logger.info(
+            "request_id=%(request_id)s status_code=%(status_code)s",
+            {"request_id": "req-synth-100", "status_code": 201, "note_text": NOTE},
+        )
+    finally:
+        _restore(logger, previous)
+    text = stream.getvalue()
+    assert "dict %s" not in text
+    assert "obj %s" not in text
+    assert "synthetic headache" not in text
+    assert "note_text" not in text
+    assert "req-synth-100" in text
+    assert "201" in text
+    assert "37" in text
