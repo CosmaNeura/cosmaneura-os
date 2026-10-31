@@ -6,6 +6,7 @@ import argparse
 import datetime as dt
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -181,6 +182,25 @@ def write_new(path: Path, content: bytes, mode=0o600) -> None:
         os.fsync(stream.fileno())
 
 
+def docker_daemon_document() -> dict:
+    """Docker daemon settings. Log rotation comes from the logging retention config."""
+    path = Path(__file__).resolve().parents[1] / "logging" / "retention.py"
+    spec = importlib.util.spec_from_file_location("cosmabot_log_retention_host", path)
+    if spec is None or spec.loader is None:
+        raise Refused("log retention configuration is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    config = module.load_config()
+    return {
+        "firewall-backend": "iptables",
+        "iptables": True,
+        "ip6tables": True,
+        "live-restore": False,
+        "log-driver": config["docker"]["driver"],
+        "log-opts": module.docker_log_options(config),
+    }
+
+
 def install_packages() -> None:
     write_new(Path("/usr/sbin/policy-rc.d"), POLICY, 0o755)
     run(["systemctl", "mask", "docker.service", "docker.socket", "containerd.service"])
@@ -210,8 +230,7 @@ def install_packages() -> None:
                 "Runtime service unexpectedly started")
     Path("/etc/docker").mkdir(mode=0o755, exist_ok=True)
     Path("/etc/docker").chmod(0o755)
-    daemon = {"firewall-backend": "iptables", "iptables": True, "ip6tables": True,
-              "live-restore": False, "log-driver": "local", "log-opts": {"max-size": "10m", "max-file": "3"}}
+    daemon = docker_daemon_document()
     write_new(Path("/etc/docker/daemon.json"), (json.dumps(daemon, indent=2) + "\n").encode(), 0o644)
     run(["dockerd", "--validate", "--config-file=/etc/docker/daemon.json"])
     require(Path("/usr/sbin/policy-rc.d").read_bytes() == POLICY, "Temporary service policy changed")

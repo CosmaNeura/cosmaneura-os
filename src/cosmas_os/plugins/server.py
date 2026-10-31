@@ -6,6 +6,11 @@ import logging
 import sys
 from pathlib import Path
 
+from cosmas_os.plugins.log_setup import (
+    arm_plugin_loggers,
+    install_plugin_log_scrubbing,
+    scrub_diverted_stdout,
+)
 from cosmas_os.plugins.runtime import PluginError, PluginRuntime
 
 JOURNEY = """Use only the current authenticated account and configured tools.
@@ -34,6 +39,8 @@ def create_server(runtime):
     from anyio import to_thread
     from mcp import types
     from mcp.server.lowlevel import Server
+
+    arm_plugin_loggers()
 
     async def list_tools(_context, _params):
         rows = await to_thread.run_sync(runtime.tool_definitions)
@@ -71,12 +78,18 @@ def create_server(runtime):
 
 async def serve(runtime):
     from mcp.server.stdio import stdio_server
+
+    # While this transport is open it points process stdout at stderr, so stray
+    # prints are logs. Protocol frames use a separate descriptor.
+    install_plugin_log_scrubbing()
     server = create_server(runtime)
     async with stdio_server() as (reader, writer):
-        await server.run(reader, writer, server.create_initialization_options())
+        with scrub_diverted_stdout():
+            await server.run(reader, writer, server.create_initialization_options())
 
 
 def main(argv=None, *, session=None):
+    install_plugin_log_scrubbing()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--origin", required=True)
     parser.add_argument("--token-file", type=Path, help="External stdio only: existing owner-only credential file")

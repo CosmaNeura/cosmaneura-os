@@ -1,6 +1,7 @@
 """Emit only application/backup health; never forward command output or app logs."""
 
 import datetime
+import hashlib
 import http.client
 import json
 import re
@@ -8,6 +9,7 @@ import socket
 import ssl
 import subprocess
 import time
+from pathlib import Path
 
 SERVICES = frozenset({"api", "worker", "web", "proxy", "postgres", "redis"})
 TIMERS = ("cosmabot-backup.timer", "cosmabot-backup-switch.timer", "cosmabot-backup-status.timer")
@@ -21,6 +23,9 @@ PROPERTIES = (
     "Id,ActiveState,SubState,UnitFileState,Result,ExecMainStatus,ExecMainExitTimestampMonotonic"
 )
 PREFIX = "cosmabot-health-v1 "
+POINTER = Path("/etc/cosmabot/active-release")
+RELEASE_ROOT = Path("/opt/cosmabot/releases")
+RELEASE_ID = re.compile(r"[a-z][a-z0-9-]{2,47}")
 
 
 def command(arguments):
@@ -77,7 +82,93 @@ def docker_time(value):
     return datetime.datetime.fromisoformat(normalized.replace("Z", "+00:00"))
 
 
-def application_healthy(units, containers, now):
+def resolve_active_release():
+    """The live pointer names one canonical release directory, or the probe fails."""
+    try:
+        raw = POINTER.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ValueError("active release pointer is missing") from None
+    except (OSError, UnicodeError):
+        raise ValueError("active release pointer is dangling") from None
+    prefix = f"RELEASE_DIR={RELEASE_ROOT}/"
+    if len(raw) > 256 or raw.count("\n") != 1 or not raw.endswith("\n") or not raw.startswith(prefix):
+        raise ValueError("active release pointer is dangling")
+    release_id = raw[len(prefix) : -1]
+    if RELEASE_ID.fullmatch(release_id) is None:
+        raise ValueError("active release pointer is dangling")
+    release = RELEASE_ROOT / release_id
+    if release.is_symlink() or not release.is_dir():
+        raise ValueError("active release pointer is dangling")
+    return release
+
+
+def read_bounded(path, label):
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"active release {label} is missing")
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        raise ValueError(f"active release {label} is missing") from None
+    if len(raw) > 262144:
+        raise ValueError("oversized health observation")
+    return raw
+
+
+def read_release(release):
+    """Manifest hashes bind the compose plan this release actually published."""
+    manifest_raw = read_bounded(release / "RENDER.json", "manifest")
+    plan_raw = read_bounded(release / "compose.json", "plan")
+    try:
+        manifest = json.loads(manifest_raw)
+        plan = json.loads(plan_raw)
+    except json.JSONDecodeError:
+        raise ValueError("active release manifest or plan is unusable") from None
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    expected = files.get("compose.json") if isinstance(files, dict) else None
+    if expected != hashlib.sha256(plan_raw).hexdigest():
+        raise ValueError("active release plan does not match its manifest")
+    if not isinstance(plan, dict) or plan.get("name") != "cosmabot-staging":
+        raise ValueError("active release plan is unusable")
+    if not isinstance(plan.get("services"), dict) or not plan["services"]:
+        raise ValueError("active release plan is unusable")
+    return manifest, plan
+
+
+def running_services(plan):
+    running = []
+    optional = False
+    for name, service in plan["services"].items():
+        if (
+            not isinstance(name, str)
+            or re.fullmatch(r"[a-z][a-z0-9_]{1,40}", name) is None
+            or not isinstance(service, dict)
+        ):
+            raise ValueError("active release plan is unusable")
+        if service.get("profiles") == ["prepare"]:
+            optional = True
+            continue
+        running.append(name)
+    if not running:
+        raise ValueError("active release plan is unusable")
+    return frozenset(running), optional
+
+
+def published_ports(plan):
+    ports = []
+    for service in plan["services"].values():
+        for item in service.get("ports", []):
+            if not isinstance(item, str) or re.fullmatch(r"[0-9]{1,5}:[0-9]{1,5}", item) is None:
+                raise ValueError("active release plan is unusable")
+            host = int(item.split(":", 1)[0])
+            if not 1 <= host <= 65535:
+                raise ValueError("active release plan is unusable")
+            ports.append(host)
+    if not ports:
+        raise ValueError("active release plan is unusable")
+    return tuple(ports)
+
+
+def application_healthy(units, containers, now, *, expected=SERVICES):
     staging = units["cosmabot-staging.service"]
     if (staging.get("ActiveState"), staging.get("Result")) != ("active", "success"):
         return False
@@ -88,7 +179,7 @@ def application_healthy(units, containers, now):
             if state.get("Running") or state.get("ExitCode") != 0:
                 return False
             continue
-        if name not in SERVICES or name in observed:
+        if name not in expected or name in observed:
             return False
         observed.add(name)
         if (
@@ -107,10 +198,14 @@ def application_healthy(units, containers, now):
             ended = docker_time(last["End"])
             if last.get("ExitCode") != 0 or not -5 <= (now - ended).total_seconds() <= 90:
                 return False
-    return observed == SERVICES
+    return observed == expected
 
 
-def containers():
+def containers(release, plan):
+    # Stopped leftovers from older releases share the project name. The compose
+    # file path is what makes this release's containers distinct.
+    compose_file = str(release / "compose.json")
+    running, optional = running_services(plan)
     ids = command(
         [
             "/usr/bin/docker",
@@ -120,14 +215,42 @@ def containers():
             "--quiet",
             "--no-trunc",
             "--filter",
-            "label=com.docker.compose.project=cosmabot-staging",
+            "label=com.docker.compose.project=" + plan["name"],
+            "--filter",
+            "label=com.docker.compose.project.config_files=" + compose_file,
         ]
     ).splitlines()
-    if not 6 <= len(ids) <= 7 or any(not re.fullmatch(r"[0-9a-f]{64}", value) for value in ids):
+    low, high = len(running), len(running) + (1 if optional else 0)
+    if not low <= len(ids) <= high or any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in ids):
         raise ValueError("unexpected container inventory")
-    template = '{"service":{{json (index .Config.Labels "com.docker.compose.service")}},"state":{{json .State}}}'
+    template = (
+        '{"service":{{json (index .Config.Labels "com.docker.compose.service")}},'
+        '"config":{{json (index .Config.Labels "com.docker.compose.project.config_files")}},'
+        '"state":{{json .State}}}'
+    )
     raw = command(["/usr/bin/docker", "container", "inspect", "--format", template, *ids])
-    return [json.loads(line) for line in raw.splitlines()]
+    observed = [json.loads(line) for line in raw.splitlines()]
+    if any(row.get("config") != compose_file for row in observed):
+        raise ValueError("container is outside the active release")
+    return observed
+
+
+def port_open(port):
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=4):
+            return True
+    except OSError:
+        return False
+
+
+def ports_healthy(plan):
+    for port in published_ports(plan):
+        if port == 443:
+            if not web_healthy():
+                return False
+        elif not port_open(port):
+            return False
+    return True
 
 
 def web_healthy():
@@ -159,11 +282,15 @@ def observe():
     except Exception:
         pass
     try:
-        observed = containers()
-        application = (
-            application_healthy(units, observed, datetime.datetime.now(datetime.timezone.utc))
-            and web_healthy()
-        )
+        release = resolve_active_release()
+        _manifest, plan = read_release(release)
+        observed = containers(release, plan)
+        application = application_healthy(
+            units,
+            observed,
+            datetime.datetime.now(datetime.timezone.utc),
+            expected=running_services(plan)[0],
+        ) and ports_healthy(plan)
     except Exception:
         pass
     return application, backup, datetime.datetime.now(datetime.timezone.utc)

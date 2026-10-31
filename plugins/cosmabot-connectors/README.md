@@ -59,6 +59,12 @@ credentials or retrieve tokens from browser storage. Load the generated external
 MCP package only after its authentication is configured. `cosmabot-connectors --check` performs signed
 configuration discovery only; it does not call a provider or claim account health.
 
+Log lines from this process are scrubbed before they are written. MRN, date of
+birth, SSN, phone, email, and the same kinds of identifiers are redacted,
+clinical note fields are left out, and query strings in logged URLs are
+redacted. Tool results on the protocol stream are unchanged. See
+`docs/plugins/log-scrub.md`.
+
 Connect Google as john@cosmaneura.com and other development providers as
 dev@cosmaneura.com in CosmaBot Connections. Email addresses alone do not install
 fax accounts, portal mappings or grants. The existing account setup must bind

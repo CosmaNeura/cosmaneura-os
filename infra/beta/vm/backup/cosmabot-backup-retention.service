@@ -1,0 +1,30 @@
+[Unit]
+Description=Dry-run plan for WAL-G backup retention; does not delete
+After=cosmabot-staging.service
+
+[Service]
+Type=oneshot
+User=cosmabot-backup
+Group=cosmabot-backup
+ExecStart=/usr/bin/python3 -I /opt/cosmabot/backup/retention.py plan --config /etc/cosmabot/backup/retention.json --backup-list /var/lib/cosmabot-backup/retention-backup-list.json --log-file /var/lib/cosmabot-backup/retention.log
+StateDirectory=cosmabot-backup
+StateDirectoryMode=0700
+StandardOutput=journal
+StandardError=journal
+UMask=0077
+NoNewPrivileges=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=
+MemoryMax=256M
+CPUQuota=10%
+TasksMax=16

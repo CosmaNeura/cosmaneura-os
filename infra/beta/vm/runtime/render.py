@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import re
 import shutil
@@ -39,6 +40,20 @@ NETWORKS = {
     "frontend": ("172.30.242.0/24", "br-cm-front", True),
 }
 POSTGRES_BACKUP = {"mode": "wal-g-host-v1", "host_address": "172.30.240.1/32"}
+
+
+def _load_log_retention():
+    path = HERE.parent / "logging" / "retention.py"
+    spec = importlib.util.spec_from_file_location("cosmabot_log_retention", path)
+    if spec is None or spec.loader is None:
+        raise Refused("log_retention_module")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+LOGS = _load_log_retention()
+LOG_CONFIG = LOGS.load_config()
 
 
 def checked_path(path: Path) -> Path:
@@ -260,7 +275,7 @@ def compose(value: dict, release: Path, protected: Path, data: Path) -> dict:
         "restart": "on-failure:3",
         "init": True,
         "stop_grace_period": "120s",
-        "logging": {"driver": "local", "options": {"max-size": "10m", "max-file": "3"}},
+        "logging": LOGS.docker_compose_logging(LOG_CONFIG),
         "pids_limit": 128,
     }
     runtime = "/opt/cosmabot/runtime"
@@ -497,22 +512,44 @@ save ""
 
 
 def caddy(value):
+    """Proxy config. Access logs keep status, duration, and request_id.
+
+    Query strings and request or response bodies are not written.
+    """
     web, api = value["web_origin"][8:], value["api_origin"][8:]
+    roll = LOGS.caddy_global_lines(LOG_CONFIG)
     return f"""{{
-    admin off
-    http_port 8080
-    https_port 8443
+	admin off
+	http_port 8080
+	https_port 8443{roll}
+}}
+(cosmas_access_log) {{
+	log {{
+		output stdout
+		format filter {{
+			request>uri regexp \\?.* [redacted-query]
+			request>headers delete
+			request>body delete
+			resp_headers delete
+			response>body delete
+			wrap json
+		}}
+	}}
+	log_append request_id {{http.request.uuid}}
 }}
 http://{web}, http://{api} {{
-    redir https://{{host}}{{uri}} permanent
+	import cosmas_access_log
+	redir https://{{host}}{{uri}} permanent
 }}
 https://{web} {{
-    reverse_proxy web:8080
+	import cosmas_access_log
+	reverse_proxy web:8080
 }}
 https://{api} {{
-    @private path /health /ready /docs /redoc /openapi.json
-    respond @private 404
-    reverse_proxy api:8000
+	import cosmas_access_log
+	@private path /health /ready /docs /redoc /openapi.json
+	respond @private 404
+	reverse_proxy api:8000
 }}
 """
 
