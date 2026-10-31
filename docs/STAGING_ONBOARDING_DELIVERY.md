@@ -37,6 +37,11 @@ workspace/native build profiles keep their existing behavior.
 3. Prepare, review and apply only the isolated staging foundation described in
    `infra/enrollment/foundation/README.md`. Retain the encrypted state and its
    protected recovery key separately. Review cost/capacity before apply.
+   Central US is the measured staging default: the subscription's October 31
+   catalog rejects new PostgreSQL in East US 2 and East US, while Central US
+   lists PostgreSQL 16/B1ms/32 GiB and Container Apps. Catalog support is not an
+   allocation guarantee. East US 2 remains a bounded source option that needs
+   a new capacity check; regions outside these two are rejected.
 4. Run the private database bootstrap job and verify the restricted application
    role. Build and push images from the accepted source; use registry manifest
    digests, not local Docker configuration IDs.

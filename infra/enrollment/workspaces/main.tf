@@ -59,7 +59,7 @@ resource "terraform_data" "guard" {
     precondition {
       condition = (local.d.version == 1 && local.d.environment == "staging" && local.d.synthetic_only && local.d.rendered_only && !local.d.deployed &&
         local.f.contract_version == "enrollment-foundation.v1" && local.f.environment == "staging" &&
-        toset(keys(local.practices)) == toset(["a", "b"]) && local.f.location == "eastus2" &&
+        toset(keys(local.practices)) == toset(["a", "b"]) && contains(["eastus2", "centralus"], local.f.location) &&
       local.d.account.app_origin == "https://onboarding.staging.cosmas.ai" && local.d.account.api_origin == "https://enrollment-api.staging.cosmas.ai")
       error_message = "Only the prepared independent two-practice synthetic staging contract is supported."
     }

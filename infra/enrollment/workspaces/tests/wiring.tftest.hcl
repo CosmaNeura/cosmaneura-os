@@ -43,6 +43,25 @@ run "stores_only_before_admission" {
     error_message = "Each Box must retain private separate stores/identity; no workload or readiness before qualification."
   }
 }
+run "centralus_private_stores_preserve_closed_admission" {
+  command = plan
+  variables { deployment_file = "tests/.generated-centralus.json" }
+  assert {
+    condition = (alltrue([for server in values(azurerm_postgresql_flexible_server.box) : server.location == "centralus" && !server.public_network_access_enabled]) &&
+      alltrue([for vault in values(azurerm_key_vault.box) : vault.location == "centralus" && !vault.public_network_access_enabled]) &&
+      alltrue([for store in values(azurerm_storage_account.box) : store.location == "centralus" && !store.public_network_access_enabled]) &&
+      alltrue([for broker in values(azurerm_managed_redis.box) : broker.location == "centralus" && broker.public_network_access == "Disabled" && broker.high_availability_enabled]) &&
+      length(azurerm_private_endpoint.box) == 6 &&
+      length(azurerm_container_app.runtime) == 0 && length(azurerm_container_app.web) == 0 && length(azurerm_container_app_job.box) == 0 &&
+    !output.workspace_resources.a.owner_ready && !output.workspace_resources.b.registry_workspace_ready)
+    error_message = "Central US must preserve private independent stores and cannot activate a workspace or owner."
+  }
+}
+run "unsupported_foundation_location_denied" {
+  command = plan
+  variables { deployment_file = "tests/.generated-unsupported-location.json" }
+  expect_failures = [terraform_data.guard]
+}
 run "manual_migration_identity_has_only_its_database_refs" {
   command = plan
   variables { deployment_file = "tests/.generated-migrate.json" }

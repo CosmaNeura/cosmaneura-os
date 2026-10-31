@@ -363,7 +363,7 @@ jobs:
           set -euo pipefail
           umask 077
           workspace_fixture="$(mktemp -d "$RUNNER_TEMP/enrollment-workspace-mock.XXXXXX")"
-          trap 'rm -rf "$workspace_fixture"; rm -f tests/.generated-stores.json tests/.generated-migrate.json tests/.generated-workloads.json' EXIT
+          trap 'rm -rf "$workspace_fixture"; rm -f tests/.generated-stores.json tests/.generated-migrate.json tests/.generated-workloads.json tests/.generated-centralus.json tests/.generated-unsupported-location.json' EXIT
           printf '%s\n' 'synthetic-workspace-encryption-fixture-never-live' > "$workspace_fixture/encryption.passphrase"
           export TF_VAR_encryption_key_file="$workspace_fixture/encryption.passphrase"
           export TF_DATA_DIR="$workspace_fixture/tofu-data"

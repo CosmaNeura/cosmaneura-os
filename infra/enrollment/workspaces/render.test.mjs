@@ -26,6 +26,25 @@ test('two reserved Boxes preserve canonical UUID5, isolated Org/routing and exis
   assert.notEqual(d.practices.a.plan.box_id,d.practices.b.plan.box_id);
 });
 
+test('Central US foundation preserves the same owned two-practice origins and closed gates',()=>{
+  const baseline=render(candidate()),input=candidate();input.foundation.location='centralus';
+  const files=render(input),d=files['deployment.json'];
+  assert.equal(d.foundation.location,'centralus');
+  assert.deepEqual({...d,foundation:{...d.foundation,location:'eastus2'}},baseline['deployment.json']);
+  for(const slot of ['a','b']) {
+    assert.deepEqual(files[`web-${slot}.env.json`],baseline[`web-${slot}.env.json`]);
+    assert.deepEqual(files[`owner-${slot}.json`],baseline[`owner-${slot}.json`]);
+  }
+  assert.equal(d.deploy_workloads,false);assert.equal(d.bind_domains,false);
+  assert.equal(d.deployed,false);assert.equal(d.workspace_ready,false);
+});
+
+test('foundation region is limited to exact East US 2 or Central US values',()=>{
+  for(const location of ['eastus','westus2','canadacentral','westeurope','centralus ','CENTRALUS',null]) {
+    const input=candidate();input.foundation.location=location;assert.throws(()=>render(input),/independent staging foundation required/);
+  }
+});
+
 test('production, foreign destinations, stale release and colliding immutable practice rejected',()=>{
   for(const mutate of [x=>x.environment='production',x=>x.synthetic_only=false,x=>x.account.api_origin='https://api.cosmas.ai',x=>x.practices[0].plan.api_origin='https://other.staging.cosmas.ai',x=>x.practices[0].plan.box_id=x.practices[1].plan.box_id,x=>x.practices[0].plan.source_commit='f'.repeat(40),x=>x.practices[1].plan.organization_id=x.practices[0].plan.organization_id,x=>x.foundation.vnet_id=x.foundation.vnet_id.replace('rg-cosmabot-enrollment-staging-mock1234','rg-existing-beta')]) {
     const input=candidate();mutate(input);assert.throws(()=>render(input));

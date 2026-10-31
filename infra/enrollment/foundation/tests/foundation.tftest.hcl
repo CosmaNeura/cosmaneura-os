@@ -48,6 +48,10 @@ variables {
 run "isolated_staging_foundation" {
   command = plan
   assert {
+    condition     = var.location == "centralus"
+    error_message = "Fresh staging preparation must default to the measured Central US region."
+  }
+  assert {
     condition = (azurerm_resource_group.enrollment.name == "rg-cosmabot-enrollment-staging-mock1234" &&
       azurerm_postgresql_flexible_server_database.enrollment.name == "cosmabot_enrollment" &&
       !azurerm_postgresql_flexible_server.enrollment.public_network_access_enabled &&
@@ -75,6 +79,40 @@ run "isolated_staging_foundation" {
     !output.foundation.application_deployed && !output.foundation.database_qualified && !output.foundation.runtime_ready)
     error_message = "Only the code registry is public; state is exact-IP/Entra protected and foundation grants no readiness."
   }
+}
+run "central_us_locations_follow_selection" {
+  command = plan
+  variables { location = "centralus" }
+  assert {
+    condition = alltrue(concat([
+      azurerm_resource_group.enrollment.location == var.location,
+      azurerm_log_analytics_workspace.enrollment.location == var.location,
+      azurerm_container_app_environment.enrollment.location == var.location,
+      azurerm_postgresql_flexible_server.enrollment.location == var.location,
+      azurerm_container_registry.enrollment.location == var.location,
+      azurerm_key_vault.enrollment.location == var.location,
+      azurerm_storage_account.state.location == var.location,
+      azurerm_virtual_network.enrollment.location == var.location,
+      output.foundation.location == var.location,
+    ], [for endpoint in values(azurerm_private_endpoint.service) : endpoint.location == var.location]))
+    error_message = "Every regional foundation resource and its exported binding must use the selected Central US location."
+  }
+}
+run "east_us_2_remains_bounded_option" {
+  command = plan
+  variables { location = "eastus2" }
+  assert {
+    condition = (azurerm_resource_group.enrollment.location == "eastus2" &&
+      azurerm_container_app_environment.enrollment.location == "eastus2" &&
+      azurerm_postgresql_flexible_server.enrollment.location == "eastus2" &&
+    output.foundation.location == "eastus2")
+    error_message = "The original East US 2 option must remain explicit and preserve its location binding."
+  }
+}
+run "reject_unsupported_region" {
+  command = plan
+  variables { location = "eastus" }
+  expect_failures = [var.location]
 }
 run "reject_production" {
   command = plan

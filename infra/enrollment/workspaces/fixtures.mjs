@@ -21,8 +21,12 @@ export function candidate() {
 if(process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const dir=new URL('./tests/',import.meta.url);mkdirSync(dir,{recursive:true});
   const input=candidate();
-  const write=name=>writeFileSync(new URL(`.generated-${name}.json`,dir),JSON.stringify(render(input)['deployment.json'],null,2)+'\n');
+  const write=(name,value=input)=>writeFileSync(new URL(`.generated-${name}.json`,dir),JSON.stringify(render(value)['deployment.json'],null,2)+'\n');
   write('stores');
+  const regional=structuredClone(input);regional.foundation.location='centralus';write('centralus',regional);
+  // Exercise the Terraform boundary against a manifest changed after rendering.
+  const unsupported=structuredClone(render(input)['deployment.json']);unsupported.foundation.location='westeurope';
+  writeFileSync(new URL('.generated-unsupported-location.json',dir),JSON.stringify(unsupported,null,2)+'\n');
   for(const p of input.practices)p.secret_references=Object.fromEntries(Object.entries(SECRET_NAMES).map(([name,secret])=>[name,`https://kv-cews-${input.namespace}-${p.key}.vault.azure.net/secrets/${secret}/${'e'.repeat(32)}`]));
   input.create_migration_jobs=true;write('migrate');
   for(const p of input.practices){p.migration_receipt_sha256='f'.repeat(64);p.reservation_receipt_sha256='0'.repeat(64);}

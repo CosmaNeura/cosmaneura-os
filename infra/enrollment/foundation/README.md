@@ -1,10 +1,21 @@
 # Independent enrollment staging foundation
 
 This definition prepares the missing Azure foundation for the browser enrollment
-flow. It is fixed to `staging` / `eastus2`; it cannot create production resources.
+flow. It is fixed to `staging`, with `centralus` as the default region and only
+`centralus` or `eastus2` accepted; it cannot create production resources.
 It neither deploys an application nor marks registration, billing, workspaces or
 a customer journey qualified. No existing VM, Core, clinical database, vault,
 state backend or VNet is consumed or changed.
+
+Authenticated staging capability checks rejected PostgreSQL provisioning in
+East US 2 and East US. Central US supports the selected PostgreSQL 16 /
+`B_Standard_B1ms` / 32 GiB footprint and Container Apps, so fresh protected
+preparation now selects Central US by default. East US 2 remains an explicit
+Terraform option for a separately measured capacity recovery. The definition
+does not accept East US or other regions. The selected location flows into the
+new resource group, regional services, network and private endpoints; DNS zones
+retain their global scope. Capability discovery does not qualify an actual
+deployment or customer journey.
 
 The default footprint is one new `rg-cosmabot-enrollment-staging-<suffix>` with:
 

@@ -22,10 +22,10 @@ variable "environment" {
 }
 variable "location" {
   type    = string
-  default = "eastus2"
+  default = "centralus"
   validation {
-    condition     = var.location == "eastus2"
-    error_message = "This bounded staging foundation is fixed to East US 2."
+    condition     = contains(["centralus", "eastus2"], var.location)
+    error_message = "This bounded staging foundation permits only Central US or East US 2."
   }
 }
 variable "resource_name_suffix" {

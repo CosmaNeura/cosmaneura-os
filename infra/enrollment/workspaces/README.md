@@ -11,7 +11,11 @@ Configuration preparation performs no cloud calls and proves no readiness.
 ## Resources and boundaries
 
 Reuse only the new enrollment foundation's VNet, private subnets/DNS, Container
-Apps environment and ACR. Each practice gets its **own** PostgreSQL 16 server
+Apps environment and ACR. The foundation location must be exactly `eastus2` or
+`centralus`; all other locations are rejected by both the renderer and the
+Terraform guard. Regional capacity remains an operator measurement, and a region
+change requires a fresh reviewed foundation plan before any workspace deployment.
+Each practice gets its **own** PostgreSQL 16 server
 with a `cosmas_os` database, private Blob account/container, private Key Vault,
 private Azure Managed Redis broker, API/worker identity and separate browser
 identity. The enrollment registry remains on its own server/database.
@@ -28,9 +32,15 @@ Sizing is deliberately bounded: two B1ms PostgreSQL servers (32 GiB each,
 seven-day backups), two HA Azure Managed Redis `Balanced_B0` instances
 (`NoCluster`, TLS, DB 0, `NoEviction`, AOF every second), four API/worker replicas
 at 0.5 CPU/1 GiB and two static web replicas at 0.25 CPU/0.5 GiB, max one each.
-The currently published Redis HA B0 example is about $26.28/month per broker;
-the actual East US 2 quote, PostgreSQL, Container Apps, storage, Key Vault and
-telemetry charges must be checked before apply. No legacy Azure Cache for Redis
+Azure retail prices checked on 2026-10-31, using 730 hours/month and two nodes for
+HA, put each B0 broker at **$23.36/month in East US 2** or **$26.28/month in Central
+US**. The two-practice fixed store increment is about **$124.70/$134.73/month**
+respectively: two PostgreSQL B1ms/32 GiB servers, two HA brokers, six private
+endpoints and four new private DNS zones. API/worker/web Consumption usage,
+Blob storage/transactions, vault operations, telemetry, egress and backup overage
+are additional; free grants are shared with other apps in the subscription.
+These are public PAYG estimates, not allocation evidence or a subscription quote.
+No legacy Azure Cache for Redis
 resource is introduced. Availability/capacity remains an actual deployment gate.
 [Managed Redis](https://learn.microsoft.com/azure/redis/overview),
 [pricing](https://azure.microsoft.com/pricing/details/managed-redis/).

@@ -35,7 +35,7 @@ export function render(input) {
   for (const key of ['create_migration_jobs','create_owner_reservation_jobs','deploy_workloads','bind_domains']) requireValue(typeof input[key] === 'boolean', 'explicit deployment gates required');
   const f = input.foundation;
   exact(f, ['contract_version','environment','subscription_id','tenant_id','resource_group_name','location','vnet_id','container_app_environment_id','container_registry_id','registry_server','postgres_subnet_id','private_endpoint_subnet_id','vault_private_dns_zone_id']);
-  requireValue(f.contract_version === 'enrollment-foundation.v1' && f.environment === 'staging' && uuid(f.subscription_id) && uuid(f.tenant_id) && f.location === 'eastus2' && /^rg-cosmabot-enrollment-staging-[a-z0-9]{6,8}$/.test(f.resource_group_name), 'independent staging foundation required');
+  requireValue(f.contract_version === 'enrollment-foundation.v1' && f.environment === 'staging' && uuid(f.subscription_id) && uuid(f.tenant_id) && ['eastus2','centralus'].includes(f.location) && /^rg-cosmabot-enrollment-staging-[a-z0-9]{6,8}$/.test(f.resource_group_name), 'independent staging foundation required');
   const scope = `/subscriptions/${f.subscription_id}/resourceGroups/${f.resource_group_name}/providers/`;
   for (const key of ['vnet_id','container_app_environment_id','container_registry_id','postgres_subnet_id','private_endpoint_subnet_id','vault_private_dns_zone_id']) requireValue(typeof f[key] === 'string' && f[key].toLowerCase().startsWith(scope.toLowerCase()), 'foundation resources must remain owned');
   requireValue(/^acrcbotenrstg[a-z0-9]{6,8}\.azurecr\.io$/.test(f.registry_server) && f.container_registry_id.endsWith('/'+f.registry_server.split('.')[0]), 'owned enrollment registry required');
