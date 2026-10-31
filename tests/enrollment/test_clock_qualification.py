@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import os
 import time
+from contextlib import ExitStack
 from contextvars import Context
 from types import SimpleNamespace
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -52,61 +53,69 @@ def runtime_case(admission_case, monkeypatch, runtime_engine):
 def admission_case():
     settings = synthetic_settings()
     url = os.environ.get("ENROLLMENT_TEST_DATABASE_URL")
-    engine = create_engine(url, pool_pre_ping=True) if url else create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    if url:
-        assert engine.url.host == "127.0.0.1" and engine.url.database == "enrollment_synthetic"
-    else:
-        event.listen(engine, "connect", lambda connection, _: connection.execute("PRAGMA foreign_keys=ON"))
-    upgrade(engine)
-    if url:
-        with engine.begin() as connection:
-            tables = ",".join(engine.dialect.identifier_preparer.format_table(t) for t in EnrollmentBase.metadata.sorted_tables)
-            connection.exec_driver_sql("TRUNCATE TABLE " + tables + " RESTART IDENTITY CASCADE")
-    identities = SyntheticIdentities(settings)
-    provider = ProviderDouble(settings)
-    commerce = ClockBoundStripeCommerce(settings, provider)
-    app = create_app(settings, engine=engine, verifier=identities, commerce=commerce,
-        workspace_confirmer=SyntheticWorkspaceConfirmer(identities))
-    service = app.state.enrollment_service
-    commerce.install(service)
-    app.state.synthetic_identities = identities
-    with TestClient(app) as client:
-        headers = {"Authorization": "Bearer " + identities.token("owner-a")}
-        def write(path, body, method="POST", key=None):
-            revision = client.get("/enrollment/v1/status", headers=headers).json()["revision"]
-            result = client.request(method, "/enrollment/v1" + path, headers={**headers, "Idempotency-Key": key or str(uuid4())},
-                json={"expected_revision": revision, **body})
-            assert result.status_code == 200, result.text
-            return result.json()
-        write("/profile", {"display_name": "Alex Example", "title": "Owner"}, "PUT")
-        state = write("/practice", {"legal_name": "Example Clinic LLC", "display_name": "Example Clinic", "address_line1": "123 Example Street",
-            "city": "Example City", "region": "NY", "postal_code": "10001", "administrative_email": "office@example.invalid", "human_seats": 2, "covered_entity": True}, "PUT")
-        document = client.get("/enrollment/v1/baa/current", headers=headers).json()
-        write("/baa/accept", {"doc_id": document["doc_id"], "version": document["version"], "sha256": document["sha256"],
-            "signature_name": "Alex Example", "signature_title": "Owner", "authority_confirmed": True, "accepted": True})
-        practice_id = state["practice"]["id"]
-        box_id = str(uuid5(NAMESPACE_URL, practice_id))
-        org = "org_synthetic" + practice_id.replace("-", "")
-        service.record_workspace(practice_id, box_id=box_id, organization_id=org, url=settings.public_app_origin + "/chief",
-            status="provisioning", proof_sha256="a" * 64, workspace_api_origin="https://api.example.invalid", source_commit="a" * 40, image_sha256="b" * 64)
-        token = identities.token("owner-a", org)
-        master = settings.runtime_admission_secret.get_secret_value()
-        key = derive_runtime_admission_key(master, practice_id, box_id, org)
-        runtime = Settings(_env_file=None, cosmas_env="early_adopter_beta", data_mode="synthetic", auth_mode="clerk_jwt",  # pyright: ignore[reportCallIssue]
-            workspace_enrollment_managed=True, workspace_enrollment_practice_id=practice_id, beta_box_id=box_id,
-            clerk_issuer=settings.clerk_issuer, clerk_organization_id=org, clerk_session_policy="enrollment_default", clerk_audience="",
-            workspace_enrollment_api_origin="https://enrollment.example.invalid", workspace_enrollment_origin_allowlist="https://enrollment.example.invalid,https://app.example.invalid",
-            workspace_enrollment_admission_secret=SecretStr(key), workspace_enrollment_account_origin=settings.public_app_origin)
-        responses = []
-        def transport(request):
-            result = Context().run(client.post, request.url.path, content=request.content, headers=dict(request.headers))
-            responses.append(result)
-            return httpx.Response(result.status_code, content=result.content, headers=dict(result.headers))
-        adapter = EnrollmentAdmissionAdapter(runtime, client=httpx.Client(transport=httpx.MockTransport(transport)))
-        yield SimpleNamespace(app=app, client=client, token=token, write=write, runtime=runtime, adapter=adapter, provider=provider,
-            commerce=commerce, service=service, key=key, master=master, practice_id=practice_id, box_id=box_id, org=org,
-            issuer=settings.clerk_issuer, headers=headers, transport=transport, responses=responses)
-    commerce.client.close()
+    with ExitStack() as cleanup:
+        engine = create_engine(url, pool_pre_ping=True) if url else create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        cleanup.callback(engine.dispose)
+        if url:
+            assert engine.url.host == "127.0.0.1" and engine.url.database == "enrollment_synthetic"
+        else:
+            event.listen(engine, "connect", lambda connection, _: connection.execute("PRAGMA foreign_keys=ON"))
+        upgrade(engine)
+        if url:
+            def clear_own_database():
+                # The exact loopback database was checked before migration or teardown.
+                with engine.begin() as connection:
+                    tables = ",".join(engine.dialect.identifier_preparer.format_table(t) for t in EnrollmentBase.metadata.sorted_tables)
+                    connection.exec_driver_sql("TRUNCATE TABLE " + tables + " RESTART IDENTITY CASCADE")
+            cleanup.callback(clear_own_database)
+            clear_own_database()
+        identities = SyntheticIdentities(settings)
+        provider = ProviderDouble(settings)
+        commerce = ClockBoundStripeCommerce(settings, provider)
+        cleanup.callback(commerce.client.close)
+        app = create_app(settings, engine=engine, verifier=identities, commerce=commerce,
+            workspace_confirmer=SyntheticWorkspaceConfirmer(identities))
+        service = app.state.enrollment_service
+        commerce.install(service)
+        app.state.synthetic_identities = identities
+        with TestClient(app) as client:
+            headers = {"Authorization": "Bearer " + identities.token("owner-a")}
+            def write(path, body, method="POST", key=None):
+                revision = client.get("/enrollment/v1/status", headers=headers).json()["revision"]
+                result = client.request(method, "/enrollment/v1" + path, headers={**headers, "Idempotency-Key": key or str(uuid4())},
+                    json={"expected_revision": revision, **body})
+                assert result.status_code == 200, result.text
+                return result.json()
+            write("/profile", {"display_name": "Alex Example", "title": "Owner"}, "PUT")
+            state = write("/practice", {"legal_name": "Example Clinic LLC", "display_name": "Example Clinic", "address_line1": "123 Example Street",
+                "city": "Example City", "region": "NY", "postal_code": "10001", "administrative_email": "office@example.invalid", "human_seats": 2, "covered_entity": True}, "PUT")
+            document = client.get("/enrollment/v1/baa/current", headers=headers).json()
+            write("/baa/accept", {"doc_id": document["doc_id"], "version": document["version"], "sha256": document["sha256"],
+                "signature_name": "Alex Example", "signature_title": "Owner", "authority_confirmed": True, "accepted": True})
+            practice_id = state["practice"]["id"]
+            box_id = str(uuid5(NAMESPACE_URL, practice_id))
+            org = "org_synthetic" + practice_id.replace("-", "")
+            service.record_workspace(practice_id, box_id=box_id, organization_id=org, url=settings.public_app_origin + "/chief",
+                status="provisioning", proof_sha256="a" * 64, workspace_api_origin="https://api.example.invalid", source_commit="a" * 40, image_sha256="b" * 64)
+            token = identities.token("owner-a", org)
+            master = settings.runtime_admission_secret.get_secret_value()
+            key = derive_runtime_admission_key(master, practice_id, box_id, org)
+            runtime = Settings(_env_file=None, cosmas_env="early_adopter_beta", data_mode="synthetic", auth_mode="clerk_jwt",  # pyright: ignore[reportCallIssue]
+                workspace_enrollment_managed=True, workspace_enrollment_practice_id=practice_id, beta_box_id=box_id,
+                clerk_issuer=settings.clerk_issuer, clerk_organization_id=org, clerk_session_policy="enrollment_default", clerk_audience="",
+                workspace_enrollment_api_origin="https://enrollment.example.invalid", workspace_enrollment_origin_allowlist="https://enrollment.example.invalid,https://app.example.invalid",
+                workspace_enrollment_admission_secret=SecretStr(key), workspace_enrollment_account_origin=settings.public_app_origin)
+            responses = []
+            def transport(request):
+                result = Context().run(client.post, request.url.path, content=request.content, headers=dict(request.headers))
+                responses.append(result)
+                return httpx.Response(result.status_code, content=result.content, headers=dict(result.headers))
+            admission_client = httpx.Client(transport=httpx.MockTransport(transport))
+            cleanup.callback(admission_client.close)
+            adapter = EnrollmentAdmissionAdapter(runtime, client=admission_client)
+            yield SimpleNamespace(app=app, client=client, token=token, write=write, runtime=runtime, adapter=adapter, provider=provider,
+                commerce=commerce, service=service, key=key, master=master, practice_id=practice_id, box_id=box_id, org=org,
+                issuer=settings.clerk_issuer, headers=headers, transport=transport, responses=responses)
 
 
 def publish(c, kind, obj, identity):
