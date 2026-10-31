@@ -1,5 +1,6 @@
 import {WorkspaceApiError,type WorkspaceIdentity} from './workspace-api';
 import {hostedWorkspaceRequested} from './hosted-workspace';
+import {observeWorkspaceEnrollment,workspaceEnrollmentRevision,workspaceEnrollmentHold} from './workspace-enrollment-state';
 
 export const WORKSPACE_PROTOCOL_HEADER='X-Cosmas-Workspace-Protocol';
 export const REQUIRED_WORKSPACE_CONTRACTS:Readonly<Record<string,number>>=Object.freeze({
@@ -71,9 +72,19 @@ async function fetchWorkspace(url:string,init:RequestInit):Promise<Response> {
   }
 }
 
-/** Shared API dispatch guard; local editing, encrypted custody and recording Stop stay available. */
+/** Protocol pauses retain local editing and recording Stop; enrollment holds have a separate scope. */
 export async function workspaceFetch(identity:WorkspaceIdentity|undefined,url:string,init:RequestInit,compatibility=false):Promise<Response> {
-  if(!hostedWorkspaceRequested())return fetchWorkspace(url,init);
+  const enrollmentRevision=identity?workspaceEnrollmentRevision(identity):0;
+  const enrollment=(response:Response)=>{const denied=observeWorkspaceEnrollment(identity,response);
+    if(denied){cancel(response);throw denied;}
+    if(identity&&response.ok&&workspaceEnrollmentRevision(identity)!==enrollmentRevision){cancel(response);throw new WorkspaceApiError(403,workspaceEnrollmentHold(identity)??'workspace_enrollment_access_required');}
+    return response;
+  };
+  if(!hostedWorkspaceRequested()){
+    const response=await fetchWorkspace(url,init);
+    if(init.signal?.aborted||identity&&!currentIdentity(identity)){cancel(response);throw new WorkspaceApiError(401);}
+    return enrollment(response);
+  }
   if(!identity || !('mode' in identity) || !currentIdentity(identity))throw new WorkspaceApiError(401);
   const mismatch=compatibility?updateRequired:workPaused;
   if(!compatibility)requireWorkspaceProtocol(identity);
@@ -82,6 +93,7 @@ export async function workspaceFetch(identity:WorkspaceIdentity|undefined,url:st
   init.signal?.throwIfAborted();
   const response=await fetchWorkspace(url,init);
   if(init.signal?.aborted || !currentIdentity(identity)){cancel(response);throw new WorkspaceApiError(401);}
+  enrollment(response);
   // An upstream outage may return a proxy error without application headers.
   // It is not proof of an incompatible server. Successful data must be identified.
   const protocol=response.headers.get(WORKSPACE_PROTOCOL_HEADER);
