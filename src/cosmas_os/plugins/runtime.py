@@ -296,10 +296,10 @@ class PluginRuntime:
         rows = [tool(operation, True) for operation in self.operations.values() if enabled.get(operation.id, False)]
         if not self.plugins or "elation" in self.plugins:
             rows.extend(elation.tool_definitions())
-        if not self.plugins or "athena" in self.plugins:
-            rows.extend(athena.tool_definitions())
         if not self.plugins or "atlas_md" in self.plugins:
             rows.extend(atlas_md.tool_definitions())
+        if not self.plugins or "athena" in self.plugins:
+            rows.extend(athena.tool_definitions())
         return rows
 
     def call(self, name, arguments):

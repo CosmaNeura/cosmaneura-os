@@ -69,9 +69,8 @@ async def test_real_mcp_lists_reads_and_preserves_current_workspace_without_get_
                 async with ClientSession(*client_streams) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    assert set(row.name for row in tools.tools) == {
-                        "workspace_read", *ELATION_NAMES, *ATHENA_NAMES, *ATLAS_NAMES}
-                    assert len(tools.tools) == 1 + len(ELATION_NAMES) + len(ATHENA_NAMES) + len(ATLAS_NAMES)
+                    assert [row.name for row in tools.tools] == [
+                        "workspace_read", *ELATION_NAMES, *ATLAS_NAMES, *ATHENA_NAMES]
                     assert set(tools.tools[0].input_schema["required"]) == {"workspace_id"}
                     result = await session.call_tool("workspace_read", {"workspace_id": UUID})
                     assert not result.is_error and result.structured_content["result"]["revision"] == 7
@@ -421,8 +420,6 @@ def test_injected_server_check_reports_only_catalog_not_connected_account(capsys
                                    lambda: "signed-in-current-session")
     assert main(["--origin", "https://fixture.invalid", "--check"], session=adapter) == 0
     receipt = json.loads(capsys.readouterr().out)
-    assert set(receipt) == {"ready", "transport", "tools", "account_status"}
-    assert receipt["ready"] is True and receipt["transport"] == "current_app_session"
-    assert receipt["account_status"] == "not_checked"
-    assert set(receipt["tools"]) == {"workspace_read", *ELATION_NAMES, *ATHENA_NAMES, *ATLAS_NAMES}
-    assert len(receipt["tools"]) == 1 + len(ELATION_NAMES) + len(ATHENA_NAMES) + len(ATLAS_NAMES)
+    assert receipt == {"ready": True, "transport": "current_app_session",
+                       "tools": ["workspace_read", *ELATION_NAMES, *ATLAS_NAMES, *ATHENA_NAMES],
+                       "account_status": "not_checked"}

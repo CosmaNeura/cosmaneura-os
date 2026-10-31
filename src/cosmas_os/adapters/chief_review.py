@@ -8,9 +8,12 @@ def review(context, *, operational_rows=()):
     lines = ["Saved encounter overview"]
     citations = []
     visit = OpenVisitContext.supplied(context.question)
+    notice = None if visit else OpenVisitContext.stated_omission(context.question)
     if visit:
         lines.append("Open visit:")
         lines.append("• " + visit)
+    elif notice:
+        lines.append(notice)
     if context.sources:
         lines.append("Sources to carry into the handoff:")
         for source in context.sources[:12]:
@@ -22,7 +25,7 @@ def review(context, *, operational_rows=()):
             lines.append(f"{len(context.sources) - 12} additional sources are outside this overview.")
     elif visit:
         lines.append(OpenVisitContext.NOTES_GAP)
-    else:
+    elif not notice:
         lines.append(OpenVisitContext.MISSING)
     if context.linked_work or context.follow_ups:
         lines.append("Current work:")
