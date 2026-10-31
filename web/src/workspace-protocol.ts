@@ -82,7 +82,9 @@ export async function workspaceFetch(identity:WorkspaceIdentity|undefined,url:st
   };
   if(!hostedWorkspaceRequested()){
     const response=await fetchWorkspace(url,init);
-    if(init.signal?.aborted||identity&&!currentIdentity(identity)){cancel(response);throw new WorkspaceApiError(401);}
+    // Native callers own their session/deadline error contracts. Discard stale bytes
+    // before their existing checks, without recording a hold for an obsolete session.
+    if(init.signal?.aborted||identity&&!currentIdentity(identity)){cancel(response);return response;}
     return enrollment(response);
   }
   if(!identity || !('mode' in identity) || !currentIdentity(identity))throw new WorkspaceApiError(401);
