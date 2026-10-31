@@ -153,6 +153,18 @@ export function render(input) {
     'public-env.json': publicEnv,
     'secret-references.json': { secret_definitions: secretDefinitions, secret_env: secretEnv },
     'web-build-env.json': { VITE_ENROLLMENT_ENABLED: 'true', VITE_ENROLLMENT_API_BASE: api },
+    'workspace-account-env.json': Object.fromEntries(workspaceOrigins.map(workspace => [workspace, {
+      CLERK_ISSUER: issuer,
+      CLERK_JWKS_URL: `${issuer}/.well-known/jwks.json`,
+      CLERK_SESSION_POLICY: 'enrollment_default',
+      CLERK_AUDIENCE: '',
+      CLERK_AUTHORIZED_PARTIES: [...new Set([app, workspace])].join(','),
+      CORS_ALLOWED_ORIGINS: workspace,
+      WORKSPACE_ENROLLMENT_MANAGED: 'true',
+      WORKSPACE_ENROLLMENT_API_ORIGIN: api,
+      WORKSPACE_ENROLLMENT_ORIGIN_ALLOWLIST: [...new Set([api, app])].join(','),
+      WORKSPACE_ENROLLMENT_ACCOUNT_ORIGIN: app,
+    }])),
     'deployment-contract.json': contract,
   };
 }

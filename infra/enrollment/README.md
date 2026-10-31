@@ -138,6 +138,18 @@ must pass the independent runtime's actual local human access checks. The
 registry stores the proof hash, never the session token. Membership creation
 alone does not grant local runtime authority or start a trial.
 
+The renderer's `workspace-account-env.json` prepares the account policy for each
+exact admitted workspace origin. Apply that entry to its independently deployed
+runtime together with the saved plan's `BETA_BOX_ID`, `CLERK_ORGANIZATION_ID`,
+`WORKSPACE_ENROLLMENT_PRACTICE_ID`, exact release source/image and protected derived
+admission key. The entry deliberately admits both the central account and exact
+workspace origins as Clerk authorized parties, because initial setup carries an
+account-origin session. CORS remains the exact workspace origin; central
+confirmation uses server-to-server HTTPS. Central admission permits the account
+origin only for bounded setup/qualification and refuses it for clinical workspace
+access. Missing immutable binding or secret inputs leave the runtime unavailable;
+this partial policy file cannot qualify a Box or grant readiness.
+
 The enrollment runtime admission master remains only in its own vault/process.
 Each Box receives a derived admission key bound to its immutable practice, Box
 and Org. Never distribute the master or reuse an invitation/Stripe credential

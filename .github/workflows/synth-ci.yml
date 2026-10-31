@@ -346,6 +346,7 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://enrollment_test:synthetic_test_only@127.0.0.1:54329/runtime_synthetic
       ENROLLMENT_TEST_DATABASE_URL: postgresql+psycopg://enrollment_test:synthetic_test_only@127.0.0.1:54329/enrollment_synthetic
+      ENROLLMENT_RUNTIME_TEST_DATABASE_URL: postgresql+psycopg://enrollment_test:synthetic_test_only@127.0.0.1:54329/enrollment_runtime_synthetic
       COSMAS_ENROLLMENT_LAB_URL: http://127.0.0.1:8041
     steps:
       - uses: actions/checkout@v4
@@ -353,8 +354,8 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import
-      - name: Create separate synthetic registry database
-        run: uv run python -c "import psycopg; c=psycopg.connect('postgresql://enrollment_test:synthetic_test_only@127.0.0.1:54329/runtime_synthetic',autocommit=True); c.execute('CREATE DATABASE enrollment_synthetic'); c.close()"
+      - name: Create separate synthetic registry and managed workspace databases
+        run: uv run python -c "import psycopg; c=psycopg.connect('postgresql://enrollment_test:synthetic_test_only@127.0.0.1:54329/runtime_synthetic',autocommit=True); c.execute('CREATE DATABASE enrollment_synthetic'); c.execute('CREATE DATABASE enrollment_runtime_synthetic'); c.close()"
       - name: Account, agreement, billing and trusted workspace checks
         run: uv run pytest tests/enrollment -q
       - uses: actions/setup-node@v4

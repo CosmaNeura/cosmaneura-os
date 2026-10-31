@@ -44,6 +44,20 @@ test('development enrollment uses its matching Clerk development instance withou
   assert.throws(() => render(value));
 });
 
+test('practice setup admits the account session without making it a clinical workspace session', () => {
+  const value = sample();
+  value.workspace_origins = ['https://example-practice.staging.cosmas.ai'];
+  const env = render(value)['workspace-account-env.json'][value.workspace_origins[0]];
+  assert.equal(env.CLERK_AUTHORIZED_PARTIES, `${value.app_origin},${value.workspace_origins[0]}`);
+  assert.equal(env.CORS_ALLOWED_ORIGINS, value.workspace_origins[0]);
+  assert.equal(env.WORKSPACE_ENROLLMENT_API_ORIGIN, value.api_origin);
+  assert.equal(env.WORKSPACE_ENROLLMENT_ACCOUNT_ORIGIN, value.app_origin);
+  assert.equal(env.CLERK_SESSION_POLICY, 'enrollment_default');
+  assert.equal(env.WORKSPACE_ENROLLMENT_MANAGED, 'true');
+  assert.equal(JSON.stringify(env).includes('SECRET'), false);
+  assert.equal('BETA_BOX_ID' in env, false);
+});
+
 test('credentials and unrelated runtime privileges cannot enter rendered browser configuration', () => {
   assert.throws(() => render({ ...sample(), secret_references: { ENROLLMENT_CLERK_SECRET_KEY: 'sk_test_do_not_store' } }));
   assert.throws(() => render({ ...sample(), secret_references: { CORE_CAPTURE_TOKEN: 'https://invented.vault.azure.net/secrets/key/' + '3'.repeat(32) } }));
