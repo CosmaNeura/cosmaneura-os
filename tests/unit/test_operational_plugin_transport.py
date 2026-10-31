@@ -18,8 +18,10 @@ from mcp.shared.memory import create_client_server_memory_streams
 from cosmas_os.api.microsoft_connection_routes import router as microsoft_router
 from cosmas_os.api.plugin_catalog import CONTRACT, META
 from cosmas_os.plugins import runtime as runtime_module
+from cosmas_os.plugins.athena import NAMES as ATHENA_NAMES
+from cosmas_os.plugins.atlas_md import NAMES as ATLAS_NAMES
 from cosmas_os.plugins.configure import generate
-from cosmas_os.plugins.elation import NAMES
+from cosmas_os.plugins.elation import NAMES as ELATION_NAMES
 from cosmas_os.plugins.runtime import AuthenticatedSession, PluginError, PluginRuntime
 from cosmas_os.plugins.server import create_server, main
 from cosmas_os.plugins.tebra import NAMES as TEBRA_NAMES
@@ -69,8 +71,9 @@ async def test_real_mcp_lists_reads_and_preserves_current_workspace_without_get_
                     await session.initialize()
                     tools = await session.list_tools()
                     listed = {row.name: row for row in tools.tools}
-                    assert {"workspace_read", *NAMES, *TEBRA_NAMES} <= set(listed)
-                    for name in (*NAMES, *TEBRA_NAMES):
+                    expected = {"workspace_read", *ELATION_NAMES, *ATHENA_NAMES, *ATLAS_NAMES, *TEBRA_NAMES}
+                    assert set(listed) == expected and len(tools.tools) == len(expected) == 15
+                    for name in (*ELATION_NAMES, *ATHENA_NAMES, *ATLAS_NAMES, *TEBRA_NAMES):
                         assert listed[name].annotations.read_only_hint is True
                         assert listed[name].annotations.destructive_hint is False
                     assert set(listed["workspace_read"].input_schema["required"]) == {"workspace_id"}
@@ -422,6 +425,8 @@ def test_injected_server_check_reports_only_catalog_not_connected_account(capsys
                                    lambda: "signed-in-current-session")
     assert main(["--origin", "https://fixture.invalid", "--check"], session=adapter) == 0
     receipt = json.loads(capsys.readouterr().out)
+    expected = {"workspace_read", *ELATION_NAMES, *ATHENA_NAMES, *ATLAS_NAMES, *TEBRA_NAMES}
+    assert set(receipt) == {"ready", "transport", "tools", "account_status"}
     assert receipt["ready"] is True and receipt["transport"] == "current_app_session"
     assert receipt["account_status"] == "not_checked"
-    assert {"workspace_read", *NAMES, *TEBRA_NAMES} <= set(receipt["tools"])
+    assert set(receipt["tools"]) == expected and len(receipt["tools"]) == len(expected) == 15
