@@ -700,13 +700,13 @@ def test_scope_guard_rejects_foreign_signed_runtime_before_clock_reads(lab):
 def postgres_journal():
     """Always create this test's own loopback cluster; never use ambient DBs."""
     pg = Path(subprocess.check_output(["pg_config", "--bindir"], text=True).strip())
-    with tempfile.TemporaryDirectory(
-        prefix="private-clock-journal-pg-", dir="/private/tmp"
-    ) as folder:
+    with tempfile.TemporaryDirectory(prefix="private-clock-journal-pg-") as folder:
         work = Path(folder)
+        assert work.stat().st_mode & 0o777 == 0o700
         password = "synthetic-private-clock-journal-only"
         (work / "password").write_text(password)
         (work / "password").chmod(0o600)
+        assert (work / "password").stat().st_mode & 0o777 == 0o600
         with socket.socket() as reserve:
             reserve.bind(("127.0.0.1", 0))
             port = reserve.getsockname()[1]

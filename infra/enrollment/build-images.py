@@ -262,6 +262,9 @@ def clock_source_gate(source: Path, commit: str, accepted_fix: str | None) -> No
 
 def job_recipe(kind: str, image: str, app_image: str, trivy: str, hashes: dict[str, str]) -> dict:
     module_path, database, roles, error_code = JOB_MODULES[kind]
+    denied_receipt = {"error": error_code, "class": "ValueError"}
+    if kind == "database-job":
+        denied_receipt.update(operation="check", stage="validate_inputs", code="invalid_owned_host")
     code = f"""import hashlib,importlib.util,json,os,subprocess,sys
 assert os.getuid()==10001
 expected={hashes!r}
@@ -274,7 +277,7 @@ assert callable(module.bootstrap) and callable(module.check) and callable(module
 env={{'PATH':os.environ['PATH'],'PYTHONPATH':'/app/src','ENROLLMENT_ENABLED':'false','ENROLLMENT_DATA_MODE':'synthetic'}}
 result=subprocess.run([sys.executable,{module_path!r},'check'],env=env,capture_output=True,timeout=20)
 assert result.returncode==1 and result.stdout==b''
-assert json.loads(result.stderr)=={{'error':{error_code!r},'class':'ValueError'}}
+assert json.loads(result.stderr)=={denied_receipt!r}
 """
     arguments = ["-t", image, "-f", f"infra/enrollment/{kind}/Dockerfile", "--build-arg", "APP_IMAGE=" + app_image, "."]
     return publication_recipe(arguments, {"cmd": image + " -B -c " + shlex.quote(code), "entryPoint": "python"}, image, trivy)

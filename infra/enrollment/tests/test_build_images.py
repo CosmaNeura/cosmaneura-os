@@ -234,6 +234,7 @@ def test_database_job_uses_exact_verified_base_and_minimal_unchanged_context(bui
     code = shlex.split(task["steps"][1]["cmd"])[-1]
     compile(code, "<database image validation>", "exec")
     assert "os.getuid()==10001" in code and "enrollment_runtime" in code and "result.returncode==1" in code
+    assert "'operation': 'check', 'stage': 'validate_inputs', 'code': 'invalid_owned_host'" in code
     assert "invented-reference-never-upload-this-file" not in "".join(p.read_text() for p in context.rglob("*") if p.is_file())
     assert job["dockerfile_sha256"] and m["database_job_qualified"] is False
 

@@ -22,6 +22,37 @@ from cosmas_os.enrollment.models import EnrollmentBase
 DATABASE = "cosmabot_enrollment"
 LOGINS = {"admin": "enrollment_bootstrap", "migration": "enrollment_migrator", "runtime": "enrollment_runtime"}
 BAA = "enrollment_baa_acceptances"
+FAILURE_CODES = {
+    "server contains an unrelated database": "unrelated_database",
+    "owned staging PostgreSQL host required": "invalid_owned_host",
+    "bound PostgreSQL role/TLS URL required": "invalid_role_tls_binding",
+    "database role has unexpected authority": "unexpected_role_authority",
+    "database role may not inherit or assume another role": "unexpected_role_membership",
+    "wrong database": "incorrect_database",
+    "database contains unrelated tables": "unrelated_tables",
+    "open PostgreSQL driver connection required": "driver_connection_missing",
+    "immutable receipt table mismatch": "immutable_table_mismatch",
+    "schema not ready": "schema_not_ready",
+    "incorrect runtime login": "incorrect_runtime_login",
+    "unexpected database tables": "unexpected_tables",
+    "runtime database privilege exceeds scope": "runtime_database_privilege",
+    "runtime may not access managed service databases": "runtime_managed_database_access",
+    "runtime may not create objects": "runtime_schema_create",
+    "runtime table privilege exceeds exact grant contract": "runtime_table_privilege",
+    "immutable agreement trigger missing": "immutable_trigger_missing",
+    "explicit database operation required": "invalid_operation",
+}
+FAILURE_CLASSES = frozenset({"ValueError", "RuntimeError", "DBAPIError", "OperationalError", "ProgrammingError", "IntegrityError", "InterfaceError", "TimeoutError"})
+
+
+def failure_receipt(operation: str, stage: str, error: Exception) -> dict[str, str]:
+    # Only classify exact built-in ValueError arguments. Unknown exception text
+    # can include driver SQL, URLs or credentials and never enters the receipt.
+    message = error.args[0] if type(error) is ValueError and len(error.args) == 1 and isinstance(error.args[0], str) else None
+    return {"error": "enrollment_database_preparation_failed",
+            "class": type(error).__name__ if type(error).__name__ in FAILURE_CLASSES else "Exception",
+            "operation": operation, "stage": stage,
+            "code": FAILURE_CODES.get(message, "operation_failed")}
 
 
 def database_names(connection) -> set[str]:
@@ -157,23 +188,27 @@ def check(engines: dict[str, Engine]) -> dict[str, object]:
 
 def main() -> int:
     engines: dict[str, Engine] = {}
+    operation, stage = "invalid", "validate_inputs"
     try:
         if len(sys.argv) != 2 or sys.argv[1] not in {"bootstrap", "migrate", "check"}:
             raise ValueError("explicit database operation required")
         operation = sys.argv[1]
         engines = engines_from_environment(operation)
         if operation == "bootstrap":
+            stage = "bootstrap"
             bootstrap(engines)
             result = {"operation": "bootstrap", "roles_created": True, "qualified": False}
         else:
             if operation == "migrate":
+                stage = "migrate"
                 migrate(engines)
+            stage = "check"
             result = check(engines)
         print(json.dumps(result, sort_keys=True))
         return 0
     except Exception as error:
         # Never print SQL, driver errors, URLs, credentials or environment.
-        print(json.dumps({"error": "enrollment_database_preparation_failed", "class": type(error).__name__}), file=sys.stderr)
+        print(json.dumps(failure_receipt(operation, stage, error), sort_keys=True), file=sys.stderr)
         return 1
     finally:
         for engine in engines.values():

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import socket
 import subprocess
@@ -83,6 +84,27 @@ def test_managed_system_databases_keep_their_original_owner_and_closed_access(ro
     with roles["admin"].connect() as connection:
         assert list(connection.execute(text("SELECT datname,datdba,datacl FROM pg_database WHERE datname IN ('azure_maintenance','azure_sys') ORDER BY datname"))) == original
         assert len(original) == 2
+    assert database.check(roles)["runtime_role_checked"]
+
+
+def test_managed_database_public_access_reports_bounded_failure_and_preserves_authority(roles, monkeypatch, capsys):
+    # Reproduce provider-default PUBLIC connectivity on this owned local
+    # database only. No Azure/system database permissions are changed here.
+    fixture_admin = create_engine(roles["admin"].url.set(username="foundation_rehearsal"))
+    try:
+        with fixture_admin.begin() as connection:
+            connection.execute(text("GRANT CONNECT ON DATABASE azure_sys TO PUBLIC"))
+        monkeypatch.setattr(database.sys, "argv", ["database.py", "check"])
+        monkeypatch.setattr(database, "engines_from_environment", lambda operation: {"runtime": roles["runtime"]})
+        assert database.main() == 1
+        output = capsys.readouterr()
+        assert output.out == ""
+        assert json.loads(output.err) == {"error": "enrollment_database_preparation_failed", "class": "ValueError",
+            "operation": "check", "stage": "check", "code": "runtime_managed_database_access"}
+    finally:
+        with fixture_admin.begin() as connection:
+            connection.execute(text("REVOKE CONNECT ON DATABASE azure_sys FROM PUBLIC"))
+        fixture_admin.dispose()
     assert database.check(roles)["runtime_role_checked"]
 
 
