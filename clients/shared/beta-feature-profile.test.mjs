@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {createRequire} from 'node:module';
 import {BETA_FEATURE_FLAGS,NATIVE_STAGING_FEATURE_PROFILE,resolveBetaFeatureProfile,validateBetaFeatureManifest,validateNativeBetaProfile} from './beta-feature-profile.mjs';
 const pilotFlags=['VITE_MESSAGES_ENABLED','VITE_EHR_READ_ENABLED','VITE_CALENDAR_IMPORT_ENABLED','VITE_MICROSOFT_MESSAGE_ENABLED'];
+const accountOnlyGates=['VITE_ENROLLMENT_ENABLED'];
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const base={VITE_WORKSPACE_FEATURE_PROFILE:'operational-beta-v1',VITE_WORKSPACE_HOSTED_CLIENT:'web',
   VITE_WORKSPACE_DATA_MODE:'synthetic',VITE_WORKSPACE_HOSTED_API_ORIGIN:'https://api.example.invalid',
@@ -26,7 +27,13 @@ test('profile covers every actual workflow gate, including the formerly omitted 
     const contents=readFileSync(join(entry.parentPath,entry.name),'utf8');
     for(const match of contents.matchAll(/import[.]meta[.]env[.](VITE_\w+_ENABLED)/g))gates.add(match[1]);
   }
-  for(const key of gates)assert.ok(key in env||pilotFlags.includes(key),`Unclassified build gate: ${key}`);
+  for(const key of gates)assert.ok(key in env||pilotFlags.includes(key)||accountOnlyGates.includes(key),`Unclassified build gate: ${key}`);
+  for(const key of accountOnlyGates){
+    assert.ok(gates.has(key),`Unused account-only gate: ${key}`);
+    assert.equal(Object.hasOwn(env,key),false);
+    for(const value of ['', 'true', 'false'])assert.throws(()=>resolveBetaFeatureProfile({...base,[key]:value}),/unknown feature gate/);
+  }
+  for(const value of ['', 'true', 'false'])assert.throws(()=>resolveBetaFeatureProfile({...base,VITE_UNKNOWN_ACCOUNT_ENABLED:value}),/unknown feature gate/);
   for(const key of BETA_FEATURE_FLAGS)assert.ok(gates.has(key),`Unused profile flag: ${key}`);
   for(const key of ['VITE_WORKSPACE_CAPTURE_ENABLED','VITE_WORKSPACE_APPOINTMENTS_ENABLED','VITE_INBOX_ENABLED','VITE_COSMANEURA_RECORD_ENABLED','VITE_FAX_INBOUND_ENABLED','VITE_FAX_INBOUND_SOURCE_ENABLED'])assert.equal(env[key],'true');
 });
