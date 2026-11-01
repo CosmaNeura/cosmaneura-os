@@ -95,7 +95,7 @@ EHR_COMMANDS = {
     "core_allergies": AthenaAllergies,
     "core_medications": AthenaMedications,
 }
-UNSUPPORTED_DETAILS = {"ehr_read_unavailable"}
+UNSUPPORTED_DETAILS = {"ehr_read_unavailable", "unsupported"}
 EXPIRED_DETAILS = {
     "ehr_read_binding_changed",
     "ehr_read_binding_unavailable",

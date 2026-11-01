@@ -86,6 +86,7 @@ UNSUPPORTED_DETAILS = {
     "ehr_read_problems_unavailable",
     "ehr_read_medications_unavailable",
     "ehr_read_labs_unavailable",
+    "unsupported",
 }
 EXPIRED_DETAILS = {
     "ehr_read_binding_changed",

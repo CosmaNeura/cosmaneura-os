@@ -112,6 +112,14 @@ def lab_model_case(engine, monkeypatch):
             practice_id="910", practice_name=scope.practice_name, environment="sandbox",
             binding_digest=scope.commitment(), state="active")
         s.add(binding)
+        from cosmas_os import ehr_read_audit
+
+        ehr_read_audit.upsert_allowed_resources(
+            s,
+            box_id=box,
+            connection_id=str(scope.connection_id),
+            resources=(*ehr_read_audit.DEFAULT_ALLOWED_RESOURCES, "Observation"),
+        )
         s.commit()
         provider = InventedLabProvider(s)
         port = SyntheticElationReads((scope,), httpx.MockTransport(provider),

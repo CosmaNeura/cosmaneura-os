@@ -95,7 +95,7 @@ OBSERVATIONS = {
     "fhir_patients": FhirPatientsObservation,
     "fhir_medications": FhirMedicationsObservation,
 }
-UNSUPPORTED_DETAILS = {"ehr_read_unavailable"}
+UNSUPPORTED_DETAILS = {"ehr_read_unavailable", "unsupported"}
 EXPIRED_DETAILS = {
     "ehr_read_binding_changed",
     "ehr_read_binding_unavailable",
