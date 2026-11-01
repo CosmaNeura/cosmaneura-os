@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 PRODUCTION_TARGET_MESSAGE = "CosmaBot can only connect to sandbox EHRs right now."
+WRITE_REFUSED_MESSAGE = "CosmaBot can only read from EHRs; it can't change records."
 
 
 class EhrCapabilityError(ValueError):
@@ -18,8 +19,9 @@ class EhrCapabilityError(ValueError):
 class EhrWriteRefused(EhrCapabilityError):
     """Raised when any write / mutation action is requested."""
 
-    def __init__(self, action: str = "write"):
+    def __init__(self, action: str = "write", message: str | None = None):
         self.action = action
+        self.message = WRITE_REFUSED_MESSAGE if message is None else message
         super().__init__("ehr_write_refused")
 
 

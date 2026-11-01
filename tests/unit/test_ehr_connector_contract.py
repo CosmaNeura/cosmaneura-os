@@ -13,7 +13,7 @@ from cosmas_os.plugins.ehr import (
     EhrWriteRefused,
 )
 from cosmas_os.plugins.ehr.connector import READ_ACTIONS, WRITE_ACTIONS
-from cosmas_os.plugins.ehr.refusals import PRODUCTION_TARGET_MESSAGE
+from cosmas_os.plugins.ehr.refusals import PRODUCTION_TARGET_MESSAGE, WRITE_REFUSED_MESSAGE
 from cosmas_os.plugins.ehr.registry import build_default_registry
 
 BETA_MUTATION_GAPS = (
@@ -59,6 +59,16 @@ def test_refuse_write_always_raises_for_known_mutations(action):
     assert raised.value.code == "ehr_write_refused"
     with pytest.raises(EhrWriteRefused):
         connector.refuse_write(action)
+
+
+def test_write_refusal_has_code_and_plain_english_message():
+    connector = DeclaredEhrConnector(_manifest())
+    with pytest.raises(EhrWriteRefused) as raised:
+        connector.assert_not_write_action("DELETE")
+    assert raised.value.code == "ehr_write_refused"
+    assert raised.value.message
+    assert raised.value.message == WRITE_REFUSED_MESSAGE
+    assert raised.value.message == "CosmaBot can only read from EHRs; it can't change records."
 
 
 @pytest.mark.parametrize("action", BETA_MUTATION_GAPS)
