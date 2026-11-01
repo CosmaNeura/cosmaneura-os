@@ -42,8 +42,8 @@ not mean the chart is empty.
 ## Plain error states
 
 Failures map to the same state names and message wording the existing connector
-plugins already show. Pass a display label such as `Athena`, `Elation`,
-`Tebra`, or `EHR`:
+plugins already show, plus two ehr_fhir-lane additions. Pass a display label
+such as `Athena`, `Elation`, `Tebra`, or `EHR`:
 
 | State | When it happens |
 | --- | --- |
@@ -51,20 +51,28 @@ plugins already show. Pass a display label such as `Athena`, `Elation`,
 | `not_connected` | HTTP 404, connect failure, or OperationOutcome `not-found` / `not-supported` |
 | `expired` | HTTP 401/403, or OperationOutcome `login` / `expired` / `security` / `forbidden` |
 | `wrong_practice` | HTTP 421, or OperationOutcome `multiple-matches` |
-| `malformed` | Bad JSON, wrong resource type, size limit, write refusal, or structure errors |
+| `malformed` | Bad JSON, wrong resource type, size limit, or structure errors |
 | `timeout` | HTTP 408/504, read timeout, or OperationOutcome `timeout` / `transient` |
 | `stale` | HTTP 409/412, off-origin next link, or OperationOutcome `deleted` / `superseded` |
+| `rate_limited` | HTTP 429 |
+| `refused` | Write verbs refused before transport |
 
-Chart rows are returned only for `ready`.
+When an error response carries both an HTTP status and an OperationOutcome
+issue code, the HTTP status mapping wins. Chart rows are returned only for
+`ready`.
 
 ## Read-only and sandbox-only defaults
 
 - Write verbs (`POST`, `PUT`, `PATCH`, `DELETE`, and the client `create` /
   `update` / `patch` / `delete` / `post` / `put` helpers) are refused before
-  any transport call and return `malformed`.
-- Base URLs must look like sandbox / synthetic hosts by default
-  (`sandbox`, `synthetic`, `mock`, `localhost`, `127.0.0.1`, `.invalid`,
-  `example.com`, `example.org`, or `test.`).
+  any transport call and return `refused`.
+- Base URLs must use an exact allowlisted sandbox host name
+  (case-insensitive equality on the parsed hostname only). The allowlist is
+  `fhir.sandbox.example.com`, `sandbox.fhir.example.org`, `synthetic.invalid`,
+  `mock.example.com`, `localhost`, and `127.0.0.1`. Look-alike hosts such as
+  `test.evil.com`, `mock-athena.example.net`, or `sandbox.attacker.io` are
+  refused. Trailing-dot host names, plain HTTP to non-local hosts, and URLs
+  with userinfo are refused.
 - Production hosts (`prd`, `prod`, `production`, `live`) raise
   `PermissionError` unless `allow_production=True` is set explicitly. That
   opt-in is not wired to live credentials here. The real-data switch stays off.

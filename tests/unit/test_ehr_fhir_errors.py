@@ -37,6 +37,11 @@ from cosmas_os.plugins.ehr_fhir import (
 
 SANDBOX = "https://fhir.sandbox.example.com/r4"
 
+# States shared with Athena / Elation / Tebra plugins.
+SHARED_PLUGIN_STATES = frozenset(
+    {"not_connected", "expired", "wrong_practice", "malformed", "timeout", "stale"}
+)
+
 
 def outcome(code: str, severity: str = "error") -> dict:
     return {
@@ -53,15 +58,11 @@ def response(payload: dict, status: int = 200) -> httpx.Response:
     )
 
 
-def test_error_state_names_match_existing_plugins():
-    assert ERROR_STATES == {
-        "not_connected",
-        "expired",
-        "wrong_practice",
-        "malformed",
-        "timeout",
-        "stale",
-    }
+def test_error_state_names_include_shared_plugins_and_lane_additions():
+    assert SHARED_PLUGIN_STATES <= ERROR_STATES
+    assert "rate_limited" in ERROR_STATES
+    assert "refused" in ERROR_STATES
+    assert ERROR_STATES == SHARED_PLUGIN_STATES | {"rate_limited", "refused"}
 
 
 def test_messages_reuse_athena_wording_with_label():
@@ -86,6 +87,7 @@ def test_messages_reuse_athena_wording_with_label():
         (421, "wrong_practice"),
         (400, "malformed"),
         (422, "malformed"),
+        (429, "rate_limited"),
         (504, "timeout"),
     ],
 )
@@ -93,6 +95,14 @@ def test_http_status_mapping(status: int, state: str):
     result = map_http_status(status, "EHR")
     assert result.state == state
     assert result.message == messages_for("EHR")[state]
+
+
+def test_http_429_is_rate_limited_not_malformed():
+    result = map_http_status(429, "Athena")
+    assert result.state == "rate_limited"
+    assert result.state != "malformed"
+    assert "limiting reads" in result.message
+    assert result.message == messages_for("Athena")["rate_limited"]
 
 
 @pytest.mark.parametrize(
@@ -114,6 +124,7 @@ def test_http_status_mapping(status: int, state: str):
         ("required", "malformed"),
         ("value", "malformed"),
         ("conflict", "malformed"),
+        ("processing", "malformed"),
     ],
 )
 def test_operation_outcome_code_mapping(code: str, state: str):
@@ -121,6 +132,13 @@ def test_operation_outcome_code_mapping(code: str, state: str):
     assert mapped is not None
     assert mapped.state == state
     assert mapped.message == messages_for("Elation")[state]
+
+
+def test_http_status_wins_over_body_error_code():
+    # Body says "processing" (malformed); HTTP 401 must still map to expired.
+    result = map_http_status(401, "EHR", outcome_code="processing")
+    assert result.state == "expired"
+    assert result.message == messages_for("EHR")["expired"]
 
 
 def test_operation_outcome_payload_mapping_ignores_warnings():
@@ -149,6 +167,32 @@ def test_client_maps_http_errors_through_transport():
     result = client.read("Patient", "synth-patient-1001")
     assert result.state == "expired"
     assert result.message == ATHENA_EXPIRED
+    assert result.resources == ()
+
+
+def test_client_http_status_wins_over_body_processing_code():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response(outcome("processing"), status=401)
+
+    client = FhirR4ReadClient(SANDBOX, transport=httpx.MockTransport(handler))
+    result = client.read("Patient", "synth-patient-1001")
+    assert result.state == "expired"
+    assert result.message == messages_for("EHR")["expired"]
+    assert result.resources == ()
+
+
+def test_client_maps_http_429_to_rate_limited():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response(outcome("transient"), status=429)
+
+    client = FhirR4ReadClient(
+        SANDBOX,
+        transport=httpx.MockTransport(handler),
+        display_label="Athena",
+    )
+    result = client.search("Patient", {"patient": "synth-patient-1001"})
+    assert result.state == "rate_limited"
+    assert result.message == messages_for("Athena")["rate_limited"]
     assert result.resources == ()
 
 

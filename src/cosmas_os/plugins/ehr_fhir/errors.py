@@ -1,8 +1,9 @@
 """Plain EHR read error states shared with CosmaBot connector plugins.
 
 State names and message templates match the Athena / Elation / Tebra plugin
-tools. Callers pass a display label (for example ``Athena`` or ``EHR``) so the
-shared FHIR client stays vendor-neutral while users still see familiar wording.
+tools, plus ehr_fhir-lane additions for rate limits and write refusal. Callers
+pass a display label (for example ``Athena`` or ``EHR``) so the shared FHIR
+client stays vendor-neutral while users still see familiar wording.
 """
 
 from __future__ import annotations
@@ -17,11 +18,22 @@ ErrorState = Literal[
     "malformed",
     "timeout",
     "stale",
+    "rate_limited",
+    "refused",
 ]
 
 READY: Final = "ready"
 ERROR_STATES: Final[frozenset[str]] = frozenset(
-    {"not_connected", "expired", "wrong_practice", "malformed", "timeout", "stale"}
+    {
+        "not_connected",
+        "expired",
+        "wrong_practice",
+        "malformed",
+        "timeout",
+        "stale",
+        "rate_limited",
+        "refused",
+    }
 )
 
 # OperationOutcome.issue.code values that map to a closed user-facing state.
@@ -49,6 +61,24 @@ _MALFORMED_CODES = frozenset(
 _TIMEOUT_CODES = frozenset({"timeout", "transient"})
 _STALE_CODES = frozenset({"deleted", "superseded"})
 _SECURITY_CODES = frozenset({"security", "forbidden"})
+
+# HTTP statuses with an explicit plain-state mapping. These win over any
+# OperationOutcome issue code in the response body.
+_HTTP_STATUS_STATES: Final[dict[int, ErrorState]] = {
+    401: "expired",
+    403: "expired",
+    404: "not_connected",
+    408: "timeout",
+    409: "stale",
+    412: "stale",
+    421: "wrong_practice",
+    400: "malformed",
+    422: "malformed",
+    429: "rate_limited",
+    504: "timeout",
+    524: "timeout",
+    0: "timeout",
+}
 
 
 def messages_for(label: str) -> dict[str, str]:
@@ -79,6 +109,12 @@ def messages_for(label: str) -> dict[str, str]:
             f"The {label} account changed while this was being read. The result was discarded. "
             "Check the connected practice and read again."
         ),
+        "rate_limited": (
+            f"{label} is limiting reads right now. Wait a moment, then try this same read again."
+        ),
+        "refused": (
+            f"This {label} client only reads chart data. Writes are refused and were not sent."
+        ),
         "ready_page": (
             f"Showing returned {label} records for this page. This is not a complete chart."
         ),
@@ -89,7 +125,7 @@ def messages_for(label: str) -> dict[str, str]:
             "No rows were returned on this page. That does not mean the chart is empty."
         ),
         "write_refused": (
-            f"{label} returned a response CosmaBot could not read. No chart data is shown."
+            f"This {label} client only reads chart data. Writes are refused and were not sent."
         ),
         "production_refused": (
             f"{label} is not connected. Connect {label} for this practice in CosmaBot, "
@@ -116,25 +152,18 @@ def error_result(state: ErrorState, label: str) -> FhirReadError:
 
 
 def map_http_status(status: int, label: str, *, outcome_code: str | None = None) -> FhirReadError:
-    """Map HTTP status and an optional OperationOutcome issue code to a plain state."""
+    """Map HTTP status and an optional OperationOutcome issue code to a plain state.
+
+    An explicit HTTP status mapping always wins over a body error code. Body
+    codes are consulted only when the status has no dedicated mapping.
+    """
+    mapped_state = _HTTP_STATUS_STATES.get(status)
+    if mapped_state is not None:
+        return error_result(mapped_state, label)
     if outcome_code is not None:
         mapped = map_operation_outcome_code(outcome_code, label)
         if mapped is not None:
             return mapped
-    if status in {401, 403}:
-        return error_result("expired", label)
-    if status == 404:
-        return error_result("not_connected", label)
-    if status in {408, 504, 524}:
-        return error_result("timeout", label)
-    if status in {409, 412}:
-        return error_result("stale", label)
-    if status == 421:
-        return error_result("wrong_practice", label)
-    if status in {400, 422}:
-        return error_result("malformed", label)
-    if status == 0:
-        return error_result("timeout", label)
     return error_result("malformed", label)
 
 

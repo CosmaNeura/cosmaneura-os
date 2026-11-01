@@ -169,7 +169,7 @@ class FhirR4ReadClient:
         return self._write_refused()
 
     def _write_refused(self) -> FhirReadResult:
-        return FhirReadResult(state="malformed", message=self._messages["write_refused"])
+        return FhirReadResult(state="refused", message=self._messages["write_refused"])
 
     def _error(self, state: str) -> FhirReadResult:
         err = error_result(state, self._label)  # type: ignore[arg-type]
@@ -232,10 +232,11 @@ class FhirR4ReadClient:
                             body_preview += chunk
                             if len(body_preview) > 8192:
                                 break
-                        outcome = self._try_outcome(body_preview)
-                        if outcome is not None:
-                            return b"", used, self._from_error(outcome)
-                        return b"", used, self._from_error(map_http_status(status, self._label))
+                        outcome_code = self._outcome_code(body_preview)
+                        # Explicit HTTP status mappings win over body issue codes.
+                        return b"", used, self._from_error(
+                            map_http_status(status, self._label, outcome_code=outcome_code)
+                        )
                     content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
                     if content_type not in {"application/fhir+json", "application/json"}:
                         return b"", used, self._error("malformed")
@@ -261,6 +262,26 @@ class FhirR4ReadClient:
         if type(payload) is not dict:
             return None
         return map_operation_outcome(payload, self._label)
+
+    def _outcome_code(self, raw: bytes) -> str | None:
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, ValueError, json.JSONDecodeError):
+            return None
+        if type(payload) is not dict or payload.get("resourceType") != "OperationOutcome":
+            return None
+        issues = payload.get("issue")
+        if type(issues) is not list:
+            return None
+        for issue in issues:
+            if type(issue) is not dict:
+                continue
+            severity = issue.get("severity")
+            if severity in {"warning", "information"}:
+                continue
+            code = issue.get("code")
+            return code if type(code) is str else None
+        return None
 
     def _parse_json(self, raw: bytes) -> dict[str, Any] | FhirReadResult:
         try:

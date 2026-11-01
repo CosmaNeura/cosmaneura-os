@@ -21,11 +21,30 @@ SANDBOX_URLS = (
     "http://127.0.0.1:9443/r4",
 )
 
+# Case variants of allowlisted hosts must still pass (exact match is case-insensitive).
+SANDBOX_CASE_URLS = (
+    "https://FHIR.SANDBOX.EXAMPLE.COM/r4",
+    "https://Sandbox.Fhir.Example.Org/fhir",
+    "https://MOCK.EXAMPLE.COM/r4",
+)
+
 PRODUCTION_URLS = (
     "https://fhir.prd.cloud.tebra.com/fhir-request",
     "https://api.prod.example.com/fhir",
     "https://production.ehr.example.com/r4",
     "https://live.vendor.example.com/fhir",
+)
+
+# Look-alike hosts that previously matched substring/word markers must be refused.
+LOOKALIKE_REFUSED_URLS = (
+    "https://test.evil.com/fhir",
+    "https://mock-athena.example.net/r4",
+    "https://sandbox.attacker.io/fhir",
+    "https://fhir.sandbox.example.com./r4",  # trailing DNS dot
+    "https://not-sandbox.example.com/r4",
+    "https://api.example.com/fhir",
+    "https://something.test.evil.com/r4",
+    "https://prefix-mock.example.com/fhir",
 )
 
 
@@ -34,6 +53,14 @@ def test_sandbox_urls_are_accepted(url: str):
     assert is_sandbox_base_url(url)
     assert assert_allowed_base_url(url) == url.rstrip("/")
     assert production_base_refused(url) is False
+    client = FhirR4ReadClient(url)
+    assert client.base_url == url.rstrip("/")
+
+
+@pytest.mark.parametrize("url", SANDBOX_CASE_URLS)
+def test_allowlisted_hosts_match_case_insensitively(url: str):
+    assert is_sandbox_base_url(url)
+    assert assert_allowed_base_url(url) == url.rstrip("/")
     client = FhirR4ReadClient(url)
     assert client.base_url == url.rstrip("/")
 
@@ -65,12 +92,40 @@ def test_ambiguous_non_sandbox_hosts_are_refused():
         FhirR4ReadClient(url)
 
 
+@pytest.mark.parametrize("url", LOOKALIKE_REFUSED_URLS)
+def test_lookalike_hosts_are_refused(url: str):
+    assert is_sandbox_base_url(url) is False
+    with pytest.raises(ValueError):
+        assert_allowed_base_url(url)
+    with pytest.raises((PermissionError, ValueError)):
+        FhirR4ReadClient(url)
+
+
+def test_lookalike_host_with_nondefault_https_port_is_refused():
+    url = "https://test.evil.com:8443/fhir"
+    assert is_sandbox_base_url(url) is False
+    with pytest.raises(ValueError, match="fhir_base_url_invalid"):
+        assert_allowed_base_url(url)
+
+
+def test_uppercase_lookalike_hosts_are_refused():
+    for url in (
+        "https://TEST.EVIL.COM/fhir",
+        "https://MOCK-ATHENA.EXAMPLE.NET/r4",
+        "https://SANDBOX.ATTACKER.IO/fhir",
+    ):
+        assert is_sandbox_base_url(url) is False
+        with pytest.raises(ValueError):
+            assert_allowed_base_url(url)
+
+
 def test_invalid_base_urls_are_rejected():
     for url in (
         "ftp://sandbox.example.com/fhir",
-        "https://user:pass@sandbox.example.com/fhir",
-        "https://sandbox.example.com/fhir?x=1",
-        "https://sandbox.example.com/fhir#frag",
+        "https://user:pass@fhir.sandbox.example.com/fhir",
+        "https://fhir.sandbox.example.com/fhir?x=1",
+        "https://fhir.sandbox.example.com/fhir#frag",
+        "http://fhir.sandbox.example.com/fhir",  # plain http to non-local host
         "not a url",
     ):
         with pytest.raises(ValueError):
