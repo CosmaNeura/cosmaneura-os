@@ -72,6 +72,7 @@ def agreement(session, runtime, actor, *, created_at=BEFORE, **detail):
 
 def test_prior_identity_retains_history_without_reactivation(session):
     runtime, person, binding = member(session, binding_at=BEFORE)
+    assert binding is not None
     binding.active = False
     person.state = "paused"
     session.flush()
@@ -166,7 +167,8 @@ def test_legacy_agreement_is_independent_of_binding_and_recording_time(session, 
 def test_legacy_agreement_needs_scoped_executed_human_evidence(session, case):
     runtime, person, _ = member(session, bound=False)
     changed = {case: "" if case == "version" else "other"} if case in {"issuer", "subject", "organization_id", "doc_id", "version"} else {}
-    row = agreement(session, runtime, person, **changed)
+    row = agreement(session, runtime, person)
+    row.detail = {**row.detail, **changed}
     if case == "event_type":
         row.event_type = "agreement.proposed"
     elif case == "outcome":
