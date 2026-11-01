@@ -503,10 +503,16 @@ def test_mixed_case_note_keys_are_dropped_from_dicts_json_and_extras() -> None:
 
     install()
     extra_logger = logging.getLogger("cosmas_os.mixedextra")
-    previous_extra = (extra_logger.level, extra_logger.propagate, list(extra_logger.handlers))
+    previous_extra = (
+        extra_logger.level,
+        extra_logger.propagate,
+        list(extra_logger.handlers),
+        extra_logger.disabled,
+    )
     extra_logger.handlers = []
     extra_logger.setLevel(logging.INFO)
     extra_logger.propagate = False
+    extra_logger.disabled = False
     extra_logger.addHandler(Grab())
     try:
         extra_logger.info(
@@ -520,16 +526,48 @@ def test_mixed_case_note_keys_are_dropped_from_dicts_json_and_extras() -> None:
             },
         )
     finally:
-        level, propagate, handlers = previous_extra
-        extra_logger.handlers = handlers
-        extra_logger.setLevel(level)
-        extra_logger.propagate = propagate
+        _restore(extra_logger, previous_extra)
     assert len(grabbed) == 1
     recorded = grabbed[0].__dict__
     for spelling in (*spellings, "patientNote"):
         assert spelling not in recorded
     assert secret not in str(recorded)
     assert recorded["page"] == 2
+
+
+def test_exception_path_after_alembic_fileconfig_disabled_logger() -> None:
+    """Regression: suite migration tests disable uvicorn.error via fileConfig."""
+    from logging.config import fileConfig
+
+    install()
+    # Ensure the logger exists before fileConfig so disable_existing_loggers
+    # marks it disabled the same way test_workspace migrations do.
+    preexisting = logging.getLogger("uvicorn.error")
+    preexisting.disabled = False
+    fileConfig(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+    assert logging.getLogger("uvicorn.error").disabled is True
+
+    logger, stream, previous = _capture("uvicorn.error")
+    try:
+        assert logger.disabled is False
+        try:
+            _raise_with_note()
+        except RuntimeError:
+            logger.exception(
+                "request_id=req-synth-100 status_code=500 duration_ms=37"
+            )
+    finally:
+        _restore(logger, previous)
+    text = stream.getvalue()
+    for token in ("synthetic headache", "stuffed penguin", "penguin felt fine", "Zedstone"):
+        assert token not in text
+    assert "req-synth-100" in text
+    assert "500" in text
+    assert "37" in text
+    assert "Traceback (most recent call last)" in text
+    assert "patient_name = " not in text
+    assert "invented:invented" not in text
+    assert logging.getLogger("uvicorn.error").disabled is True
 
 
 def test_adjacent_redacted_tokens_collapse() -> None:
