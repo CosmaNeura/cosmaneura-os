@@ -12,7 +12,21 @@ from cosmas_os.plugins.ehr import (
     EhrTargetRefused,
     EhrWriteRefused,
 )
-from cosmas_os.plugins.ehr.connector import WRITE_ACTIONS
+from cosmas_os.plugins.ehr.connector import READ_ACTIONS, WRITE_ACTIONS
+from cosmas_os.plugins.ehr.refusals import PRODUCTION_TARGET_MESSAGE
+from cosmas_os.plugins.ehr.registry import build_default_registry
+
+BETA_MUTATION_GAPS = (
+    "DELETE",
+    "Write",
+    "patch",
+    "post",
+    "put",
+    "upsert",
+    "modify",
+    "amend",
+    "sign_order",
+)
 
 
 def _manifest(**overrides) -> CapabilityManifest:
@@ -47,10 +61,48 @@ def test_refuse_write_always_raises_for_known_mutations(action):
         connector.refuse_write(action)
 
 
-def test_refuse_write_prefix_actions():
+@pytest.mark.parametrize("action", BETA_MUTATION_GAPS)
+def test_assert_not_write_action_refuses_beta_mutation_gaps(action):
     connector = DeclaredEhrConnector(_manifest())
-    with pytest.raises(EhrWriteRefused):
-        connector.assert_not_write_action("write_custom_mutation")
+    with pytest.raises(EhrWriteRefused) as raised:
+        connector.assert_not_write_action(action)
+    assert raised.value.code == "ehr_write_refused"
+
+
+@pytest.mark.parametrize("action", [
+    " DELETE ",
+    "\tWrite\n",
+    "  patch  ",
+    "POST",
+    "Put",
+    " UPSERT ",
+    "Modify",
+    "AMEND",
+    " Sign_Order ",
+    "write_custom_mutation",
+    "unknown_action",
+    "",
+    "   ",
+])
+def test_assert_not_write_action_refuses_case_and_whitespace_variants(action):
+    connector = DeclaredEhrConnector(_manifest())
+    with pytest.raises(EhrWriteRefused) as raised:
+        connector.assert_not_write_action(action)
+    assert raised.value.code == "ehr_write_refused"
+
+
+@pytest.mark.parametrize("action", sorted(READ_ACTIONS))
+def test_assert_not_write_action_allows_explicit_read_actions(action):
+    connector = DeclaredEhrConnector(_manifest())
+    connector.assert_not_write_action(action)
+    connector.assert_not_write_action(f"  {action.upper()}  ")
+
+
+def test_default_registry_refuses_beta_mutation_gaps_on_elation():
+    connector = build_default_registry().require("elation")
+    for action in BETA_MUTATION_GAPS:
+        with pytest.raises(EhrWriteRefused):
+            connector.assert_not_write_action(action)
 
 
 def test_writes_supported_cannot_be_true_on_manifest():
@@ -72,13 +124,17 @@ def test_sandbox_refused_when_not_declared():
         connector.allow_target("sandbox")
     assert raised.value.code == "ehr_target_refused"
     assert raised.value.target == "sandbox"
+    assert raised.value.message == "That EHR target is not allowed."
 
 
 def test_production_refused_by_default_even_with_claim():
     connector = DeclaredEhrConnector(_manifest(production_supported=True))
     with pytest.raises(EhrTargetRefused) as raised:
         connector.allow_target("production")
+    assert raised.value.code == "ehr_target_refused"
     assert raised.value.target == "production"
+    assert raised.value.message == PRODUCTION_TARGET_MESSAGE
+    assert raised.value.message == "CosmaBot can only connect to sandbox EHRs right now."
 
 
 def test_production_refused_when_manifest_disallows_even_if_gate_allows():
@@ -87,8 +143,10 @@ def test_production_refused_when_manifest_disallows_even_if_gate_allows():
             return True
 
     connector = DeclaredEhrConnector(_manifest(production_supported=False))
-    with pytest.raises(EhrTargetRefused):
+    with pytest.raises(EhrTargetRefused) as raised:
         connector.allow_target("production", production_gate=AllowAll())
+    assert raised.value.code == "ehr_target_refused"
+    assert raised.value.message == PRODUCTION_TARGET_MESSAGE
 
 
 def test_production_allowed_only_with_manifest_claim_and_c14_gate():
@@ -108,8 +166,10 @@ def test_production_still_refused_when_c14_gate_denies():
             return False
 
     connector = DeclaredEhrConnector(_manifest(production_supported=True))
-    with pytest.raises(EhrTargetRefused):
+    with pytest.raises(EhrTargetRefused) as raised:
         connector.allow_target("production", production_gate=DenyAll())
+    assert raised.value.code == "ehr_target_refused"
+    assert raised.value.message == PRODUCTION_TARGET_MESSAGE
 
 
 def test_allow_read_refuses_undeclared_resource():
@@ -121,8 +181,10 @@ def test_allow_read_refuses_undeclared_resource():
 
 def test_allow_read_refuses_production_by_default():
     connector = DeclaredEhrConnector(_manifest())
-    with pytest.raises(EhrTargetRefused):
+    with pytest.raises(EhrTargetRefused) as raised:
         connector.allow_read("appointments", target="production")
+    assert raised.value.code == "ehr_target_refused"
+    assert raised.value.message == PRODUCTION_TARGET_MESSAGE
 
 
 def test_c6_practice_scope_hook_can_refuse():
@@ -181,5 +243,7 @@ def test_hook_slots_default_to_none_for_c2_c3_c4():
 
 def test_unknown_target_refused():
     connector = DeclaredEhrConnector(_manifest())
-    with pytest.raises(EhrTargetRefused):
+    with pytest.raises(EhrTargetRefused) as raised:
         connector.allow_target("staging")  # type: ignore[arg-type]
+    assert raised.value.code == "ehr_target_refused"
+    assert raised.value.message == "That EHR target is not allowed."

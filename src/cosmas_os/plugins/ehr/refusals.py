@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+PRODUCTION_TARGET_MESSAGE = "CosmaBot can only connect to sandbox EHRs right now."
+
 
 class EhrCapabilityError(ValueError):
     """Base error for capability and gate failures. Safe to show ``code`` only."""
@@ -24,8 +26,14 @@ class EhrWriteRefused(EhrCapabilityError):
 class EhrTargetRefused(EhrCapabilityError):
     """Raised when the target environment is not allowed (fail closed)."""
 
-    def __init__(self, target: str):
+    def __init__(self, target: str, message: str | None = None):
         self.target = target
+        if message is None:
+            if target == "production":
+                message = PRODUCTION_TARGET_MESSAGE
+            else:
+                message = "That EHR target is not allowed."
+        self.message = message
         super().__init__("ehr_target_refused")
 
 
