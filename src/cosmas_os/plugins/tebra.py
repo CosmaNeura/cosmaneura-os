@@ -28,6 +28,7 @@ from pydantic import ValidationError
 
 from cosmas_os.api.ehr_read_schemas import FhirMedications, FhirPatients, Observe, Status, Verify
 from cosmas_os.domain.hashing import payload_hash
+from cosmas_os.plugins.ehr.manifest import CapabilityManifest
 from cosmas_os.plugins.runtime import PluginError
 from cosmas_os.ports.ehr_reads import TebraVerifiedObservation, TebraWindowObservation, Window
 from cosmas_os.ports.tebra_fhir_ehr import FhirMedicationsObservation, FhirPatientsObservation
@@ -681,3 +682,42 @@ def call(runtime, name: str, arguments: object) -> dict[str, Any]:
     if not _same_account(status, after):
         return {"operation": spec.operation_id, "result": _state("stale", STALE), "recovery": RECOVERY}
     return {"operation": spec.operation_id, "result": projected, "recovery": RECOVERY}
+
+
+# Capability declaration for the shared EHR connector contract.
+# Does not change tool behavior, routes, or receipts.
+EHR_CAPABILITY = CapabilityManifest(
+    vendor_id="tebra",
+    display_name="Tebra",
+    auth_styles=frozenset({
+        "cosmas_session",
+        "tebra_soap_customer_key",
+        "tebra_fhir_bearer",
+    }),
+    readable_resources=frozenset({
+        "appointments",
+        "visit",
+        "patients",
+        "medications",
+    }),
+    unsupported_actions=frozenset({
+        "write_chart",
+        "prescribe",
+        "sign_note",
+        "book_appointment",
+        "patient_search_without_appointment",
+        "medication_next_page",
+        "read_problems",
+        "read_allergies",
+        "read_labs",
+        "soap_medication_list",
+        "production_target",
+    }),
+    sandbox_supported=True,
+    production_supported=False,
+    writes_supported=False,
+    notes=(
+        "Practice appointments and visit verification use the practice path; "
+        "authorized patients and medications use FHIR. Production stays refused."
+    ),
+)

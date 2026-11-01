@@ -24,6 +24,7 @@ from pydantic import ValidationError
 
 from cosmas_os.api.ehr_read_schemas import LabRead, Medications, Observe, Problems, Status
 from cosmas_os.domain.hashing import payload_hash
+from cosmas_os.plugins.ehr.manifest import CapabilityManifest
 from cosmas_os.plugins.runtime import PluginError
 from cosmas_os.ports.ehr_reads import (
     MedicationsObservation,
@@ -534,3 +535,33 @@ def call(runtime, name: str, arguments: object) -> dict[str, Any]:
     if not _same_account(status, after):
         return {"operation": spec.operation_id, "result": _state("stale", STALE), "recovery": RECOVERY}
     return {"operation": spec.operation_id, "result": projected, "recovery": RECOVERY}
+
+
+# Capability declaration for the shared EHR connector contract.
+# Does not change tool behavior, routes, or receipts.
+EHR_CAPABILITY = CapabilityManifest(
+    vendor_id="elation",
+    display_name="Elation",
+    auth_styles=frozenset({"cosmas_session", "oauth2_client_credentials"}),
+    readable_resources=frozenset({
+        "appointments",
+        "problems",
+        "medications",
+        "labs",
+    }),
+    unsupported_actions=frozenset({
+        "write_chart",
+        "prescribe",
+        "sign_note",
+        "book_appointment",
+        "read_allergies",
+        "production_target",
+    }),
+    sandbox_supported=True,
+    production_supported=False,
+    writes_supported=False,
+    notes=(
+        "Plugin tools call signed CosmaBot EHR reads. Vendor adapter auth is "
+        "OAuth2 client-credentials against the Elation sandbox only."
+    ),
+)
