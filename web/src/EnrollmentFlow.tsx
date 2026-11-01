@@ -199,10 +199,10 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
       {uncertain&&<div className="enrollment-status" role="status"><p>Your submission may be saved. Check progress before retrying.</p>
         <div className="enrollment-actions"><button onClick={check} disabled={busy}>Check saved progress</button>{pending.current?.replayable!==false&&<button onClick={retry} disabled={busy||!pending.current||!checkedPending}>Retry the same submission</button>}</div></div>}
       {!status?<><h1>{busy?'Loading saved setup…':'Continue your setup'}</h1><p>Sign-in and saved progress are checked before any practice or payment is created.</p><button onClick={check} disabled={busy}>Check saved progress</button></>:
-      stage==='account'?<><p className="enrollment-eyebrow">Your account</p><h1>Welcome to CosmaBot</h1><p>Confirm your name. Your sign-in is managed by Clerk.</p>
+      stage==='account'?<><p className="enrollment-eyebrow">Your account</p><h1>Welcome to CosmaBot</h1><p>Confirm your name to continue.</p>
         <form className="enrollment-form" onSubmit={saveProfile} noValidate>
           <Field name="name" label="Your name" value={name} onChange={setName} error={errors.name} autoComplete="name" disabled={formDisabled}/>
-          <p className="enrollment-hint">Use up to 120 characters for your workspace name.</p>
+          <p className="enrollment-hint">Use up to 120 characters for your name.</p>
           <Field name="title" label="Title (optional)" value={title} onChange={setTitle} error={errors.title} autoComplete="organization-title" required={false} disabled={formDisabled}/>
           <p className="enrollment-hint">Verified email: {status.profile?.email||initialEmail||'Provided by your signed-in account'}</p>
           <div className="enrollment-actions"><button className="primary" disabled={formDisabled}>Save and continue</button>{review&&<button type="button" onClick={()=>setReview(null)}>Back to saved setup</button>}</div>

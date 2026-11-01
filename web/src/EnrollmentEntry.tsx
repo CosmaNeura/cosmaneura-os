@@ -7,8 +7,8 @@ import { prepareEnrollmentWorkspaceToken } from './enrollment-clerk';
 import './enrollment.css';
 
 const enrollmentLocalization = {
-  signIn: {start: {title: 'Sign in to CosmaBot'}},
-  signUp: {start: {title: 'Create your CosmaBot account'}},
+  signIn: {start: {title: 'Sign in to CosmaBot'},emailCode: {subtitle: 'to continue to CosmaBot'}},
+  signUp: {start: {title: 'Create your CosmaBot account'},emailCode: {subtitle: 'to continue to CosmaBot'}},
 };
 
 export function enrollmentRouteRequested(enabled=import.meta.env.VITE_ENROLLMENT_ENABLED==='true',href=window.location.href,accountOnly=import.meta.env.VITE_ENROLLMENT_ACCOUNT_ONLY==='true'):boolean {
@@ -66,7 +66,7 @@ function EnrollmentClerkAccount({api,config}:{api:EnrollmentApi;config:Enrollmen
   if(auth.isSignedIn!==true){const signIn=window.location.pathname.startsWith('/sign-in'),destination=returnPath(window.location.search);
     return <main className="enrollment-page"><header className="enrollment-header"><a className="enrollment-brand" href="/onboarding">CosmaBot</a><nav><a href={signIn?destination:'/sign-in'+window.location.search}>{signIn?'Create account':'Sign in'}</a></nav></header>
       {config.data_mode==='synthetic'&&<p className="enrollment-synthetic-note" role="note">Synthetic staging · Use invented information only.</p>}
-      <section className="enrollment-card"><p className="enrollment-eyebrow">Account → Practice → Agreement → Trial → Chief</p><h1>{signIn?'Welcome back':'Create your CosmaBot account'}</h1>
+      <section className="enrollment-card"><p className="enrollment-eyebrow">Account → Practice → Agreement → Trial → Chief</p><p>{signIn?'Continue to your saved practice setup.':'Create an account to save your practice setup and review the agreement.'}</p>
         <p>Use Google, Microsoft, or email and password. Connecting a mailbox or calendar is a separate choice after setup.</p>
         <p>{config.activation_available?'A card is required for your 14-day free trial.':'Registration is available. Your trial starts when your workspace is ready.'} Solo is $300/month; 2–10 human users are $300 for the first user plus $100 for each additional user. 11+ users require an agreed quote.</p>
         <div className="enrollment-auth">{signIn?<SignIn routing="hash" signUpUrl={destination} forceRedirectUrl={destination}/>:<SignUp routing="hash" signInUrl={'/sign-in'+window.location.search} forceRedirectUrl={destination}/>}</div>

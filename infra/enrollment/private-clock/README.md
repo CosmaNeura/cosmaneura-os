@@ -154,6 +154,49 @@ reviewed private ingress/routing or sequential controlled staging deployment;
 their central origins alone are not evidence that browser traffic reaches them.
 The database-job image remains a SQL-only bootstrap/check image.
 
+### One hosted scope at a time
+
+The separate `private_clock_hosted` entrypoint can serve one immutable scope on
+the **existing owned staging enrollment API app**. It creates no dispatcher,
+public clock-selection route or production mode. The ordinary `enrollment.api:app`
+and loopback runner retain their existing behavior.
+
+After the original bindings and journal have actually qualified, the operator
+must review a staging-only deployment revision that retains the same API app,
+identity, HTTPS origin and six central secret versions. Supply every
+`ENROLLMENT_<FIELD>` from `EnrollmentSettings` explicitly, including blank
+optional values. Add only `ENROLLMENT_PRIVATE_CLOCK_BINDINGS` from the existing
+versioned packed-bindings secret and `ENROLLMENT_PRIVATE_CLOCK_JOURNAL_URL` from
+the selected A or B journal secret. The API identity must receive per-secret
+access to that selected journal credential; it receives no clock administrator
+credential or unselected journal credential. This optional operational overlay
+is not emitted by the ordinary renderer/runtime module and needs its own exact
+command/env/reference/grant review before deployment.
+
+Select the immutable scope in the reviewed command, never in a browser request:
+
+```sh
+python -m cosmas_os.enrollment.private_clock_hosted --slot a --binding-sha256 <original-a-canonical-hash> --intent SERVE_STAGING_STRIPE_CLOCK
+```
+
+The launcher rejects missing or extra enrollment settings, production/live
+credentials, a changed hash, mixed scope or wrong journal role. It adapts the
+selected values through owner-only temporary files to `create_explicit_app`,
+then removes those files before serving port 8000. The real Clerk verifier,
+`BoundWorkspaceConfirmer`, signed Box admission, durable journal and clock
+freshness/high-water checks remain the existing factory's authority. Listener
+startup is not evidence of actual owned ingress, TLS, usable owner setup or a
+qualified Checkout.
+
+Complete A's current clock operation and preserve its actual Checkout,
+subscription/trial tuple, journal and receipts. Switch to B only through a new
+reviewed deployment revision with B's original hash, allowed workspace origin
+and scoped journal reference. A's browser/webhook/Box requests are held while B
+is selected; complete each practice's webhook recovery with its original scope
+active. Restoring A uses its original inputs and journal, never a replacement
+subscription, trial or row. The single-scope verifier remains owner-only; this
+entrypoint does not qualify the later staff journey.
+
 Give each private composition only its own versioned journal credential and
 protected original binding. Construct `PostgresClockJournal` using that scoped
 SQLAlchemy `postgresql+psycopg` engine, then supply it to the existing
