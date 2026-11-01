@@ -91,3 +91,22 @@ run "qualified_runtime_preserves_admission_and_excludes_administrator_secrets" {
     error_message = "Deployment must preserve exact practice admission, secret-free web and runtime exclusion of administrator/reservation authority."
   }
 }
+run "configured_account_audience_matches_each_api_and_worker" {
+  command = plan
+  variables { deployment_file = "tests/.generated-audience-workloads.json" }
+  assert {
+    condition = alltrue([for app in values(azurerm_container_app.runtime) :
+    one([for env in one(app.template).container[0].env : env.value if env.name == "CLERK_AUDIENCE"]) == "cosmas-os-beta-api"])
+    error_message = "Every isolated API/worker must retain the same explicit scalar account session audience."
+  }
+}
+run "changed_practice_audience_denied_after_rendering" {
+  command = plan
+  variables { deployment_file = "tests/.generated-audience-mismatch.json" }
+  expect_failures = [terraform_data.guard]
+}
+run "list_account_audience_denied_after_rendering" {
+  command = plan
+  variables { deployment_file = "tests/.generated-audience-list.json" }
+  expect_failures = [terraform_data.guard]
+}

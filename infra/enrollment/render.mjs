@@ -56,7 +56,7 @@ export function render(input, { preflightTrustFile } = {}) {
     'Configure the admitted workspace origins.');
   const workspaceOrigins = [...new Set(input.workspace_origins.map(value => origin(value, environment, 'workspace origin')))];
 
-  exact(input.clerk, ['issuer', 'publishable_key', 'session_policy'], 'Clerk');
+  exact(input.clerk, ['issuer', 'publishable_key', 'session_policy', 'audience'], 'Clerk');
   const issuerUrl = new URL(input.clerk.issuer);
   const developmentHost = /^[a-z0-9]+(?:-[a-z0-9]+)*\.clerk\.accounts\.dev$/.test(issuerUrl.hostname);
   const issuer = environment === 'staging' && developmentHost
@@ -73,6 +73,9 @@ export function render(input, { preflightTrustFile } = {}) {
   const host = Buffer.from(encoded, 'base64').toString('utf8');
   requireValue(host === `${new URL(issuer).hostname}$`, 'Clerk publishable key and issuer do not match.');
   requireValue(input.clerk.session_policy === 'default_session', 'Use the default live-verified Clerk session policy.');
+  requireValue(input.clerk.audience === undefined || typeof input.clerk.audience === 'string'
+    && input.clerk.audience.length <= 255 && !/[^\x21-\x7e]/.test(input.clerk.audience),
+  'Use one exact printable session audience or leave it blank.');
 
   exact(input.stripe, [...PUBLIC_NAMES].map(name => name.replace('ENROLLMENT_STRIPE_', '').toLowerCase()), 'Stripe');
   const stripe = {};
@@ -144,6 +147,7 @@ export function render(input, { preflightTrustFile } = {}) {
     ENROLLMENT_CLERK_PUBLISHABLE_KEY: input.clerk.publishable_key,
     ENROLLMENT_CLERK_ISSUER: issuer,
     ENROLLMENT_CLERK_SESSION_POLICY: input.clerk.session_policy,
+    ...(input.clerk.audience !== undefined ? { ENROLLMENT_CLERK_AUDIENCE: input.clerk.audience } : {}),
     ENROLLMENT_CLERK_AUTHORIZED_PARTIES: JSON.stringify([app]),
     ENROLLMENT_STRIPE_API_VERSION: '2025-09-30.clover',
     ENROLLMENT_STRIPE_LIVE_MODE: String(environment === 'production'),
@@ -172,7 +176,7 @@ export function render(input, { preflightTrustFile } = {}) {
       CLERK_ISSUER: issuer,
       CLERK_JWKS_URL: `${issuer}/.well-known/jwks.json`,
       CLERK_SESSION_POLICY: 'enrollment_default',
-      CLERK_AUDIENCE: '',
+      CLERK_AUDIENCE: input.clerk.audience ?? '',
       CLERK_AUTHORIZED_PARTIES: [...new Set([app, workspace])].join(','),
       CORS_ALLOWED_ORIGINS: workspace,
       WORKSPACE_ENROLLMENT_MANAGED: 'true',

@@ -48,7 +48,7 @@ test('wrong product origins and mismatched Clerk identity are rejected', () => {
     { app_origin: 'https://app.cosmaneura.com' },
     { api_origin: 'https://api.staging.cosmas.ai.evil.example' },
     { clerk: { ...sample().clerk, publishable_key: `pk_test_${Buffer.from('other.example$').toString('base64')}` } },
-    { clerk: { ...sample().clerk, audience: 'cosmas-enrollment' } },
+    { clerk: { ...sample().clerk, audience: ['cosmas-enrollment'] } },
   ]) assert.throws(() => render({ ...sample(), ...patch }));
 });
 
@@ -59,6 +59,20 @@ test('development enrollment uses its matching Clerk development instance withou
   assert.equal(render(value)['public-env.json'].ENROLLMENT_CLERK_ISSUER, value.clerk.issuer);
   value.clerk.issuer += '/unexpected';
   assert.throws(() => render(value));
+});
+
+test('an explicit scalar default-session audience propagates only into the server and workspace policy', () => {
+  const value = sample(); value.clerk.audience = 'invented-enrollment-session';
+  value.workspace_origins = ['https://example-practice.staging.cosmas.ai'];
+  const files = render(value);
+  assert.equal(files['public-env.json'].ENROLLMENT_CLERK_AUDIENCE, value.clerk.audience);
+  assert.equal(files['workspace-account-env.json'][value.workspace_origins[0]].CLERK_AUDIENCE, value.clerk.audience);
+  assert.equal('VITE_ENROLLMENT_CLERK_AUDIENCE' in files['web-build-env.json'], false);
+  for (const audience of [null, true, ['audience'], 'with space', 'with\nnewline', 'trailing\n', 'a'.repeat(256)]) {
+    assert.throws(() => render({ ...value, clerk: { ...value.clerk, audience } }));
+  }
+  value.clerk.audience = '';
+  assert.equal(render(value)['public-env.json'].ENROLLMENT_CLERK_AUDIENCE, '');
 });
 
 test('practice setup admits the account session without making it a clinical workspace session', () => {
@@ -224,6 +238,65 @@ function intakeFixture(t) {
   attach();
   return { input, payload, trust, key, evidenceFiles, attach, directory };
 }
+
+function audienceIntakeFixture(t) {
+  const fixture = intakeFixture(t), { input, payload, evidenceFiles, directory } = fixture;
+  input.clerk.audience = 'invented-enrollment-session';
+  const binding = {
+    kind: 'cosmabot.dev-clerk.session-claims-read.v1', observed_at: payload.issued_at,
+    instance_id: payload.clerk.configuration.instance_id, issuer: payload.clerk.issuer,
+    source_url: `https://dashboard.clerk.com/apps/app_inventedfixture/instances/${payload.clerk.configuration.instance_id}/sessions`,
+    session_token_name: '__session', claims: { aud: input.clerk.audience }, dom_sha256: '6'.repeat(64),
+    vendor_writes: false, token_values_captured: false,
+  };
+  const raw = JSON.stringify(binding);
+  evidenceFiles.clerk_session_claims = join(directory, 'session-claims.json');
+  writeFileSync(evidenceFiles.clerk_session_claims, raw, { mode: 0o600 });
+  Object.assign(payload.clerk, { audience: input.clerk.audience, session_claims_binding: binding,
+    session_claims_evidence_sha256: createHash('sha256').update(raw).digest('hex') });
+  fixture.attach();
+  return fixture;
+}
+
+test('signed intake audience binds retained actual default-session configuration without granting trial access', t => {
+  const { input, trust } = audienceIntakeFixture(t);
+  const files = render(input, { preflightTrustFile: trust });
+  assert.equal(files['public-env.json'].ENROLLMENT_CLERK_AUDIENCE, input.clerk.audience);
+  assert.equal(files['public-env.json'].ENROLLMENT_STRIPE_ACQUISITION_ENABLED, 'false');
+  assert.equal(files['public-env.json'].ENROLLMENT_ACTIVATION_AVAILABLE, 'false');
+  assert.equal(JSON.stringify(files['web-build-env.json']).includes('session_claims'), false);
+  assert.equal(JSON.stringify(files['public-env.json']).includes('session_claims_binding'), false);
+  for (const audience of [undefined, '', 'other-audience']) {
+    const changed = structuredClone(input); changed.clerk.audience = audience;
+    assert.throws(() => render(changed, { preflightTrustFile: trust }));
+  }
+  const original = intakeFixture(t);
+  original.input.clerk.audience = input.clerk.audience;
+  assert.throws(() => render(original.input, { preflightTrustFile: original.trust }));
+});
+
+test('audience attestation rejects absent, mismatched or unsafe retained session configuration', t => {
+  const { payload, key, evidenceFiles } = audienceIntakeFixture(t);
+  for (const change of [
+    value => { delete value.clerk.session_claims_binding; },
+    value => { value.clerk.audience += '\n'; value.clerk.session_claims_binding.claims.aud = value.clerk.audience; },
+    value => { value.clerk.session_claims_binding.claims.aud = ['invented-enrollment-session']; },
+    value => { value.clerk.session_claims_binding.instance_id = 'ins_other'; },
+    value => { value.clerk.session_claims_binding.issuer = 'https://other.clerk.accounts.dev'; },
+    value => { value.clerk.session_claims_binding.source_url += '\n'; },
+    value => { value.clerk.session_claims_binding.observed_at += 86400; },
+    value => { value.clerk.session_claims_binding.vendor_writes = true; },
+    value => { value.clerk.session_claims_binding.token_values_captured = true; },
+    value => { value.clerk.session_claims_binding.session_token_name = 'other-template'; },
+  ]) {
+    const changed = structuredClone(payload); change(changed);
+    assert.throws(() => signStagingPreflight(changed, key, evidenceFiles));
+  }
+  const withoutClaims = { ...evidenceFiles }; delete withoutClaims.clerk_session_claims;
+  assert.throws(() => signStagingPreflight(payload, key, withoutClaims));
+  writeFileSync(evidenceFiles.clerk_session_claims, '{}', { mode: 0o600 });
+  assert.throws(() => signStagingPreflight(payload, key, evidenceFiles));
+});
 
 test('trusted configured-method Development preflight permits auth testing/intake while trial and deployment stay closed', t => {
   const { input, trust } = intakeFixture(t);

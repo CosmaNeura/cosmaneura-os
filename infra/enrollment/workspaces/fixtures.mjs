@@ -31,4 +31,11 @@ if(process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url
   input.create_migration_jobs=true;write('migrate');
   for(const p of input.practices){p.migration_receipt_sha256='f'.repeat(64);p.reservation_receipt_sha256='0'.repeat(64);}
   input.create_owner_reservation_jobs=true;input.deploy_workloads=true;write('workloads');
+  input.account.audience='cosmas-os-beta-api';write('audience-workloads');
+  const audienceMismatch=structuredClone(render(input)['deployment.json']);
+  audienceMismatch.practices.a.api_env.CLERK_AUDIENCE='';
+  writeFileSync(new URL('.generated-audience-mismatch.json',dir),JSON.stringify(audienceMismatch,null,2)+'\n');
+  const audienceList=structuredClone(render(input)['deployment.json']);
+  audienceList.account.audience=['cosmas-os-beta-api'];
+  writeFileSync(new URL('.generated-audience-list.json',dir),JSON.stringify(audienceList,null,2)+'\n');
 }

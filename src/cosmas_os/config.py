@@ -759,11 +759,12 @@ class Settings(BaseSettings):
         if self.clerk_session_policy == "audience":
             return [] if self.clerk_audience else ["CLERK_AUDIENCE is required"]
         if self.clerk_session_policy == "enrollment_default":
-            if (not self.workspace_enrollment_managed or self.clerk_audience != ""
+            if (not self.workspace_enrollment_managed or type(self.clerk_audience) is not str
+                    or self.clerk_audience and not re.fullmatch(r"[\x21-\x7e]{1,255}", self.clerk_audience)
                     or self.auth_mode != "clerk_jwt" or self.cosmas_env != "early_adopter_beta"
                     or not self._is_exact_https_origin(self.clerk_issuer or "")
                     or self.workspace_enrollment_configuration_errors()):
-                return ["Enrollment default sessions require managed admission, exact issuer and explicitly empty audience"]
+                return ["Enrollment default sessions require managed admission, exact issuer and explicit blank or bounded scalar audience"]
             return []
         if (self.clerk_session_policy != "shared_staging" or self.clerk_audience != ""
                 or self.cosmas_env not in {"early_adopter_beta", "standalone_clerk_synthetic"}

@@ -32,14 +32,15 @@ variable "postgres_admin_passwords" {
   }
 }
 locals {
-  d               = jsondecode(file(var.deployment_file))
-  f               = local.d.foundation
-  practices       = local.d.practices
-  names           = { for key in keys(local.practices) : key => "cews-stg-${local.d.namespace}-${key}" }
-  tags            = { product = "cosmabot", component = "enrollment-practice-runtime", environment = "staging", clinical_data = "false" }
-  scope           = lower("/subscriptions/${local.f.subscription_id}/resourceGroups/${local.f.resource_group_name}/providers/")
-  secret_keys     = { DATABASE_URL = "database-url", REDIS_URL = "redis-url", WORKSPACE_ENROLLMENT_ADMISSION_SECRET = "enrollment-admission-key", DATABASE_ADMIN_URL = "database-admin-url", OWNER_MANIFEST = "owner-manifest" }
-  runtime_secrets = { for key, p in local.practices : key => { for name, reference in p.secret_references : name => reference if contains(["DATABASE_URL", "REDIS_URL", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET"], name) } }
+  d                = jsondecode(file(var.deployment_file))
+  account_audience = try(local.d.account.audience, "")
+  f                = local.d.foundation
+  practices        = local.d.practices
+  names            = { for key in keys(local.practices) : key => "cews-stg-${local.d.namespace}-${key}" }
+  tags             = { product = "cosmabot", component = "enrollment-practice-runtime", environment = "staging", clinical_data = "false" }
+  scope            = lower("/subscriptions/${local.f.subscription_id}/resourceGroups/${local.f.resource_group_name}/providers/")
+  secret_keys      = { DATABASE_URL = "database-url", REDIS_URL = "redis-url", WORKSPACE_ENROLLMENT_ADMISSION_SECRET = "enrollment-admission-key", DATABASE_ADMIN_URL = "database-admin-url", OWNER_MANIFEST = "owner-manifest" }
+  runtime_secrets  = { for key, p in local.practices : key => { for name, reference in p.secret_references : name => reference if contains(["DATABASE_URL", "REDIS_URL", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET"], name) } }
 }
 provider "azurerm" {
   subscription_id                 = local.f.subscription_id
@@ -114,9 +115,13 @@ resource "terraform_data" "guard" {
       error_message = "Private execution requires complete per-Box references, reservation requires migrated state, and domains require explicit ownership."
     }
     precondition {
+      condition     = try(local.account_audience == tostring(local.account_audience) && (local.account_audience == "" || can(regex("^[!-~]{1,255}$", local.account_audience))), false)
+      error_message = "Account audience must be explicitly blank or one bounded printable scalar; lists and inferred audiences are forbidden."
+    }
+    precondition {
       condition = alltrue([for p in values(local.practices) :
         p.api_env.COSMAS_ENV == "early_adopter_beta" && p.api_env.DATA_MODE == "synthetic" && p.api_env.AUTH_MODE == "clerk_jwt" &&
-        p.api_env.CLERK_SESSION_POLICY == "enrollment_default" && p.api_env.CLERK_AUDIENCE == "" && p.api_env.WORKSPACE_ENROLLMENT_MANAGED == "true" &&
+        p.api_env.CLERK_SESSION_POLICY == "enrollment_default" && p.api_env.CLERK_AUDIENCE == local.account_audience && p.api_env.WORKSPACE_ENROLLMENT_MANAGED == "true" &&
         p.api_env.BETA_BOX_ID == p.plan.box_id && p.api_env.CLERK_ORGANIZATION_ID == p.plan.organization_id &&
         p.api_env.WORKSPACE_ENROLLMENT_PRACTICE_ID == p.plan.practice_id && p.api_env.WORKSPACE_ENROLLMENT_ACCOUNT_ORIGIN == local.d.account.app_origin &&
         p.api_env.WORKSPACE_ENROLLMENT_API_ORIGIN == local.d.account.api_origin && p.api_env.CORS_ALLOWED_ORIGINS == "${local.d.account.app_origin},${p.web_origin}" &&

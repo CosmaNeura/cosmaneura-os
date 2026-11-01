@@ -132,6 +132,30 @@ request URLs and artifact hashes to the configured metadata and selected
 intake. The signer also requires equality with the independently protected
 retained artifact. Absent concrete request identity evidence fails closed.
 
+If the selected Development instance's existing default session customization
+declares an audience, retain the actual session claim configuration separately;
+do not change that customization or create a named JWT template. Configure the
+same exact scalar in the manifest's optional `clerk.audience`. Add these three
+fields to the payload's `clerk` object: `audience`, `session_claims_binding` and
+`session_claims_evidence_sha256`. The binding is the retained
+`cosmabot.dev-clerk.session-claims-read.v1` JSON with exactly `kind`, physical
+`observed_at`, matching `instance_id` / `issuer`, the official Dashboard
+`source_url` ending in `/instances/<same-instance>/sessions`,
+`session_token_name: "__session"`, `claims: {"aud": "<same exact scalar>"}`,
+`dom_sha256`, `vendor_writes: false` and `token_values_captured: false`. Retain the
+actual visible configuration evidence, never a JWT or session secret. This
+measurement must be no more than 24 hours before issuance; the operator draft
+constructor also caps expiry at its observation plus 24 hours.
+
+For this mode, add `clerk_session_claims` as the seventh protected evidence-path
+entry. The signer hashes/parses it and requires exact equality with the binding
+before attesting. The renderer binds the signed audience to the manifest, so a
+no-audience attestation cannot be transplanted into a configured-audience
+deployment. Missing, wrong, nonscalar or unmeasured audience configurations
+fail closed. Omitted/blank manifest audience preserves the existing no-audience
+policy and six-file evidence contract. A configured audience adds no Org,
+practice, billing or clinical authority.
+
 Prepare a separate protected evidence-path JSON with exactly
 `database_check`, `database_execution`, `hosting`, `clerk_environment` and
 `clerk_instance`, plus `clerk_identity`, mapping to absolute protected artifact paths. Artifact

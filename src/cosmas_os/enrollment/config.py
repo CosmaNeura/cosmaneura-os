@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .domain import (
@@ -37,6 +37,9 @@ class EnrollmentSettings(BaseSettings):
     clerk_secret_key: SecretStr = SecretStr("")
     clerk_issuer: str = ""
     clerk_session_policy: Literal["default_session"] = "default_session"
+    # Blank preserves the no-audience default. A configured value is exact,
+    # never an alternative audience or a replacement for session/party checks.
+    clerk_audience: str = Field(default="", strict=True, max_length=255)
     clerk_authorized_parties: list[str] = []
     # The selected instance must actually have these methods configured by its operator.
     clerk_methods_verified: bool = False
@@ -60,6 +63,8 @@ class EnrollmentSettings(BaseSettings):
 
     def auth_errors(self) -> list[str]:
         errors: list[str] = []
+        if any(ord(c) < 33 or ord(c) > 126 for c in self.clerk_audience):
+            errors.append("Configure one exact printable Clerk session audience or leave it blank.")
         issuer = urlparse(self.clerk_issuer)
         if (not owned_origin(self.clerk_issuer) or not issuer.hostname
                 or not self.clerk_authorized_parties

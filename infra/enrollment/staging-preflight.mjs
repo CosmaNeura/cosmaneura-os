@@ -105,6 +105,27 @@ function boundClerkIdentity(clerk, issuedAt) {
   'retained actual request/key/instance/party identity binding does not match this Development intake');
 }
 
+function boundSessionAudience(clerk, issuedAt) {
+  if (clerk.audience === undefined) return;
+  const binding = clerk.session_claims_binding;
+  requireValue(typeof clerk.audience === 'string' && clerk.audience.length >= 1 && clerk.audience.length <= 255
+    && !/[^\x21-\x7e]/.test(clerk.audience),
+    'configured audience must be one exact nonempty scalar');
+  exact(binding, ['kind', 'observed_at', 'instance_id', 'issuer', 'source_url', 'session_token_name',
+    'claims', 'dom_sha256', 'vendor_writes', 'token_values_captured']);
+  exact(binding.claims, ['aud']);
+  requireValue(binding.kind === 'cosmabot.dev-clerk.session-claims-read.v1' && Number.isSafeInteger(binding.observed_at)
+    && binding.observed_at <= issuedAt && binding.observed_at >= issuedAt - 86400
+    && binding.instance_id === clerk.configuration.instance_id && binding.issuer === clerk.issuer
+    && typeof binding.source_url === 'string'
+    && new RegExp(`^https://dashboard\\.clerk\\.com/apps/app_[A-Za-z0-9_]{1,240}/instances/${binding.instance_id}/sessions$`)
+      .exec(binding.source_url)?.[0] === binding.source_url
+    && binding.session_token_name === '__session' && binding.claims.aud === clerk.audience
+    && sha(binding.dom_sha256) && binding.vendor_writes === false && binding.token_values_captured === false
+    && sha(clerk.session_claims_evidence_sha256),
+  'require current retained default-session claim configuration for this same Development instance');
+}
+
 function measurements(payload) {
   exact(payload, ['contract_version', 'purpose', 'environment', 'synthetic_only', 'source_commit', 'image',
     'app_origin', 'api_origin', 'issued_at', 'expires_at', 'database', 'hosting', 'clerk']);
@@ -151,7 +172,8 @@ function measurements(payload) {
 
   const clerk = payload.clerk;
   exact(clerk, ['issuer', 'publishable_key', 'authorized_parties', 'methods', 'invite_only', 'policy_evidence_sha256',
-    'instance_evidence_sha256', 'configuration', 'identity_binding', 'identity_evidence_sha256']);
+    'instance_evidence_sha256', 'configuration', 'identity_binding', 'identity_evidence_sha256',
+    ...(clerk.audience !== undefined ? ['audience', 'session_claims_binding', 'session_claims_evidence_sha256'] : [])]);
   requireValue(/^https:\/\/[a-z0-9]+(?:-[a-z0-9]+)*\.clerk\.accounts\.dev$/.test(clerk.issuer) &&
     typeof clerk.publishable_key === 'string' && clerk.publishable_key.startsWith('pk_test_') &&
     Buffer.from(clerk.publishable_key.slice(8), 'base64').toString() === `${new URL(clerk.issuer).hostname}$` &&
@@ -160,6 +182,7 @@ function measurements(payload) {
   'require the measured matching invite-only Development instance and exact account party');
   configuredClerk(clerk.configuration);
   boundClerkIdentity(clerk, payload.issued_at);
+  boundSessionAudience(clerk, payload.issued_at);
   exact(clerk.methods, ['password', 'google', 'microsoft']);
   for (const method of Object.values(clerk.methods)) {
     exact(method, ['configured', 'evidence_sha256']);
@@ -172,7 +195,8 @@ function measurements(payload) {
 // measurements; it performs no vendor calls and is not itself a measurement.
 export function signStagingPreflight(payload, operatorPrivateKeyFile, evidenceFiles) {
   measurements(payload);
-  exact(evidenceFiles, ['database_check', 'database_execution', 'hosting', 'clerk_environment', 'clerk_instance', 'clerk_identity']);
+  exact(evidenceFiles, ['database_check', 'database_execution', 'hosting', 'clerk_environment', 'clerk_instance', 'clerk_identity',
+    ...(payload.clerk.audience !== undefined ? ['clerk_session_claims'] : [])]);
   const evidence = Object.fromEntries(Object.entries(evidenceFiles).map(([name, path]) => [name, protectedRead(path)]));
   requireValue(canonical(JSON.parse(evidence.database_check)) === canonical(payload.database.check) &&
     canonical(JSON.parse(evidence.hosting)) === canonical(payload.hosting) &&
@@ -183,6 +207,10 @@ export function signStagingPreflight(payload, operatorPrivateKeyFile, evidenceFi
     canonical(JSON.parse(evidence.clerk_identity)) === canonical(payload.clerk.identity_binding) &&
     canonical(clerkConfigurationFromReceipts(JSON.parse(evidence.clerk_environment), JSON.parse(evidence.clerk_instance))) === canonical(payload.clerk.configuration),
   'retained actual component receipts and derived configured-method metadata must match before attesting');
+  if (payload.clerk.audience !== undefined) requireValue(
+    digest(evidence.clerk_session_claims) === payload.clerk.session_claims_evidence_sha256 &&
+    canonical(JSON.parse(evidence.clerk_session_claims)) === canonical(payload.clerk.session_claims_binding),
+  'retained default-session audience configuration must match before attesting');
   return { payload, signature: sign(null, Buffer.from(canonical(payload)), keyFile(operatorPrivateKeyFile, true)).toString('base64') };
 }
 
@@ -197,6 +225,7 @@ export function verifyStagingPreflight(input, receipt, operatorPublicKeyFile) {
     payload.source_commit === input.source_commit && payload.image === input.image &&
     payload.clerk.issuer === input.clerk.issuer && payload.clerk.publishable_key === input.clerk.publishable_key &&
     input.clerk.session_policy === 'default_session' &&
+    (payload.clerk.audience ?? '') === (input.clerk.audience ?? '') &&
     payload.database.runtime_secret_reference === input.secret_references.ENROLLMENT_DATABASE_URL &&
     Object.values(input.secret_references).every(reference => reference.startsWith(payload.database.key_vault_uri + 'secrets/')),
   'receipt does not bind this selected source/image/host/identity/database configuration');

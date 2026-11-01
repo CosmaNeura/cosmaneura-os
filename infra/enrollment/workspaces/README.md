@@ -69,7 +69,14 @@ public `release_operator_object_id` for the operator record, plus:
   VNet/Container Apps environment/ACR IDs and registry server,
   `postgres_subnet_id`, `private_endpoint_subnet_id`, `vault_private_dns_zone_id`.
 - `account`: the exact central `app_origin`, `api_origin`, selected development
-  Clerk `issuer` and matching public `publishable_key`. This bridge requires
+  Clerk `issuer` and matching public `publishable_key`, plus optional explicit
+  `audience` matching the retained default session claim policy. Omission or
+  `""` keeps the no-audience policy; a configured value must be one printable
+  ASCII scalar (1–255 characters, without whitespace). Both workspace runtimes
+  receive that same `CLERK_AUDIENCE`: configured mode requires an exact scalar
+  JWT claim and rejects missing/wrong/list audiences; blank mode rejects any
+  `aud` claim. Issuer, authorized party, session, live Org, registry and Box
+  admission checks remain required. This bridge requires
   `https://onboarding.staging.cosmas.ai` and
   `https://enrollment-api.staging.cosmas.ai`; older beta or account aliases are
   rejected, so recovery stays on the same enrollment Clerk instance.

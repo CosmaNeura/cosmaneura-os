@@ -107,7 +107,7 @@ def test_rendered_runtime_matches_existing_hosted_configuration(files):
         ("BOX_POSTGRES_HOST", "central.postgres.database.azure.com"),
         ("BETA_BOX_ID", "00000000-0000-4000-8000-000000000000"),
         ("EXPECTED_SCHEMA_REVISION", "unreviewed-head"),
-        ("CLERK_AUDIENCE", "named-template"),
+        ("CLERK_AUDIENCE", "named audience"),
     ],
 )
 def test_job_refuses_before_database_or_readiness(files, monkeypatch, field, value):
@@ -118,6 +118,19 @@ def test_job_refuses_before_database_or_readiness(files, monkeypatch, field, val
     )
     with pytest.raises(ValueError):
         job.run("migrate", env)
+
+
+def test_workspace_runtime_and_job_accept_only_explicit_bounded_scalar_audience(files):
+    from cosmas_os.config import Settings
+
+    env = environment(files)
+    env["CLERK_AUDIENCE"] = "cosmas-os-beta-api"
+    runtime = Settings(_env_file=None, **{name.lower(): value for name, value in env.items()})
+    assert runtime.runtime_configuration_errors() == []
+    assert job.binding(env)["source_commit"] == env["WORKSPACE_RELEASE_SOURCE_COMMIT"]
+    for value in [None, ["cosmas-os-beta-api"], 123, False, " ", "named audience", "a" * 256, "é"]:
+        with pytest.raises(ValueError):
+            job.binding(env | {"CLERK_AUDIENCE": value})
 
 
 def test_private_url_preparation_is_separate_and_all_inputs_checked_first(tmp_path):

@@ -30,7 +30,8 @@ def binding(environ: dict[str, str]) -> dict[str, str]:
         or environ.get("DATA_MODE") != "synthetic"
         or environ.get("WORKSPACE_ENROLLMENT_MANAGED") != "true"
         or environ.get("CLERK_SESSION_POLICY") != "enrollment_default"
-        or environ.get("CLERK_AUDIENCE") != ""
+        or type(environ.get("CLERK_AUDIENCE")) is not str
+        or environ["CLERK_AUDIENCE"] and not re.fullmatch(r"[\x21-\x7e]{1,255}", environ["CLERK_AUDIENCE"])
         or environ.get("EXPECTED_SCHEMA_REVISION") != EXPECTED_SCHEMA_REVISION
     ):
         raise ValueError("synthetic bound deployment required")

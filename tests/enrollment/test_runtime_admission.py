@@ -227,10 +227,12 @@ def test_owned_adapter_does_not_accept_unverified_or_old_response(admission_case
     assert c.adapter.authorize(c.token, "user_synthetic_owner-a")["enforced"]
 
 
-def test_default_session_requires_complete_managed_configuration_and_empty_audience(admission_case):
+def test_default_session_requires_complete_managed_configuration_and_explicit_audience_policy(admission_case):
     c = admission_case
     assert c.runtime.clerk_session_configuration_errors() == []
-    c.runtime.clerk_audience = "unexpected"
+    c.runtime.clerk_audience = "cosmas-os-beta-api"
+    assert c.runtime.clerk_session_configuration_errors() == []
+    c.runtime.clerk_audience = "invalid audience"
     assert c.runtime.clerk_session_configuration_errors()
     c.runtime.clerk_audience = ""
     c.runtime.workspace_enrollment_managed = False

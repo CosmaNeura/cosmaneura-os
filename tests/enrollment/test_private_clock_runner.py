@@ -139,19 +139,25 @@ def wire_fixture(lab, postgres_journal, monkeypatch):
     return engines
 
 
-def test_explicit_real_factory_wiring_keeps_original_trial_and_ignores_ambient(runner_files, lab, postgres_journal, monkeypatch):
+@pytest.mark.parametrize("audience", ["", "invented-enrollment-session"])
+def test_explicit_real_factory_wiring_keeps_original_trial_and_ignores_ambient(runner_files, lab, postgres_journal, monkeypatch, audience):
     _, paths = runner_files
+    configuration = json.loads(paths["configuration_path"].read_text())
+    configuration["enrollment"]["clerk_audience"] = audience
+    paths["configuration_path"].write_text(json.dumps(configuration))
     start_trial(lab)
     before = PostgresClockJournal(postgres_journal.engine, lab.binding).read()
     engines = wire_fixture(lab, postgres_journal, monkeypatch)
     monkeypatch.setenv("ENROLLMENT_PRODUCTION_QUALIFIED", "true")
     monkeypatch.setenv("ENROLLMENT_STRIPE_LIVE_MODE", "true")
+    monkeypatch.setenv("ENROLLMENT_CLERK_AUDIENCE", "untrusted-ambient-audience")
     app = runner.create_explicit_app(**paths)
     with TestClient(app) as client:
         response = client.get("/enrollment/v1/config")
         assert response.status_code == 200 and response.json()["workspace_confirmation_configured"] is True
         assert app.state.enrollment_service.settings.stripe_live_mode is False
         assert app.state.enrollment_service.settings.production_qualified is False
+        assert app.state.enrollment_service.settings.clerk_audience == audience
         assert client.put("/enrollment/v1/practice", json={}).status_code == 503
     assert len(engines) == 2 and engines[0].database != engines[1].database
     assert PostgresClockJournal(postgres_journal.engine, lab.binding).read() == before

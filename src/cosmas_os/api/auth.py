@@ -248,12 +248,19 @@ class ClerkTokenVerifier:
                 "require": ["exp", "iat", "nbf", "iss", "sub", "sid"] + ([] if native_origin else ["azp"]),
                 "verify_aud": True,
             }
+            enrollment_default = self._settings.clerk_session_policy == "enrollment_default"
+            audience = (None if self._settings.clerk_session_policy == "shared_staging"
+                        or enrollment_default and self._settings.clerk_audience == ""
+                        else self._settings.clerk_audience)
+            if enrollment_default and audience:
+                options["require"].append("aud")
+                options["strict_aud"] = True
             claims = jwt.decode(
                 token,
                 signing_key.key,
                 algorithms=["RS256"],
                 issuer=self._settings.clerk_issuer,
-                audience=None if self._settings.clerk_session_policy in {"shared_staging", "enrollment_default"} else self._settings.clerk_audience,
+                audience=audience,
                 options=options,
                 leeway=5,
             )
@@ -265,12 +272,13 @@ class ClerkTokenVerifier:
         subject = claims.get("sub")
         session_id = claims.get("sid")
         authorized_party = claims.get("azp")
-        # The shared development instance issues default sessions without aud.
-        # Require complete absence, including rejection of null/empty claims;
-        # verify_aud above still rejects tokens intended for another API.
+        # Blank default/shared policy requires complete absence, including
+        # null/empty claims. An explicitly configured enrollment audience must
+        # be one exact scalar; unrelated beta audience behavior stays unchanged.
         if (not isinstance(subject, str) or not subject or len(subject) > 255
                 or not isinstance(session_id, str) or not session_id or len(session_id) > 255
-                or self._settings.clerk_session_policy in {"shared_staging", "enrollment_default"} and "aud" in claims):
+                or audience is None and self._settings.clerk_session_policy in {"shared_staging", "enrollment_default"} and "aud" in claims
+                or enrollment_default and audience and (type(claims.get("aud")) is not str or claims["aud"] != audience)):
             raise AuthenticationFailed("invalid bearer token")
         # Clerk native clients authenticate with Authorization and cannot send
         # Origin alongside it. Their signed session JWT can therefore omit azp.

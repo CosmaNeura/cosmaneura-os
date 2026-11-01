@@ -39,6 +39,22 @@ test('Central US foundation preserves the same owned two-practice origins and cl
   assert.equal(d.deployed,false);assert.equal(d.workspace_ready,false);
 });
 
+test('both workspace runtimes receive only the explicit scalar account audience while omission remains blank',()=>{
+  const input=candidate();input.account.audience='cosmas-os-beta-api';
+  const files=render(input);
+  for(const slot of ['a','b']) {
+    assert.equal(files['deployment.json'].practices[slot].api_env.CLERK_AUDIENCE,input.account.audience);
+    assert.equal(files['deployment.json'].practices[slot].api_env.CLERK_SESSION_POLICY,'enrollment_default');
+    assert.deepEqual(files[`web-${slot}.env.json`],render(candidate())[`web-${slot}.env.json`]);
+  }
+  for(const audience of [null,undefined,false,123,['cosmas-os-beta-api'],{},'named audience',' ', '\n','cosmas-os-beta-api\n','a'.repeat(256),'é']) {
+    const invalid=candidate();invalid.account.audience=audience;
+    assert.throws(()=>render(invalid),/scalar account audience/);
+  }
+  input.account.audience='';
+  assert.equal(render(input)['deployment.json'].practices.a.api_env.CLERK_AUDIENCE,'');
+});
+
 test('foundation region is limited to exact East US 2 or Central US values',()=>{
   for(const location of ['eastus','westus2','canadacentral','westeurope','centralus ','CENTRALUS',null]) {
     const input=candidate();input.foundation.location=location;assert.throws(()=>render(input),/independent staging foundation required/);

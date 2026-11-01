@@ -33,13 +33,19 @@ origins may use `<practice-slug>.workspace.cosmas.ai`, paired with
 than inferred from the naming pattern. Enrollment routing is separate
 from existing native and clinical API routing.
 
-The `clerk` object contains `issuer`, its matching `publishable_key` and
-`session_policy: "default_session"`. Staging also admits the selected matching
+The `clerk` object contains `issuer`, its matching `publishable_key`,
+`session_policy: "default_session"` and optional `audience`. Staging also admits the selected matching
 `*.clerk.accounts.dev` issuer. The selected instance must actually enable
-Google, Microsoft and email/password. Default Clerk session tokens have no
-audience claim; verification requires their session ID, exact issuer/authorized
-app origin and a live active session with verified primary email. Custom token
-templates and Core's sign-in settings are not changed. Rendering configuration
+Google, Microsoft and email/password. With omitted or blank audience,
+verification forbids every audience claim. If the selected instance's existing
+default session customization declares an audience, configure that exact scalar
+as `audience` / `ENROLLMENT_CLERK_AUDIENCE`; verification requires it and rejects
+missing, wrong or list-valued audiences. Both modes require the session ID,
+exact issuer/authorized app origin and a live active session with verified
+primary email. Practice runtime configuration receives the same explicit value
+as `CLERK_AUDIENCE`; it retains its separate Org/Box/admission checks. The browser
+continues to obtain the default session token, with no named template. Existing
+Clerk default customization and Core's sign-in settings are not changed. Rendering configuration
 does not create or qualify that Clerk setup.
 
 `stripe` contains only `account_id`, `base_price_id`, `additional_price_id` and

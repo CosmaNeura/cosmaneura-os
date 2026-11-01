@@ -6,6 +6,11 @@ import { EnrollmentFlow } from './EnrollmentFlow';
 import { prepareEnrollmentWorkspaceToken } from './enrollment-clerk';
 import './enrollment.css';
 
+const enrollmentLocalization = {
+  signIn: {start: {title: 'Sign in to CosmaBot'}},
+  signUp: {start: {title: 'Create your CosmaBot account'}},
+};
+
 export function enrollmentRouteRequested(enabled=import.meta.env.VITE_ENROLLMENT_ENABLED==='true',href=window.location.href,accountOnly=import.meta.env.VITE_ENROLLMENT_ACCOUNT_ONLY==='true'):boolean {
   try{const page=new URL(href);return enabled&&['http:','https:'].includes(page.protocol)&&
     (accountOnly&&page.pathname==='/'||['/onboarding','/enroll','/sign-in','/sign-up'].includes(page.pathname.replace(/\/$/,'')));}catch{return false;}
@@ -33,7 +38,7 @@ export function EnrollmentEntry({apiBase=import.meta.env.VITE_ENROLLMENT_API_BAS
     <section className="enrollment-card"><h1>{!failed&&!config?'Checking account availability…':'Account setup is not available yet'}</h1>
       <p role={failed?'alert':'status'}>{!failed&&!config?'We are checking the account service before opening sign-in.':'Your account and trial have not been created. Return when account enrollment is available.'}</p>
       <button onClick={()=>setRetry(value=>value+1)}>Check availability</button></section></main>;
-  return <ClerkProvider publishableKey={config.clerk_publishable_key}>
+  return <ClerkProvider publishableKey={config.clerk_publishable_key} localization={enrollmentLocalization}>
     <EnrollmentClerkAccount api={connection.api} config={config}/>
   </ClerkProvider>;
 }

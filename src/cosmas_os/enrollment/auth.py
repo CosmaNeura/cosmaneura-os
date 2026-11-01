@@ -76,13 +76,17 @@ class ClerkEnrollmentVerifier:
             key = self.keys.get(kid)
             if key is None:
                 raise ValueError("unknown key")
+            audience = self.settings.clerk_audience
             claims = jwt.decode(token, key, algorithms=["RS256"], issuer=self.settings.clerk_issuer,
-                                audience=None, leeway=5,
-                                options={"require": ["exp", "iat", "nbf", "iss", "sub", "sid", "azp"], "verify_aud": True})
+                                audience=audience or None, leeway=5,
+                                options={"require": ["exp", "iat", "nbf", "iss", "sub", "sid", "azp"]
+                                         + (["aud"] if audience else []),
+                                         "verify_aud": True, "strict_aud": bool(audience)})
             sub, sid = claims.get("sub"), claims.get("sid")
             if (not isinstance(sub, str) or not 1 <= len(sub) <= 255
                     or not isinstance(sid, str) or not 1 <= len(sid) <= 255
-                    or "aud" in claims
+                    or (type(claims.get("aud")) is not str or claims["aud"] != audience
+                        if audience else "aud" in claims)
                     or claims.get("azp") not in (authorized_parties if authorized_parties is not None else self.settings.clerk_authorized_parties)):
                 raise ValueError("invalid claims")
         except (jwt.PyJWTError, ValueError, TypeError) as exc:

@@ -61,6 +61,45 @@ def test_real_shaped_default_clerk_session_has_no_audience_and_uses_live_email(i
     assert evidence["fetches"] == 1
 
 
+def test_explicit_default_session_audience_retains_live_human_and_scoped_party_checks(identity_adapter):
+    verifier, token, evidence = identity_adapter
+    verifier.settings.clerk_audience = "invented-enrollment-session"
+    identity = verifier.verify(token({"aud": verifier.settings.clerk_audience}))
+    assert identity.email == "verified@example.invalid" and identity.session_id == "sess_example"
+    with pytest.raises(EnrollmentError):
+        verifier.verify(token())
+    workspace = "https://practice.example.invalid"
+    scoped = token({"aud": verifier.settings.clerk_audience, "azp": workspace, "o": {"id": "org_example"}})
+    with pytest.raises(EnrollmentError):
+        verifier.verify(scoped)
+    assert verifier.verify_scoped(scoped, "org_example", authorized_parties=[workspace]).subject == "user_example"
+    evidence["session_status"] = "revoked"
+    with pytest.raises(EnrollmentError):
+        verifier.verify(token({"aud": verifier.settings.clerk_audience}))
+
+
+@pytest.mark.parametrize("audience", [None, "", "other-api", ["invented-enrollment-session"],
+                                    ["invented-enrollment-session", "other-api"], [], True])
+def test_explicit_audience_denies_missing_wrong_or_nonscalar_signed_claims(identity_adapter, audience):
+    verifier, token, _ = identity_adapter
+    verifier.settings.clerk_audience = "invented-enrollment-session"
+    with pytest.raises(EnrollmentError, match="Sign in"):
+        verifier.verify(token({"aud": audience}))
+
+
+def test_audience_setting_is_one_explicit_bounded_string():
+    from pydantic import ValidationError
+
+    from cosmas_os.enrollment.config import EnrollmentSettings
+
+    assert EnrollmentSettings(clerk_audience="").clerk_audience == ""
+    for value in (None, True, ["audience"], "a" * 256):
+        with pytest.raises(ValidationError):
+            EnrollmentSettings(clerk_audience=value)
+    for value in (" ", "audience\n", "audience\t", "not\x00allowed"):
+        assert any("audience" in error for error in EnrollmentSettings(clerk_audience=value).auth_errors())
+
+
 def test_runtime_scoped_party_and_live_session_do_not_relax_signup(identity_adapter):
     verifier, token, evidence = identity_adapter
     workspace = "https://practice.example.invalid"

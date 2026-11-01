@@ -135,7 +135,10 @@ the checkout. The configuration has exactly `contract_version:
 "enrollment-private-clock-runner.v1"`, `synthetic_only: true`, the original
 `binding_sha256`, `journal_role: "clock_journal_a"` (or B), and `enrollment` with
 every `EnrollmentSettings` field explicitly present using JSON booleans/lists
-and protected secret strings. Missing fields cannot fall back to ambient
+and protected secret strings, including `clerk_audience` as the exact measured
+default-session audience or `""` for the no-audience policy. This field reaches
+the same real verifier and workspace confirmer; it grants no membership or
+trial reset. Missing fields cannot fall back to ambient
 `ENROLLMENT_*`. It requires the fixed central account/API origins, synthetic
 Development identity, explicitly enabled provisioning and the already-qualified
 restricted enrollment database plus its separate bound journal role/database.
