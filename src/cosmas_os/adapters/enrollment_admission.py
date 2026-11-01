@@ -22,6 +22,18 @@ from cosmas_os.enrollment.admission import (
 ACCESS_REQUIRED = "workspace_enrollment_access_required"
 ADMISSION_UNAVAILABLE = "workspace_enrollment_admission_unavailable"
 PUBLIC_ADMISSION_HEADER = "X-Cosmas-Enrollment-Admission"
+PUBLIC_ENROLLMENT_USER_HEADER = "X-Cosmas-Enrollment-User"
+
+
+def existing_user_admission(session, runtime, subject: str) -> dict | None:
+    """Use server-owned historical identity evidence, never a caller flag."""
+    if session is None:
+        return None
+    from cosmas_os.application.enrollment_existing_user import is_existing_user
+
+    if is_existing_user(session, runtime, subject):
+        return {"decision": "allow", "existing_user": True, "enforced": False}
+    return None
 
 
 class RuntimeAdmissionError(Exception):
@@ -29,14 +41,23 @@ class RuntimeAdmissionError(Exception):
         super().__init__(code)
         self.code, self.status = code, status
 
+    @property
+    def headers(self) -> dict[str, str]:
+        # Only a server-classified new user reaches enrollment admission.
+        return {"Cache-Control": "no-store", PUBLIC_ADMISSION_HEADER: self.code,
+                PUBLIC_ENROLLMENT_USER_HEADER: "new"}
+
 
 class EnrollmentAdmissionAdapter:
-    def __init__(self, runtime: Settings, *, client: httpx.Client | None = None):
-        self.runtime, self.client = runtime, client
+    def __init__(self, runtime: Settings, *, client: httpx.Client | None = None, session=None):
+        self.runtime, self.client, self.session = runtime, client, session
 
     def authorize(self, token: str, subject: str, *, purpose: Literal["workspace", "qualification", "worker"] = "workspace",
                   operation_id: str | None = None, approval_sha256: str | None = None) -> dict:
         runtime = self.runtime
+        existing = existing_user_admission(self.session, runtime, subject)
+        if existing is not None:
+            return existing
         if (not getattr(runtime, "workspace_enrollment_managed", False) or not isinstance(runtime, Settings)
                 or runtime.workspace_enrollment_configuration_errors()):
             raise RuntimeAdmissionError(ADMISSION_UNAVAILABLE, 503)
@@ -100,9 +121,12 @@ class EnrollmentAdmissionAdapter:
 
 def require_runtime_admission(runtime: Settings, authorization: str | None, subject: str, *,
                               purpose: Literal["workspace", "qualification"] = "workspace",
-                              adapter: EnrollmentAdmissionAdapter | None = None) -> dict | None:
+                              adapter: EnrollmentAdmissionAdapter | None = None, session=None) -> dict | None:
     if not getattr(runtime, "workspace_enrollment_managed", False):
         return None
+    existing = existing_user_admission(session, runtime, subject)
+    if existing is not None:
+        return existing
     if not authorization or not authorization.startswith("Bearer ") or len(authorization) > 8200:
         raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
-    return (adapter or EnrollmentAdmissionAdapter(runtime)).authorize(authorization[7:], subject, purpose=purpose)
+    return (adapter or EnrollmentAdmissionAdapter(runtime, session=session)).authorize(authorization[7:], subject, purpose=purpose)

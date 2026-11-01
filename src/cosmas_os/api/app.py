@@ -25,6 +25,7 @@ from cosmas_os.adapters.enrollment_admission import (
     ACCESS_REQUIRED,
     ADMISSION_UNAVAILABLE,
     PUBLIC_ADMISSION_HEADER,
+    PUBLIC_ENROLLMENT_USER_HEADER,
     EnrollmentAdmissionAdapter,
     RuntimeAdmissionError,
 )
@@ -270,7 +271,8 @@ def _runtime_admission_adapter() -> EnrollmentAdmissionAdapter:
 
 
 def _install_enrollment_commit_fence(request, session, authorization, box_header, actor_header):
-    if not getattr(settings, "workspace_enrollment_managed", False) or session.info.get("enrollment_request_fence") is request:
+    if (not getattr(settings, "workspace_enrollment_managed", False)
+            or session.info.get("enrollment_request_fence") is request):
         return
     selected = settings
     session.info["enrollment_request_fence"] = request
@@ -280,10 +282,19 @@ def _install_enrollment_commit_fence(request, session, authorization, box_header
         if current.info.get("enrollment_model_settlement"):
             return
         if settings is not selected:
+            if getattr(request.state, "enrollment_existing_user", False):
+                raise HTTPException(403, "authentication configuration changed", headers={"Cache-Control": "no-store"})
             raise RuntimeAdmissionError(ADMISSION_UNAVAILABLE, 503)
-        authenticate_request(current, selected, authorization=authorization, box_header=box_header,
-            actor_header=actor_header, verifier=_request_clerk_verifier(request.headers.getlist("origin")),
-            admission_adapter=_runtime_admission_adapter())
+        try:
+            # Existing users retain ordinary local identity/revocation checks;
+            # authenticate_request bypasses the enrollment service for them.
+            authenticate_request(current, selected, authorization=authorization, box_header=box_header,
+                actor_header=actor_header, verifier=_request_clerk_verifier(request.headers.getlist("origin")),
+                admission_adapter=_runtime_admission_adapter())
+        except AuthenticationFailed as exc:
+            raise HTTPException(401, str(exc), headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"}) from exc
+        except AccessDenied as exc:
+            raise HTTPException(403, str(exc), headers={"Cache-Control": "no-store"}) from exc
     event.listen(session, "before_commit", verify_before_commit)
     listeners = getattr(request.state, "enrollment_commit_fences", [])
     listeners.append((session, verify_before_commit))
@@ -298,8 +309,6 @@ def _identity(
     x_actor_principal_id: str | None = Header(default=None),
 ) -> RequestIdentity:
     try:
-        if getattr(settings, "workspace_enrollment_managed", False) and request.method != "GET" and request.url.path.startswith("/admin/identities/"):
-            raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
         check_capture_deadline()
         verifier = _request_clerk_verifier(request.headers.getlist("origin")) if settings.auth_mode == "clerk_jwt" else None
         check_capture_deadline()
@@ -312,6 +321,11 @@ def _identity(
             verifier=verifier,
             admission_adapter=_runtime_admission_adapter() if getattr(settings, "workspace_enrollment_managed", False) else None,
         )
+        request.state.enrollment_existing_user = bool(session.info.get("enrollment_existing_identity"))
+        if (getattr(settings, "workspace_enrollment_managed", False)
+                and not request.state.enrollment_existing_user and request.method != "GET"
+                and request.url.path.startswith("/admin/identities/")):
+            raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
         _install_enrollment_commit_fence(request, session, authorization, x_box_id, x_actor_principal_id)
         check_capture_deadline()
         return result
@@ -324,15 +338,14 @@ def _identity(
     except AccessDenied as exc:
         raise HTTPException(status_code=403, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
     except RuntimeAdmissionError as exc:
-        raise HTTPException(status_code=exc.status, detail=exc.code,
-            headers={"Cache-Control": "no-store", PUBLIC_ADMISSION_HEADER: exc.code}) from None
+        raise HTTPException(status_code=exc.status, detail=exc.code, headers=exc.headers) from None
 
 
 def _map_err(exc: Exception) -> HTTPException:
     if isinstance(exc, HTTPException):
         return exc
     if isinstance(exc, RuntimeAdmissionError):
-        return HTTPException(status_code=exc.status, detail=exc.code, headers={PUBLIC_ADMISSION_HEADER: exc.code, "Cache-Control": "no-store"})
+        return HTTPException(status_code=exc.status, detail=exc.code, headers=exc.headers)
     if isinstance(exc, AuthorizationError):
         return HTTPException(status_code=403, detail=str(exc))
     if isinstance(exc, PolicyDenied):
@@ -361,7 +374,7 @@ def _workspace_gate(response: Response, request: Request) -> None:
 
 
 @app.exception_handler(ws.WorkspaceError)
-async def workspace_error(_: Request, exc: ws.WorkspaceError):
+async def workspace_error(request: Request, exc: ws.WorkspaceError):
     content = {"detail": exc.code}
     if (isinstance(exc, workspace_capture.CoreCaptureFailure)
         and exc.status == 503
@@ -369,15 +382,16 @@ async def workspace_error(_: Request, exc: ws.WorkspaceError):
         and isinstance(exc.capture_phase, workspace_capture.CoreCaptureReadPhase)):
         content["capture_phase"] = exc.capture_phase.value
     headers = {"Cache-Control": "no-store"}
-    if exc.code in {ACCESS_REQUIRED, ADMISSION_UNAVAILABLE}:
+    if exc.code in {ACCESS_REQUIRED, ADMISSION_UNAVAILABLE} and not getattr(request.state, "enrollment_existing_user", False):
         headers[PUBLIC_ADMISSION_HEADER] = exc.code
+        headers[PUBLIC_ENROLLMENT_USER_HEADER] = "new"
     return JSONResponse(status_code=exc.status, content=content, headers=headers)
 
 
 @app.exception_handler(RuntimeAdmissionError)
 async def admission_error(_request, exc: RuntimeAdmissionError):
     return JSONResponse(status_code=exc.status, content={"detail": exc.code},
-                        headers={"Cache-Control": "no-store", PUBLIC_ADMISSION_HEADER: exc.code})
+                        headers=exc.headers)
 
 
 @app.middleware("http")
@@ -1479,9 +1493,12 @@ def enrollment_runtime_config(response: Response):
 
 
 @app.get("/account/identity")
-def account_identity(response: Response, identity: RequestIdentity = Depends(_identity)):
+def account_identity(request: Request, response: Response, identity: RequestIdentity = Depends(_identity)):
     response.headers["Cache-Control"] = "no-store"
-    return {"state": "allowed", "box_id": identity.box_id, "organization_id": identity.organization_id}
+    user = ("unmanaged" if not getattr(settings, "workspace_enrollment_managed", False)
+            else "existing" if getattr(request.state, "enrollment_existing_user", False) else "new_enrolled")
+    return {"state": "allowed", "box_id": identity.box_id, "organization_id": identity.organization_id,
+            "enrollment_user": user}
 
 
 @app.get("/ready")
@@ -2307,5 +2324,5 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT"],
     allow_headers=allowed_headers,
-    expose_headers=["X-Cosmas-Workspace-Protocol", PUBLIC_ADMISSION_HEADER],
+    expose_headers=["X-Cosmas-Workspace-Protocol", PUBLIC_ADMISSION_HEADER, PUBLIC_ENROLLMENT_USER_HEADER],
 )

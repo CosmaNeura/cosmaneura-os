@@ -10,6 +10,7 @@ from cosmas_os.adapters.enrollment_admission import (
     ACCESS_REQUIRED,
     EnrollmentAdmissionAdapter,
     RuntimeAdmissionError,
+    existing_user_admission,
 )
 from cosmas_os.enrollment.domain import canonical_hash
 from cosmas_os.models import AuditEvent, BoxContext, ExternalIdentity, Principal
@@ -18,6 +19,9 @@ from cosmas_os.practice_setup_models import PracticeSetupProfile
 
 def prepare_registered_member(s, runtime, member, checked, *, fence):
     """Create only a non-owner local human from measured capped registry authority."""
+    if (checked is not None and checked.get("existing_user") is True
+            and checked.get("decision") == "allow" and checked.get("enforced") is False):
+        return  # Preserve the existing local principal/binding without provisioning.
     if not getattr(runtime, "workspace_enrollment_managed", False) or checked is None:
         return
     if (checked.get("enforced") is not True or checked.get("purpose") != "qualification"
@@ -70,6 +74,8 @@ def require_worker_admission(s, runtime, *, box, owner, operation_id, approval_s
         ExternalIdentity.organization_id == runtime.clerk_organization_id, ExternalIdentity.active.is_(True))))
     if (person is None or len(bindings) != 1 or external_identity_id is not None and bindings[0].id != external_identity_id):
         raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
+    if existing_user_admission(s, runtime, bindings[0].subject) is not None:
+        return
     # No bearer is persisted or replayed. This service purpose grants no approval.
     (adapter or EnrollmentAdmissionAdapter(runtime)).authorize("", bindings[0].subject, purpose="worker",
         operation_id=str(operation_id), approval_sha256=approval_sha256)

@@ -321,6 +321,7 @@ def _valid_uuid(value: str | None) -> bool:
 def _active_human(session: Session, principal_id: str, box_id: str) -> Principal:
     principal = session.scalar(
         select(Principal).where(Principal.id == principal_id, Principal.box_id == box_id)
+        .execution_options(populate_existing=True)
     )
     if not principal:
         raise AccessDenied("identity is not assigned to this Box")
@@ -342,6 +343,9 @@ def authenticate_request(
     verifier: TokenVerifier | None = None,
     admission_adapter: EnrollmentAdmissionAdapter | None = None,
 ) -> RequestIdentity:
+    # Request-local, server-derived evidence; never carry a prior caller's
+    # enrollment exemption into a reused database session.
+    session.info.pop("enrollment_existing_identity", None)
     if runtime_settings.auth_mode == "synth_headers":
         if runtime_settings.cosmas_env != "synth_os":
             raise AuthenticationFailed("synthetic header authentication is disabled")
@@ -386,15 +390,30 @@ def authenticate_request(
             ExternalIdentity.organization_id == organization_id,
             ExternalIdentity.active.is_(True),
         )
+        .execution_options(populate_existing=True)
     )
     if not binding:
+        saved = session.scalar(select(ExternalIdentity).where(
+            ExternalIdentity.issuer == issuer, ExternalIdentity.subject == subject
+        ))
+        if saved is not None:
+            # A revoked/remapped local identity is not a brand-new signup.
+            # Preserve the ordinary authorization denial without enrollment.
+            raise AccessDenied("identity is not provisioned")
+        require_runtime_admission(runtime_settings, authorization, subject,
+                                  adapter=admission_adapter, session=session)
         raise AccessDenied("identity is not provisioned")
     if not runtime_settings.beta_box_id or not hmac.compare_digest(
         binding.box_id, runtime_settings.beta_box_id
     ):
         raise AccessDenied("identity is outside the configured Box")
     _active_human(session, binding.principal_id, binding.box_id)
-    require_runtime_admission(runtime_settings, authorization, subject, adapter=admission_adapter)
+    admission = require_runtime_admission(runtime_settings, authorization, subject,
+                                         adapter=admission_adapter, session=session)
+    if admission is not None and admission.get("existing_user") is True:
+        session.info["enrollment_existing_identity"] = (
+            issuer, organization_id, binding.box_id, binding.id
+        )
     return RequestIdentity(
         box_id=binding.box_id,
         principal_id=binding.principal_id,

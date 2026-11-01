@@ -5,6 +5,7 @@ import hmac
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
@@ -45,6 +46,8 @@ from .models import (
 from .period_time import PeriodTime
 from .stripe import EVENT_TYPES, hosted_url
 from .workspace import WorkspaceConfirmationRequest, WorkspaceConfirmer
+
+_BAA_V23_ARCHIVE = Path(__file__).with_name("assets") / "baa_v2.3.html"
 
 
 def identifier() -> str:
@@ -97,9 +100,31 @@ class EnrollmentService:
         return practice, member
 
     def _acceptance(self, session: Session, practice: Practice) -> Acceptance | None:
+        # An executed agreement keeps its original version/hash. A later offer
+        # is a separate legal/retention decision, not an automatic access reset.
         return session.scalar(select(Acceptance).where(Acceptance.practice_id == practice.id,
-                              Acceptance.doc_id == BAA_DOC_ID, Acceptance.version == BAA_VERSION,
-                              Acceptance.sha256 == BAA_SHA256))
+                              Acceptance.doc_id == BAA_DOC_ID)
+                              .order_by(Acceptance.accepted_at, Acceptance.id).limit(1))
+
+    def _executed_document(self, acceptance: Acceptance) -> dict[str, Any]:
+        if acceptance.doc_id == BAA_DOC_ID and acceptance.version == "2.3":
+            try:
+                raw = _BAA_V23_ARCHIVE.read_bytes()
+            except OSError:
+                raw = b""
+            if not raw or hashlib.sha256(raw).hexdigest() != acceptance.sha256:
+                raise EnrollmentError("agreement_archive_unavailable",
+                    "The executed agreement archive is unavailable. Contact support for its receipt.", 503)
+            return {"doc_id": acceptance.doc_id, "version": acceptance.version,
+                    "sha256": acceptance.sha256, "html": raw.decode("utf-8"),
+                    "pdf_url": "https://cosmaneura.com/baa-v2-3.pdf"}
+        current = document()
+        if (current["doc_id"], current["version"], current["sha256"]) != (
+            acceptance.doc_id, acceptance.version, acceptance.sha256
+        ):
+            raise EnrollmentError("agreement_archive_unavailable",
+                "The executed agreement archive is unavailable. Contact support for its receipt.", 503)
+        return current
 
     def _entitled(self, practice: Practice) -> bool:
         current = now_utc()
@@ -129,8 +154,11 @@ class EnrollmentService:
                               **practice.address, "administrative_email": practice.administrative_email,
                               "human_seats": practice.human_seats, "role": member.role,
                               "covered_entity": practice.covered_entity, "can_sign": member.can_sign}
-        result["agreement"] = {"accepted": acceptance is not None, "doc_id": BAA_DOC_ID, "version": BAA_VERSION,
-                               "sha256": BAA_SHA256, "receipt_id": acceptance.id if acceptance else None}
+        result["agreement"] = {"accepted": acceptance is not None,
+                               "doc_id": acceptance.doc_id if acceptance else BAA_DOC_ID,
+                               "version": acceptance.version if acceptance else BAA_VERSION,
+                               "sha256": acceptance.sha256 if acceptance else BAA_SHA256,
+                               "receipt_id": acceptance.id if acceptance else None}
         result["quote"] = quote(practice.human_seats)
         status = practice.subscription_status
         action = status in {"past_due", "unpaid", "paused", "pending_verification", "incomplete"}
@@ -396,7 +424,8 @@ class EnrollmentService:
             return {"receipt": {"id": a.id, "practice_id": a.practice_id, "covered_entity_legal_name": a.covered_entity_legal_name,
                     "accepted_by_subject": a.signer_subject, "accepted_by_name": a.signer_name, "accepted_by_title": a.signer_title,
                     "accepted_by_email": a.signer_email, "accepted_at": iso(a.accepted_at), "doc_id": a.doc_id,
-                    "version": a.version, "sha256": a.sha256, "authority_statement": a.authority_statement}, "document": document()}
+                    "version": a.version, "sha256": a.sha256, "authority_statement": a.authority_statement},
+                    "document": self._executed_document(a)}
 
     def _invite_token(self, invitation_id: str) -> str:
         secret = self.settings.invitation_secret.get_secret_value()

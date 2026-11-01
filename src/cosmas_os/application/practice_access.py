@@ -42,14 +42,19 @@ def _scope(s, runtime, member, fence):
         raise PracticeAccessError("practice_access_unavailable", 503)
 
 
-def _binding(s, member):
-    binding = s.scalar(select(ExternalIdentity).where(
+def _binding(s, member, *, lock=True):
+    binding_query = select(ExternalIdentity).where(
         ExternalIdentity.issuer == member.issuer, ExternalIdentity.subject == member.subject
-    ).with_for_update().execution_options(populate_existing=True))
+    ).execution_options(populate_existing=True)
+    if lock:
+        binding_query = binding_query.with_for_update()
+    binding = s.scalar(binding_query)
     if binding is None:
         return None
-    principal = s.scalar(select(Principal).where(Principal.id == binding.principal_id)
-                         .with_for_update().execution_options(populate_existing=True))
+    principal_query = select(Principal).where(Principal.id == binding.principal_id).execution_options(populate_existing=True)
+    if lock:
+        principal_query = principal_query.with_for_update()
+    principal = s.scalar(principal_query)
     if (not binding.active or binding.provider != "clerk"
             or binding.box_id != member.box_id or binding.organization_id != member.organization_id
             or principal is None or principal.box_id != member.box_id

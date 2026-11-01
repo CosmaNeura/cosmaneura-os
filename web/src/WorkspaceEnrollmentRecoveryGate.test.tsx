@@ -10,6 +10,7 @@ import {workspaceEnrollmentHold} from './workspace-enrollment-state';
 const api='https://api.invented-clinic.workspace.cosmas.ai',headers={'X-Cosmas-Workspace-Protocol':'1','Content-Type':'application/json','Cache-Control':'no-store'};
 const descriptor={contract_version:1,workspace_protocol:1,requests_require_protocol:true,contracts:{...REQUIRED_WORKSPACE_CONTRACTS}};
 const response=(value:unknown,status=200,extra:Record<string,string>={})=>new Response(JSON.stringify(value),{status,headers:{...headers,...extra}});
+const allowedIdentity=(enrollment_user='new_enrolled')=>({state:'allowed',enrollment_user,box_id:'invented_box',organization_id:enrollment_user==='unmanaged'?null:'org_invented'});
 let root:Root,host:HTMLDivElement,billing:'allowed'|'canceled'|'unpaid'|'unavailable';
 const identity=()=>({mode:'clerk_jwt' as const,getToken:vi.fn(async()=> 'invented.fresh.token')});
 beforeEach(()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);billing='allowed';
@@ -21,14 +22,14 @@ beforeEach(()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);billing='allowed'
     const path=new URL(String(input)).pathname;
     if(path==='/practice-access/compatibility')return response(descriptor);
     if(path==='/config')return response({enrollment_managed:true,enrollment_account_origin:'https://app.cosmas.ai',enrollment_recovery_url:'https://app.cosmas.ai/onboarding'});
-    if(billing!=='allowed'){const code=billing==='unavailable'?'workspace_enrollment_admission_unavailable':'workspace_enrollment_access_required';return response({detail:code},billing==='unavailable'?503:403,{'X-Cosmas-Enrollment-Admission':code});}
-    return response(path==='/account/identity'?{allowed:true}:[]);
+    if(billing!=='allowed'){const code=billing==='unavailable'?'workspace_enrollment_admission_unavailable':'workspace_enrollment_access_required';return response({detail:code},billing==='unavailable'?503:403,{'X-Cosmas-Enrollment-Admission':code,'X-Cosmas-Enrollment-User':'new'});}
+    return response(path==='/account/identity'?allowedIdentity():[]);
   }));
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 async function wait(check:()=>void){for(let i=0;i<100;i++){let done=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,1));try{check();done=true;}catch{}});if(done)return;}check();}
 async function checkAccess(){await act(async()=>[...host.querySelectorAll('button')].find(item=>item.textContent==='Check practice access')!.click());await wait(()=>expect(host.querySelector<HTMLButtonElement>('.workspace-enrollment-recovery button')?.disabled??false).toBe(false));}
-it('pauses a bookmarked workspace for canceled/unpaid billing and resumes only after a fresh protected allowed response',async()=>{
+it('pauses a server-classified New user for canceled/unpaid billing and resumes only after a fresh protected allowed response',async()=>{
   const id=identity(),mounted=vi.fn(),unmounted=vi.fn();const saved={key:'invented_saved_request',note:'Invented saved private note'},before=structuredClone(saved);
   function Workspace(){useEffect(()=>{mounted();return unmounted;},[]);return <p>{saved.note}</p>;}
   await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={<span>Account menu</span>}><Workspace/></WorkspaceCompatibilityGate>));
@@ -95,7 +96,7 @@ it('does not release an existing hold when the signed session becomes obsolete d
     ?new Promise(resolve=>{finish=resolve;}):existing(input,init));
   billing='allowed';await act(async()=>{host.querySelector<HTMLButtonElement>('.workspace-enrollment-recovery button')!.click();});
   await wait(()=>expect(finish).toBeTypeOf('function'));current=false;
-  await act(async()=>{finish(response({allowed:true}));});
+  await act(async()=>{finish(response(allowedIdentity()));});
   await wait(()=>expect(host.textContent).toContain('Practice access is still paused'));
   expect(workspaceEnrollmentHold(id)).toBe('workspace_enrollment_access_required');expect(host.textContent).not.toContain('Invented private work');
 });
@@ -107,7 +108,69 @@ it('returns no recovery URL for missing, foreign or malformed API origins',()=>{
 it('cancels an enrollment denial without reading its opaque response body',async()=>{
   const id=identity();await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><p>Private workspace</p></WorkspaceCompatibilityGate>));
   const cancel=vi.fn(async()=>{}),read=vi.fn(),json=vi.fn();
-  vi.mocked(fetch).mockResolvedValueOnce({status:403,ok:false,headers:new Headers({'X-Cosmas-Workspace-Protocol':'1','X-Cosmas-Enrollment-Admission':'workspace_enrollment_access_required'}),body:{cancel,getReader:read},json} as unknown as Response);
+  vi.mocked(fetch).mockResolvedValueOnce({status:403,ok:false,headers:new Headers({'X-Cosmas-Workspace-Protocol':'1','X-Cosmas-Enrollment-Admission':'workspace_enrollment_access_required','X-Cosmas-Enrollment-User':'new'}),body:{cancel,getReader:read},json} as unknown as Response);
   await act(async()=>{await expect(workspaceApi.catalog(id)).rejects.toMatchObject({status:403,code:'workspace_enrollment_access_required'});});
   expect(cancel).toHaveBeenCalledOnce();expect(read).not.toHaveBeenCalled();expect(json).not.toHaveBeenCalled();
+});
+it('keeps an existing workspace mounted through agreement metadata changes and generic admission errors',async()=>{
+  const id=identity(),mounted=vi.fn(),unmounted=vi.fn();
+  function Workspace(){useEffect(()=>{mounted();return unmounted;},[]);return <input aria-label="Saved draft" defaultValue="Invented draft"/>;}
+  await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><Workspace/></WorkspaceCompatibilityGate>));
+  const draft=host.querySelector<HTMLInputElement>('input')!;draft.value='Invented unsaved edit';
+  for(const status of [403,503]){
+    const code=status===403?'workspace_enrollment_access_required':'workspace_enrollment_admission_unavailable';
+    vi.mocked(fetch).mockResolvedValueOnce(response({detail:code,baa_version:'v99',baa_sha256:'b'.repeat(64)},status,{'X-Cosmas-Enrollment-Admission':code}));
+    await act(async()=>{await expect(workspaceApi.catalog(id)).rejects.toMatchObject({status});});
+    expect(workspaceEnrollmentHold(id)).toBeNull();expect(host.querySelector('input')).toBe(draft);expect(draft.value).toBe('Invented unsaved edit');
+    expect(host.querySelector('.workspace-enrollment-recovery')).toBeNull();expect(host.querySelector('a')).toBeNull();
+  }
+  expect(mounted).toHaveBeenCalledOnce();expect(unmounted).not.toHaveBeenCalled();
+  expect(vi.mocked(fetch).mock.calls.some(([url])=>String(url)===api+'/config')).toBe(false);
+});
+it.each(['existing','new_enrolled','unmanaged'])('follows a fresh server-allowed %s identity after an explicit New denial',async enrollmentUser=>{
+  const id=identity(),mounted=vi.fn();function Workspace(){useEffect(()=>{mounted();},[]);return <p>Invented private workspace</p>;}
+  vi.mocked(fetch).mockResolvedValueOnce(response({detail:'workspace_enrollment_access_required'},403,{'X-Cosmas-Enrollment-Admission':'workspace_enrollment_access_required','X-Cosmas-Enrollment-User':'new'}));
+  await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><Workspace/></WorkspaceCompatibilityGate>));
+  await wait(()=>expect(host.querySelector('a')?.getAttribute('href')).toBe('https://app.cosmas.ai/onboarding'));
+  expect(mounted).not.toHaveBeenCalled();
+  const existing=vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation((input,init)=>new URL(String(input)).pathname==='/account/identity'
+    ?Promise.resolve(response({...allowedIdentity(enrollmentUser),baa_version:'v99',baa_sha256:'b'.repeat(64)})):existing(input,init));
+  await checkAccess();await wait(()=>expect(host.textContent).toContain('Invented private workspace'));
+  expect(workspaceEnrollmentHold(id)).toBeNull();expect(mounted).toHaveBeenCalledOnce();
+  expect(vi.mocked(fetch).mock.calls.every(([,init])=>init?.method==='GET'&&init.body===undefined)).toBe(true);
+});
+it.each([
+  {state:'allowed',box_id:'invented_box',organization_id:'org_invented'},
+  {...allowedIdentity(),enrollment_user:'new'},
+  {...allowedIdentity(),state:'pending'},
+  {...allowedIdentity(),box_id:null},
+  {...allowedIdentity(),organization_id:12},
+])('does not release an explicit New hold from an invalid allowed-identity reply %#',async invalid=>{
+  const id=identity();await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><p>Invented private workspace</p></WorkspaceCompatibilityGate>));
+  billing='canceled';await act(async()=>{await expect(workspaceApi.catalog(id)).rejects.toMatchObject({status:403});});
+  const existing=vi.mocked(fetch).getMockImplementation()!;billing='allowed';
+  vi.mocked(fetch).mockImplementation((input,init)=>new URL(String(input)).pathname==='/account/identity'?Promise.resolve(response(invalid)):existing(input,init));
+  await checkAccess();expect(workspaceEnrollmentHold(id)).toBe('workspace_enrollment_access_required');expect(host.textContent).not.toContain('Invented private workspace');
+});
+it('retains the New hold if its identity becomes obsolete while an allowed response body is being read',async()=>{
+  let current=true;const id={...identity(),nativeSession:{revision:'invented-session',isCurrent:()=>current}};
+  await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><p>Invented private workspace</p></WorkspaceCompatibilityGate>));
+  billing='canceled';await act(async()=>{await expect(workspaceApi.catalog(id)).rejects.toMatchObject({status:403});});
+  let finish!:()=>void;const stream=new ReadableStream<Uint8Array>({start(controller){finish=()=>{controller.enqueue(new TextEncoder().encode(JSON.stringify(allowedIdentity('existing'))));controller.close();};}});
+  const reply=new Response(stream,{headers}),reader=vi.spyOn(reply.body!,'getReader');
+  const existing=vi.mocked(fetch).getMockImplementation()!;billing='allowed';
+  vi.mocked(fetch).mockImplementation((input,init)=>new URL(String(input)).pathname==='/account/identity'?Promise.resolve(reply):existing(input,init));
+  await act(async()=>host.querySelector<HTMLButtonElement>('.workspace-enrollment-recovery button')!.click());
+  await wait(()=>expect(reader).toHaveBeenCalledOnce());current=false;await act(async()=>finish());
+  await wait(()=>expect(host.textContent).toContain('Practice access is still paused'));
+  expect(workspaceEnrollmentHold(id)).toBe('workspace_enrollment_access_required');expect(host.textContent).not.toContain('Invented private workspace');
+});
+it('does not accept duplicate classifier fields as a fresh allowed proof',async()=>{
+  const id=identity();await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><p>Invented private workspace</p></WorkspaceCompatibilityGate>));
+  billing='canceled';await act(async()=>{await expect(workspaceApi.catalog(id)).rejects.toMatchObject({status:403});});
+  const existing=vi.mocked(fetch).getMockImplementation()!;billing='allowed';
+  vi.mocked(fetch).mockImplementation((input,init)=>new URL(String(input)).pathname==='/account/identity'
+    ?Promise.resolve(new Response('{"state":"allowed","enrollment_user":"new","enrollment_user":"existing","box_id":"invented_box","organization_id":"org_invented"}',{headers})):existing(input,init));
+  await checkAccess();expect(workspaceEnrollmentHold(id)).toBe('workspace_enrollment_access_required');expect(host.textContent).not.toContain('Invented private workspace');
 });

@@ -5,7 +5,8 @@ import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace
 import {workspaceAuthHeaders,assertCurrentDesktopSession} from './workspace-auth-headers';
 import {permittedWorkspaceApi} from './workspace-origin';
 import {admitWorkspaceProtocol,workspaceFetch,workspaceProtocolGeneration} from './workspace-protocol';
-import {WORKSPACE_ENROLLMENT_HEADER,releaseWorkspaceEnrollment,subscribeWorkspaceEnrollment,workspaceEnrollmentHold,workspaceEnrollmentRevision} from './workspace-enrollment-state';
+import {WORKSPACE_ENROLLMENT_HEADER,WORKSPACE_ENROLLMENT_USER_HEADER,releaseWorkspaceEnrollment,subscribeWorkspaceEnrollment,workspaceEnrollmentHold,workspaceEnrollmentRevision} from './workspace-enrollment-state';
+import {parseVendorJson} from './vendor-contract';
 import {WorkspaceStartupShell} from './WorkspaceStartupShell';
 import './workspace-enrollment.css';
 import {hostedWorkspaceConfiguration} from './hosted-workspace';
@@ -37,19 +38,34 @@ async function request(identity:AuthenticatedWorkspaceIdentity,path:string,signa
   const response=await workspaceFetch(identity,base+path,{headers,signal,method:'GET',credentials:'omit',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'},true);
   assertCurrentDesktopSession(identity);signal.throwIfAborted();
   if(response.status!==200||response.redirected||response.type==='opaque'||response.url&&response.url!==base+path||
-    response.headers.get(WORKSPACE_ENROLLMENT_HEADER)!==null||response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()!=='application/json'||
+    response.headers.get(WORKSPACE_ENROLLMENT_HEADER)!==null||response.headers.get(WORKSPACE_ENROLLMENT_USER_HEADER)!==null||response.headers.get('content-type')?.split(';')[0].trim().toLowerCase()!=='application/json'||
     !response.headers.get('cache-control')?.split(',').some(value=>value.trim().toLowerCase()==='no-store')){void response.body?.cancel().catch(()=>{});throw new WorkspaceApiError(response.status===403?403:503);}
   return response;
 }
-async function recoveryLink(identity:AuthenticatedWorkspaceIdentity,signal:AbortSignal):Promise<string|null>{
-  const response=await request(identity,'/config',signal),reader=response.body?.getReader();if(!reader)throw new WorkspaceApiError(503);
+async function readJson(identity:AuthenticatedWorkspaceIdentity,response:Response,signal:AbortSignal):Promise<unknown>{
+  const reader=response.body?.getReader();if(!reader)throw new WorkspaceApiError(503);
   const bytes=new Uint8Array(65536);let size=0;
+  const check=()=>{signal.throwIfAborted();assertCurrentDesktopSession(identity);
+    if(identity.mode==='clerk_jwt'&&identity.nativeSession&&!identity.nativeSession.isCurrent())throw new WorkspaceApiError(401);};
   const cancel=()=>{void reader.cancel().catch(()=>{});};signal.addEventListener('abort',cancel,{once:true});
-  try{for(;;){signal.throwIfAborted();const part=await reader.read();signal.throwIfAborted();if(part.done)break;
+  try{for(;;){check();const part=await reader.read();check();if(part.done)break;
     if(part.value.length>bytes.length-size)throw new WorkspaceApiError(503);bytes.set(part.value,size);size+=part.value.length;}
-    const value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(0,size)));
-    return value?.enrollment_managed===true?enrollmentRecoveryDestination(value?.enrollment_recovery_url,undefined,value?.enrollment_account_origin):null;
+    const value:unknown=parseVendorJson(new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(0,size)));check();return value;
   }finally{signal.removeEventListener('abort',cancel);cancel();}
+}
+async function recoveryLink(identity:AuthenticatedWorkspaceIdentity,signal:AbortSignal):Promise<string|null>{
+  const value=await readJson(identity,await request(identity,'/config',signal),signal);
+  if(!value||typeof value!=='object'||Array.isArray(value))return null;
+  const config=value as Record<string,unknown>;
+  return config.enrollment_managed===true?enrollmentRecoveryDestination(config.enrollment_recovery_url,undefined,config.enrollment_account_origin):null;
+}
+async function allowedAccount(identity:AuthenticatedWorkspaceIdentity,signal:AbortSignal):Promise<void>{
+  const value=await readJson(identity,await request(identity,'/account/identity',signal),signal);
+  if(!value||typeof value!=='object'||Array.isArray(value))throw new WorkspaceApiError(503);
+  const account=value as Record<string,unknown>,identifier=(input:unknown)=>typeof input==='string'&&input.length>0&&input.length<=256&&!/[^\x21-\x7e]/.test(input);
+  if(account.state!=='allowed'||
+    !['existing','new_enrolled','unmanaged'].includes(account.enrollment_user as string)||!identifier(account.box_id)||
+    !(account.organization_id===null||identifier(account.organization_id)))throw new WorkspaceApiError(503);
 }
 export function WorkspaceEnrollmentRecoveryGate({identity,accountControls,children}:{identity:AuthenticatedWorkspaceIdentity;accountControls?:ReactNode;children:ReactNode}){
   const observedRevision=useSyncExternalStore(listener=>subscribeWorkspaceEnrollment(identity,listener),()=>workspaceEnrollmentRevision(identity),()=>0);
@@ -63,7 +79,7 @@ export function WorkspaceEnrollmentRecoveryGate({identity,accountControls,childr
   },[identity,hold,observedRevision]);
   const recheck=()=>{setMessage('');const revision=workspaceEnrollmentRevision(identity);
     void run(signal=>bounded(signal,async signal=>{const generation=workspaceProtocolGeneration(identity);await practiceAccessApi.compatibility(identity,signal);signal.throwIfAborted();admitWorkspaceProtocol(identity,generation);
-      const response=await request(identity,'/account/identity',signal);void response.body?.cancel().catch(()=>{});return revision;
+      await allowedAccount(identity,signal);return revision;
     }),checked=>releaseWorkspaceEnrollment(identity,checked),()=>setMessage('Practice access is still paused. Review the existing account and billing setup, then check again.'));
   };
   if(!hold)return <>{children}</>;

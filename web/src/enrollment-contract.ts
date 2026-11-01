@@ -122,7 +122,15 @@ export function validateEnrollmentStatus(value: unknown): EnrollmentStatus {
   const profile = v.profile === null ? null : object(v.profile);
   const practice = v.practice === null ? null : object(v.practice);
   const agreement = v.agreement === null ? null : object(v.agreement);
-  if (agreement) documentIdentity(agreement);
+  // Executed receipts retain the document identity accepted at signing.
+  // Unsigned offerings must still match the current terms.
+  if (agreement) {
+    if (bool(agreement.accepted) && nullableText(agreement.receipt_id)) {
+      if (agreement.doc_id !== BAA.doc_id || typeof agreement.sha256 !== 'string' ||
+          !/^[0-9a-f]{64}$/i.test(agreement.sha256)) return invalid();
+      text(agreement.version, 100);
+    } else documentIdentity(agreement);
+  }
   const status: EnrollmentStatus = {
     contract_version: ENROLLMENT_CONTRACT, revision: integer(v.revision), stage: v.stage as EnrollmentStage,
     // An unsaved provider prefill remains editable; confirmed runtime names use the 120-character contract.
@@ -132,8 +140,8 @@ export function validateEnrollmentStatus(value: unknown): EnrollmentStatus {
       address_line2: text(practice.address_line2, 200, true), city: text(practice.city, 100), region: text(practice.region, 80),
       postal_code: text(practice.postal_code, 20), country: 'US', administrative_email: text(practice.administrative_email,320),
       human_seats: integer(practice.human_seats, 1, 1000), role: practice.role as EnrollmentPractice['role'],covered_entity:bool(practice.covered_entity),can_sign:bool(practice.can_sign) } : null,
-    agreement: agreement ? { accepted: bool(agreement.accepted), doc_id: BAA.doc_id, version: BAA.version,
-      sha256: BAA.sha256, receipt_id: nullableText(agreement.receipt_id) } : null,
+    agreement: agreement ? { accepted: bool(agreement.accepted), doc_id: BAA.doc_id, version: text(agreement.version, 100),
+      sha256: text(agreement.sha256, 64), receipt_id: nullableText(agreement.receipt_id) } : null,
     quote: v.quote === null ? null : validateEnrollmentQuote(v.quote),
     billing: { status: text(billing.status, 50), trial_ends_at: timestamp(billing.trial_ends_at),
       first_charge_at: timestamp(billing.first_charge_at), cancel_at_period_end: bool(billing.cancel_at_period_end),

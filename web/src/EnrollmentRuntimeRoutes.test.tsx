@@ -45,3 +45,11 @@ it('keeps explicit returning sign-in in the account flow without the root flag',
   await act(async()=>root.render(<RuntimeApp runtimeMode="synth_os" enrollmentEnabled enrollmentAccountOnly={false}/>));
   expect(host.textContent).toContain('Central account flow');
 });
+it('preserves the beta entry at every bookmark when enrollment build flags are unset',async()=>{
+  vi.stubEnv('VITE_ENROLLMENT_ENABLED',undefined);vi.stubEnv('VITE_ENROLLMENT_ACCOUNT_ONLY',undefined);
+  for(const route of ['/','/onboarding','/sign-in']){
+    window.history.replaceState(null,'',route);
+    await act(async()=>root.render(<RuntimeApp runtimeMode="early_adopter_beta" clerkPublishableKey="pk_test_beta" apiBase="https://api.example.invalid"/>));
+    expect(host.textContent).toBe('Existing beta login');expect(host.textContent).not.toContain('Central account flow');
+  }
+});

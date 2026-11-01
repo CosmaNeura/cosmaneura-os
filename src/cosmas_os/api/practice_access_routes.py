@@ -9,8 +9,8 @@ from starlette.requests import Request
 
 from cosmas_os.adapters.enrollment_admission import (
     ACCESS_REQUIRED,
-    PUBLIC_ADMISSION_HEADER,
     RuntimeAdmissionError,
+    existing_user_admission,
     require_runtime_admission,
 )
 from cosmas_os.api.auth import AccessDenied, AuthenticationFailed, _organization_id
@@ -106,18 +106,12 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                 or method == "POST" and request.headers.get("content-type", "").split(";", 1)[0].lower() != "application/json"):
             return response({"detail": "invalid_practice_access_request"}, 422)
         try:
-            config = runtime()
-            if getattr(config, "workspace_enrollment_managed", False) and method == "POST" and request.url.path not in {"/practice-access/setup/complete", "/practice-access/members"}:
-                verified(config, request.headers["authorization"], verifier(request.headers.getlist("origin")))
-                raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
             body = bytearray()
             async with asyncio.timeout(15):
                 async for chunk in request.stream():
                     if len(body) + len(chunk) > 4096 or method == "GET" and chunk:
                         raise ValueError
                     body.extend(chunk)
-            command = model.model_validate(json.loads(body, object_pairs_hook=_unique)) if model else None
-
             def invoke():
                 config = runtime()
                 if ((not config.workspace_hosted_enabled and config.cosmas_env != "standalone_synthetic")
@@ -125,14 +119,7 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                     raise access.PracticeAccessError("practice_access_not_found", 404)
                 token_verifier = verifier(request.headers.getlist("origin"))
                 member = verified(config, request.headers["authorization"], token_verifier)
-                if getattr(config, "workspace_enrollment_managed", False) and method == "POST" and request.url.path not in {"/practice-access/setup/complete", "/practice-access/members"}:
-                    raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
                 purpose = "qualification" if request.url.path in {"/practice-access/enrollment-qualification", "/practice-access/setup", "/practice-access/setup/complete"} else "workspace"
-                checked_admission = require_runtime_admission(config, request.headers["authorization"], member.subject,
-                    purpose=purpose, adapter=admission_adapter() if admission_adapter else None)
-                if (getattr(config, "workspace_enrollment_managed", False) and request.url.path == "/practice-access/setup/complete"
-                        and (checked_admission is None or checked_admission["member_role"] != "owner")):
-                    raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
 
                 def fence():
                     check_capture_deadline()
@@ -142,21 +129,37 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                             or verified(config, request.headers["authorization"], token_verifier) != member):
                         raise AccessDenied()
                     current_admission = require_runtime_admission(config, request.headers["authorization"], member.subject,
-                        purpose=purpose, adapter=admission_adapter() if admission_adapter else None)
-                    if (checked_admission is not None and (current_admission is None
+                        purpose=purpose, adapter=admission_adapter() if admission_adapter else None, session=session)
+                    if (checked_admission is not None and checked_admission.get("existing_user") is not True and (current_admission is None
                             or current_admission["member_role"] != checked_admission["member_role"]
                             or current_admission["display_name"] != checked_admission["display_name"])):
                         raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
 
                 with session_factory() as session:
                     try:
+                        # Preserve revoked/remapped local identity denials;
+                        # enrollment cannot repair or reinterpret those records.
+                        # The operation retains its existing Box-first locks.
+                        access._binding(session, member, lock=False)
+                        existing = existing_user_admission(session, config, member.subject)
+                        if (getattr(config, "workspace_enrollment_managed", False) and existing is None
+                                and method == "POST" and request.url.path not in {"/practice-access/setup/complete", "/practice-access/members"}):
+                            raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
+                        checked_admission = require_runtime_admission(config, request.headers["authorization"], member.subject,
+                            purpose=purpose, adapter=admission_adapter() if admission_adapter else None, session=session)
+                        if (getattr(config, "workspace_enrollment_managed", False) and existing is None
+                                and request.url.path == "/practice-access/setup/complete"
+                                and (checked_admission is None or checked_admission["member_role"] != "owner")):
+                            raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
+                        command = model.model_validate(json.loads(body, object_pairs_hook=_unique)) if model else None
                         if request.url.path == "/practice-access/enrollment-qualification":
                             prepare_registered_member(session, config, member, checked_admission, fence=fence)
                         if command is None:
                             result = operation(session, config, member, fence=fence)
                         else:
                             result = operation(session, config, member, command, fence=fence)
-                        if request.url.path == "/practice-access/enrollment-qualification" and checked_admission is not None:
+                        if (request.url.path == "/practice-access/enrollment-qualification" and checked_admission is not None
+                                and checked_admission.get("existing_user") is not True):
                             marker = {k: checked_admission[k] for k in ("contract_version", "enforced", "practice_id", "purpose")}
                             result = {**result, "enrollment_admission": marker,
                                       "initial_setup_complete": session.get(PracticeSetupProfile, member.box_id) is not None}
@@ -171,7 +174,7 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
         except AuthenticationFailed:
             return response({"detail": "practice_access_authentication_required"}, 401)
         except RuntimeAdmissionError as error:
-            return response({"detail": error.code}, error.status, {PUBLIC_ADMISSION_HEADER: error.code})
+            return response({"detail": error.code}, error.status, error.headers)
         except (AccessDenied, AuthorizationError):
             return response({"detail": "practice_access_denied"}, 403)
         except access.PracticeAccessError as error:

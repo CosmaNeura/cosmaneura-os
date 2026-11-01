@@ -7,7 +7,7 @@ import {EnrollmentEntry,enrollmentRouteRequested} from './EnrollmentEntry';impor
 import {enrollmentApiBase} from './enrollment-api';
 let root:Root,host:HTMLDivElement;
 beforeEach(()=>{clerk.keys=[];vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);host=document.createElement('div');document.body.append(host);root=createRoot(host);window.history.replaceState(null,'','/onboarding?plan=small&seats=5');vi.stubGlobal('fetch',vi.fn());});
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 const json=(value:unknown)=>new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
 it('admits browser onboarding and its alias while preserving the existing workspace and native entry',()=>{
   expect(enrollmentRouteRequested(true,'https://app.example.invalid/onboarding?plan=small&seats=5')).toBe(true);
@@ -47,4 +47,17 @@ it('stays closed before a qualified account configuration is installed',async()=
 it('refuses an enrollment key that differs from the supplied build identity',async()=>{
   vi.mocked(fetch).mockResolvedValue(json(enrollmentConfig()));await act(async()=>root.render(<EnrollmentEntry apiBase="http://127.0.0.1:8910" publishableKey="pk_test_different"/>));
   expect(clerk.keys).toEqual([]);expect(host.textContent).toContain('Account setup is not available yet');
+});
+it('does not take over existing beta bookmarks with unset flags, but opens an explicitly enabled new account route',async()=>{
+  vi.stubEnv('VITE_ENROLLMENT_ENABLED',undefined);vi.stubEnv('VITE_ENROLLMENT_ACCOUNT_ONLY',undefined);
+  for(const route of ['/','/sign-in','/onboarding']){
+    window.history.replaceState(null,'',route);
+    expect(enrollmentRouteRequested(false,window.location.href,false)).toBe(false);
+    await act(async()=>root.render(enrollmentRouteRequested()?<EnrollmentEntry apiBase="http://127.0.0.1:8910"/>:<p>Existing beta runtime</p>));
+    expect(host.textContent).toBe('Existing beta runtime');expect(clerk.keys).toEqual([]);expect(fetch).not.toHaveBeenCalled();
+  }
+  window.history.replaceState(null,'','/onboarding');vi.mocked(fetch).mockResolvedValue(json(enrollmentConfig()));
+  expect(enrollmentRouteRequested(true,window.location.href,false)).toBe(true);
+  await act(async()=>root.render(enrollmentRouteRequested(true,window.location.href,false)?<EnrollmentEntry apiBase="http://127.0.0.1:8910"/>:<p>Existing beta runtime</p>));
+  expect(host.textContent).toContain('Clerk Google Microsoft password signup');expect(fetch).toHaveBeenCalledOnce();expect(clerk.keys).toEqual(['pk_test_invented']);
 });
