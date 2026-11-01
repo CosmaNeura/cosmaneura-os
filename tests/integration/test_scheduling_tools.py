@@ -94,13 +94,13 @@ def test_dst_fold_is_two_exact_utc_slots_and_timezone_cannot_select_new_resource
     try:
         read = observed(tools)
         first, second = read["availability"]["slots"]
-        assert first["local_starts_at"] == "2026-11-01T01:30:00-04:00"
-        assert second["local_starts_at"] == "2026-11-01T01:30:00-05:00"
+        assert first["local_starts_at"] == "2027-11-07T01:30:00-04:00"
+        assert second["local_starts_at"] == "2027-11-07T01:30:00-05:00"
         assert first["starts_at"] != second["starts_at"]
         prepared = tools.call("follow_up", "scheduling_prepare_observed", prepare_args(read, index=1))
         assert prepared["detail"]["intent"]["slot"]["starts_at"] == second["starts_at"]
         read_utc = observed(tools, "visit_prep", "UTC")
-        assert read_utc["availability"]["slots"][0]["local_starts_at"] == "2026-11-01T05:30:00+00:00"
+        assert read_utc["availability"]["slots"][0]["local_starts_at"] == "2027-11-07T05:30:00+00:00"
         assert read_utc["source_bindings"] == read["source_bindings"]
         before = list(tools.calls)
         for args in ({"timezone": "US/Eastern"}, {"timezone": "UTC", "resource_id": str(uuid4())}):
