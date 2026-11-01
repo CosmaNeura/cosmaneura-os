@@ -137,11 +137,13 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
 
                 with session_factory() as session:
                     try:
-                        # Preserve revoked/remapped local identity denials;
-                        # enrollment cannot repair or reinterpret those records.
-                        # The operation retains its existing Box-first locks.
-                        access._binding(session, member, lock=False)
-                        existing = existing_user_admission(session, config, member.subject)
+                        existing = None
+                        if getattr(config, "workspace_enrollment_managed", False):
+                            # Preserve revoked/remapped local identity denials;
+                            # enrollment cannot repair or reinterpret those records.
+                            # The operation retains its existing Box-first locks.
+                            access._binding(session, member, lock=False)
+                            existing = existing_user_admission(session, config, member.subject)
                         if (getattr(config, "workspace_enrollment_managed", False) and existing is None
                                 and method == "POST" and request.url.path not in {"/practice-access/setup/complete", "/practice-access/members"}):
                             raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)

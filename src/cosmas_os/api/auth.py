@@ -343,9 +343,11 @@ def authenticate_request(
     verifier: TokenVerifier | None = None,
     admission_adapter: EnrollmentAdmissionAdapter | None = None,
 ) -> RequestIdentity:
-    # Request-local, server-derived evidence; never carry a prior caller's
-    # enrollment exemption into a reused database session.
-    session.info.pop("enrollment_existing_identity", None)
+    managed_enrollment = getattr(runtime_settings, "workspace_enrollment_managed", False)
+    if managed_enrollment:
+        # Request-local, server-derived evidence; never carry a prior caller's
+        # enrollment exemption into a reused managed database session.
+        session.info.pop("enrollment_existing_identity", None)
     if runtime_settings.auth_mode == "synth_headers":
         if runtime_settings.cosmas_env != "synth_os":
             raise AuthenticationFailed("synthetic header authentication is disabled")
@@ -393,13 +395,14 @@ def authenticate_request(
         .execution_options(populate_existing=True)
     )
     if not binding:
-        saved = session.scalar(select(ExternalIdentity).where(
-            ExternalIdentity.issuer == issuer, ExternalIdentity.subject == subject
-        ))
-        if saved is not None:
-            # A revoked/remapped local identity is not a brand-new signup.
-            # Preserve the ordinary authorization denial without enrollment.
-            raise AccessDenied("identity is not provisioned")
+        if managed_enrollment:
+            saved = session.scalar(select(ExternalIdentity).where(
+                ExternalIdentity.issuer == issuer, ExternalIdentity.subject == subject
+            ))
+            if saved is not None:
+                # A revoked/remapped local identity is not a brand-new signup.
+                # Preserve the ordinary authorization denial without enrollment.
+                raise AccessDenied("identity is not provisioned")
         require_runtime_admission(runtime_settings, authorization, subject,
                                   adapter=admission_adapter, session=session)
         raise AccessDenied("identity is not provisioned")
