@@ -24,12 +24,16 @@ those four manifests and wraps them in `DeclaredEhrConnector`. Plugin
 
 ## Fail-closed rules
 
-1. **Writes.** `refuse_write` and `assert_not_write_action` always raise
-   `EhrWriteRefused`. Manifests may not set `writes_supported=True`.
-2. **Production.** `allow_target("production")` raises `EhrTargetRefused` unless
-   the manifest claims `production_supported` **and** a C14 `ProductionGate`
-   returns true. Today's manifests all set `production_supported=False`, so
-   production is refused even if a gate object is passed.
+1. **Writes.** `refuse_write` always raises `EhrWriteRefused`. 
+   `assert_not_write_action` strips and casefolds the name, then allows only the
+   closed read-action allowlist (`READ_ACTIONS`); anything else is refused.
+   Manifests may not set `writes_supported=True`.
+2. **Production.** `allow_target("production")` raises `EhrTargetRefused` with
+   code `ehr_target_refused` and the plain message
+   "CosmaBot can only connect to sandbox EHRs right now." unless the manifest
+   claims `production_supported` **and** a C14 `ProductionGate` returns true.
+   Today's manifests all set `production_supported=False`, so production is
+   refused even if a gate object is passed.
 3. **Sandbox.** `allow_target("sandbox")` succeeds only when
    `sandbox_supported` is true. Atlas.md declares sandbox unsupported because
    no vendor sandbox contract is verified in this repository.

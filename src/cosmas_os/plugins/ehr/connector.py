@@ -27,7 +27,23 @@ from cosmas_os.plugins.ehr.manifest import (
 )
 from cosmas_os.plugins.ehr.refusals import EhrReadRefused, EhrTargetRefused, EhrWriteRefused
 
-# Closed set of action names treated as writes / mutations by this contract.
+# Closed allowlist of read action names. Anything else is refused as a write.
+READ_ACTIONS = frozenset({
+    "appointments",
+    "patients",
+    "medications",
+    "allergies",
+    "problems",
+    "labs",
+    "visit",
+    "visit_link_status",
+    "status",
+    "observe",
+    "verify",
+    "read",
+})
+
+# Historical mutation names kept for tests and docs; the gate uses READ_ACTIONS.
 WRITE_ACTIONS = frozenset({
     "write",
     "write_chart",
@@ -46,6 +62,11 @@ WRITE_ACTIONS = frozenset({
     "send_message",
     "external_send",
 })
+
+
+def normalize_action_name(action: str) -> str:
+    """Strip surrounding whitespace and casefold for closed comparisons."""
+    return action.strip().casefold()
 
 
 @runtime_checkable
@@ -90,7 +111,7 @@ class DeclaredEhrConnector:
     auth_provider: BackendAuthProvider | None = None
     secret_resolver: SecretResolver | None = None
     fhir_read_client: FhirReadClient | None = None
-    _write_actions: frozenset[str] = field(default=WRITE_ACTIONS, repr=False)
+    _read_actions: frozenset[str] = field(default=READ_ACTIONS, repr=False)
 
     def __post_init__(self) -> None:
         if type(self.manifest) is not CapabilityManifest:
@@ -166,8 +187,9 @@ class DeclaredEhrConnector:
                 )
 
     def assert_not_write_action(self, action: str) -> None:
-        """Refuse known mutation action names before any downstream work."""
-        if type(action) is not str or not action:
+        """Refuse any action that is not an explicit allowlisted read name."""
+        if type(action) is not str:
             raise EhrWriteRefused("write")
-        if action in self._write_actions or action.startswith("write_"):
-            self.refuse_write(action)
+        normalized = normalize_action_name(action)
+        if not normalized or normalized not in self._read_actions:
+            self.refuse_write(action if action.strip() else "write")
