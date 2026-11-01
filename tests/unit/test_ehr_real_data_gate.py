@@ -9,6 +9,9 @@ import httpx
 import pytest
 from tests.unit.test_athena_allergy_read import SCOPE as ATHENA_SCOPE
 from tests.unit.test_athena_allergy_read import Harness as AthenaHarness
+from tests.unit.test_athena_medication_read import SCOPE as ATHENA_MED_SCOPE
+from tests.unit.test_athena_medication_read import Harness as AthenaMedHarness
+from tests.unit.test_elation_lab_read import SCOPE as ELATION_LAB_SCOPE
 from tests.unit.test_elation_read import SCOPE as ELATION_SCOPE
 
 from cosmas_os.adapters.athena_allergy_read import (
@@ -18,6 +21,8 @@ from cosmas_os.adapters.athena_allergy_read import (
     AthenaAllergyError,
     AthenaAllergyReader,
 )
+from cosmas_os.adapters.athena_medication_read import AthenaMedicationError
+from cosmas_os.adapters.elation_lab_read import ElationLabError, ElationLabReader
 from cosmas_os.adapters.elation_read import ORIGIN as ELATION_SANDBOX_ORIGIN
 from cosmas_os.adapters.elation_read import ElationReadAdapter, ElationReadError
 from cosmas_os.adapters.tebra_fhir_read import FHIR_BASE, TebraFhirReadAdapter, TebraFhirReadError
@@ -27,6 +32,7 @@ from cosmas_os.config import Settings
 from cosmas_os.ehr_real_data_gate import (
     ATHENA_PRODUCTION_ORIGIN,
     ELATION_PRODUCTION_ORIGIN,
+    PRODUCTION_ORIGINS,
     CosmasEhrRealDataGate,
     EhrRealDataGateError,
     assert_ehr_request_allowed,
@@ -62,6 +68,129 @@ def test_production_origins_are_refused_by_default(vendor, origin):
             real_data_enabled=False,
             practice_baa_recorded=True,
         )
+
+
+def test_real_data_gate_off_by_default_refuses_every_non_sandbox_source_in_every_adapter():
+    """CTO readiness: switch defaults off; every non-sandbox origin is refused.
+
+    Covers the shared gate for every catalogued production origin, plus each
+    wired adapter (athena allergy/medication, Elation visit/lab, Tebra FHIR/SOAP,
+    Atlas.md with no origin).
+    """
+    assert Settings().cosmas_ehr_real_data_enabled is False
+    closed = CosmasEhrRealDataGate()
+    assert closed.real_data_enabled is False and closed.practice_baa_recorded is False
+    for vendor_id in ("athena", "elation", "tebra", "atlas_md"):
+        assert closed.allow_production(vendor_id=vendor_id, target="production") is False
+
+    non_sandbox = [
+        (vendor, origin)
+        for vendor, origins in PRODUCTION_ORIGINS.items()
+        for origin in sorted(origins)
+    ]
+    assert non_sandbox == [
+        ("athena", ATHENA_PRODUCTION_ORIGIN),
+        ("elation", ELATION_PRODUCTION_ORIGIN),
+        ("tebra", "https://fhir.prd.cloud.tebra.com"),
+        ("tebra", "https://webservice.kareo.com"),
+    ]
+    for vendor, origin in non_sandbox:
+        with pytest.raises(EhrRealDataGateError, match="^real_data_required$"):
+            assert_ehr_request_allowed(vendor=vendor, origin=origin)
+
+    # athena allergy + medication adapters refuse production when flags stay default.
+    allergy = AthenaHarness()
+    with pytest.raises(AthenaAllergyError, match="^real_data_required$"):
+        allergy.reader(replace(ATHENA_SCOPE, environment="production"), sandbox_enabled=False).read()
+    assert allergy.calls == []
+
+    medication = AthenaMedHarness()
+    with pytest.raises(AthenaMedicationError, match="^real_data_required$"):
+        medication.reader(
+            replace(ATHENA_MED_SCOPE, environment="production"), sandbox_enabled=False
+        ).read()
+    assert medication.calls == []
+
+    # Elation adapters dial only the sandbox origin; production is refused above.
+    assert ELATION_SANDBOX_ORIGIN == "https://sandbox.elationemr.com"
+    assert ELATION_PRODUCTION_ORIGIN not in {ELATION_SANDBOX_ORIGIN}
+
+    async def credentials(_):
+        raise AssertionError("credentials must not resolve when the real-data gate is closed")
+
+    async def allow(_):
+        return True
+
+    def forbidden(_: httpx.Request):
+        raise AssertionError("closed gate must not contact a vendor origin")
+
+    elation = ElationReadAdapter(
+        ELATION_SCOPE,
+        credentials,
+        enabled=True,
+        authorize_read=allow,
+        transport=httpx.MockTransport(forbidden),
+        sandbox_enabled=False,
+        real_data_enabled=False,
+        practice_baa_recorded=False,
+    )
+    with pytest.raises(ElationReadError, match="^access_denied$"):
+        elation._guard_origin()
+
+    lab = ElationLabReader(
+        ELATION_LAB_SCOPE,
+        httpx.MockTransport(forbidden),
+        enabled=lambda: True,
+        authorize=lambda _: True,
+        sandbox_enabled=False,
+        real_data_enabled=False,
+        practice_baa_recorded=False,
+    )
+    with pytest.raises(ElationLabError, match="^access_denied$"):
+        lab._guard_origin()
+
+    # Tebra has no sandbox origin. Live/non-mock transports refuse production
+    # when the real-data switch stays off (MockTransport is a synthetic bypass).
+    fhir = TebraFhirReadAdapter(
+        enabled=True,
+        transport=None,
+        authorize_read=lambda _: True,
+        verify_patient=lambda *_: True,
+        real_data_enabled=False,
+        practice_baa_recorded=False,
+    )
+    with pytest.raises(TebraFhirReadError, match="^real_data_required$"):
+        fhir._guard_origin()
+
+    # SOAP checks MockTransport before the gate; live transport stays dark, and
+    # the gate call the adapter would make without the mock bypass refuses.
+    soap = TebraReadAdapter(
+        authorize_read=lambda _: True,
+        enabled=True,
+        transport=None,
+        real_data_enabled=False,
+        practice_baa_recorded=False,
+    )
+    from cosmas_os.adapters.tebra_read import TebraReadScope
+
+    soap_scope = TebraReadScope(
+        UUID(int=1), UUID(int=2), UUID(int=3), UUID(int=4), 900, 901, "Invented Clinic"
+    )
+    with pytest.raises(TebraReadError, match="^provider_qualification_required$"):
+        soap._guard(soap_scope)
+    with pytest.raises(EhrRealDataGateError, match="^real_data_required$"):
+        assert_ehr_request_allowed(
+            vendor="tebra",
+            origin=TEBRA_SOAP_ENDPOINT,
+            sandbox_enabled=False,
+            real_data_enabled=False,
+            practice_baa_recorded=False,
+            mock_transport_only=False,
+        )
+
+    assert atlas_md_has_no_origin() is True
+    with pytest.raises(EhrRealDataGateError, match="^atlas_md_unsupported$"):
+        assert_ehr_request_allowed(vendor="atlas_md", origin=ATHENA_PRODUCTION_ORIGIN)
 
 
 @pytest.mark.parametrize(
