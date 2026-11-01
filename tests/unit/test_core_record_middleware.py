@@ -338,3 +338,25 @@ def test_late_session_factory_retains_slot_and_never_authenticates(actual_record
         assert f.events==['session','pool waiting','pool returned','rollback','close']
         await asyncio.sleep(0.01)
     asyncio.run(run())
+
+
+def test_explicit_managed_denial_never_opens_record_connection(actual_record, monkeypatch):
+    from cosmas_os.adapters.enrollment_admission import ACCESS_REQUIRED, RuntimeAdmissionError
+    from cosmas_os.api import app as product
+
+    f = actual_record
+    product.settings.workspace_enrollment_managed = True
+
+    def denied(*args, **kwargs):
+        f.events.append('auth')
+        raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
+
+    monkeypatch.setattr(product, 'authenticate_request', denied)
+
+    async def run():
+        messages = await invoke(f)
+        assert messages[0]['status'] == 403
+        assert json.loads(b''.join(m.get('body', b'') for m in messages))['detail'] == ACCESS_REQUIRED
+        assert f.events == ['session', 'auth', 'rollback', 'close']
+
+    asyncio.run(run())
