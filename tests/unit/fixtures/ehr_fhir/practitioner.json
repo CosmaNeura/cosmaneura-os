@@ -1,0 +1,22 @@
+{
+  "resourceType": "Practitioner",
+  "id": "synth-practitioner-9101",
+  "meta": {
+    "profile": ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-practitioner"]
+  },
+  "identifier": [
+    {
+      "system": "http://hl7.org/fhir/sid/us-npi",
+      "value": "9999999999"
+    }
+  ],
+  "name": [
+    {
+      "use": "official",
+      "family": "Example",
+      "given": ["Casey"],
+      "prefix": ["Dr."]
+    }
+  ],
+  "active": true
+}

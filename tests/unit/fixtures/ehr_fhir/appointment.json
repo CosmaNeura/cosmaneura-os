@@ -1,0 +1,27 @@
+{
+  "resourceType": "Appointment",
+  "id": "synth-appointment-3001",
+  "status": "booked",
+  "serviceType": [
+    {
+      "text": "Invented follow-up"
+    }
+  ],
+  "start": "2026-11-02T16:00:00Z",
+  "end": "2026-11-02T16:30:00Z",
+  "participant": [
+    {
+      "actor": {
+        "reference": "Patient/synth-patient-1001",
+        "display": "Avery Northwind"
+      },
+      "status": "accepted"
+    },
+    {
+      "actor": {
+        "display": "Dr. Example Clinician"
+      },
+      "status": "accepted"
+    }
+  ]
+}
