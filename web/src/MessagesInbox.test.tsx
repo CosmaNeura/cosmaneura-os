@@ -37,15 +37,17 @@ it('makes context the primary title and keeps each Chief conversation and its me
   const cards=[...host.querySelectorAll<HTMLElement>('.messages-conversation-card')];
   expect(cards).toHaveLength(2);
   expect(cards.map(card=>card.querySelector('strong > .messages-context')?.textContent)).toEqual([first.context_label,otherChief.context_label]);
-  expect(cards.every(card=>card.querySelector('.bot-avatar.chief')&&!card.querySelector('.messages-bot-identity'))).toBe(true);
+  // One Chief avatar per row; do not revive #222's double identity (avatar + visible Chief name under the Chief group).
+  expect(cards.every(card=>card.querySelectorAll('.bot-avatar.chief').length===1&&!card.querySelector('.messages-bot-identity'))).toBe(true);
   expect([...host.querySelectorAll('.messages-inbox-group>h2')].filter(heading=>heading.textContent==='Chief')).toHaveLength(1);
+  expect(host.querySelectorAll('.messages-inbox .bot-avatar.chief')).toHaveLength(2);
   expect(cards.every(card=>card.children.length===2&&card.children[0].classList.contains('messages-row')&&card.children[1].classList.contains('messages-row-menu'))).toBe(true);
   expect(cards.map(card=>card.querySelector('.messages-row-menu')?.getAttribute('aria-label'))).toEqual([
     `Conversation actions for ${first.context_label}, Chief of Staff`,
     `Conversation actions for ${otherChief.context_label}, Chief of Staff`,
   ]);
 });
-it('shows the Chief icon beside each synthetic patient-chat engagement under the Chief group',async()=>{
+it('shows exactly one Chief icon beside each synthetic patient-chat engagement under the Chief group',async()=>{
   await act(async()=>root.render(<Harness rows={[first,otherChief,second]}/>));
   const chiefGroup=[...host.querySelectorAll('.messages-inbox-group')].find(group=>group.querySelector('h2')?.textContent==='Chief');
   expect(chiefGroup).toBeTruthy();
@@ -55,11 +57,17 @@ it('shows the Chief icon beside each synthetic patient-chat engagement under the
     first.context_label,otherChief.context_label,
   ]);
   for(const card of chiefCards){
-    const avatar=card.querySelector('.messages-row > .bot-avatar.chief');
-    expect(avatar).toBeTruthy();
-    expect(avatar?.getAttribute('aria-hidden')).toBe('true');
+    const avatars=card.querySelectorAll('.bot-avatar.chief');
+    expect(avatars).toHaveLength(1);
+    expect(card.querySelector('.messages-row > .bot-avatar.chief')).toBe(avatars[0]);
+    expect(avatars[0].getAttribute('aria-hidden')).toBe('true');
     expect(card.querySelector('.messages-bot-identity')).toBeNull();
+    // Visible title is the engagement context; Chief name stays screen-reader-only (avoids #222 double identity).
+    expect(card.querySelector('strong > .messages-context')).toBeTruthy();
+    expect(card.querySelector('strong > .team-sr-only')?.textContent).toMatch(/Chief of Staff/);
+    expect([...card.querySelectorAll('strong > :not(.team-sr-only)')].map(node=>node.textContent).join('')).not.toMatch(/Chief of Staff/);
   }
+  expect(chiefGroup!.querySelectorAll('.bot-avatar.chief')).toHaveLength(2);
   const followUpCard=[...host.querySelectorAll<HTMLElement>('.messages-conversation-card')].find(card=>card.textContent?.includes(second.context_label));
   expect(followUpCard?.querySelector('.messages-row > .bot-avatar.follow_up')).toBeTruthy();
   expect(followUpCard?.querySelector('.messages-bot-identity')?.textContent).toBe('Follow-up');
