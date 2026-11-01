@@ -13,8 +13,25 @@ from cosmas_os.plugins.ehr import (
     EhrWriteRefused,
 )
 from cosmas_os.plugins.ehr.connector import READ_ACTIONS, WRITE_ACTIONS
-from cosmas_os.plugins.ehr.refusals import PRODUCTION_TARGET_MESSAGE, WRITE_REFUSED_MESSAGE
+from cosmas_os.plugins.ehr.refusals import (
+    PRACTICE_SCOPE_REFUSED_MESSAGE,
+    PRACTICE_SCOPE_REQUIRED_MESSAGE,
+    PRODUCTION_TARGET_MESSAGE,
+    RESOURCE_UNSUPPORTED_MESSAGE,
+    WRITE_REFUSED_MESSAGE,
+)
 from cosmas_os.plugins.ehr.registry import build_default_registry
+
+VENDORS = ("athena", "atlas_md", "elation", "tebra")
+NON_STRING_RESOURCES = (
+    [],
+    {},
+    b"appointments",
+    None,
+    1,
+    1.5,
+    True,
+)
 
 BETA_MUTATION_GAPS = (
     "DELETE",
@@ -187,6 +204,10 @@ def test_allow_read_refuses_undeclared_resource():
     with pytest.raises(EhrReadRefused) as raised:
         connector.allow_read("allergies", target="sandbox")
     assert raised.value.code == "ehr_resource_unsupported"
+    assert raised.value.message == RESOURCE_UNSUPPORTED_MESSAGE
+    assert raised.value.message == (
+        "That EHR resource isn't available for this connection."
+    )
 
 
 def test_allow_read_refuses_production_by_default():
@@ -195,6 +216,41 @@ def test_allow_read_refuses_production_by_default():
         connector.allow_read("appointments", target="production")
     assert raised.value.code == "ehr_target_refused"
     assert raised.value.message == PRODUCTION_TARGET_MESSAGE
+
+
+@pytest.mark.parametrize("vendor_id", VENDORS)
+def test_allow_read_refusals_carry_plain_english_message_for_each_vendor(vendor_id):
+    connector = build_default_registry().require(vendor_id)
+    if vendor_id == "atlas_md":
+        with pytest.raises(EhrTargetRefused) as raised:
+            connector.allow_read("appointments", target="sandbox")
+        assert raised.value.code == "ehr_target_refused"
+        assert raised.value.message == "That EHR target is not allowed."
+        return
+
+    undeclared = {
+        "athena": "problems",
+        "elation": "allergies",
+        "tebra": "labs",
+    }[vendor_id]
+    with pytest.raises(EhrReadRefused) as raised:
+        connector.allow_read(undeclared, target="sandbox")
+    assert raised.value.code == "ehr_resource_unsupported"
+    assert raised.value.message == RESOURCE_UNSUPPORTED_MESSAGE
+
+
+@pytest.mark.parametrize("vendor_id", VENDORS)
+@pytest.mark.parametrize("resource", NON_STRING_RESOURCES)
+def test_allow_read_non_string_resource_raises_contract_refusal(vendor_id, resource):
+    connector = build_default_registry().require(vendor_id)
+    with pytest.raises(EhrReadRefused) as raised:
+        connector.allow_read(resource, target="sandbox")  # type: ignore[arg-type]
+    assert raised.value.code == "ehr_resource_unsupported"
+    assert raised.value.message == RESOURCE_UNSUPPORTED_MESSAGE
+    assert "TypeError" not in type(raised.value).__name__
+    # Never echo the caller's input in the plain message.
+    assert repr(resource) not in raised.value.message
+    assert str(resource) not in raised.value.message
 
 
 def test_c6_practice_scope_hook_can_refuse():
@@ -211,6 +267,7 @@ def test_c6_practice_scope_hook_can_refuse():
             practice_scope=Scope(),
         )
     assert raised.value.code == "ehr_practice_scope_refused"
+    assert raised.value.message == PRACTICE_SCOPE_REFUSED_MESSAGE
     connector.allow_read(
         "appointments",
         target="sandbox",
@@ -228,6 +285,7 @@ def test_c6_practice_scope_requires_practice_ref():
     with pytest.raises(EhrReadRefused) as raised:
         connector.allow_read("appointments", practice_scope=Scope())
     assert raised.value.code == "ehr_practice_scope_required"
+    assert raised.value.message == PRACTICE_SCOPE_REQUIRED_MESSAGE
 
 
 def test_c6_read_audit_hook_records_allowed_and_refused():

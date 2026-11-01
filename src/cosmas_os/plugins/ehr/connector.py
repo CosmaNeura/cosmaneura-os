@@ -163,6 +163,10 @@ class DeclaredEhrConnector:
     ) -> None:
         outcome = "refused"
         try:
+            # Non-string resources must refuse with a contract error, never TypeError.
+            # Do not echo the input in the message.
+            if type(resource) is not str:
+                raise EhrReadRefused("ehr_resource_unsupported")
             self.allow_target(target, production_gate=production_gate)
             if not self.manifest.supports_read(resource):
                 raise EhrReadRefused("ehr_resource_unsupported")
