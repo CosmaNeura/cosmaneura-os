@@ -876,7 +876,12 @@ def call(runtime, name: str, arguments: object) -> dict[str, Any]:
 EHR_CAPABILITY = CapabilityManifest(
     vendor_id="athena",
     display_name="athenaOne",
-    auth_styles=frozenset({"cosmas_session", "athena_platform_bearer"}),
+    auth_styles=frozenset({
+        "cosmas_session",
+        "athena_platform_bearer",
+        # C2 2-legged client-credentials for Cosmaneura CosmaBot FHIR (not live-wired).
+        "oauth2_client_credentials",
+    }),
     readable_resources=frozenset({
         "appointments",
         "medications",
@@ -899,6 +904,8 @@ EHR_CAPABILITY = CapabilityManifest(
     writes_supported=False,
     notes=(
         "Plugin tools call signed CosmaBot routes only. Athena Platform preview "
-        "is treated as the sandbox class for this contract; production stays refused."
+        "is treated as the sandbox class for this contract; production stays refused. "
+        "oauth2_client_credentials is declared for the Cosmaneura CosmaBot FHIR "
+        "sandbox auth module; no live token exchange is enabled from this plugin yet."
     ),
 )

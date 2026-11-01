@@ -1,9 +1,9 @@
 """Shared EHR connector contract: manifest, fail-closed gates, vendor registry.
 
-This package is the stable surface for later SMART backend-services auth (C2),
-Key Vault secret resolution (C3), and a FHIR R4 read client (C4). It does not
-perform vendor HTTP itself. Existing CosmaBot plugin tools keep their current
-behavior; they only declare a capability manifest here.
+This package is the stable surface for 2-legged client-credentials auth (C2 via
+``adapters.ehr_auth``), Key Vault secret resolution (C3), and a FHIR R4 read
+client (C4). It does not perform vendor HTTP itself. Existing CosmaBot plugin
+tools keep their current behavior; they only declare a capability manifest here.
 
 Writes and production targets are refused by default (fail closed). Optional
 hook points exist for a later production gate (C14) and PHI-free read audit /

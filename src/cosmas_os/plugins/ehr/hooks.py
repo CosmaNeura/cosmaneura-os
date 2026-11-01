@@ -6,8 +6,8 @@ this package:
 - ``ProductionGate`` — C14 real-data / production gate
 - ``PracticeScopeConfig`` / ``PhiFreeReadAudit`` — C6 per-practice scope and
   PHI-free read audit
-- ``BackendAuthProvider`` — C2 SMART backend-services JWT auth
-- ``SecretResolver`` — C3 Key Vault (or equivalent) secret adapter
+- ``BackendAuthProvider`` — C2 2-legged OAuth client-credentials auth
+- ``SecretResolver`` — named secret resolution (C2 env binding; C3 Key Vault)
 - ``FhirReadClient`` — C4 FHIR R4 read client
 
 Callers pass hook instances into ``EhrConnector`` gate methods when those
@@ -16,7 +16,7 @@ modules exist. Until then the connector stays fail closed.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from cosmas_os.plugins.ehr.manifest import ResourceType, TargetEnvironment, VendorId
 
@@ -64,16 +64,26 @@ class PhiFreeReadAudit(Protocol):
         ...
 
 
+@runtime_checkable
 class BackendAuthProvider(Protocol):
-    """C2: obtain a backend-services access token for a vendor."""
+    """C2: obtain a 2-legged client-credentials access token for a vendor.
+
+    Concrete implementation:
+    ``cosmas_os.adapters.ehr_auth.ClientCredentialsAuthProvider``.
+    """
 
     def access_token(self, *, vendor_id: VendorId, audience: str) -> str:
         """Return a short-lived access token. Must not log the token."""
         ...
 
 
+@runtime_checkable
 class SecretResolver(Protocol):
-    """C3: resolve a named secret without embedding credentials in code."""
+    """Resolve a named secret without embedding credentials in code.
+
+    C2 provides ``ManagedSecretEnvResolver`` (``COSMAS_MANAGED_SECRET_*`` env
+    bindings from Key Vault). C3 may add a richer Key Vault adapter.
+    """
 
     def resolve(self, *, name: str) -> str:
         """Return the secret value for ``name``. Must not log the value."""
