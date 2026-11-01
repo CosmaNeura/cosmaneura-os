@@ -105,7 +105,8 @@ class Harness:
         self.status = 200
         self.transport = httpx.MockTransport(self.send)
         self.reader = ElationLabReader(
-            SCOPE, self.transport, enabled=lambda: self.enabled, authorize=lambda _: self.authorized
+            SCOPE, self.transport, enabled=lambda: self.enabled, authorize=lambda _: self.authorized,
+            sandbox_enabled=True,
         )
 
     def send(self, request):

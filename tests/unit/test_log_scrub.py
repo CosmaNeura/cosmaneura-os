@@ -91,10 +91,14 @@ def _assert_redacted(text: str) -> None:
 def _capture(name: str, formatter: logging.Formatter | None = None):
     install()
     logger = logging.getLogger(name)
-    previous = (logger.level, logger.propagate, list(logger.handlers))
+    # Alembic fileConfig disables loggers that already exist. The full suite
+    # does that before this test, which would drop the record and leave an
+    # empty capture (same trap as tests/unit/test_plugin_log_scrub.py).
+    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
     logger.handlers = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
+    logger.disabled = False
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.setFormatter(formatter or logging.Formatter("%(message)s"))
@@ -102,11 +106,14 @@ def _capture(name: str, formatter: logging.Formatter | None = None):
     return logger, stream, previous
 
 
-def _restore(logger: logging.Logger, previous: tuple[int, bool, list[logging.Handler]]) -> None:
-    level, propagate, handlers = previous
+def _restore(
+    logger: logging.Logger, previous: tuple[int, bool, list[logging.Handler], bool]
+) -> None:
+    level, propagate, handlers, disabled = previous
     logger.handlers = handlers
     logger.setLevel(level)
     logger.propagate = propagate
+    logger.disabled = disabled
 
 
 def _raise_with_note() -> None:
@@ -234,10 +241,11 @@ def test_worker_log_redacts_identifiers_and_note_text() -> None:
 
 def test_preexisting_handler_is_scrubbed() -> None:
     logger = logging.getLogger("cosmas_os.preexisting")
-    previous = (logger.level, logger.propagate, list(logger.handlers))
+    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
     logger.handlers = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
+    logger.disabled = False
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
     handler.setFormatter(logging.Formatter("%(message)s"))

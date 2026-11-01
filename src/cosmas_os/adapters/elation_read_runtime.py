@@ -89,7 +89,7 @@ class SyntheticElationReads:
 
         return ElationReadAdapter(scope, credentials, enabled=self.current(scope),
             authorize_read=allowed, transport=self._transport, problems_enabled=problems,
-            medications_enabled=medications)
+            medications_enabled=medications, sandbox_enabled=True)
 
     def window(self, scope: ElationReadScope, starts_at: datetime, ends_at: datetime, *, authorize):
         async def run():

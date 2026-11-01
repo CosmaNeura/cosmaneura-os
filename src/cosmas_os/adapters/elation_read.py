@@ -25,6 +25,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 from pydantic import SecretStr
 
+from cosmas_os.ehr_real_data_gate import EhrRealDataGateError, assert_ehr_request_allowed
+
 ORIGIN = "https://sandbox.elationemr.com"
 SCOPES = "system/practices.read system/appointments.read system/patients.read"
 PROBLEM_SCOPES = SCOPES + " system/problems.read"
@@ -214,10 +216,16 @@ class ElationReadAdapter:
             transport: httpx.AsyncBaseTransport | None = None,
             now: Callable[[], datetime] = lambda: datetime.now(UTC),
             monotonic: Callable[[], float] = time.monotonic,
-            sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+            sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+            sandbox_enabled: bool = False,
+            real_data_enabled: bool = False,
+            practice_baa_recorded: bool = False):
         if (type(scope) is not ElationReadScope or type(enabled) is not bool
                 or type(problems_enabled) is not bool
                 or type(medications_enabled) is not bool
+                or type(sandbox_enabled) is not bool
+                or type(real_data_enabled) is not bool
+                or type(practice_baa_recorded) is not bool
                 or scope.environment != "sandbox"
                 or any(type(v) is not UUID for v in (scope.box_id, scope.owner_id,
                     scope.connection_id, scope.credential_generation))):
@@ -231,6 +239,9 @@ class ElationReadAdapter:
             " system/medications.read" if medications_enabled else "")
         self.authorize_read, self.permit_request = authorize_read, permit_request
         self.transport, self.now, self.monotonic, self.sleep = transport, now, monotonic, sleep
+        self.sandbox_enabled = sandbox_enabled
+        self.real_data_enabled = real_data_enabled
+        self.practice_baa_recorded = practice_baa_recorded
         self._token: SecretStr | None = None
         self._token_until = 0.0
         self._credential_commitment: str | None = None
@@ -264,10 +275,27 @@ class ElationReadAdapter:
                 await self.sleep(max(0.0, self._calls[-1] + 0.51 - now))
             self._calls.append(self.monotonic())
 
+    def _guard_origin(self):
+        try:
+            assert_ehr_request_allowed(
+                vendor="elation",
+                origin=ORIGIN,
+                sandbox_enabled=self.sandbox_enabled,
+                real_data_enabled=self.real_data_enabled,
+                practice_baa_recorded=self.practice_baa_recorded,
+                mock_transport_only=type(self.transport) is httpx.MockTransport,
+            )
+        except EhrRealDataGateError as exc:
+            raise ElationReadError(
+                "access_denied" if exc.code in {"sandbox_flag_required", "real_data_required"}
+                else "invalid_request"
+            ) from None
+
     async def _json(self, client, method, path, *, params=None, form=None, token=None):
         await self._authorize()
         await self._permit()
         await self._authorize()
+        self._guard_origin()
         headers = {"Accept": "application/json", "Accept-Encoding": "identity"}
         if token is not None:
             headers["Authorization"] = "Bearer " + token.get_secret_value()
@@ -404,6 +432,7 @@ class ElationReadAdapter:
         try:
             async with asyncio.timeout(30):
                 await self._authorize()
+                self._guard_origin()
                 query_hash = self._query_hash(path, params)
                 sent = dict(params)
                 if cursor is not None:

@@ -12,6 +12,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from cosmas_os.ehr_real_data_gate import atlas_md_has_no_origin
 from cosmas_os.plugins.ehr.manifest import CapabilityManifest
 from cosmas_os.plugins.runtime import PluginError
 
@@ -101,6 +102,8 @@ def _validate(arguments: object) -> None:
 
 def call(_runtime, name: str, arguments: object) -> dict[str, Any]:
     """Return the unsupported state. ``_runtime`` is unused so no request is sent."""
+    # Atlas.md has no practice API origin; the shared real-data gate has nothing to allow.
+    assert atlas_md_has_no_origin()
     spec = BY_NAME.get(name)
     if spec is None:
         raise PluginError("unknown_tool")
