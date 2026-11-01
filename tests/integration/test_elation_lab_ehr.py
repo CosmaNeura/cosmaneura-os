@@ -28,11 +28,21 @@ ehr_case = _ehr_case
 @pytest.fixture
 def lab_case(ehr_case, monkeypatch):
     """The existing signed Elation visit fixture plus one entirely invented Lab report."""
+    from cosmas_os import ehr_read_audit
+
     f = ehr_case
     monkeypatch.setattr(f.configuration, "workspace_elation_labs_enabled", True)
     monkeypatch.setattr(
         f.port, "_labs_enabled", lambda: f.configuration.workspace_elation_labs_enabled
     )
+    # Labs map to Observation, which is outside the product default allow-list.
+    ehr_read_audit.upsert_allowed_resources(
+        f.s,
+        box_id=f.box,
+        connection_id=str(f.scope.connection_id),
+        resources=(*ehr_read_audit.DEFAULT_ALLOWED_RESOURCES, "Observation"),
+    )
+    f.s.commit()
     f.patient = dict(deepcopy(PATIENT), id=930, caregiver_practice=910, primary_physician=920)
     f.patient_name = "Alex Éxample"
     f.provider.change_patient = lambda row: row | f.patient

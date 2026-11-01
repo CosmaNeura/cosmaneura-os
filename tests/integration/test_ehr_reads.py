@@ -349,3 +349,56 @@ def test_changed_installed_timezone_cannot_reopen_an_old_patient_snapshot(ehr_ca
     response = action(f, {"action": "inspect", "observation_id": visit["observation_id"]})
     assert response.status_code == 409 and response.json()["detail"] == "ehr_read_binding_changed"
     assert "Alex" not in response.text and len(f.provider.calls) == calls
+
+
+def test_synthetic_observe_writes_phi_free_audit_and_refuses_disallowed_resource(ehr_case):
+    from cosmas_os import ehr_read_audit
+    from cosmas_os.models import AuditEvent
+
+    f = ehr_case
+    canary_name, canary_dob = "Zara Zedstone", "1980-04-02"
+    window = observed(f, key="ehr-audit-observe-1")
+    assert window["observation"]["kind"] == "window"
+    events = list(
+        f.s.scalars(
+            select(AuditEvent).where(
+                AuditEvent.box_id == f.box,
+                AuditEvent.event_type == ehr_read_audit.EVENT_TYPE,
+                AuditEvent.aggregate_id == str(f.scope.connection_id),
+            )
+        )
+    )
+    assert len(events) == 1
+    event = events[0]
+    assert event.actor_principal_id == f.owner
+    assert event.outcome == "ok"
+    assert event.detail["vendor"] == "elation"
+    assert event.detail["resource_type"] == "Appointment"
+    assert event.detail["result_count"] == 1
+    assert event.detail["connection_id"] == str(f.scope.connection_id)
+    assert event.detail["practice_id"] == "910"
+    assert event.detail["request_hash"] == event.payload_hash
+    blob = repr(event.detail) + repr(event.__dict__)
+    assert canary_name not in blob and canary_dob not in blob
+    assert "Alex" not in blob and "Example" not in blob and "1980-01-02" not in blob
+
+    # Narrow the practice allow-list so Appointment is refused with unsupported.
+    ehr_read_audit.upsert_allowed_resources(
+        f.s,
+        box_id=f.box,
+        connection_id=str(f.scope.connection_id),
+        resources=("Patient", "Condition"),
+    )
+    f.s.commit()
+    refused = action(f, observe_body(f, key="ehr-audit-observe-denied"))
+    assert refused.status_code == 404 and refused.json()["detail"] == "unsupported"
+    denied = f.s.scalars(
+        select(AuditEvent).where(
+            AuditEvent.box_id == f.box,
+            AuditEvent.event_type == ehr_read_audit.EVENT_TYPE,
+            AuditEvent.outcome == "unsupported",
+        )
+    ).all()
+    assert len(denied) == 1
+    assert denied[0].detail["resource_type"] == "Appointment"
+    assert canary_name not in repr(denied[0].detail)
