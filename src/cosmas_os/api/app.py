@@ -321,7 +321,10 @@ def _identity(
             verifier=verifier,
             admission_adapter=_runtime_admission_adapter() if getattr(settings, "workspace_enrollment_managed", False) else None,
         )
-        request.state.enrollment_existing_user = bool(session.info.get("enrollment_existing_identity"))
+        request.state.enrollment_existing_user = bool(
+            getattr(settings, "workspace_enrollment_managed", False)
+            and session.info.get("enrollment_existing_identity")
+        )
         if (getattr(settings, "workspace_enrollment_managed", False)
                 and not request.state.enrollment_existing_user and request.method != "GET"
                 and request.url.path.startswith("/admin/identities/")):
