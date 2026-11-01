@@ -9,6 +9,7 @@ snapshot, modify the scaffold, sign, or compile.
 import argparse
 import hashlib
 import json
+import plistlib
 import shutil
 from pathlib import Path
 
@@ -79,6 +80,79 @@ def _regular_file(repository: Path, path: Path) -> Path:
     if not _inside(resolved, repository):
         raise ValueError(f"Composition source escaped the repository: {path}")
     return resolved
+
+
+def _add_owned_app_privacy(repository: Path, output: Path, placed: list[dict[str, object]]) -> None:
+    """Derive app privacy resources without changing the frozen scaffold."""
+    source_path = "clients/apple/startup-recovery/PrivacyInfo.xcprivacy"
+    source = _regular_file(repository, repository / source_path)
+    expected = {
+        "NSPrivacyAccessedAPITypes": [
+            {
+                "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+                "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
+            }
+        ]
+    }
+    if plistlib.loads(source.read_bytes()) != expected:
+        raise ValueError(
+            "Owned app privacy manifest differs from reviewed required-reason coverage."
+        )
+    app = output / APP_SCAFFOLD / "ios/App/App"
+    destination = app / "PrivacyInfo.xcprivacy"
+    if destination.exists() or destination.is_symlink():
+        raise ValueError("App privacy resource already exists in the derived scaffold.")
+    project_path = "ios/App/App.xcodeproj/project.pbxproj"
+    project = output / APP_SCAFFOLD / project_path
+    original_sha256 = _digest(project)
+    text = project.read_text(encoding="utf-8")
+    replacements = [
+        (
+            "\t\tC03110000000000000000004 /* WorkspaceSceneSignalState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03100000000000000000004 /* WorkspaceSceneSignalState.swift */; };",
+            "\t\tC03110000000000000000004 /* WorkspaceSceneSignalState.swift in Sources */ = {isa = PBXBuildFile; fileRef = C03100000000000000000004 /* WorkspaceSceneSignalState.swift */; };\n\t\tC03110000000000000000005 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C03100000000000000000005 /* PrivacyInfo.xcprivacy */; };",
+        ),
+        (
+            '\t\tC03100000000000000000004 /* WorkspaceSceneSignalState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSceneSignalState.swift; sourceTree = "<group>"; };',
+            '\t\tC03100000000000000000004 /* WorkspaceSceneSignalState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSceneSignalState.swift; sourceTree = "<group>"; };\n\t\tC03100000000000000000005 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };',
+        ),
+        (
+            "\t\t\t\tC03100000000000000000004 /* WorkspaceSceneSignalState.swift */,",
+            "\t\t\t\tC03100000000000000000004 /* WorkspaceSceneSignalState.swift */,\n\t\t\t\tC03100000000000000000005 /* PrivacyInfo.xcprivacy */,",
+        ),
+        (
+            "\t\t\t\t2FAD9763203C412B000D30F8 /* config.xml in Resources */,",
+            "\t\t\t\t2FAD9763203C412B000D30F8 /* config.xml in Resources */,\n\t\t\t\tC03110000000000000000005 /* PrivacyInfo.xcprivacy in Resources */,",
+        ),
+    ]
+    for anchor, replacement in replacements:
+        if text.count(anchor) != 1:
+            raise ValueError("App privacy resource wiring differs from the reviewed scaffold.")
+        text = text.replace(anchor, replacement, 1)
+    project_record = next(item for item in placed if item["path"] == project_path)
+    derivation_path = "scripts/compose-portable-iphone.py"
+    derivation = _regular_file(repository, repository / derivation_path)
+    shutil.copyfile(source, destination)
+    project.write_text(text, encoding="utf-8")
+    project_record.update(
+        {
+            "role": "derived-app-resource-wiring",
+            "sha256": _digest(project),
+            "scaffold_input_sha256": original_sha256,
+            "derivation_source": derivation_path,
+            "derivation_source_sha256": _digest(derivation),
+            "wiring_note": "Derived app-owned privacy resource wiring; frozen scaffold source unchanged.",
+        }
+    )
+    placed.append(
+        {
+            "path": "ios/App/App/PrivacyInfo.xcprivacy",
+            "role": "implementation",
+            "owner": "clients/apple",
+            "sha256": _digest(destination),
+            "authoritative_counterpart": source_path,
+            "wiring_note": "App-owned required-reason API privacy resource.",
+        }
+    )
 
 
 def compose(repository: Path, output: Path) -> Path:
@@ -178,6 +252,7 @@ def compose(repository: Path, output: Path) -> Path:
         public = output / APP_SCAFFOLD / "ios/App/App/public"
         if public.exists():
             raise ValueError("Generated web assets do not belong in this source composition.")
+        _add_owned_app_privacy(repository, output, placed)
         manifest = {
             "purpose": "portable-iphone-project-inputs",
             "qualified_install": False,
