@@ -4,6 +4,23 @@ from __future__ import annotations
 
 PRODUCTION_TARGET_MESSAGE = "CosmaBot can only connect to sandbox EHRs right now."
 WRITE_REFUSED_MESSAGE = "CosmaBot can only read from EHRs; it can't change records."
+RESOURCE_UNSUPPORTED_MESSAGE = (
+    "That EHR resource isn't available for this connection."
+)
+PRACTICE_SCOPE_REQUIRED_MESSAGE = (
+    "A practice must be selected before this EHR read."
+)
+PRACTICE_SCOPE_REFUSED_MESSAGE = (
+    "That practice isn't allowed for this EHR read."
+)
+READ_REFUSED_MESSAGE = "That EHR read isn't allowed."
+
+_READ_REFUSED_MESSAGES = {
+    "ehr_resource_unsupported": RESOURCE_UNSUPPORTED_MESSAGE,
+    "ehr_practice_scope_required": PRACTICE_SCOPE_REQUIRED_MESSAGE,
+    "ehr_practice_scope_refused": PRACTICE_SCOPE_REFUSED_MESSAGE,
+    "ehr_read_refused": READ_REFUSED_MESSAGE,
+}
 
 
 class EhrCapabilityError(ValueError):
@@ -42,5 +59,8 @@ class EhrTargetRefused(EhrCapabilityError):
 class EhrReadRefused(EhrCapabilityError):
     """Raised when a read is not allowed for the declared capabilities or hooks."""
 
-    def __init__(self, code: str = "ehr_read_refused"):
+    def __init__(self, code: str = "ehr_read_refused", message: str | None = None):
+        if message is None:
+            message = _READ_REFUSED_MESSAGES.get(code, READ_REFUSED_MESSAGE)
+        self.message = message
         super().__init__(code)
