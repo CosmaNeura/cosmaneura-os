@@ -37,6 +37,7 @@ RUN --network=none python -B /tmp/remove_runtime_mount.py && rm /tmp/remove_runt
 # and required libraries. This reduces exposure without claiming vendor CVE fixes.
 COPY scripts/harden_runtime_tools.py /tmp/harden_runtime_tools.py
 RUN --network=none python -B /tmp/harden_runtime_tools.py && rm /tmp/harden_runtime_tools.py
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 USER 10001:10001
 EXPOSE 8000 8001
 CMD ["uvicorn", "cosmas_os.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
