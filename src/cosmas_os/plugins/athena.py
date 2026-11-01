@@ -876,7 +876,12 @@ def call(runtime, name: str, arguments: object) -> dict[str, Any]:
 EHR_CAPABILITY = CapabilityManifest(
     vendor_id="athena",
     display_name="athenaOne",
-    auth_styles=frozenset({"cosmas_session", "athena_platform_bearer"}),
+    auth_styles=frozenset({
+        "cosmas_session",
+        "athena_platform_bearer",
+        # C2 SMART backend-services / backend_jwt auth kind (not live-wired yet).
+        "smart_backend_services",
+    }),
     readable_resources=frozenset({
         "appointments",
         "medications",
@@ -899,6 +904,8 @@ EHR_CAPABILITY = CapabilityManifest(
     writes_supported=False,
     notes=(
         "Plugin tools call signed CosmaBot routes only. Athena Platform preview "
-        "is treated as the sandbox class for this contract; production stays refused."
+        "is treated as the sandbox class for this contract; production stays refused. "
+        "smart_backend_services (backend_jwt) is declared for the shared auth module; "
+        "no live token exchange is enabled from this plugin yet."
     ),
 )

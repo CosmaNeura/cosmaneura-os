@@ -65,7 +65,11 @@ class PhiFreeReadAudit(Protocol):
 
 
 class BackendAuthProvider(Protocol):
-    """C2: obtain a backend-services access token for a vendor."""
+    """C2: obtain a backend-services (backend_jwt) access token for a vendor.
+
+    Concrete implementation:
+    ``cosmas_os.adapters.ehr_auth.SmartBackendJwtAuthProvider``.
+    """
 
     def access_token(self, *, vendor_id: VendorId, audience: str) -> str:
         """Return a short-lived access token. Must not log the token."""
