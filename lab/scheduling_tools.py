@@ -9,7 +9,7 @@ the separate test driver can approve/execute against an injected MockTransport.
 
 import json
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -49,6 +49,24 @@ from lab.store import LabError
 
 BROKER_AUTHORITY = "synthetic_scheduling_broker_only; current follow_up grant; no production agent authority"
 SCENARIOS = ("normal", "unavailable", "grant_unavailable", "stale_slot", "lost_prepare_reply", "lost_submit_reply", "calendar_pending")
+
+
+def _eastern_fall_back_sunday(year: int) -> date:
+    """US Eastern autumn transition day: first Sunday in November."""
+    day = date(year, 11, 1)
+    return day + timedelta(days=(6 - day.weekday()) % 7)
+
+
+def _next_eastern_fall_back_day(after: datetime) -> date:
+    """Next fall-back Sunday whose 05:30Z DST-fold slot is still bookable after ``after``."""
+    year = after.year
+    for _ in range(4):
+        day = _eastern_fall_back_sunday(year)
+        first_slot = datetime(day.year, day.month, day.day, 5, 30, tzinfo=UTC)
+        if first_slot > after + timedelta(hours=1):
+            return day
+        year += 1
+    raise RuntimeError("no eastern fall-back day available for scheduling fixtures")
 
 
 class SchedulingAvailabilityArgs(Arguments):
@@ -98,9 +116,21 @@ class SchedulingTools:
         self.scope = app.box, app.owner, app.workspace
         self.identity_id, self.account_id, self.patient_mapping_id = map(str, (uuid4(), uuid4(), uuid4()))
         self.remote = {name: str(uuid4()) for name in ("practice_id", "actor_id", "practitioner_id", "location_id", "appointment_type_id", "patient_id", "connection_id")}
-        self.window = AvailabilityWindow(starts_at=datetime(2026, 11, 1, 4, tzinfo=UTC), ends_at=datetime(2026, 11, 1, 9, tzinfo=UTC))
-        # Two distinct 01:30 local times during the New York autumn DST fold.
-        self.slots = tuple(AvailabilitySlot(starts_at=datetime(2026, 11, 1, hour, 30, tzinfo=UTC), ends_at=datetime(2026, 11, 1, hour, 50, tzinfo=UTC)) for hour in (5, 6))
+        # Two distinct 01:30 America/New_York times on the next Eastern fall-back
+        # Sunday (05:30Z / 06:30Z). Keep the window ahead of wall-clock "now" so
+        # booking authority (slot.starts_at > expires_at) stays valid on that day.
+        fall_back = _next_eastern_fall_back_day(datetime.now(UTC))
+        self.window = AvailabilityWindow(
+            starts_at=datetime(fall_back.year, fall_back.month, fall_back.day, 4, tzinfo=UTC),
+            ends_at=datetime(fall_back.year, fall_back.month, fall_back.day, 9, tzinfo=UTC),
+        )
+        self.slots = tuple(
+            AvailabilitySlot(
+                starts_at=datetime(fall_back.year, fall_back.month, fall_back.day, hour, 30, tzinfo=UTC),
+                ends_at=datetime(fall_back.year, fall_back.month, fall_back.day, hour, 50, tzinfo=UTC),
+            )
+            for hour in (5, 6)
+        )
         self.calls, self.journal, self.observations, self.preparations, self.catalog_reads = [], {}, {}, {}, {}
         self.calendar_state = "pending" if scenario == "calendar_pending" else "synced"
         self.connected_at = datetime.now(UTC) - timedelta(hours=1)
