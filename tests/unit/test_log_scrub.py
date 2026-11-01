@@ -91,10 +91,9 @@ def _assert_redacted(text: str) -> None:
 def _capture(name: str, formatter: logging.Formatter | None = None):
     install()
     logger = logging.getLogger(name)
-    # Alembic fileConfig(disable_existing_loggers=True) marks loggers that
-    # already existed as disabled. Earlier suite tests run migrations
-    # in-process and leave uvicorn.error disabled; clearing handlers alone
-    # then yields an empty capture for logger.exception.
+    # Alembic fileConfig disables loggers that already exist. The full suite
+    # does that before this test, which would drop the record and leave an
+    # empty capture (same trap as tests/unit/test_plugin_log_scrub.py).
     previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
     logger.handlers = []
     logger.setLevel(logging.INFO)

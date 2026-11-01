@@ -31,6 +31,7 @@ from cosmas_os.adapters.athena_medication_read import (
 )
 from cosmas_os.api.ehr_read_schemas import AthenaAllergies, AthenaMedications, Status
 from cosmas_os.domain.hashing import payload_hash
+from cosmas_os.plugins.ehr.manifest import CapabilityManifest
 from cosmas_os.plugins.runtime import PluginError
 from cosmas_os.ports.athena_allergy_ehr import AthenaAllergiesObservation
 from cosmas_os.ports.athena_medication_ehr import AthenaMedicationsObservation
@@ -868,3 +869,36 @@ def call(runtime, name: str, arguments: object) -> dict[str, Any]:
     if not _same(spec, status, after):
         return _done(spec, _state("stale", STALE))
     return _done(spec, projected)
+
+
+# Capability declaration for the shared EHR connector contract.
+# Does not change tool behavior, routes, or receipts.
+EHR_CAPABILITY = CapabilityManifest(
+    vendor_id="athena",
+    display_name="athenaOne",
+    auth_styles=frozenset({"cosmas_session", "athena_platform_bearer"}),
+    readable_resources=frozenset({
+        "appointments",
+        "medications",
+        "allergies",
+        "visit_link_status",
+    }),
+    unsupported_actions=frozenset({
+        "write_chart",
+        "prescribe",
+        "sign_note",
+        "book_appointment",
+        "link_visit",
+        "unlink_visit",
+        "read_problems",
+        "read_labs",
+        "production_target",
+    }),
+    sandbox_supported=True,
+    production_supported=False,
+    writes_supported=False,
+    notes=(
+        "Plugin tools call signed CosmaBot routes only. Athena Platform preview "
+        "is treated as the sandbox class for this contract; production stays refused."
+    ),
+)
