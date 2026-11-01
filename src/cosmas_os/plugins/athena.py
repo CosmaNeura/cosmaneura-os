@@ -879,8 +879,8 @@ EHR_CAPABILITY = CapabilityManifest(
     auth_styles=frozenset({
         "cosmas_session",
         "athena_platform_bearer",
-        # C2 SMART backend-services / backend_jwt auth kind (not live-wired yet).
-        "smart_backend_services",
+        # C2 2-legged client-credentials for Cosmaneura CosmaBot FHIR (not live-wired).
+        "oauth2_client_credentials",
     }),
     readable_resources=frozenset({
         "appointments",
@@ -905,7 +905,7 @@ EHR_CAPABILITY = CapabilityManifest(
     notes=(
         "Plugin tools call signed CosmaBot routes only. Athena Platform preview "
         "is treated as the sandbox class for this contract; production stays refused. "
-        "smart_backend_services (backend_jwt) is declared for the shared auth module; "
-        "no live token exchange is enabled from this plugin yet."
+        "oauth2_client_credentials is declared for the Cosmaneura CosmaBot FHIR "
+        "sandbox auth module; no live token exchange is enabled from this plugin yet."
     ),
 )

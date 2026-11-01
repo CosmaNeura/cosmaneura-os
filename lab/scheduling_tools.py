@@ -98,21 +98,9 @@ class SchedulingTools:
         self.scope = app.box, app.owner, app.workspace
         self.identity_id, self.account_id, self.patient_mapping_id = map(str, (uuid4(), uuid4(), uuid4()))
         self.remote = {name: str(uuid4()) for name in ("practice_id", "actor_id", "practitioner_id", "location_id", "appointment_type_id", "patient_id", "connection_id")}
-        # Next America/New_York autumn DST fold Sunday after 2026-11-01 (which is
-        # today in CI and made these morning slots expire mid-day). Keep two
-        # distinct 01:30 local times across the fold; both must stay in the future
-        # so AppointmentIntent's slot-after-expiry bound still holds.
-        self.window = AvailabilityWindow(
-            starts_at=datetime(2027, 11, 7, 4, tzinfo=UTC),
-            ends_at=datetime(2027, 11, 7, 9, tzinfo=UTC),
-        )
-        self.slots = tuple(
-            AvailabilitySlot(
-                starts_at=datetime(2027, 11, 7, hour, 30, tzinfo=UTC),
-                ends_at=datetime(2027, 11, 7, hour, 50, tzinfo=UTC),
-            )
-            for hour in (5, 6)
-        )
+        self.window = AvailabilityWindow(starts_at=datetime(2026, 11, 1, 4, tzinfo=UTC), ends_at=datetime(2026, 11, 1, 9, tzinfo=UTC))
+        # Two distinct 01:30 local times during the New York autumn DST fold.
+        self.slots = tuple(AvailabilitySlot(starts_at=datetime(2026, 11, 1, hour, 30, tzinfo=UTC), ends_at=datetime(2026, 11, 1, hour, 50, tzinfo=UTC)) for hour in (5, 6))
         self.calls, self.journal, self.observations, self.preparations, self.catalog_reads = [], {}, {}, {}, {}
         self.calendar_state = "pending" if scenario == "calendar_pending" else "synced"
         self.connected_at = datetime.now(UTC) - timedelta(hours=1)

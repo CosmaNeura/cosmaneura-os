@@ -1,37 +1,38 @@
-"""SMART Backend Services / athena 2-legged JWT client-assertion auth (C2).
+"""EHR backend auth: 2-legged OAuth client-credentials (client secret).
 
 Access tokens stay in process memory only. They are never written to disk, the
-database, logs, HTTP responses, or any device. Private keys for production use
-stay in Azure Key Vault and are referenced only by ``COSMAS_MANAGED_SECRET_*``
-names. Live connectors are not wired here.
+database, logs, HTTP responses, or any device. Client id and client secret are
+read only through ``COSMAS_MANAGED_SECRET_*`` reference names. Live connectors
+are not wired here.
+
+Signed-key / JWT client-assertion auth is deferred to a later ticket so this
+module stays small.
 """
 
-from cosmas_os.adapters.ehr_auth.backend_jwt import (
-    AUTH_KIND_BACKEND_JWT,
-    BackendJwtAuthError,
-    BackendJwtConfig,
-    BackendJwtTokenClient,
-    SmartBackendJwtAuthProvider,
+from cosmas_os.adapters.ehr_auth.client_credentials import (
+    AUTH_KIND_CLIENT_CREDENTIALS,
+    ClientCredentialsAuthError,
+    ClientCredentialsAuthProvider,
+    ClientCredentialsConfig,
+    ClientCredentialsTokenClient,
     normalize_system_read_scopes,
 )
-from cosmas_os.adapters.ehr_auth.key_vault_signer import (
-    KeyVaultRemoteKeySigner,
-    ManagedSecretKeyReference,
-    RemoteDigestSigner,
+from cosmas_os.adapters.ehr_auth.managed_secret_env import (
+    ATHENA_FHIR_CLIENT_ID_REF,
+    ATHENA_FHIR_CLIENT_SECRET_REF,
+    ManagedSecretEnvResolver,
     validate_managed_secret_reference_name,
 )
-from cosmas_os.adapters.ehr_auth.local_test_signer import LocalTestKeySigner
 
 __all__ = [
-    "AUTH_KIND_BACKEND_JWT",
-    "BackendJwtAuthError",
-    "BackendJwtConfig",
-    "BackendJwtTokenClient",
-    "KeyVaultRemoteKeySigner",
-    "LocalTestKeySigner",
-    "ManagedSecretKeyReference",
-    "RemoteDigestSigner",
-    "SmartBackendJwtAuthProvider",
+    "ATHENA_FHIR_CLIENT_ID_REF",
+    "ATHENA_FHIR_CLIENT_SECRET_REF",
+    "AUTH_KIND_CLIENT_CREDENTIALS",
+    "ClientCredentialsAuthError",
+    "ClientCredentialsAuthProvider",
+    "ClientCredentialsConfig",
+    "ClientCredentialsTokenClient",
+    "ManagedSecretEnvResolver",
     "normalize_system_read_scopes",
     "validate_managed_secret_reference_name",
 ]
