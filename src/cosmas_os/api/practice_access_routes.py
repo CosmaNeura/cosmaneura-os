@@ -128,6 +128,16 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                             or not config.workspace_available
                             or verified(config, request.headers["authorization"], token_verifier) != member):
                         raise AccessDenied()
+                    if getattr(config, "workspace_enrollment_managed", False):
+                        current_principal = access._binding(session, member, lock=False)
+                        if (checked_admission is not None and checked_admission.get("existing_user") is True
+                                and initial_principal_id is not None
+                                and (current_principal is None or current_principal.id != initial_principal_id)):
+                            raise AccessDenied()
+                    if checked_admission is not None and checked_admission.get("existing_user") is True:
+                        # Retain the verified initial history classification;
+                        # local authority changes never turn it into enrollment.
+                        return
                     current_admission = require_runtime_admission(config, request.headers["authorization"], member.subject,
                         purpose=purpose, adapter=admission_adapter() if admission_adapter else None, session=session)
                     if (checked_admission is not None and checked_admission.get("existing_user") is not True and (current_admission is None
@@ -138,18 +148,22 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                 with session_factory() as session:
                     try:
                         existing = None
+                        initial_principal_id = None
                         if getattr(config, "workspace_enrollment_managed", False):
                             # Preserve revoked/remapped local identity denials;
                             # enrollment cannot repair or reinterpret those records.
                             # The operation retains its existing Box-first locks.
-                            access._binding(session, member, lock=False)
+                            initial_principal = access._binding(session, member, lock=False)
+                            initial_principal_id = initial_principal.id if initial_principal is not None else None
                             existing = existing_user_admission(session, config, member.subject)
                         if (getattr(config, "workspace_enrollment_managed", False) and existing is None
                                 and method == "POST" and request.url.path not in {"/practice-access/setup/complete", "/practice-access/members"}):
                             raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
-                        checked_admission = require_runtime_admission(config, request.headers["authorization"], member.subject,
-                            purpose=purpose, adapter=admission_adapter() if admission_adapter else None, session=session)
-                        if (getattr(config, "workspace_enrollment_managed", False) and existing is None
+                        checked_admission = existing if existing is not None else require_runtime_admission(
+                            config, request.headers["authorization"], member.subject, purpose=purpose,
+                            adapter=admission_adapter() if admission_adapter else None, session=session)
+                        if (getattr(config, "workspace_enrollment_managed", False)
+                                and (checked_admission is None or checked_admission.get("existing_user") is not True)
                                 and request.url.path == "/practice-access/setup/complete"
                                 and (checked_admission is None or checked_admission["member_role"] != "owner")):
                             raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)

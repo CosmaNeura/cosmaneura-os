@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -25,7 +26,15 @@ from cosmas_os.adapters.enrollment_admission import (
     EnrollmentAdmissionAdapter,
 )
 from cosmas_os.api import app as api
-from cosmas_os.application import conversation, handoffs, provider_team, workspace
+from cosmas_os.api import practice_access_routes
+from cosmas_os.application import (
+    conversation,
+    enrollment_existing_user,
+    handoffs,
+    practice_access,
+    provider_team,
+    workspace,
+)
 from cosmas_os.application.enrollment_existing_user import EXISTING_USER_CUTOVER
 from cosmas_os.enrollment import domain, service
 from cosmas_os.enrollment.admission import (
@@ -37,6 +46,7 @@ from cosmas_os.enrollment.admission import (
 )
 from cosmas_os.model_registry import metadata
 from cosmas_os.models import (
+    AuditEvent,
     BoxContext,
     EncounterWorkspace,
     ExternalIdentity,
@@ -44,6 +54,7 @@ from cosmas_os.models import (
     WorkspaceEntry,
 )
 from cosmas_os.practice_access_models import PracticeAccessRequest
+from cosmas_os.practice_setup_models import PracticeSetupProfile
 
 practice_case = _practice_case
 
@@ -254,3 +265,125 @@ def test_existing_beta_commit_fence_rechecks_local_revocation_without_enrollment
         assert session.scalar(select(func.count()).select_from(WorkspaceEntry)) == 0
     f.adapter.authorize.assert_not_called()
     assert f.state.http_calls == []
+
+
+@pytest.mark.parametrize("phase", ["initial_classification", "first_scope_fence"])
+@pytest.mark.parametrize("revocation", ["disable_human", "remove_binding", "remap_binding"])
+def test_old_box_existing_practice_fence_retains_classification_and_denies_revocation_locally(
+    existing_beta, monkeypatch, phase, revocation
+):
+    f = existing_beta
+    # Only the active already-bound human in an old Box qualifies initially.
+    # Binding/principal dates, profile, approval and agreement cannot carry it.
+    with f.case.factory.begin() as session:
+        session.get(BoxContext, f.case.config.beta_box_id).created_at = EXISTING_USER_CUTOVER - timedelta(days=1)
+        session.get(Principal, f.case.owner_id).created_at = EXISTING_USER_CUTOVER + timedelta(days=1)
+        session.get(ExternalIdentity, f.binding_id).created_at = EXISTING_USER_CUTOVER + timedelta(days=1)
+    with f.case.factory() as session:
+        assert session.scalar(select(func.count()).select_from(PracticeSetupProfile)) == 0
+        assert session.scalar(select(func.count()).select_from(PracticeAccessRequest)) == 0
+        assert session.scalar(select(func.count()).select_from(AuditEvent).where(
+            AuditEvent.event_type == "cosmaneura.agreement.accepted")) == 0
+        before_audit = session.scalar(select(func.count()).select_from(AuditEvent))
+        assert enrollment_existing_user.is_existing_user(session, f.case.config, f.case.owner.subject)
+
+    revocations, classifier_calls, remapped_ids = [], [], []
+    actual_classifier = enrollment_existing_user.is_existing_user
+
+    def revoke_in_independent_transaction():
+        def commit_revocation():
+            with f.case.factory.begin() as session:
+                if revocation == "disable_human":
+                    session.get(Principal, f.case.owner_id).state = "disabled"
+                elif revocation == "remove_binding":
+                    session.delete(session.get(ExternalIdentity, f.binding_id))
+                else:
+                    replacement = Principal(box_id=f.case.config.beta_box_id,
+                        principal_type="human", state="active", display_name="Invented replacement human",
+                        created_at=EXISTING_USER_CUTOVER + timedelta(days=1))
+                    session.add(replacement)
+                    session.flush()
+                    session.get(ExternalIdentity, f.binding_id).principal_id = replacement.id
+                    remapped_ids.append(replacement.id)
+            revocations.append(True)
+        # The real request remains live while a different thread/transaction
+        # commits the revocation; no registry failure or authority is faked.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(commit_revocation).result(timeout=5)
+
+    def classify(*args, **kwargs):
+        result = actual_classifier(*args, **kwargs)
+        classifier_calls.append(result)
+        if phase == "initial_classification" and result and not revocations:
+            revoke_in_independent_transaction()
+        return result
+
+    monkeypatch.setattr(enrollment_existing_user, "is_existing_user", classify)
+    operation = practice_access.status
+
+    def status_after_revocation(*args, **kwargs):
+        if phase == "first_scope_fence":
+            revoke_in_independent_transaction()
+        return operation(*args, **kwargs)
+
+    monkeypatch.setitem(practice_access_routes.PATHS, "/practice-access",
+        ("GET", None, status_after_revocation))
+    response = f.client.get("/practice-access", headers=f.headers)
+    assert response.status_code == 403, response.text
+    assert response.json() == {"detail": "practice_access_denied"}
+    assert_no_enrollment_gate(response)
+    assert revocations == [True] and classifier_calls == [True]
+    f.adapter.authorize.assert_not_called()
+    assert f.state.http_calls == []
+    with f.case.factory() as session:
+        assert session.get(EncounterWorkspace, f.draft["id"]).revision == f.draft["revision"]
+        assert session.scalar(select(func.count()).select_from(WorkspaceEntry)) == 0
+        assert session.scalar(select(func.count()).select_from(PracticeAccessRequest)) == 0
+        assert session.scalar(select(func.count()).select_from(PracticeSetupProfile)) == 0
+        assert session.scalar(select(func.count()).select_from(AuditEvent)) == before_audit
+        assert session.scalar(select(func.count()).select_from(Principal)) == (2 if revocation == "remap_binding" else 1)
+        if revocation == "disable_human":
+            assert session.get(Principal, f.case.owner_id).state == "disabled"
+            assert session.get(ExternalIdentity, f.binding_id).active is True
+        elif revocation == "remove_binding":
+            assert session.get(ExternalIdentity, f.binding_id) is None
+        else:
+            assert session.get(ExternalIdentity, f.binding_id).principal_id == remapped_ids[0]
+            assert session.get(Principal, remapped_ids[0]).is_owner is False
+
+
+@pytest.mark.parametrize("is_owner", [False, True])
+def test_canonical_checked_existing_setup_keeps_original_local_owner_authority(
+    existing_beta, monkeypatch, is_owner
+):
+    f = existing_beta
+    with f.case.factory.begin() as session:
+        session.get(Principal, f.case.owner_id).is_owner = is_owner
+    # Exercise the canonical helper's own history decision after the optional
+    # preliminary lookup misses. No browser flag or fabricated allow is used.
+    monkeypatch.setattr(practice_access_routes, "existing_user_admission", lambda *_: None)
+    classifier = Mock(wraps=enrollment_existing_user.is_existing_user)
+    monkeypatch.setattr(enrollment_existing_user, "is_existing_user", classifier)
+    response = f.client.post("/practice-access/setup/complete", headers=f.headers, json={
+        "idempotency_key": str(uuid4()), "display_name": "Invented existing human",
+        "practice_name": "Invented retained practice", "specialty": None, "confirm": True})
+    assert response.status_code == (200 if is_owner else 403), response.text
+    assert_no_enrollment_gate(response)
+    assert "enrollment_admission" not in response.json()
+    if is_owner:
+        assert response.json()["state"] == "owner_ready"
+    else:
+        assert response.json() == {"detail": "practice_access_denied"}
+    classifier.assert_called_once()
+    f.adapter.authorize.assert_not_called()
+    assert f.state.http_calls == []
+    with f.case.factory() as session:
+        assert session.get(Principal, f.case.owner_id).is_owner is is_owner
+        assert session.scalar(select(func.count()).select_from(Principal)) == 1
+        assert session.scalar(select(func.count()).select_from(ExternalIdentity)) == 1
+        assert session.scalar(select(func.count()).select_from(PracticeAccessRequest)) == 0
+        assert session.scalar(select(func.count()).select_from(WorkspaceEntry)) == 0
+        profile = session.get(PracticeSetupProfile, f.case.config.beta_box_id)
+        assert (profile is not None) is is_owner
+        if profile is not None:
+            assert profile.owner_id == f.case.owner_id
