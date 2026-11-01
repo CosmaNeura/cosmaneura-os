@@ -138,6 +138,23 @@ node infra/enrollment/workspaces/build.mjs --input /protected/two-practices.json
 node infra/enrollment/workspaces/build.mjs --input /protected/two-practices.json --practice b --output /protected/new-b-web-context
 ```
 
+For a separately reviewed job-only database preparer correction, retain the
+original API digest and practice release. From the clean exact operator commit:
+
+```sh
+node infra/enrollment/workspaces/build.mjs --input /protected/two-practices.json --practice job --output /protected/new-operator-job-context --job-operator-source FULL_OPERATOR_SHA --base-api-receipt /protected/qualified-original-api-receipt.json
+```
+
+This optional mode accepts only a job. It preserves the original committed
+`job.py` and renderer, and copies only the operator commit's preparer into the
+job layer. The protected base receipt must match the selected API image/source
+and actual build, validation, scan, push and digest-lock evidence. Context labels
+and its preparation receipt name the actual operator source separately from the
+base API and workspace release. The image recipe/collector must retain these
+identities and validate the imported preparer's path/hash before the existing
+Trivy and push steps. Context preparation proves no Azure repair or readiness;
+it does not change the API/web images, original plans, or migration protocol.
+
 Build/push these contexts into the **owned staging ACR** through the existing
 operator image procedure, then record each measured digest. Fill the job digest
 and both web digests in the protected manifest; placeholders never qualify a

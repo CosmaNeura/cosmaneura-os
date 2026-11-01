@@ -3,11 +3,14 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import secrets
+from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
+from psycopg import sql
 from sqlalchemy import Connection, create_engine, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import DBAPIError
 
 from cosmas_os.application import database_preparation
@@ -294,3 +297,168 @@ def test_database_preparation_removes_public_table_and_sequence_privileges() -> 
                 connection.execute(text(f"DROP OWNED BY {quoted_role}"))
                 connection.execute(text(f"DROP ROLE {quoted_role}"))
         admin_engine.dispose()
+
+
+@pytest.fixture
+def role_preparation_owner() -> Iterator[tuple[URL, URL, str, str]]:
+    control_url = make_url(
+        os.environ.get(
+            "DATABASE_PREPARATION_SUPERUSER_URL",
+            os.environ.get(
+                "DATABASE_URL",
+                "postgresql+psycopg://cosmas:cosmas@localhost:54329/cosmas_os",
+            ),
+        )
+    ).set(database="postgres")
+    suffix = uuid4().hex[:12]
+    owner = f"cosmas_prep_owner_{suffix}"
+    runtime = f"cosmas_prep_runtime_{suffix}"
+    member = f"cosmas_prep_member_{suffix}"
+    database = f"cosmas_prep_db_{suffix}"
+    owner_url = control_url.set(
+        username=owner, password=secrets.token_urlsafe(36), database=database
+    )
+    control_engine = create_engine(control_url)
+    try:
+        with control_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            driver = connection.connection.driver_connection
+            assert driver is not None
+            with driver.cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("CREATE ROLE {} LOGIN CREATEDB CREATEROLE PASSWORD {}").format(
+                        sql.Identifier(owner), sql.Literal(owner_url.password)
+                    )
+                )
+                cursor.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(member)))
+                cursor.execute(
+                    sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                        sql.Identifier(database), sql.Identifier(owner)
+                    )
+                )
+        yield control_url, owner_url, runtime, member
+    finally:
+        with control_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            driver = connection.connection.driver_connection
+            assert driver is not None
+            with driver.cursor() as cursor:
+                cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(database)))
+                for role in (runtime, member, owner):
+                    cursor.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+        control_engine.dispose()
+
+
+def test_role_preparation_supports_non_superuser_database_owner(
+    role_preparation_owner: tuple[URL, URL, str, str],
+) -> None:
+    _, owner_url, role, _ = role_preparation_owner
+    runtime = owner_url.set(username=role, password=secrets.token_urlsafe(36))
+    engine = create_engine(owner_url)
+    try:
+        with engine.begin() as connection:
+            assert tuple(
+                connection.execute(
+                    text("SELECT rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname=current_user")
+                ).one()
+            ) == (False, True, True)
+            assert connection.execute(
+                text("SELECT pg_get_userbyid(datdba)=current_user FROM pg_database WHERE datname=current_database()")
+            ).scalar_one() is True
+            database_preparation._ensure_unprivileged_role(connection, runtime)
+            driver = connection.connection.driver_connection
+            assert driver is not None
+            with driver.cursor() as cursor:
+                cursor.execute(sql.SQL("ALTER ROLE {} NOLOGIN NOINHERIT").format(sql.Identifier(role)))
+        with engine.begin() as connection:
+            database_preparation._ensure_unprivileged_role(
+                connection, runtime.set(password=secrets.token_urlsafe(36))
+            )
+            assert tuple(
+                connection.execute(
+                    text("SELECT rolcanlogin, rolinherit, rolsuper, rolcreatedb, rolcreaterole, "
+                         "rolreplication, rolbypassrls FROM pg_roles WHERE rolname=:role"),
+                    {"role": role},
+                ).one()
+            ) == (True, True, False, False, False, False, False)
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "unsafe_attribute", ["SUPERUSER", "CREATEDB", "CREATEROLE", "REPLICATION", "BYPASSRLS", "membership"]
+)
+def test_non_superuser_owner_refuses_unsafe_existing_runtime_role(
+    role_preparation_owner: tuple[URL, URL, str, str], unsafe_attribute: str
+) -> None:
+    control_url, owner_url, role, member = role_preparation_owner
+    runtime = owner_url.set(username=role, password=secrets.token_urlsafe(36))
+    owner_engine = create_engine(owner_url)
+    control_engine = create_engine(control_url)
+    try:
+        with owner_engine.begin() as connection:
+            driver = connection.connection.driver_connection
+            assert driver is not None
+            with driver.cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("CREATE ROLE {} NOLOGIN NOINHERIT PASSWORD {}").format(
+                        sql.Identifier(role), sql.Literal(runtime.password)
+                    )
+                )
+        with control_engine.begin() as connection:
+            driver = connection.connection.driver_connection
+            assert driver is not None
+            with driver.cursor() as cursor:
+                if unsafe_attribute == "membership":
+                    cursor.execute(
+                        sql.SQL("GRANT {} TO {}").format(sql.Identifier(member), sql.Identifier(role))
+                    )
+                else:
+                    cursor.execute(
+                        sql.SQL("ALTER ROLE {} {}").format(
+                            sql.Identifier(role), sql.SQL(unsafe_attribute)
+                        )
+                    )
+        message = (
+            "unexpected role memberships"
+            if unsafe_attribute == "membership"
+            else "privileged attributes"
+        )
+        flags_query = text(
+            "SELECT rolcanlogin, rolinherit, rolsuper, rolcreatedb, rolcreaterole, "
+            "rolreplication, rolbypassrls FROM pg_roles WHERE rolname=:role"
+        )
+        with owner_engine.begin() as connection:
+            before = tuple(connection.execute(flags_query, {"role": role}).one())
+            with pytest.raises(DatabasePreparationError, match=message):
+                database_preparation._ensure_unprivileged_role(connection, runtime)
+            assert tuple(connection.execute(flags_query, {"role": role}).one()) == before
+    finally:
+        owner_engine.dispose()
+        control_engine.dispose()
+
+
+def test_true_dba_can_restore_existing_runtime_role_flags(
+    role_preparation_owner: tuple[URL, URL, str, str],
+) -> None:
+    control_url, owner_url, role, _ = role_preparation_owner
+    runtime = owner_url.set(username=role, password=secrets.token_urlsafe(36))
+    engine = create_engine(control_url)
+    try:
+        with engine.begin() as connection:
+            driver = connection.connection.driver_connection
+            assert driver is not None
+            with driver.cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("CREATE ROLE {} LOGIN SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS PASSWORD {}").format(
+                        sql.Identifier(role), sql.Literal(runtime.password)
+                    )
+                )
+            database_preparation._ensure_unprivileged_role(connection, runtime)
+            assert tuple(
+                connection.execute(
+                    text("SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls "
+                         "FROM pg_roles WHERE rolname=:role"),
+                    {"role": role},
+                ).one()
+            ) == (False, False, False, False, False)
+    finally:
+        engine.dispose()

@@ -179,17 +179,36 @@ def _ensure_unprivileged_role(connection: Connection, runtime: URL) -> None:
         if memberships:
             raise DatabasePreparationError("runtime role has unexpected role memberships")
 
-    # Re-running rotates the protected runtime password and restores every
-    # non-administrator role attribute without widening access.
+    administrator_is_superuser = connection.execute(
+        text("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
+    ).scalar_one()
+    if not administrator_is_superuser:
+        privileged_flags = connection.execute(
+            text(
+                "SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls "
+                "FROM pg_roles WHERE rolname = :role"
+            ),
+            {"role": role},
+        ).one()
+        if any(privileged_flags):
+            raise DatabasePreparationError("runtime role has unexpected privileged attributes")
+
+    # A true DBA can restore every restricted attribute. Managed database
+    # owners must first verify those attributes, then rotate only attributes
+    # PostgreSQL permits them to change without superuser authority.
+    role_attributes = (
+        "NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS"
+        if administrator_is_superuser
+        else "INHERIT"
+    )
     driver_connection = connection.connection.driver_connection
     if driver_connection is None:
         raise DatabasePreparationError("database driver connection is unavailable")
     with driver_connection.cursor() as cursor:
         cursor.execute(
-            sql.SQL(
-                "ALTER ROLE {} WITH LOGIN PASSWORD {} "
-                "NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS"
-            ).format(sql.Identifier(role), sql.Literal(password_verifier))
+            sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD {} {}").format(
+                sql.Identifier(role), sql.Literal(password_verifier), sql.SQL(role_attributes)
+            )
         )
 
 
