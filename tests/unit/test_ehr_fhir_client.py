@@ -206,6 +206,7 @@ def test_search_rejects_oversized_response():
 
 def test_write_verbs_are_refused_without_transport():
     harness = Harness(lambda request: pytest.fail(f"unexpected {request.method}"))
+    refused = messages_for("EHR")["write_refused"]
     for call in (
         harness.client.create,
         harness.client.update,
@@ -215,10 +216,13 @@ def test_write_verbs_are_refused_without_transport():
         harness.client.put,
     ):
         result = call({"resourceType": "Patient"})
-        assert result.state == "malformed"
+        assert result.state == "refused"
+        assert result.message == refused
+        assert "could not read" not in result.message
         assert result.resources == ()
-    assert harness.client.request("POST", "/Patient").state == "malformed"
-    assert harness.client.request("DELETE", "/Patient/1").state == "malformed"
+    assert harness.client.request("POST", "/Patient").state == "refused"
+    assert harness.client.request("DELETE", "/Patient/1").state == "refused"
+    assert harness.client.request("PATCH", "/Patient/1").message == refused
     assert harness.calls == []
 
 

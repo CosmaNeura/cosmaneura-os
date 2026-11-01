@@ -3,23 +3,27 @@
 Production and ambiguous hosts are refused unless ``allow_production`` is
 explicitly set True by a later, separately activated qualification path. The
 default stays sandbox-only so this package cannot reach live patient systems.
+
+Sandbox acceptance is an exact host-name allowlist only: the parsed hostname
+must match one allowlisted name case-insensitively. Substring, word, and
+suffix matching are never used.
 """
 
 from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-# Host markers that identify synthetic / sandbox FHIR bases.
-_SANDBOX_MARKERS = (
-    "sandbox",
-    "synthetic",
-    "mock",
-    "localhost",
-    "127.0.0.1",
-    ".invalid",
-    "example.com",
-    "example.org",
-    "test.",
+# Exact host names that identify synthetic / sandbox FHIR bases.
+# Match is case-insensitive equality on the parsed hostname only.
+_SANDBOX_HOSTS = frozenset(
+    {
+        "fhir.sandbox.example.com",
+        "sandbox.fhir.example.org",
+        "synthetic.invalid",
+        "mock.example.com",
+        "localhost",
+        "127.0.0.1",
+    }
 )
 
 # Host markers that identify production / live FHIR bases.
@@ -46,6 +50,9 @@ def _hostname(value: str) -> str | None:
     host = parts.hostname
     if host is None or not host:
         return None
+    # Trailing-dot FQDNs are not allowlisted; refuse rather than normalize.
+    if host.endswith("."):
+        return None
     if parts.scheme == "https":
         if parts.port not in (None, 443):
             return None
@@ -70,7 +77,7 @@ def is_sandbox_base_url(base_url: str) -> bool:
         return False
     if is_production_base_url(base_url):
         return False
-    return any(marker in host for marker in _SANDBOX_MARKERS)
+    return host in _SANDBOX_HOSTS
 
 
 def assert_allowed_base_url(base_url: str, *, allow_production: bool = False) -> str:
