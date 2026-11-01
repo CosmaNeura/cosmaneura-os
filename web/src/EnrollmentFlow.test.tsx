@@ -73,6 +73,29 @@ it('shows pending activation with no trial dates or unconfirmed Chief access',as
   expect(button('Open Chief')).toBeUndefined();expect(button('Continue securely with Stripe')).toBeUndefined();
   expect(host.textContent).toContain('First chargeNot started');
 });
+it('lets the accepted owner continue prebilling setup through the existing confirmation POST while keeping card and Chief held',async()=>{
+  current=enrollmentStatus('activation_pending',3);current.workspace={status:'provisioning',url:null,organization_id:'org_invented',box_id:'10000000-0000-4000-8000-000000000003'};
+  current.practice!.role='staff';const config={...enrollmentConfig(),billing_configured:false};
+  const prepare=vi.fn().mockResolvedValue('fresh.scoped.fixture');let confirmations=0;
+  const posted=vi.fn(async(url:RequestInfo|URL,options?:RequestInit)=>{
+    expect(url).toBe('http://127.0.0.1:8910/enrollment/v1/workspace/confirm');expect(options?.method).toBe('POST');
+    expect(new Headers(options?.headers).get('Authorization')).toBe('Bearer invented.token');
+    expect(new Headers(options?.headers).get('Idempotency-Key')).toEqual(expect.any(String));
+    expect(JSON.parse(String(options?.body))).toEqual({expected_revision:current.revision,workspace_token:'fresh.scoped.fixture'});
+    current={...current,revision:current.revision+1};
+    if(++confirmations===2)current={...current,stage:'payment',workspace:{...current.workspace,status:'ready'}};
+    return new Response(JSON.stringify(current),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+  });vi.stubGlobal('fetch',posted);
+  await act(async()=>root.render(<EnrollmentFlow key="staff" api={api} identity={id} config={config} navigate={navigate} prepareWorkspaceToken={prepare}/>));
+  expect(button('Continue setup')).toBeUndefined();expect(prepare).not.toHaveBeenCalled();
+  current.practice!.role='owner';await act(async()=>root.render(<EnrollmentFlow key="owner" api={api} identity={id} config={config} navigate={navigate} prepareWorkspaceToken={prepare}/>));
+  await click('Continue setup');expect(posted).toHaveBeenCalledOnce();expect(button('Continue setup')).toBeDefined();
+  expect(button('Continue securely with Stripe')).toBeUndefined();expect(button('Open Chief')).toBeUndefined();
+  await click('Continue setup');expect(posted).toHaveBeenCalledTimes(2);expect(prepare).toHaveBeenCalledTimes(2);
+  expect(button('Continue setup')).toBeUndefined();expect(button('Continue securely with Stripe').disabled).toBe(true);
+  expect(button('Open Chief')).toBeUndefined();expect(current.billing.status).toBe('none');expect(current.billing.trial_ends_at).toBeNull();
+  expect(navigate).not.toHaveBeenCalled();expect(localStorage.length).toBe(0);expect(sessionStorage.length).toBe(0);
+});
 it('checks an uncertain submission then replays the exact key and immutable body',async()=>{
   const submitted=vi.spyOn(api,'profile').mockRejectedValueOnce(new EnrollmentError(503)).mockImplementation(async()=>{current=enrollmentStatus('practice',1);return current;});
   await render();await fill('name','Invented Owner');await click('Save and continue');

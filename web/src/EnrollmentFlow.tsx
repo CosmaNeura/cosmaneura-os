@@ -186,6 +186,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
   },accept);};
   const formDisabled=busy||uncertain;
   const ownsPractice=status?.practice?.role==='owner';
+  const ownerSetupPending=ownsPractice&&status?.stage==='activation_pending'&&status.workspace.status!=='ready';
   const newTrial=status?.billing.status==='none'||status?.billing.status==='pending'&&!status.billing.trial_ends_at;
   const inviteLink=invitation?new URL('/onboarding?invite='+encodeURIComponent(invitation.token),window.location.origin).href:'';
   const errorSummary=Object.keys(errors).length>0&&<ul>{Object.entries(errors).map(([key,value])=><li key={key}><a href={`#enrollment-${key}`}>{value}</a></li>)}</ul>;
@@ -264,7 +265,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
           {stage==='ready'&&ownsPractice&&<button onClick={()=>{setTeamOpen(value=>!value);setInvitation(null);}} disabled={formDisabled}>Invite a teammate</button>}
           {stage==='payment'&&newTrial&&ownsPractice&&status.quote?.self_serve&&<button className="primary" onClick={checkout} disabled={formDisabled||!config.billing_configured}>Continue securely with Stripe</button>}
           {stage==='finishing_setup'&&ownsPractice&&status.billing.status==='pending'&&<button className="primary" onClick={checkout} disabled={formDisabled||!config.billing_configured}>Resume secure checkout</button>}
-          {stage!=='ready'&&status.workspace.organization_id&&status.agreement?.accepted&&['trialing','active'].includes(status.billing.status)&&prepareWorkspaceToken&&<button className="primary" onClick={confirmWorkspace} disabled={formDisabled}>Confirm practice account</button>}
+          {stage!=='ready'&&status.workspace.organization_id&&status.agreement?.accepted&&(ownerSetupPending||['trialing','active'].includes(status.billing.status))&&prepareWorkspaceToken&&<button className="primary" onClick={confirmWorkspace} disabled={formDisabled}>{ownerSetupPending?'Continue setup':'Confirm practice account'}</button>}
           <button onClick={ownsPractice?recover:check} disabled={formDisabled}>{ownsPractice?'Check setup and payment':'Check saved progress'}</button>
           {status.agreement?.accepted&&<button onClick={showReceipt} disabled={formDisabled}>View agreement receipt</button>}
           {['ready','payment_action_required','canceled'].includes(stage??'')&&ownsPractice&&status.billing.status!=='none'&&<button onClick={portal} disabled={formDisabled}>Manage billing or cancel</button>}
