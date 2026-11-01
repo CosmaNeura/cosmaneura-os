@@ -37,13 +37,32 @@ it('makes context the primary title and keeps each Chief conversation and its me
   const cards=[...host.querySelectorAll<HTMLElement>('.messages-conversation-card')];
   expect(cards).toHaveLength(2);
   expect(cards.map(card=>card.querySelector('strong > .messages-context')?.textContent)).toEqual([first.context_label,otherChief.context_label]);
-  expect(cards.every(card=>!card.querySelector('.bot-avatar')&&!card.querySelector('.messages-bot-identity'))).toBe(true);
+  expect(cards.every(card=>card.querySelector('.bot-avatar.chief')&&!card.querySelector('.messages-bot-identity'))).toBe(true);
   expect([...host.querySelectorAll('.messages-inbox-group>h2')].filter(heading=>heading.textContent==='Chief')).toHaveLength(1);
   expect(cards.every(card=>card.children.length===2&&card.children[0].classList.contains('messages-row')&&card.children[1].classList.contains('messages-row-menu'))).toBe(true);
   expect(cards.map(card=>card.querySelector('.messages-row-menu')?.getAttribute('aria-label'))).toEqual([
     `Conversation actions for ${first.context_label}, Chief of Staff`,
     `Conversation actions for ${otherChief.context_label}, Chief of Staff`,
   ]);
+});
+it('shows the Chief icon beside each synthetic patient-chat engagement under the Chief group',async()=>{
+  await act(async()=>root.render(<Harness rows={[first,otherChief,second]}/>));
+  const chiefGroup=[...host.querySelectorAll('.messages-inbox-group')].find(group=>group.querySelector('h2')?.textContent==='Chief');
+  expect(chiefGroup).toBeTruthy();
+  const chiefCards=[...chiefGroup!.querySelectorAll<HTMLElement>('.messages-conversation-card')];
+  expect(chiefCards).toHaveLength(2);
+  expect(chiefCards.map(card=>card.querySelector('.messages-context')?.textContent)).toEqual([
+    first.context_label,otherChief.context_label,
+  ]);
+  for(const card of chiefCards){
+    const avatar=card.querySelector('.messages-row > .bot-avatar.chief');
+    expect(avatar).toBeTruthy();
+    expect(avatar?.getAttribute('aria-hidden')).toBe('true');
+    expect(card.querySelector('.messages-bot-identity')).toBeNull();
+  }
+  const followUpCard=[...host.querySelectorAll<HTMLElement>('.messages-conversation-card')].find(card=>card.textContent?.includes(second.context_label));
+  expect(followUpCard?.querySelector('.messages-row > .bot-avatar.follow_up')).toBeTruthy();
+  expect(followUpCard?.querySelector('.messages-bot-identity')?.textContent).toBe('Follow-up');
 });
 it('shows quiet working presence only while attention is working',async()=>{
   const working:ConversationSummary={...first,attention:'working',unread:false};
