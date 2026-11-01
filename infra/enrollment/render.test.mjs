@@ -131,7 +131,7 @@ test('trial activation cannot precede provisioning or a complete admitted billin
 
 // Invented local evidence/key fixtures exercise trust and binding; they are not
 // actual provider measurements and are never written into a deployment input.
-function intakeFixture(t) {
+function intakeFixture(t, signUpMode = 'restricted') {
   const directory = mkdtempSync(join(realpathSync(tmpdir()), 'cosmabot-preflight-test-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   chmodSync(directory, 0o700);
@@ -183,11 +183,11 @@ function intakeFixture(t) {
     },
     clerk: {
       issuer: input.clerk.issuer, publishable_key: input.clerk.publishable_key, authorized_parties: [input.app_origin],
-      invite_only: true, policy_evidence_sha256: '', instance_evidence_sha256: '', identity_evidence_sha256: '', methods: {}, configuration: {
+      invite_only: signUpMode === 'restricted', policy_evidence_sha256: '', instance_evidence_sha256: '', identity_evidence_sha256: '', methods: {}, configuration: {
         instance_id: 'ins_inventedfixture', instance_environment_type: 'development', instance_allowed_origins: null,
         test_mode: true, auth_password: 'required', first_factors: ['password', 'oauth_google', 'oauth_microsoft'],
         email_address: { enabled: true, required: true, verify_at_sign_up: true },
-        password: { enabled: true, required: true }, sign_up_mode: 'restricted',
+        password: { enabled: true, required: true }, sign_up_mode: signUpMode,
         social: Object.fromEntries(['oauth_google', 'oauth_microsoft'].map(strategy => [strategy,
           { enabled: true, authenticatable: true, strategy, not_selectable: false, deprecated: false }])),
       },
@@ -315,6 +315,39 @@ test('trusted configured-method Development preflight permits auth testing/intak
   assert.equal('journey_sha256' in input.qualification, false);
   assert.equal('verified' in input.qualification.staging_preflight.payload.clerk.methods.google, false);
   assert.equal(input.qualification.staging_preflight.payload.clerk.methods.google.configured, true);
+});
+
+test('signed Development Open intake requires matching measured policy and keeps billing and production closed', t => {
+  const { input, payload, trust, key, evidenceFiles } = intakeFixture(t, 'public');
+  const files = render(input, { preflightTrustFile: trust });
+  assert.equal(payload.clerk.invite_only, false);
+  assert.equal(files['public-env.json'].ENROLLMENT_ENABLED, 'true');
+  assert.equal(files['public-env.json'].ENROLLMENT_CLERK_METHODS_VERIFIED, 'true');
+  for (const flag of ['STRIPE_INTEGRATION_ENABLED', 'COMMERCIAL_TERMS_VERIFIED', 'STRIPE_ACQUISITION_ENABLED',
+    'PROVISIONING_ENABLED', 'ACTIVATION_AVAILABLE', 'PRODUCTION_QUALIFIED']) {
+    assert.equal(files['public-env.json'][`ENROLLMENT_${flag}`], 'false');
+  }
+  assert.equal(files['deployment-contract.json'].source_commit, input.source_commit);
+  assert.equal(files['deployment-contract.json'].image, input.image);
+  for (const change of [
+    value => { value.clerk.invite_only = true; },
+    value => { value.clerk.invite_only = 'false'; },
+    value => { value.clerk.configuration.sign_up_mode = 'restricted'; },
+    value => { value.clerk.configuration.sign_up_mode = 'unknown'; },
+    value => { delete value.clerk.configuration.sign_up_mode; },
+  ]) {
+    const altered = structuredClone(payload); change(altered);
+    assert.throws(() => signStagingPreflight(altered, key, evidenceFiles));
+    const bytes = JSON.stringify(altered, (_name, value) => value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map(name => [name, value[name]])) : value);
+    const signature = sign(null, Buffer.from(bytes), createPrivateKey(readFileSync(key))).toString('base64');
+    const changed = structuredClone(input); changed.qualification.staging_preflight = { payload: altered, signature };
+    assert.throws(() => render(changed, { preflightTrustFile: trust }));
+  }
+  const unmeasuredRestricted = structuredClone(payload);
+  unmeasuredRestricted.clerk.invite_only = true;
+  unmeasuredRestricted.clerk.configuration.sign_up_mode = 'restricted';
+  assert.throws(() => signStagingPreflight(unmeasuredRestricted, key, evidenceFiles));
 });
 
 test('protected signer and renderer CLIs complete intake configuration without overwriting evidence', t => {

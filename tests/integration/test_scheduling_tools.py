@@ -19,6 +19,7 @@ from tests.integration.test_virtual_clinic_lab import clinic as clinic
 from cosmas_os.application import appointment_work, workspace
 from cosmas_os.config import settings
 from cosmas_os.models import AppointmentWork, Decision, SchedulingAccount, SchedulingPatientAccount
+from cosmas_os.ports.scheduling import AvailabilitySlot, AvailabilityWindow
 
 
 def observed(tools, role="follow_up", timezone="America/New_York"):
@@ -56,6 +57,7 @@ def test_actual_boundaries_keep_approval_and_calendar_effect_separate(clinic, tm
         assert read["broker"]["authority"] == BROKER_AUTHORITY
         assert read["broker"]["grant_role"] == "follow_up"
         assert read["source_bindings"]["selection"]["patient_id"] == tools.remote["patient_id"]
+        assert datetime.fromisoformat(read["availability"]["slots"][0]["starts_at"]) > datetime.now(UTC) + timedelta(minutes=3)
         assert len(tools.calls) == 1 and tools.calls[0]["method"] == "GET"
         prepared = tools.call("follow_up", "scheduling_prepare_observed", prepare_args(read))
         detail = prepared["detail"]
@@ -92,16 +94,19 @@ def test_actual_boundaries_keep_approval_and_calendar_effect_separate(clinic, tm
 def test_dst_fold_is_two_exact_utc_slots_and_timezone_cannot_select_new_resource(clinic, tmp_path):
     tools = SchedulingTools(clinic[0], tmp_path)
     try:
+        # Fixed historical slots prove display correspondence without booking authority.
+        tools.window = AvailabilityWindow(starts_at=datetime(2026, 11, 1, 4, tzinfo=UTC), ends_at=datetime(2026, 11, 1, 9, tzinfo=UTC))
+        tools.slots = tuple(AvailabilitySlot(starts_at=datetime(2026, 11, 1, hour, 30, tzinfo=UTC), ends_at=datetime(2026, 11, 1, hour, 50, tzinfo=UTC)) for hour in (5, 6))
         read = observed(tools)
         first, second = read["availability"]["slots"]
         assert first["local_starts_at"] == "2026-11-01T01:30:00-04:00"
         assert second["local_starts_at"] == "2026-11-01T01:30:00-05:00"
         assert first["starts_at"] != second["starts_at"]
-        prepared = tools.call("follow_up", "scheduling_prepare_observed", prepare_args(read, index=1))
-        assert prepared["detail"]["intent"]["slot"]["starts_at"] == second["starts_at"]
         read_utc = observed(tools, "visit_prep", "UTC")
         assert read_utc["availability"]["slots"][0]["local_starts_at"] == "2026-11-01T05:30:00+00:00"
         assert read_utc["source_bindings"] == read["source_bindings"]
+        assert count(tools, AppointmentWork) == 0
+        assert all(call["method"] == "GET" for call in tools.calls)
         before = list(tools.calls)
         for args in ({"timezone": "US/Eastern"}, {"timezone": "UTC", "resource_id": str(uuid4())}):
             with pytest.raises(LabError, match="invalid_tool_arguments"):

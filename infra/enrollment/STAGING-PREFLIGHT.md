@@ -32,9 +32,16 @@ retain its `enrollment-staging-hosts` JSON. It must show the selected account
 source, real TLS/routes and the central database operational, while enrollment,
 activation and journey/production qualification remain false.
 
+The reviewed operator tooling may advance independently of the immutable
+application release. Keep the receipt's `source_commit`, image and actual
+closed-host source bound to that application release. Record the operator tool
+revision and exact file SHA-256 values separately in protected preparation
+evidence; a newer tool is not a new application build or hosted measurement.
+An older source's host receipt cannot be relabeled for the selected release.
+
 Review actual Development Clerk Frontend API environment and Backend API
 instance metadata for the issuer, matching test publishable key, exact account
-party, invite-only policy and configured/enabled password, Google and Microsoft
+party, signup policy and configured/enabled password, Google and Microsoft
 methods. Retain sanitized structured configuration evidence. These are method
 configuration checks, not completed end-to-end sign-ins: the account UI becomes
 available only after this intake preflight. Perform actual password and OAuth
@@ -53,7 +60,7 @@ Prepare a protected draft payload with exactly these fields:
 | `issued_at`, `expires_at` | Physical Unix seconds; already issued, not expired, maximum 24-hour lifetime |
 | `database` | Owned subscription/tenant UUIDs, staging resource group, Central US or East US 2 location, matching ACR/vault/PostgreSQL names, `cosmabot_enrollment` / `enrollment_runtime`, exact versioned runtime DB secret reference, execution evidence SHA-256 and actual `check` JSON |
 | `hosting` | Exact closed-host verifier JSON, including matching source, five account routes, TLS and operational database checks |
-| `clerk` | Exact `.clerk.accounts.dev` issuer and matching `pk_test_` key, `authorized_parties: [app_origin]`, `invite_only: true`, `configuration` projection derived below, `policy_evidence_sha256` for the actual successful FAPI environment file, `instance_evidence_sha256` for the actual BAPI instance file, `identity_binding` / `identity_evidence_sha256` as described below, and `methods` containing exactly `password`, `google`, `microsoft`, each `{configured: true, evidence_sha256: "<same actual FAPI file SHA-256>"}` |
+| `clerk` | Exact `.clerk.accounts.dev` issuer and matching `pk_test_` key, `authorized_parties: [app_origin]`, `invite_only` matching the actual signup mode below, `configuration` projection derived below, `policy_evidence_sha256` for the actual successful FAPI environment file, `instance_evidence_sha256` for the actual BAPI instance file, `identity_binding` / `identity_evidence_sha256` as described below, and `methods` containing exactly `password`, `google`, `microsoft`, each `{configured: true, evidence_sha256: "<same actual FAPI file SHA-256>"}` |
 
 The database binding uses the existing foundation names for one shared suffix:
 `rg-cosmabot-enrollment-staging-<suffix>`,
@@ -82,7 +89,8 @@ successful environment GET (`http_status: 200`, `vendor_writes: false`), with
 `settings.auth_config.object: "auth_config"`, `test_mode: true`,
 `password: "required"` and all three first factors. It checks Development
 `display_config`, required/enabled email and password attributes, verified-email
-signup configuration, `user_settings.sign_up.mode: "restricted"`, and actual
+signup configuration, actual `user_settings.sign_up.mode` of `"restricted"`
+(Invite-only, `invite_only: true`) or `"public"` (Open, `invite_only: false`), and actual
 `social.oauth_google` / `social.oauth_microsoft` enabled/authenticatable
 strategies with selectable, nondeprecated configuration. The BAPI artifact must
 be the actual `cosmabot.dev-clerk.instance-read.v1` inspection, with an
@@ -91,6 +99,10 @@ checked matching test-key correspondence. Its original allowed-origins metadata
 is retained as `null` or the exact account origin; `null` is not a provider
 allowlist claim. The existing backend's exact authorized-party verification
 still binds every actual JWT to the account origin.
+The signup-mode projection and `invite_only` must agree exactly; missing,
+unrecognized or mismatched policy is rejected. Supporting measured Development
+Open signup does not change organization creation, human membership, billing or
+workspace access authority, and does not qualify completed sign-in journeys.
 
 This projection contains the actual instance/environment and method settings,
 not an arbitrary sign-in success flag. It omits organization membership mode,

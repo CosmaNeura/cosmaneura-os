@@ -9,7 +9,10 @@ import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
 
+from cosmas_os.enrollment import api
 from cosmas_os.enrollment.auth import ClerkEnrollmentVerifier
 from cosmas_os.enrollment.domain import EnrollmentError
 from cosmas_os.enrollment.stripe import StripeCommerce
@@ -20,7 +23,8 @@ from cosmas_os.enrollment.synthetic import SyntheticCommerce, synthetic_settings
 def identity_adapter():
     settings = synthetic_settings()
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    evidence = {"session_status": "active", "email_verified": True, "fetches": 0, "banned": False, "membership": True}
+    evidence = {"session_status": "active", "email_verified": True, "fetches": 0, "banned": False, "membership": True,
+                "keys_unavailable": False}
 
     def transport(request):
         if "/sessions/" in request.url.path:
@@ -36,6 +40,8 @@ def identity_adapter():
     class Keys:
         def get_signing_keys(self, refresh):
             evidence["fetches"] += 1
+            if evidence["keys_unavailable"]:
+                raise jwt.PyJWKClientError("Synthetic signing keys are unavailable")
             return [SimpleNamespace(key_id="key_example", key=key.public_key())]
 
     verifier = ClerkEnrollmentVerifier(settings, client=httpx.Client(transport=httpx.MockTransport(transport)), jwks_client=Keys())
@@ -59,6 +65,45 @@ def test_real_shaped_default_clerk_session_has_no_audience_and_uses_live_email(i
     assert identity.email == "verified@example.invalid"
     assert identity.subject == "user_example" and identity.session_id == "sess_example"
     assert evidence["fetches"] == 1
+
+
+def test_api_recovers_signing_keys_after_idle_expiry_without_bypassing_refresh_backoff(monkeypatch, identity_adapter):
+    verifier, token, evidence = identity_adapter
+    clock = [verifier.keys_valid_until - 900]
+    monkeypatch.setattr("cosmas_os.enrollment.auth.monotonic", lambda: clock[0])
+    monkeypatch.setattr(api, "schema_ready", lambda _engine: True)
+    verifier.settings.provisioning_enabled = False
+    engine = create_engine("sqlite://")
+    app = api.create_app(verifier.settings, engine=engine, verifier=verifier,
+                         commerce=SyntheticCommerce(verifier.settings))
+    with TestClient(app) as client:
+        assert client.get("/enrollment/v1/config").json()["enabled"] is True
+        assert evidence["fetches"] == 1
+
+        clock[0] = verifier.keys_valid_until
+        assert client.get("/enrollment/v1/config").json()["enabled"] is True
+        assert evidence["fetches"] == 2
+        assert client.get("/enrollment/v1/baa/current", headers={"Authorization": "Bearer " + token()}).status_code == 200
+
+        clock[0] = verifier.keys_valid_until
+        evidence["keys_unavailable"] = True
+        closed = client.get("/enrollment/v1/config").json()
+        assert closed["enabled"] is False and closed["auth_configured"] is False
+        assert closed["blockers"] == ["Signed enrollment identity verification is unavailable."]
+        assert evidence["fetches"] == 3
+        evidence["keys_unavailable"] = False
+        clock[0] = verifier.refresh_after - 1
+        assert client.get("/ready").status_code == 503
+        assert client.get("/enrollment/v1/baa/current", headers={"Authorization": "Bearer " + token()}).status_code == 503
+        assert evidence["fetches"] == 3
+
+        clock[0] = verifier.refresh_after
+        assert client.get("/enrollment/v1/config").json()["enabled"] is True
+        assert client.get("/enrollment/v1/baa/current", headers={"Authorization": "Bearer " + token()}).status_code == 200
+        for index in range(20):
+            response = client.get("/enrollment/v1/baa/current", headers={"Authorization": "Bearer " + token(kid="unknown" + str(index))})
+            assert response.status_code == 401
+        assert evidence["fetches"] == 4
 
 
 def test_explicit_default_session_audience_retains_live_human_and_scoped_party_checks(identity_adapter):

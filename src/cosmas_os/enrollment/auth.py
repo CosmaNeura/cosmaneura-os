@@ -49,6 +49,9 @@ class ClerkEnrollmentVerifier:
 
     @property
     def ready(self) -> bool:
+        # API availability guards run before verify(), so they must also allow
+        # the existing bounded refresh to recover after an idle key expiry.
+        self.refresh_keys()
         return bool(self.keys and monotonic() < self.keys_valid_until)
 
     def _get(self, path: str) -> dict[str, Any]:

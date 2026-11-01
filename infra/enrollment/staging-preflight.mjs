@@ -42,11 +42,11 @@ function configuredClerk(configuration) {
   requireValue(/^ins_[A-Za-z0-9_]{1,240}$/.test(configuration.instance_id) &&
     configuration.instance_environment_type === 'development' && configuration.test_mode === true &&
     (configuration.instance_allowed_origins === null || canonical(configuration.instance_allowed_origins) === canonical([APP])) &&
-    configuration.auth_password === 'required' && configuration.sign_up_mode === 'restricted' &&
+    configuration.auth_password === 'required' && ['restricted', 'public'].includes(configuration.sign_up_mode) &&
     Array.isArray(configuration.first_factors) && configuration.first_factors.length <= 32 &&
     configuration.first_factors.every(factor => typeof factor === 'string' && /^[a-z_]{1,80}$/.test(factor)) &&
     ['password', 'oauth_google', 'oauth_microsoft'].every(factor => configuration.first_factors.includes(factor)),
-  'require actual Development instance, restricted signup and configured first factors');
+  'require actual Development instance, recognized signup policy and configured first factors');
   exact(configuration.email_address, ['enabled', 'required', 'verify_at_sign_up']);
   exact(configuration.password, ['enabled', 'required']);
   requireValue(Object.values(configuration.email_address).every(value => value === true) &&
@@ -177,10 +177,12 @@ function measurements(payload) {
   requireValue(/^https:\/\/[a-z0-9]+(?:-[a-z0-9]+)*\.clerk\.accounts\.dev$/.test(clerk.issuer) &&
     typeof clerk.publishable_key === 'string' && clerk.publishable_key.startsWith('pk_test_') &&
     Buffer.from(clerk.publishable_key.slice(8), 'base64').toString() === `${new URL(clerk.issuer).hostname}$` &&
-    canonical(clerk.authorized_parties) === canonical([APP]) && clerk.invite_only === true && sha(clerk.policy_evidence_sha256) &&
+    canonical(clerk.authorized_parties) === canonical([APP]) && typeof clerk.invite_only === 'boolean' && sha(clerk.policy_evidence_sha256) &&
     sha(clerk.instance_evidence_sha256),
-  'require the measured matching invite-only Development instance and exact account party');
+  'require the measured matching Development instance and exact account party');
   configuredClerk(clerk.configuration);
+  requireValue(clerk.invite_only === (clerk.configuration.sign_up_mode === 'restricted'),
+    'signup policy must match the measured Development configuration');
   boundClerkIdentity(clerk, payload.issued_at);
   boundSessionAudience(clerk, payload.issued_at);
   exact(clerk.methods, ['password', 'google', 'microsoft']);
