@@ -185,6 +185,44 @@ def test_shared_staging_session_policy_accepts_no_audience_without_weakening_oth
         ClerkTokenVerifier(settings, jwks_client=keys, start_background_refresh=False, native_origin=origin)
 
 
+@pytest.mark.parametrize("audience", ["", "cosmas-os-beta-api"])
+def test_enrollment_default_session_verifies_exact_audience_policy_and_preserves_identity_gates(audience):
+    private, _ = _verifier()
+    settings = _settings(_env_file=None, clerk_session_policy="enrollment_default", clerk_audience=audience,
+        workspace_enrollment_managed=True, workspace_enrollment_practice_id="00000000-0000-4000-8000-000000000002",
+        workspace_enrollment_api_origin="https://enrollment.example.invalid",
+        workspace_enrollment_account_origin="https://beta.example.invalid",
+        workspace_enrollment_origin_allowlist="https://enrollment.example.invalid,https://beta.example.invalid",
+        workspace_enrollment_admission_secret="e" * 64)
+    assert settings.runtime_configuration_errors() == []
+    keys = SimpleNamespace(get_signing_keys=lambda **_: [SimpleNamespace(key_id="test-key", key=private.public_key())])
+    verifier = ClerkTokenVerifier(settings, jwks_client=keys, start_background_refresh=False)
+    valid = {"aud": audience} if audience else {}
+    omitted = () if audience else ("aud",)
+    assert verifier.verify(_token(private, omit=omitted, **valid))["sid"] == "sess_test_owner"
+    for value in [None, "", "another-api", [], ["cosmas-os-beta-api"], ["cosmas-os-beta-api", "another-api"], 123]:
+        with pytest.raises(AuthenticationFailed):
+            verifier.verify(_token(private, aud=value))
+    if audience:
+        with pytest.raises(AuthenticationFailed):
+            verifier.verify(_token(private, omit=("aud",)))
+    else:
+        with pytest.raises(AuthenticationFailed):
+            verifier.verify(_token(private, aud="cosmas-os-beta-api"))
+    for patch in [{"iss": "https://other.invalid"}, {"sid": ""}, {"azp": "https://other.invalid"},
+                  {"o": {"id": "org_other"}}, {"exp": datetime.now(UTC) - timedelta(minutes=1)}]:
+        with pytest.raises((AuthenticationFailed, AccessDenied)):
+            verifier.verify(_token(private, omit=omitted, **(valid | patch)))
+    for missing in ["iss", "sub", "sid", "azp", "iat", "nbf", "exp"]:
+        with pytest.raises(AuthenticationFailed):
+            verifier.verify(_token(private, omit=(*omitted, missing), **valid))
+    for value in [None, False, 123, ["cosmas-os-beta-api"], "named audience", "a" * 256, "é"]:
+        settings.clerk_audience = value
+        assert settings.clerk_session_configuration_errors()
+        with pytest.raises(AuthenticationFailed):
+            verifier.verify(_token(private, omit=omitted, **valid))
+
+
 def test_clerk_verifier_rejects_conflicting_org_claim_shapes() -> None:
     private_key, verifier = _verifier()
     with pytest.raises(AccessDenied):
