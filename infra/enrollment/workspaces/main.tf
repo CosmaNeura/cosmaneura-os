@@ -178,7 +178,11 @@ resource "azurerm_postgresql_flexible_server" "box" {
   }
   tags       = merge(local.tags, { box = each.value.plan.box_id })
   depends_on = [terraform_data.guard, azurerm_private_dns_zone_virtual_network_link.postgres]
-  lifecycle { prevent_destroy = true }
+  lifecycle {
+    prevent_destroy = true
+    # Azure selects the creation zone; later deployment stages preserve it.
+    ignore_changes = [zone]
+  }
 }
 resource "azurerm_postgresql_flexible_server_configuration" "tls" {
   for_each  = local.practices

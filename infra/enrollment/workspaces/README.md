@@ -41,7 +41,9 @@ Blob storage/transactions, vault operations, telemetry, egress and backup overag
 are additional; free grants are shared with other apps in the subscription.
 These are public PAYG estimates, not allocation evidence or a subscription quote.
 No legacy Azure Cache for Redis
-resource is introduced. Availability/capacity remains an actual deployment gate.
+resource is introduced. PostgreSQL keeps its Azure-selected creation zone across
+later deployment stages; these B1ms servers do not enable zone-redundant HA.
+Availability/capacity remains an actual deployment gate.
 [Managed Redis](https://learn.microsoft.com/azure/redis/overview),
 [pricing](https://azure.microsoft.com/pricing/details/managed-redis/).
 
