@@ -19,7 +19,6 @@ from tests.integration.test_virtual_clinic_lab import clinic as clinic
 from cosmas_os.application import appointment_work, workspace
 from cosmas_os.config import settings
 from cosmas_os.models import AppointmentWork, Decision, SchedulingAccount, SchedulingPatientAccount
-from cosmas_os.ports.scheduling import AvailabilitySlot, AvailabilityWindow
 
 
 def observed(tools, role="follow_up", timezone="America/New_York"):
@@ -94,16 +93,16 @@ def test_actual_boundaries_keep_approval_and_calendar_effect_separate(clinic, tm
 def test_dst_fold_is_two_exact_utc_slots_and_timezone_cannot_select_new_resource(clinic, tmp_path):
     tools = SchedulingTools(clinic[0], tmp_path)
     try:
-        # Fixed historical slots prove display correspondence without booking authority.
-        tools.window = AvailabilityWindow(starts_at=datetime(2026, 11, 1, 4, tzinfo=UTC), ends_at=datetime(2026, 11, 1, 9, tzinfo=UTC))
-        tools.slots = tuple(AvailabilitySlot(starts_at=datetime(2026, 11, 1, hour, 30, tzinfo=UTC), ends_at=datetime(2026, 11, 1, hour, 50, tzinfo=UTC)) for hour in (5, 6))
+        # Relative autumn-fold slots from the lab fixture prove display correspondence
+        # without booking authority (same shape as #256's display-only DST coverage).
+        fold = tools.window.starts_at.date().isoformat()
         read = observed(tools)
         first, second = read["availability"]["slots"]
-        assert first["local_starts_at"] == "2026-11-01T01:30:00-04:00"
-        assert second["local_starts_at"] == "2026-11-01T01:30:00-05:00"
+        assert first["local_starts_at"] == f"{fold}T01:30:00-04:00"
+        assert second["local_starts_at"] == f"{fold}T01:30:00-05:00"
         assert first["starts_at"] != second["starts_at"]
         read_utc = observed(tools, "visit_prep", "UTC")
-        assert read_utc["availability"]["slots"][0]["local_starts_at"] == "2026-11-01T05:30:00+00:00"
+        assert read_utc["availability"]["slots"][0]["local_starts_at"] == f"{fold}T05:30:00+00:00"
         assert read_utc["source_bindings"] == read["source_bindings"]
         assert count(tools, AppointmentWork) == 0
         assert all(call["method"] == "GET" for call in tools.calls)

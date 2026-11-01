@@ -9,7 +9,7 @@ the separate test driver can approve/execute against an injected MockTransport.
 
 import json
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -49,6 +49,24 @@ from lab.store import LabError
 
 BROKER_AUTHORITY = "synthetic_scheduling_broker_only; current follow_up grant; no production agent authority"
 SCENARIOS = ("normal", "unavailable", "grant_unavailable", "stale_slot", "lost_prepare_reply", "lost_submit_reply", "calendar_pending")
+
+
+def eastern_fall_fold_day(now: datetime | None = None) -> date:
+    """Next first Sunday of November whose 09:00 UTC lab window is still ahead of now.
+
+    Lab availability uses the New York autumn DST fold (01:30 twice). After that
+    morning passes, booking authority correctly refuses past slots; keep the
+    fixture on the next future fold so schedule labs stay current.
+    """
+    current = datetime.now(UTC) if now is None else now.astimezone(UTC)
+    year = current.year
+    while year < current.year + 20:
+        day = date(year, 11, 1)
+        day += timedelta(days=(6 - day.weekday()) % 7)
+        if datetime(day.year, day.month, day.day, 9, tzinfo=UTC) > current + timedelta(hours=1):
+            return day
+        year += 1
+    raise LabError("scheduling_fixture_fold_unavailable")
 
 
 class SchedulingAvailabilityArgs(Arguments):
@@ -98,9 +116,19 @@ class SchedulingTools:
         self.scope = app.box, app.owner, app.workspace
         self.identity_id, self.account_id, self.patient_mapping_id = map(str, (uuid4(), uuid4(), uuid4()))
         self.remote = {name: str(uuid4()) for name in ("practice_id", "actor_id", "practitioner_id", "location_id", "appointment_type_id", "patient_id", "connection_id")}
-        day = (datetime.now(UTC) + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        self.window = AvailabilityWindow(starts_at=day + timedelta(hours=4), ends_at=day + timedelta(hours=9))
-        self.slots = tuple(AvailabilitySlot(starts_at=day + timedelta(hours=hour, minutes=30), ends_at=day + timedelta(hours=hour, minutes=50)) for hour in (5, 6))
+        fold = eastern_fall_fold_day()
+        self.window = AvailabilityWindow(
+            starts_at=datetime(fold.year, fold.month, fold.day, 4, tzinfo=UTC),
+            ends_at=datetime(fold.year, fold.month, fold.day, 9, tzinfo=UTC),
+        )
+        # Two distinct 01:30 local times during the New York autumn DST fold.
+        self.slots = tuple(
+            AvailabilitySlot(
+                starts_at=datetime(fold.year, fold.month, fold.day, hour, 30, tzinfo=UTC),
+                ends_at=datetime(fold.year, fold.month, fold.day, hour, 50, tzinfo=UTC),
+            )
+            for hour in (5, 6)
+        )
         self.calls, self.journal, self.observations, self.preparations, self.catalog_reads = [], {}, {}, {}, {}
         self.calendar_state = "pending" if scenario == "calendar_pending" else "synced"
         self.connected_at = datetime.now(UTC) - timedelta(hours=1)
