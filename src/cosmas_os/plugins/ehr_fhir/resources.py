@@ -10,9 +10,12 @@ ReadableResource = Literal[
     "Appointment",
     "AllergyIntolerance",
     "MedicationRequest",
+    "Medication",
     "Condition",
     "Observation",
     "DocumentReference",
+    "Practitioner",
+    "Organization",
 ]
 
 READABLE_RESOURCES: Final[frozenset[str]] = frozenset(
@@ -22,9 +25,12 @@ READABLE_RESOURCES: Final[frozenset[str]] = frozenset(
         "Appointment",
         "AllergyIntolerance",
         "MedicationRequest",
+        "Medication",
         "Condition",
         "Observation",
         "DocumentReference",
+        "Practitioner",
+        "Organization",
     }
 )
 

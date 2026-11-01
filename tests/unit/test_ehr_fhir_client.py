@@ -26,9 +26,12 @@ FIXTURE_FILES = {
     "Appointment": "appointment.json",
     "AllergyIntolerance": "allergy_intolerance.json",
     "MedicationRequest": "medication_request.json",
+    "Medication": "medication.json",
     "Condition": "condition.json",
     "Observation": "observation.json",
     "DocumentReference": "document_reference.json",
+    "Practitioner": "practitioner.json",
+    "Organization": "organization.json",
 }
 
 
@@ -88,9 +91,12 @@ def test_readable_resources_match_ticket_set():
         "Appointment",
         "AllergyIntolerance",
         "MedicationRequest",
+        "Medication",
         "Condition",
         "Observation",
         "DocumentReference",
+        "Practitioner",
+        "Organization",
     }
 
 

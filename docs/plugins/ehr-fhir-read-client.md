@@ -21,9 +21,12 @@ Only these FHIR R4 / US Core resource types, by instance read or search:
 | `Appointment` | Scheduled visit rows |
 | `AllergyIntolerance` | Allergy list |
 | `MedicationRequest` | Medication orders and plans |
+| `Medication` | Medication catalog records referenced by orders |
 | `Condition` | Problem list |
 | `Observation` | Vitals and results |
 | `DocumentReference` | Clinical document metadata |
+| `Practitioner` | Clinician identity |
+| `Organization` | Practice or clinic organization |
 
 Search returns Bundle `searchset` pages. The client follows `link.relation=next`
 only while the next URL stays on the same accepted base origin and path prefix.
