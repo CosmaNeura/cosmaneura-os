@@ -83,13 +83,17 @@ class Harness:
             },
         )
 
-    def reader(self, scope=SCOPE):
+    def reader(self, scope=SCOPE, *, sandbox_enabled=True, real_data_enabled=False,
+               practice_baa_recorded=False):
         return AthenaMedicationReader(
             scope,
             self.transport,
             expected_identity_sha256=patient_identity([PATIENT], scope).identity_sha256,
             enabled=lambda: self.enabled,
             authorize=lambda _: self.authorized,
+            sandbox_enabled=sandbox_enabled,
+            real_data_enabled=real_data_enabled,
+            practice_baa_recorded=practice_baa_recorded,
         )
 
     def read(self):

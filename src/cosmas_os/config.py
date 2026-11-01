@@ -117,6 +117,9 @@ class Settings(BaseSettings):
     workspace_ehr_read_enabled: bool = False
     # Separate network permission: sandbox REST reads of invented records only.
     workspace_elation_sandbox_enabled: bool = False
+    # Real-practice EHR origins. Default off; hosted/production configs must not
+    # set it. Requires a recorded practice-BAA flag on the connection as well.
+    cosmas_ehr_real_data_enabled: bool = False
     # Additional clinical read scope; appointments retain their three-scope grant.
     workspace_elation_problems_enabled: bool = False
     workspace_elation_medications_enabled: bool = False
@@ -517,6 +520,10 @@ class Settings(BaseSettings):
             errors.append("Core connection requires an authenticated workspace, exact HTTPS origin and reviewed tenant correspondence")
         if self.workspace_hosted_enabled and not self.workspace_available:
             errors.append("Hosted workspace requires authenticated early_adopter_beta and complete deployment configuration")
+        if self.cosmas_ehr_real_data_enabled and self.workspace_hosted_enabled:
+            errors.append(
+                "COSMAS_EHR_REAL_DATA_ENABLED must remain false when WORKSPACE_HOSTED_ENABLED is true"
+            )
         if (self.workspace_apple_hosted_transport_enabled or self.workspace_desktop_hosted_transport_enabled) and not self.workspace_hosted_enabled:
             errors.append("Hosted native transport requires WORKSPACE_HOSTED_ENABLED")
         if self.workspace_capture_backend != "disabled" and not self.workspace_capture_available:

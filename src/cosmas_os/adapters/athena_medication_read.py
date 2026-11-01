@@ -21,6 +21,7 @@ from cosmas_os.adapters.athena_allergy_read import (
     patient_identity as _patient_identity,
 )
 from cosmas_os.domain.hashing import payload_hash
+from cosmas_os.ehr_real_data_gate import EhrRealDataGateError, assert_ehr_request_allowed
 
 ORIGINS = {
     "preview": "https://api.preview.platform.athenahealth.com",
@@ -436,12 +437,24 @@ class AthenaMedicationReader:
         expected_identity_sha256: str,
         enabled: Callable[[], bool],
         authorize: Callable[[AthenaMedicationScope], bool],
+        sandbox_enabled: bool = False,
+        real_data_enabled: bool = False,
+        practice_baa_recorded: bool = False,
     ):
         if type(scope) is not AthenaMedicationScope or type(transport) is not httpx.MockTransport:
             raise AthenaMedicationError("synthetic_transport_required")
+        if (
+            type(sandbox_enabled) is not bool
+            or type(real_data_enabled) is not bool
+            or type(practice_baa_recorded) is not bool
+        ):
+            raise AthenaMedicationError("invalid_scope")
         self.scope, self.transport = scope, transport
         self.expected_identity_sha256 = _digest(expected_identity_sha256)
         self.enabled, self.authorize = enabled, authorize
+        self.sandbox_enabled = sandbox_enabled
+        self.real_data_enabled = real_data_enabled
+        self.practice_baa_recorded = practice_baa_recorded
 
     def _current(self):
         if not self.enabled():
@@ -449,8 +462,22 @@ class AthenaMedicationReader:
         if self.authorize(self.scope) is not True:
             raise AthenaMedicationError("access_denied")
 
+    def _guard_origin(self):
+        try:
+            assert_ehr_request_allowed(
+                vendor="athena",
+                origin=ORIGINS[self.scope.environment],
+                sandbox_enabled=self.sandbox_enabled,
+                real_data_enabled=self.real_data_enabled,
+                practice_baa_recorded=self.practice_baa_recorded,
+                mock_transport_only=type(self.transport) is httpx.MockTransport,
+            )
+        except EhrRealDataGateError as exc:
+            raise AthenaMedicationError(exc.code) from None
+
     def _get(self, client, path, parameters):
         self._current()
+        self._guard_origin()
         try:
             with client.stream(
                 "GET",
