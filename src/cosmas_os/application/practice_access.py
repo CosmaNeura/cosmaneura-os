@@ -42,14 +42,19 @@ def _scope(s, runtime, member, fence):
         raise PracticeAccessError("practice_access_unavailable", 503)
 
 
-def _binding(s, member):
-    binding = s.scalar(select(ExternalIdentity).where(
+def _binding(s, member, *, lock=True):
+    binding_query = select(ExternalIdentity).where(
         ExternalIdentity.issuer == member.issuer, ExternalIdentity.subject == member.subject
-    ).with_for_update().execution_options(populate_existing=True))
+    ).execution_options(populate_existing=True)
+    if lock:
+        binding_query = binding_query.with_for_update()
+    binding = s.scalar(binding_query)
     if binding is None:
         return None
-    principal = s.scalar(select(Principal).where(Principal.id == binding.principal_id)
-                         .with_for_update().execution_options(populate_existing=True))
+    principal_query = select(Principal).where(Principal.id == binding.principal_id).execution_options(populate_existing=True)
+    if lock:
+        principal_query = principal_query.with_for_update()
+    principal = s.scalar(principal_query)
     if (not binding.active or binding.provider != "clerk"
             or binding.box_id != member.box_id or binding.organization_id != member.organization_id
             or principal is None or principal.box_id != member.box_id
@@ -109,6 +114,26 @@ def _audit(s, row, state, actor=None):
 def status(s, runtime, member, *, fence):
     _scope(s, runtime, member, fence)
     result = _self(s, member, _binding(s, member))
+    fence()
+    s.commit()
+    return result
+
+
+def enrollment_qualification(s, runtime, member, *, fence):
+    """Signed, existing-binding read; grants no practice or clinical authority."""
+    for value, length in ((runtime.workspace_release_source_commit, 40),
+                          (runtime.workspace_release_image_sha256, 64)):
+        if len(value) != length or any(c not in "0123456789abcdef" for c in value):
+            raise PracticeAccessError("practice_access_not_found", 404)
+    _scope(s, runtime, member, fence)
+    principal = _binding(s, member)
+    if principal is None:
+        raise PracticeAccessError("practice_access_denied", 403)
+    result = {"contract_version": 1, "state": "connected", "role": "owner" if principal.is_owner else "member",
+              "box_id": runtime.beta_box_id, "organization_id": runtime.clerk_organization_id,
+              "issuer": runtime.clerk_issuer, "subject": member.subject,
+              "source_commit": runtime.workspace_release_source_commit,
+              "image_sha256": runtime.workspace_release_image_sha256}
     fence()
     s.commit()
     return result

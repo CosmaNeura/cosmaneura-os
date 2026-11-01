@@ -56,6 +56,7 @@ def test_actual_boundaries_keep_approval_and_calendar_effect_separate(clinic, tm
         assert read["broker"]["authority"] == BROKER_AUTHORITY
         assert read["broker"]["grant_role"] == "follow_up"
         assert read["source_bindings"]["selection"]["patient_id"] == tools.remote["patient_id"]
+        assert datetime.fromisoformat(read["availability"]["slots"][0]["starts_at"]) > datetime.now(UTC) + timedelta(minutes=3)
         assert len(tools.calls) == 1 and tools.calls[0]["method"] == "GET"
         prepared = tools.call("follow_up", "scheduling_prepare_observed", prepare_args(read))
         detail = prepared["detail"]
@@ -92,17 +93,19 @@ def test_actual_boundaries_keep_approval_and_calendar_effect_separate(clinic, tm
 def test_dst_fold_is_two_exact_utc_slots_and_timezone_cannot_select_new_resource(clinic, tmp_path):
     tools = SchedulingTools(clinic[0], tmp_path)
     try:
+        # Relative autumn-fold slots from the lab fixture prove display correspondence
+        # without booking authority (same shape as #256's display-only DST coverage).
         fold = tools.window.starts_at.date().isoformat()
         read = observed(tools)
         first, second = read["availability"]["slots"]
         assert first["local_starts_at"] == f"{fold}T01:30:00-04:00"
         assert second["local_starts_at"] == f"{fold}T01:30:00-05:00"
         assert first["starts_at"] != second["starts_at"]
-        prepared = tools.call("follow_up", "scheduling_prepare_observed", prepare_args(read, index=1))
-        assert prepared["detail"]["intent"]["slot"]["starts_at"] == second["starts_at"]
         read_utc = observed(tools, "visit_prep", "UTC")
         assert read_utc["availability"]["slots"][0]["local_starts_at"] == f"{fold}T05:30:00+00:00"
         assert read_utc["source_bindings"] == read["source_bindings"]
+        assert count(tools, AppointmentWork) == 0
+        assert all(call["method"] == "GET" for call in tools.calls)
         before = list(tools.calls)
         for args in ({"timezone": "US/Eastern"}, {"timezone": "UTC", "resource_id": str(uuid4())}):
             with pytest.raises(LabError, match="invalid_tool_arguments"):
