@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:beta": "node scripts/validate-beta-build.mjs && tsc -b && vite build && node scripts/render-beta-nginx.mjs",
+    "build:enrollment": "node scripts/validate-enrollment-build.mjs && tsc -b && vite build && node scripts/render-enrollment-nginx.mjs",
     "test": "vitest run",
     "preview": "vite preview",
     "ux:lab": "vite --config vite.ux-lab.config.ts",

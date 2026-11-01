@@ -375,3 +375,36 @@ IMPLEMENTATION IMPACT:
 - **Implementation impact:** Update the agent instructions and the cloud-agent
   test setup. This entry records the decision. It does not itself deploy
   software or change live Clerk, infrastructure, or app stores.
+
+### DL-20261031-ONBOARDING-01
+
+- **Status:** ACCEPTED
+- **Date:** 2026-10-31
+- **Ruling:** Build customer onboarding for `cosmas.ai`, opening during the
+  week of November 2. Use Clerk OAuth and email/password, legal practice
+  information, the current Cosmaneura customer BAA, hosted payment setup and
+  a fourteen-day free trial. Reuse useful Cosmaneura onboarding and Stripe
+  implementation patterns in this independent product. Existing
+  Cosmaneura/Core services, source, identities and databases remain unchanged.
+- **Commercial terms:** Monthly USD billing. One human seat is $300/month;
+  two through ten human seats cost $300 for the first plus $100 for each
+  additional seat. Eleven or more requires a negotiated quote. Every human
+  user, including owners, providers and office staff, is a paid seat. Agent
+  principals are not human seats. No self-serve quantity above ten and no
+  clinician-only billing rule may be substituted.
+- **Implementation sequence:** Build the public site and complete enrollment
+  journey in staging, with independent Azure production preparation in
+  parallel. Production provisioning and activation follow the staged
+  customer journey. Registration alone does not start the trial; its clock
+  starts with usable workspace access and confirmed billing setup. Pending
+  activation must be presented accurately.
+- **Owner acceptance evidence:** The owner specified the three pricing
+  options, answered "Every human user is a paid seat," then said,
+  "Your plan is approved. Get building."
+- **Implementation impact:** Add an enrollment and SaaS-billing module with
+  immutable practice agreement receipts, recoverable setup, owner/member
+  authority and isolated workspace provisioning. Existing practice finance
+  PaymentIntents remain separate. Marketing contact storage remains separate
+  from customer accounts, payment references and clinical data. Trial feature,
+  tax, seat-change and cancellation details must be explicitly represented;
+  this entry does not invent negotiated terms or patient-data readiness.

@@ -1,0 +1,65 @@
+{
+  "kind": "cosmabot.stripe-test-qualification.reference.v1",
+  "reference_only": true,
+  "deployment_apply": false,
+  "provider_calls_executed": false,
+  "source_baseline_commit": "e0d522bf8329e0a6b05ea36fff435092d2f505a2",
+  "qualification_commit": null,
+  "environment": "staging",
+  "stripe_live_mode": false,
+  "stripe_api_version": "2025-09-30.clover",
+  "public_references": {
+    "account_id": null,
+    "base_product_id": null,
+    "additional_product_id": null,
+    "base_price_id": null,
+    "additional_price_id": null,
+    "portal_configuration_id": null,
+    "webhook_endpoint_id": null,
+    "enrollment_api_origin": null
+  },
+  "versioned_secret_references_only": {
+    "ENROLLMENT_STRIPE_SECRET_KEY": null,
+    "ENROLLMENT_STRIPE_WEBHOOK_SECRET": null
+  },
+  "pricing": {
+    "currency": "usd",
+    "interval": "month",
+    "interval_count": 1,
+    "billing_scheme": "per_unit",
+    "usage_type": "licensed",
+    "first_human_cents": 30000,
+    "additional_human_cents": 10000,
+    "max_self_serve_humans": 10,
+    "all_human_roles_paid": true,
+    "pending_invites_reserve_seat": true,
+    "paused_humans_retain_seat": true,
+    "trial_days": 14,
+    "activation_requires_usable_workspace": true,
+    "card_required": true,
+    "automatic_tax": false,
+    "promotion_codes": false,
+    "extra_charge_items": false
+  },
+  "portal": {
+    "invoice_history": true,
+    "payment_method_update": true,
+    "subscription_cancel": "at_period_end",
+    "subscription_update": false,
+    "customer_update": false,
+    "public_login_page": false,
+    "retention_coupon": false,
+    "proration": false
+  },
+  "qualification": {
+    "catalog_and_portal_verified": false,
+    "bound_checkout_owner_staff": false,
+    "duplicate_and_webhook_recovery": false,
+    "card_update_preserves_trial": false,
+    "provider_clock_cancel_no_first_charge": false,
+    "provider_clock_paid_failed_recovery": false,
+    "bound_runtime_expiry_recovery": false,
+    "actual_reminder_delivery": false,
+    "journey_receipt_sha256": null
+  }
+}
