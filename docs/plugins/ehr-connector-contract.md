@@ -38,8 +38,14 @@ those four manifests and wraps them in `DeclaredEhrConnector`. Plugin
    `sandbox_supported` is true. Atlas.md declares sandbox unsupported because
    no vendor sandbox contract is verified in this repository.
 4. **Reads.** `allow_read` checks the target gate, then that the resource is in
-   `readable_resources`. It does not call a vendor and does not open a network
-   connection.
+   `readable_resources`. Refusals raised through this path
+   (`EhrReadRefused` codes such as `ehr_resource_unsupported`, and
+   `EhrTargetRefused` for Atlas.md's unsupported sandbox / any other refused
+   target) carry a plain-English `.message`, matching write and production
+   refusals. A non-string `resource` raises `EhrReadRefused` with code
+   `ehr_resource_unsupported` and that same plain message; it never raises a
+   bare `TypeError` and never echoes the input. `allow_read` does not call a
+   vendor and does not open a network connection.
 
 ## Hook points (not built here)
 

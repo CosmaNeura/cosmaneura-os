@@ -17,6 +17,7 @@ import httpx
 
 from cosmas_os.adapters.elation_read import ORIGIN, SCOPES, ElationReadScope
 from cosmas_os.domain.hashing import canonical_json, payload_hash
+from cosmas_os.ehr_real_data_gate import EhrRealDataGateError, assert_ehr_request_allowed
 
 LAB_SCOPES = SCOPES + " system/reports.read"
 MAX_ID = 9_223_372_036_854_775_807
@@ -485,12 +486,18 @@ class ElationLabReader:
         *,
         enabled: Callable[[], bool],
         authorize: Callable[[ElationLabScope], bool],
+        sandbox_enabled: bool = False,
+        real_data_enabled: bool = False,
+        practice_baa_recorded: bool = False,
     ):
         if (
             type(scope) is not ElationLabScope
             or type(transport) is not httpx.MockTransport
             or not callable(enabled)
             or not callable(authorize)
+            or type(sandbox_enabled) is not bool
+            or type(real_data_enabled) is not bool
+            or type(practice_baa_recorded) is not bool
         ):
             raise ElationLabError("synthetic_transport_required")
         self.scope, self.transport, self.enabled, self.authorize = (
@@ -499,13 +506,33 @@ class ElationLabReader:
             enabled,
             authorize,
         )
+        self.sandbox_enabled = sandbox_enabled
+        self.real_data_enabled = real_data_enabled
+        self.practice_baa_recorded = practice_baa_recorded
 
     def _current(self):
         if self.enabled() is not True or self.authorize(self.scope) is not True:
             raise ElationLabError("access_denied")
 
+    def _guard_origin(self):
+        try:
+            assert_ehr_request_allowed(
+                vendor="elation",
+                origin=ORIGIN,
+                sandbox_enabled=self.sandbox_enabled,
+                real_data_enabled=self.real_data_enabled,
+                practice_baa_recorded=self.practice_baa_recorded,
+                mock_transport_only=type(self.transport) is httpx.MockTransport,
+            )
+        except EhrRealDataGateError as exc:
+            raise ElationLabError(
+                "access_denied" if exc.code in {"sandbox_flag_required", "real_data_required"}
+                else "response_invalid"
+            ) from None
+
     def _get(self, client, path, parameters, maximum=1048576):
         self._current()
+        self._guard_origin()
         try:
             with client.stream(
                 "GET",

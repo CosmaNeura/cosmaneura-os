@@ -78,7 +78,8 @@ class Harness:
         self.port = ElationReadAdapter(SCOPE, self.secrets, enabled=enabled,
             problems_enabled=problems_enabled, medications_enabled=medications_enabled,
             authorize_read=self.authorize, transport=httpx.MockTransport(self.send),
-            now=lambda: NOW, monotonic=lambda: self.clock, sleep=self.sleep)
+            now=lambda: NOW, monotonic=lambda: self.clock, sleep=self.sleep,
+            sandbox_enabled=True)
 
     async def secrets(self, scope):
         self.credential_calls.append(scope)

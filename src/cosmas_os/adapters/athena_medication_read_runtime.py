@@ -150,7 +150,8 @@ class SyntheticAthenaMedicationReads:
         read_scope = patient.read_scope()
         observation = AthenaMedicationReader(read_scope, self._transport,
             expected_identity_sha256=patient.identity_sha256, enabled=lambda: self.current(scope),
-            authorize=lambda selected: selected == read_scope and current()).read()
+            authorize=lambda selected: selected == read_scope and current(),
+            sandbox_enabled=read_scope.environment == "preview").read()
         review = prepare_medication_review(observation, expected_scope=read_scope,
             expected_source_sha256=observation.source_sha256, expected_patient_identity_sha256=patient.identity_sha256,
             authorize_read=lambda selected: selected == read_scope and current())

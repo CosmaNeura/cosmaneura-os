@@ -87,7 +87,7 @@ def adapter(payload=None, *, enabled=True, status=200, handler=None, token=None,
     port = ElationReadAdapter(scope, credentials or secrets, enabled=enabled,
         authorize_read=authorize or allowed, permit_request=permit,
         transport=httpx.MockTransport(handle), now=lambda: START,
-        monotonic=clock, sleep=clock.sleep)
+        monotonic=clock, sleep=clock.sleep, sandbox_enabled=True)
     return port, calls, credential_calls, clock
 
 

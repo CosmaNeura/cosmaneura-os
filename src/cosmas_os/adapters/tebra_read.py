@@ -16,6 +16,8 @@ from xml.parsers import expat
 import httpx
 from pydantic import SecretStr
 
+from cosmas_os.ehr_real_data_gate import EhrRealDataGateError, assert_ehr_request_allowed
+
 ENDPOINT = "https://webservice.kareo.com/services/soap/2.1/KareoServices.svc"
 SCHEMA = "http://www.kareo.com/api/schemas/"
 SOAP = "http://schemas.xmlsoap.org/soap/envelope/"
@@ -30,6 +32,7 @@ ErrorCode = Literal[
     "connector_disabled", "provider_qualification_required", "access_denied",
     "scope_changed", "request_invalid", "response_invalid", "response_too_large",
     "too_many_results", "provider_throttled", "provider_rejected", "transport_unconfirmed",
+    "real_data_required", "sandbox_flag_required",
 ]
 
 
@@ -262,15 +265,20 @@ def _rows(data: bytes, operation: Operation, scope: TebraReadScope,
 
 class TebraReadAdapter:
     def __init__(self, *, authorize_read: Callable[[TebraReadScope], bool],
-                 enabled: bool = False, transport: httpx.MockTransport | None = None):
+                 enabled: bool = False, transport: httpx.MockTransport | None = None,
+                 real_data_enabled: bool = False, practice_baa_recorded: bool = False):
         """authorize_read verifies current CosmaBot caller/Box and scope generation.
 
         Vendor Authenticated/Authorized flags never replace that application check.
         No default HTTP transport can be created while qualification is pending.
         """
+        if type(real_data_enabled) is not bool or type(practice_baa_recorded) is not bool:
+            raise TebraReadError("request_invalid")
         self._authorize_read = authorize_read
         self._enabled = enabled is True
         self._transport = transport
+        self._real_data_enabled = real_data_enabled
+        self._practice_baa_recorded = practice_baa_recorded
 
     def _guard(self, scope: TebraReadScope) -> None:
         if not self._enabled:
@@ -286,6 +294,18 @@ class TebraReadAdapter:
             raise TebraReadError("access_denied") from None
         if authorized is not True:
             raise TebraReadError("access_denied")
+        try:
+            assert_ehr_request_allowed(
+                vendor="tebra",
+                origin=ENDPOINT,
+                sandbox_enabled=False,
+                real_data_enabled=self._real_data_enabled,
+                practice_baa_recorded=self._practice_baa_recorded,
+                mock_transport_only=type(self._transport) is httpx.MockTransport,
+            )
+        except EhrRealDataGateError as exc:
+            code = exc.code if exc.code in {"real_data_required", "sandbox_flag_required"} else "request_invalid"
+            raise TebraReadError(code) from None  # type: ignore[arg-type]
 
     def _read(self, operation: Operation, scope: TebraReadScope,
               credentials: TebraCredentials, fields: tuple[str, ...],

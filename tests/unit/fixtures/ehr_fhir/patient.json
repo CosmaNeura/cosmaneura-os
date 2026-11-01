@@ -1,0 +1,22 @@
+{
+  "resourceType": "Patient",
+  "id": "synth-patient-1001",
+  "meta": {
+    "profile": ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient"]
+  },
+  "identifier": [
+    {
+      "system": "https://invented.invalid/mrn",
+      "value": "SYNTH-MRN-1001"
+    }
+  ],
+  "name": [
+    {
+      "use": "official",
+      "family": "Northwind",
+      "given": ["Avery"]
+    }
+  ],
+  "gender": "female",
+  "birthDate": "1988-04-12"
+}

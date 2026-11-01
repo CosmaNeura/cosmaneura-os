@@ -1,0 +1,37 @@
+{
+  "resourceType": "AllergyIntolerance",
+  "id": "synth-allergy-4001",
+  "meta": {
+    "profile": ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-allergyintolerance"]
+  },
+  "clinicalStatus": {
+    "coding": [
+      {
+        "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+        "code": "active"
+      }
+    ]
+  },
+  "verificationStatus": {
+    "coding": [
+      {
+        "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-verification",
+        "code": "confirmed"
+      }
+    ]
+  },
+  "code": {
+    "coding": [
+      {
+        "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+        "code": "7980",
+        "display": "Penicillin G"
+      }
+    ],
+    "text": "Invented penicillin allergy"
+  },
+  "patient": {
+    "reference": "Patient/synth-patient-1001"
+  },
+  "recordedDate": "2024-06-01"
+}
