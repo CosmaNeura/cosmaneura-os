@@ -1,0 +1,1 @@
+{"environment": "staging", "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "rendered_only": true, "deployed": false, "image": "acrcbotenrstgmock1234.azurecr.io/enrollment@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "startup_command": ["python", "-m", "cosmas_os.enrollment.api"]}

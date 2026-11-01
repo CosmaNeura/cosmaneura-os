@@ -13,6 +13,10 @@ from jwt import PyJWKClient, PyJWTError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from cosmas_os.adapters.enrollment_admission import (
+    EnrollmentAdmissionAdapter,
+    require_runtime_admission,
+)
 from cosmas_os.config import Settings
 from cosmas_os.domain.enums import PrincipalState, PrincipalType
 from cosmas_os.models import ExternalIdentity, Principal
@@ -244,12 +248,19 @@ class ClerkTokenVerifier:
                 "require": ["exp", "iat", "nbf", "iss", "sub", "sid"] + ([] if native_origin else ["azp"]),
                 "verify_aud": True,
             }
+            enrollment_default = self._settings.clerk_session_policy == "enrollment_default"
+            audience = (None if self._settings.clerk_session_policy == "shared_staging"
+                        or enrollment_default and self._settings.clerk_audience == ""
+                        else self._settings.clerk_audience)
+            if enrollment_default and audience:
+                options["require"].append("aud")
+                options["strict_aud"] = True
             claims = jwt.decode(
                 token,
                 signing_key.key,
                 algorithms=["RS256"],
                 issuer=self._settings.clerk_issuer,
-                audience=None if self._settings.clerk_session_policy == "shared_staging" else self._settings.clerk_audience,
+                audience=audience,
                 options=options,
                 leeway=5,
             )
@@ -261,12 +272,13 @@ class ClerkTokenVerifier:
         subject = claims.get("sub")
         session_id = claims.get("sid")
         authorized_party = claims.get("azp")
-        # The shared development instance issues default sessions without aud.
-        # Require complete absence, including rejection of null/empty claims;
-        # verify_aud above still rejects tokens intended for another API.
+        # Blank default/shared policy requires complete absence, including
+        # null/empty claims. An explicitly configured enrollment audience must
+        # be one exact scalar; unrelated beta audience behavior stays unchanged.
         if (not isinstance(subject, str) or not subject or len(subject) > 255
                 or not isinstance(session_id, str) or not session_id or len(session_id) > 255
-                or self._settings.clerk_session_policy == "shared_staging" and "aud" in claims):
+                or audience is None and self._settings.clerk_session_policy in {"shared_staging", "enrollment_default"} and "aud" in claims
+                or enrollment_default and audience and (type(claims.get("aud")) is not str or claims["aud"] != audience)):
             raise AuthenticationFailed("invalid bearer token")
         # Clerk native clients authenticate with Authorization and cannot send
         # Origin alongside it. Their signed session JWT can therefore omit azp.
@@ -309,6 +321,7 @@ def _valid_uuid(value: str | None) -> bool:
 def _active_human(session: Session, principal_id: str, box_id: str) -> Principal:
     principal = session.scalar(
         select(Principal).where(Principal.id == principal_id, Principal.box_id == box_id)
+        .execution_options(populate_existing=True)
     )
     if not principal:
         raise AccessDenied("identity is not assigned to this Box")
@@ -328,7 +341,13 @@ def authenticate_request(
     box_header: str | None,
     actor_header: str | None,
     verifier: TokenVerifier | None = None,
+    admission_adapter: EnrollmentAdmissionAdapter | None = None,
 ) -> RequestIdentity:
+    managed_enrollment = getattr(runtime_settings, "workspace_enrollment_managed", False)
+    if managed_enrollment:
+        # Request-local, server-derived evidence; never carry a prior caller's
+        # enrollment exemption into a reused managed database session.
+        session.info.pop("enrollment_existing_identity", None)
     if runtime_settings.auth_mode == "synth_headers":
         if runtime_settings.cosmas_env != "synth_os":
             raise AuthenticationFailed("synthetic header authentication is disabled")
@@ -373,14 +392,31 @@ def authenticate_request(
             ExternalIdentity.organization_id == organization_id,
             ExternalIdentity.active.is_(True),
         )
+        .execution_options(populate_existing=True)
     )
     if not binding:
+        if managed_enrollment:
+            saved = session.scalar(select(ExternalIdentity).where(
+                ExternalIdentity.issuer == issuer, ExternalIdentity.subject == subject
+            ))
+            if saved is not None:
+                # A revoked/remapped local identity is not a brand-new signup.
+                # Preserve the ordinary authorization denial without enrollment.
+                raise AccessDenied("identity is not provisioned")
+        require_runtime_admission(runtime_settings, authorization, subject,
+                                  adapter=admission_adapter, session=session)
         raise AccessDenied("identity is not provisioned")
     if not runtime_settings.beta_box_id or not hmac.compare_digest(
         binding.box_id, runtime_settings.beta_box_id
     ):
         raise AccessDenied("identity is outside the configured Box")
     _active_human(session, binding.principal_id, binding.box_id)
+    admission = require_runtime_admission(runtime_settings, authorization, subject,
+                                         adapter=admission_adapter, session=session)
+    if admission is not None and admission.get("existing_user") is True:
+        session.info["enrollment_existing_identity"] = (
+            issuer, organization_id, binding.box_id, binding.id
+        )
     return RequestIdentity(
         box_id=binding.box_id,
         principal_id=binding.principal_id,

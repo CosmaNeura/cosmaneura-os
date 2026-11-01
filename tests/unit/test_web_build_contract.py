@@ -18,6 +18,10 @@ SPEC = importlib.util.spec_from_file_location("cosmas_web_build_validator", SCRI
 assert SPEC is not None and SPEC.loader is not None
 web_build = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(web_build)
+ENROLLMENT_PUBLIC_ARGUMENTS = {
+    "VITE_ENROLLMENT_ENABLED", "VITE_ENROLLMENT_ACCOUNT_ONLY", "VITE_ENROLLMENT_ACCOUNT_ORIGIN",
+    "VITE_ENROLLMENT_API_BASE", "VITE_ENROLLMENT_CLERK_ISSUER", "VITE_ENROLLMENT_CLERK_PUBLISHABLE_KEY",
+}
 
 
 def configuration() -> dict[str, str]:
@@ -43,16 +47,18 @@ def test_generated_key_contract_matches_current_docker_arguments(tmp_path: Path)
     assert web_build.load_config(write_config(tmp_path, config)) == config
     docker_args = dict(re.findall(r"^ARG (VITE_[A-Z_]+)(?:=([^\n]*))?$",
                                  (REPO / "Dockerfile.web").read_text(), re.M))
-    # The locked runner retains seven inputs. Other clients may explicitly opt
-    # into Messages or a standalone profile with its reviewed organization.
+    # The beta runner retains seven inputs. The dedicated account profile has
+    # six separate public arguments, all unset unless explicitly selected.
     assert set(docker_args) == set(config) | {
         "VITE_MESSAGES_ENABLED", "VITE_WORKSPACE_FEATURE_PROFILE", "VITE_WORKSPACE_ORGANIZATION_ID",
         "VITE_BUILD_SHA",
-    }
+    } | ENROLLMENT_PUBLIC_ARGUMENTS
     assert docker_args["VITE_BUILD_SHA"] in ("", None)
     assert docker_args["VITE_MESSAGES_ENABLED"] == "false"
-    assert docker_args["VITE_WORKSPACE_FEATURE_PROFILE"] == "operational-beta-v1"
-    assert docker_args["VITE_WORKSPACE_ORGANIZATION_ID"] == ""
+    assert docker_args["VITE_WORKSPACE_FEATURE_PROFILE"] in ("", None)
+    assert docker_args["VITE_WORKSPACE_ORGANIZATION_ID"] in ("", None)
+    assert all(docker_args[key] in ("", None) for key in ENROLLMENT_PUBLIC_ARGUMENTS)
+    assert 'export VITE_WORKSPACE_FEATURE_PROFILE="${VITE_WORKSPACE_FEATURE_PROFILE:-operational-beta-v1}"' in (REPO / "Dockerfile.web").read_text()
     assert web_build.docker_argument_lines(config) == [f"{key}={value}" for key, value in config.items()]
 
 
@@ -66,7 +72,7 @@ def test_missing_input_is_rejected(tmp_path: Path, missing: str) -> None:
 
 @pytest.mark.parametrize("extra", ["VITE_WORKSPACE_FEATURE_PROFILE", "VITE_WORKSPACE_ORGANIZATION_ID", "VITE_WORKSPACE_HOSTED_CLIENT",
                                   "VITE_API_BASE", "CLERK_SECRET_KEY", "NODE_BUILD_IMAGE",
-                                  "VITE_MESSAGES_ENABLED", "VITE_BUILD_SHA"])
+                                  "VITE_MESSAGES_ENABLED", "VITE_BUILD_SHA", *sorted(ENROLLMENT_PUBLIC_ARGUMENTS)])
 def test_extra_fields_cannot_override_fixed_build_or_carry_secrets(tmp_path: Path, extra: str) -> None:
     with pytest.raises(web_build.WebBuildError, match="seven"):
         web_build.load_config(write_config(tmp_path, configuration() | {extra: "unexpected"}))

@@ -51,22 +51,22 @@ BROKER_AUTHORITY = "synthetic_scheduling_broker_only; current follow_up grant; n
 SCENARIOS = ("normal", "unavailable", "grant_unavailable", "stale_slot", "lost_prepare_reply", "lost_submit_reply", "calendar_pending")
 
 
-def _eastern_fall_back_sunday(year: int) -> date:
-    """US Eastern autumn transition day: first Sunday in November."""
-    day = date(year, 11, 1)
-    return day + timedelta(days=(6 - day.weekday()) % 7)
+def eastern_fall_fold_day(now: datetime | None = None) -> date:
+    """Next first Sunday of November whose 09:00 UTC lab window is still ahead of now.
 
-
-def _next_eastern_fall_back_day(after: datetime) -> date:
-    """Next fall-back Sunday whose 05:30Z DST-fold slot is still bookable after ``after``."""
-    year = after.year
-    for _ in range(4):
-        day = _eastern_fall_back_sunday(year)
-        first_slot = datetime(day.year, day.month, day.day, 5, 30, tzinfo=UTC)
-        if first_slot > after + timedelta(hours=1):
+    Lab availability uses the New York autumn DST fold (01:30 twice). After that
+    morning passes, booking authority correctly refuses past slots; keep the
+    fixture on the next future fold so schedule labs stay current.
+    """
+    current = datetime.now(UTC) if now is None else now.astimezone(UTC)
+    year = current.year
+    while year < current.year + 20:
+        day = date(year, 11, 1)
+        day += timedelta(days=(6 - day.weekday()) % 7)
+        if datetime(day.year, day.month, day.day, 9, tzinfo=UTC) > current + timedelta(hours=1):
             return day
         year += 1
-    raise RuntimeError("no eastern fall-back day available for scheduling fixtures")
+    raise LabError("scheduling_fixture_fold_unavailable")
 
 
 class SchedulingAvailabilityArgs(Arguments):
@@ -116,18 +116,16 @@ class SchedulingTools:
         self.scope = app.box, app.owner, app.workspace
         self.identity_id, self.account_id, self.patient_mapping_id = map(str, (uuid4(), uuid4(), uuid4()))
         self.remote = {name: str(uuid4()) for name in ("practice_id", "actor_id", "practitioner_id", "location_id", "appointment_type_id", "patient_id", "connection_id")}
-        # Two distinct 01:30 America/New_York times on the next Eastern fall-back
-        # Sunday (05:30Z / 06:30Z). Keep the window ahead of wall-clock "now" so
-        # booking authority (slot.starts_at > expires_at) stays valid on that day.
-        fall_back = _next_eastern_fall_back_day(datetime.now(UTC))
+        fold = eastern_fall_fold_day()
         self.window = AvailabilityWindow(
-            starts_at=datetime(fall_back.year, fall_back.month, fall_back.day, 4, tzinfo=UTC),
-            ends_at=datetime(fall_back.year, fall_back.month, fall_back.day, 9, tzinfo=UTC),
+            starts_at=datetime(fold.year, fold.month, fold.day, 4, tzinfo=UTC),
+            ends_at=datetime(fold.year, fold.month, fold.day, 9, tzinfo=UTC),
         )
+        # Two distinct 01:30 local times during the New York autumn DST fold.
         self.slots = tuple(
             AvailabilitySlot(
-                starts_at=datetime(fall_back.year, fall_back.month, fall_back.day, hour, 30, tzinfo=UTC),
-                ends_at=datetime(fall_back.year, fall_back.month, fall_back.day, hour, 50, tzinfo=UTC),
+                starts_at=datetime(fold.year, fold.month, fold.day, hour, 30, tzinfo=UTC),
+                ends_at=datetime(fold.year, fold.month, fold.day, hour, 50, tzinfo=UTC),
             )
             for hour in (5, 6)
         )
