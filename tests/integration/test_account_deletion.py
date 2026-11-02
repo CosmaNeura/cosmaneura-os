@@ -11,12 +11,11 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import func, select
 
 from cosmas_os.api import app as api
 from cosmas_os.api.auth import ClerkTokenVerifier
-from pydantic import SecretStr
-
 from cosmas_os.application.account_deletion import CONFIRM_PHRASE, NOT_CONFIGURED
 from cosmas_os.config import Settings
 from cosmas_os.domain.enums import PrincipalState
