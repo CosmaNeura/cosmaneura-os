@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Literal
 from urllib.parse import urlparse
 from uuid import UUID
@@ -67,6 +68,19 @@ class EnrollmentSettings(BaseSettings):
     invitation_secret: SecretStr = SecretStr("")
     # Central master only. Each Box receives a derived immutable-scope key.
     runtime_admission_secret: SecretStr = SecretStr("")
+    google_callback_broker_enabled: bool = False
+    google_callback_broker_origin: str = ""
+    google_callback_client_id: str = ""
+
+    def google_broker_errors(self) -> list[str]:
+        if not self.google_callback_broker_enabled:
+            return []
+        if (not self.enabled or self.data_mode != "synthetic" or not self.workspace_allocation_enabled
+                or self.google_callback_broker_origin != "https://enrollment-api.staging.cosmas.ai"
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", self.google_callback_client_id)
+                or len(self.runtime_admission_secret.get_secret_value()) < 32):
+            return ["Google callback routing requires the explicit isolated staging broker and per-Box custody."]
+        return []
 
     def native_origin_enabled(self, origin: str) -> bool:
         values = self.native_authorized_origins
@@ -173,6 +187,9 @@ class EnrollmentSettings(BaseSettings):
             "blockers": blockers, "billing_blockers": billing_errors + ([] if stripe_verified else ["Stripe catalog and portal have not been verified."]),
             "provisioning_enabled": self.provisioning_enabled,
             "allowed_workspace_origins": self.allowed_workspace_origins,
+            "workspace_origin_policy": ("synthetic-practice-uuid-staging-v1"
+                                        if self.workspace_allocation_enabled and self.data_mode == "synthetic"
+                                        else "exact"),
             "baa": {"doc_id": BAA_DOC_ID, "version": BAA_VERSION, "sha256": BAA_SHA256, "pdf_url": BAA_PDF_URL},
             "pricing": {"currency": "usd", "interval": "month", "first_human_cents": FIRST_HUMAN_CENTS,
                         "additional_human_cents": ADDITIONAL_HUMAN_CENTS, "max_self_serve_humans": MAX_HUMANS,

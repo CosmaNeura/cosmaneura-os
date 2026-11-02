@@ -148,6 +148,15 @@ class ClerkEnrollmentVerifier:
         self._membership(subject, organization_id)
         return human
 
+    def verify_registered_session(self, subject: str, session_id: str, organization_id: str) -> HumanIdentity:
+        # Callback routing uses only a previously signed registration's session;
+        # it neither accepts a browser identity nor retains its bearer token.
+        if not subject or not session_id:
+            raise EnrollmentError("session_inactive", "The originating session ended.", 401)
+        human = self._human({"sub": subject, "sid": session_id})
+        self._membership(subject, organization_id)
+        return human
+
     def _human(self, claims: dict[str, Any]) -> HumanIdentity:
         sub, sid = claims["sub"], claims["sid"]
         session = self._get("/sessions/" + quote(sid, safe=""))

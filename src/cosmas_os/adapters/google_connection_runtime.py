@@ -9,14 +9,15 @@ from cosmas_os.application.google_calendar import (
 )
 from cosmas_os.application.google_message import install_binding_reader
 from cosmas_os.application.workspace import WorkspaceError
+from cosmas_os.ports.google_callback_broker import GoogleRegistrationPort
 
 
 @contextmanager
-def google_connection_lifespan(app, settings, sessions):
+def google_connection_lifespan(app, settings, sessions, *, registration_port: GoogleRegistrationPort | None = None, transport=None):
     service = None
     try:
         if settings.workspace_google_connection_enabled:
-            service = GooglePersonalConnection(settings, sessions)
+            service = GooglePersonalConnection(settings, sessions, broker=registration_port, transport=transport)
         app.state.google_connection = service
 
         def binding_reader(session, account, require_full):

@@ -74,3 +74,39 @@ it('rejects unrelated credentials destinations and unsupported native enrollment
   expect(()=>enrollmentApiBase(base,'app://cosmas/index.html')).toThrow();
   expect(()=>enrollmentApiBase('http://user:password@localhost:8910','http://localhost:5173/onboarding')).toThrow();
 });
+it('defaults missing workspace policy to exact and rejects unknown or non-synthetic UUID policies',()=>{
+  expect(validateEnrollmentConfig(enrollmentConfig()).workspace_origin_policy).toBe('exact');
+  expect(validateEnrollmentConfig({...enrollmentConfig(),workspace_origin_policy:'synthetic-practice-uuid-staging-v1'}).workspace_origin_policy).toBe('synthetic-practice-uuid-staging-v1');
+  for(const policy of ['*','uuid',null,['exact']])expect(()=>validateEnrollmentConfig({...enrollmentConfig(),workspace_origin_policy:policy})).toThrow();
+  expect(()=>validateEnrollmentConfig({...enrollmentConfig(),data_mode:'disabled',enabled:false,workspace_origin_policy:'synthetic-practice-uuid-staging-v1'})).toThrow();
+});
+it('permits only the current authenticated ready practice UUID Chief destination under explicit synthetic policy',()=>{
+  const ready=enrollmentStatus('ready',5),config={...enrollmentConfig(),workspace_origin_policy:'synthetic-practice-uuid-staging-v1' as const};
+  ready.workspace.url=`https://${ready.practice!.id}.staging.cosmas.ai/chief`;
+  const context={config,current:structuredClone(ready),ready};
+  expect(workspaceDestination(ready.workspace.url,'https://account.example.invalid/onboarding',[],context)).toBe(ready.workspace.url);
+  const legacy=enrollmentStatus('ready',5);
+  expect(workspaceDestination(legacy.workspace.url!,'https://account.example.invalid/onboarding',config.allowed_workspace_origins,
+    {config,current:structuredClone(legacy),ready:legacy})).toBe(legacy.workspace.url);
+  expect(()=>workspaceDestination(ready.workspace.url!,'https://account.example.invalid/onboarding',[],
+    {...context,config:{...config,enabled:false}})).toThrow();
+  expect(()=>workspaceDestination(ready.workspace.url!,'https://account.example.invalid/onboarding',[],
+    {...context,config:{...config,auth_configured:false}})).toThrow();
+  expect(()=>workspaceDestination(ready.workspace.url!,'https://account.example.invalid/onboarding')).toThrow();
+  const foreign='https://20000000-0000-4000-8000-000000000001.staging.cosmas.ai/chief';
+  expect(()=>workspaceDestination(foreign,'https://account.example.invalid/onboarding',[new URL(foreign).origin],{...context,ready:{...ready,workspace:{...ready.workspace,url:foreign}}})).toThrow();
+});
+it.each([
+  ['noncanonical practice',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.practice!.id=ready.practice!.id.toUpperCase().replace(/^1/,'A');}],
+  ['noncanonical Box',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.workspace.box_id='box_browser';}],
+  ['query',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.workspace.url+='?return=foreign';}],
+  ['fragment',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.workspace.url+='#chief';}],
+  ['port',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.workspace.url=ready.workspace.url!.replace('/chief',':443/chief');}],
+  ['credentials',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.workspace.url=ready.workspace.url!.replace('https://','https://user:password@');}],
+  ['wrong path',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.workspace.url=ready.workspace.url!.replace('/chief','/settings');}],
+  ['not ready',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.workspace.status='provisioning';}],
+] as const)('rejects an allocated browser destination with %s',(_name,change)=>{
+  const ready=enrollmentStatus('ready',5);ready.workspace.url=`https://${ready.practice!.id}.staging.cosmas.ai/chief`;
+  const current=structuredClone(ready);change(ready);
+  expect(()=>workspaceDestination(ready.workspace.url!,'https://account.example.invalid/onboarding',[],{config:{...enrollmentConfig(),workspace_origin_policy:'synthetic-practice-uuid-staging-v1'},current,ready})).toThrow();
+});

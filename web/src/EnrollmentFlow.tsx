@@ -187,7 +187,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
     const latest=await api.status(identity);if(latest.stage!=='ready')throw new EnrollmentError(403);
     if(openNativeWorkspace)await openNativeWorkspace();
     else{if(!latest.workspace.url)throw new EnrollmentError(403);
-      const url=workspaceDestination(latest.workspace.url,window.location.href,config.allowed_workspace_origins);if(openWorkspace)await openWorkspace(latest,url);else navigate(url);}
+      const url=workspaceDestination(latest.workspace.url,window.location.href,config.allowed_workspace_origins,{config,current:status,ready:latest});if(openWorkspace)await openWorkspace(latest,url);else navigate(url);}
     return latest;
   },accept);};
   const formDisabled=busy||uncertain;

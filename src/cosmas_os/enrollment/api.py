@@ -21,6 +21,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import ClientDisconnect
 
+from cosmas_os.ports.google_callback_broker import GoogleRelayPort
+
 from .admission import (
     ADMISSION_HEADER,
     AdmissionRequest,
@@ -165,7 +167,8 @@ class NativeProfileBody(BaseModel):
 def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
                verifier: IdentityVerifier | None = None, commerce: CommercePort | None = None,
                workspace_confirmer: WorkspaceConfirmer | None = None,
-               native_workspace_authority: NativeWorkspaceAuthority | None = None) -> FastAPI:
+               native_workspace_authority: NativeWorkspaceAuthority | None = None,
+               google_relay_port: GoogleRelayPort | None = None) -> FastAPI:
     settings = settings or EnrollmentSettings()
     if settings.data_mode == "production" and (
             (verifier is not None and not isinstance(verifier, ClerkEnrollmentVerifier))
@@ -216,13 +219,26 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
     if settings.data_mode == "production" and workspace_confirmer is not None and not isinstance(workspace_confirmer, ProductionWorkspaceConfirmer):
         raise RuntimeError("Production enrollment requires the real workspace confirmation port")
 
+    google_transport = None
     @asynccontextmanager
     async def lifespan(_app):
         yield
+        if google_transport is not None:
+            google_transport.close()
         if engine is not None:
             engine.dispose()
 
     app = FastAPI(title="Cosmas Enrollment", version="1", lifespan=lifespan)
+    if settings.google_callback_broker_enabled:
+        from cosmas_os.adapters.google_callback_broker import HttpGoogleRelayPort
+
+        from .google_callback_routes import install as install_google_callback_broker
+        relay = google_relay_port or HttpGoogleRelayPort()
+        if settings.data_mode != "synthetic" and not isinstance(relay, HttpGoogleRelayPort):
+            raise RuntimeError("Google callback routing requires the real relay adapter")
+        app.state.google_callback_broker = install_google_callback_broker(app, settings, service, verifier, relay)
+        if isinstance(relay, HttpGoogleRelayPort):
+            google_transport = relay
     app.state.enrollment_service = service
     app.state.enrollment_settings = settings
     app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
