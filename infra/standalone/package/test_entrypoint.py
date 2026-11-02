@@ -128,6 +128,60 @@ def test_refuses_extra_private_inputs_and_duplicate_json_fields(mounted):
         entrypoint.load_configuration(public, private)
 
 
+def test_production_profile_refuses_account_delete_and_clerk_secret_keys(mounted):
+    """Audience / non-staging profiles keep both Clerk secret names refused."""
+    public, private, values, secrets = mounted
+    real_profile(values, "audience")
+    public.write_text(json.dumps(values))
+    for name in ("CLERK_SECRET_KEY", "ACCOUNT_DELETE_CLERK_SECRET_KEY"):
+        private.write_text(json.dumps({**secrets, name: "invented-private-test-value"}))
+        with pytest.raises(entrypoint.Refused):
+            entrypoint.load_configuration(public, private)
+
+
+@pytest.mark.parametrize("policy", ["shared_staging"])
+def test_staging_profile_may_mount_account_delete_clerk_secret(mounted, monkeypatch, policy):
+    """Staging may optionally carry ACCOUNT_DELETE_CLERK_SECRET_KEY; CLERK_SECRET_KEY stays refused."""
+    public, private, values, secrets = mounted
+    real_profile(values, policy)
+    public.write_text(json.dumps(values))
+    private.write_text(json.dumps({**secrets, "CLERK_SECRET_KEY": "invented"}))
+    with pytest.raises(entrypoint.Refused):
+        entrypoint.load_configuration(public, private)
+
+    monkeypatch.setenv("CLERK_SECRET_KEY", "invented-ambient")
+    monkeypatch.setenv("ACCOUNT_DELETE_CLERK_SECRET_KEY", "invented-ambient-delete")
+    private.write_text(json.dumps({
+        **secrets,
+        "ACCOUNT_DELETE_CLERK_SECRET_KEY": "sk_test_invented_account_delete_only",
+    }))
+    environment = entrypoint.load_configuration(public, private)
+    assert environment["ACCOUNT_DELETE_CLERK_SECRET_KEY"] == "sk_test_invented_account_delete_only"
+    assert "CLERK_SECRET_KEY" not in environment
+
+
+def test_staging_host_origin_may_mount_account_delete_clerk_secret(mounted):
+    """Owned staging.cosmas.ai (audience + clerk.staging issuer) may mount the delete secret."""
+    public, private, values, secrets = mounted
+    real_profile(values, "audience")
+    values.update(
+        CLERK_ISSUER="https://clerk.staging.cosmas.ai",
+        CLERK_JWKS_URL="https://clerk.staging.cosmas.ai/.well-known/jwks.json",
+        STANDALONE_CLERK_ISSUER_ALLOWLIST="https://clerk.staging.cosmas.ai",
+        CLERK_AUDIENCE="cosmas-os-beta-api",
+        CORS_ALLOWED_ORIGINS="https://staging.cosmas.ai",
+        CLERK_AUTHORIZED_PARTIES="https://staging.cosmas.ai",
+    )
+    public.write_text(json.dumps(values))
+    private.write_text(json.dumps({
+        **secrets,
+        "ACCOUNT_DELETE_CLERK_SECRET_KEY": "sk_live_invented_staging_delete",
+    }))
+    environment = entrypoint.load_configuration(public, private)
+    assert environment["ACCOUNT_DELETE_CLERK_SECRET_KEY"] == "sk_live_invented_staging_delete"
+    assert "CLERK_SECRET_KEY" not in environment
+
+
 def test_refuses_fifo_symlink_hardlink_and_oversize_before_parsing(mounted, tmp_path):
     public, private, _, _ = mounted
     for kind in ("fifo", "symlink", "hardlink", "oversize"):
