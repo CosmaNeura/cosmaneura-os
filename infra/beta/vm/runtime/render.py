@@ -28,6 +28,8 @@ HERE = Path(__file__).resolve().parent
 HASH = re.compile(r"[0-9a-f]{64}")
 SCRIPT_NAMES = (
     "entrypoint.py",
+    "migrate.py",
+    "migrate_contract.py",
     "redis-health.sh",
     "imds-guard.sh",
     "host-preflight.py",
@@ -464,7 +466,9 @@ full_page_writes = on
 synchronous_commit = on
 """
 PG_HBA = """local all postgres peer
+local all cbpg peer
 hostssl cosmas_os postgres 172.30.240.12/32 scram-sha-256
+hostssl cosmas_os cbpg 172.30.240.12/32 scram-sha-256
 hostssl cosmas_os cosmas 172.30.240.10/32 scram-sha-256
 hostssl cosmas_os cosmas 172.30.240.11/32 scram-sha-256
 hostssl cosmas_os cosmas 172.30.240.12/32 scram-sha-256
