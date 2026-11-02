@@ -17,6 +17,8 @@ from pydantic import SecretStr
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
+from cosmas_os.adapters.gpt41 import ENDPOINT, GPT41Connector
+from cosmas_os.config import Settings
 from cosmas_os.enrollment.allocation import WorkspaceAllocationRequest
 from cosmas_os.enrollment.domain import (
     BAA_DOC_ID,
@@ -27,6 +29,7 @@ from cosmas_os.enrollment.domain import (
 )
 from cosmas_os.enrollment.hosting import (
     GOOGLE_SECRET_NAMES,
+    REVIEWED_MODEL,
     SECRET_NAMES,
     HostingConfiguration,
     OpenTofuWorkspaceAllocator,
@@ -42,6 +45,7 @@ from cosmas_os.enrollment.models import Membership, Practice
 from cosmas_os.enrollment.provisioning import BOX_NAMESPACE, WorkspacePlan
 from cosmas_os.enrollment.service import EnrollmentService
 from cosmas_os.enrollment.synthetic import SyntheticCommerce, synthetic_settings
+from cosmas_os.ports.bot_capabilities import BotContext
 
 
 @pytest.fixture
@@ -571,3 +575,116 @@ def test_interrupted_unqueued_web_context_is_discarded_before_rechecking_release
     assert not context.exists()
     assert len(calls) == 1 and calls[0][0] == "git"
     assert "web_build" not in state
+
+
+def _model_host(hosted, tmp_path):
+    value = json.loads(json.dumps(hosted.value))
+    key = tmp_path / "invented-model-key"
+    key.write_text("invented-model-key-for-offline-provider-boundary-only")
+    key.chmod(0o600)
+    value["model"] = {**REVIEWED_MODEL, "api_key_file": str(key)}
+    value["state_root"] = str(tmp_path / "model-worker-state")
+    config = HostingConfiguration(value)
+    allocator = OpenTofuWorkspaceAllocator(hosted.service, config)
+    return SimpleNamespace(config=config, allocator=allocator, key=key,
+        deployment=allocator._deployment(hosted.plan, hosted.operation))
+
+
+def _model_runtime(deployment, key=None):
+    values = {name.lower(): value == "true" if value in {"true", "false"} else value
+              for name, value in deployment["practice"]["api_env"].items()}
+    host = "psql-cbaw-" + deployment["practice"]["plan"]["practice_id"].replace("-", "") + ".postgres.database.azure.com"
+    values.update(database_url="postgresql+psycopg://box_runtime:invented@" + host + ":5432/cosmas_os?sslmode=verify-full&sslrootcert=system",
+        redis_url="rediss://:invented@inventedmodelbox.redis.azure.net:10000/0?ssl_cert_reqs=required",
+        azure_storage_account_url="https://inventedmodelbox.blob.core.windows.net", azure_blob_container="box",
+        workspace_enrollment_admission_secret=SecretStr("a" * 64), workspace_llm_api_key=key)
+    # Construct from explicit invented fields, then run the actual runtime
+    # validator; no environment/key-file configuration is consulted.
+    result = Settings.model_construct(**values)
+    result.validate_runtime_configuration()
+    return result
+
+
+def _seeded_model_state(selected, hosted):
+    backend = selected.allocator.backend
+    state = backend._open(selected.deployment)
+    state["deployment"]["practice"]["secret_references"].update(
+        box_references(selected.deployment, SECRET_NAMES))
+    vault = "kvca" + hosted.plan.practice_id.replace("-", "")[:20]
+    state["resources"] = {"key_vault_id": hosted.scope + "Microsoft.KeyVault/vaults/" + vault}
+    return backend, state, vault
+
+
+def test_model_selection_reaches_actual_config_and_pinned_adapter_without_public_key(hosted, tmp_path):
+    option = _model_host(hosted, tmp_path)
+    raw = canonical(option.deployment)
+    assert option.key.read_bytes() not in raw and str(option.key).encode() not in raw
+    assert option.deployment["model"] == REVIEWED_MODEL
+    public = option.deployment["practice"]["api_env"]
+    assert "WORKSPACE_LLM_API_KEY" not in public
+    config = _model_runtime(option.deployment, SecretStr("invented-model-key"))
+    assert config.workspace_llm_available and not config.workspace_agent_tools_enabled
+    assert config.workspace_llm_endpoint + "/chat/completions" == ENDPOINT
+    calls = []
+    def respond(request):
+        assert str(request.url) == ENDPOINT
+        body = json.loads(request.content)
+        assert body["model"] == "gpt-4.1" and body["store"] is False and "tools" not in body
+        calls.append(body)
+        return httpx.Response(200, json={"model": "gpt-4.1", "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+            "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": json.dumps(
+                {"answer": "Invented practice agenda ready for review.", "source_ids": []})}}]})
+    connector = GPT41Connector(lambda: config.workspace_llm_api_key.get_secret_value(), transport=httpx.MockTransport(respond))
+    reply = connector.review(BotContext("invented-workspace", 1, "chief", "Organize my notes", "brief", (), ()))
+    assert reply.content == "Invented practice agenda ready for review." and len(calls) == 1
+    missing = config.model_copy(update={"workspace_llm_api_key": None})
+    assert not missing.workspace_llm_available and missing.runtime_configuration_errors()
+
+
+def test_model_key_is_seeded_only_to_box_vault_and_completed_retry_never_reads_key(hosted, tmp_path):
+    option = _model_host(hosted, tmp_path)
+    backend, state, vault = _seeded_model_state(option, hosted)
+    calls, seeded = [], {}
+    def cli(arguments, **kwargs):
+        calls.append(arguments)
+        if arguments[:4] == ["az", "deployment", "group", "create"]:
+            body = json.loads((backend.directory / "seed-parameters.json").read_text())
+            assert body["vaultName"]["value"] == vault
+            seeded[body["secretName"]["value"]] = body["secretValue"]["value"]
+            return subprocess.CompletedProcess(arguments, 0, stdout=b"", stderr=b"")
+        assert arguments[:3] == ["az", "resource", "show"]
+        return subprocess.CompletedProcess(arguments, 0, stdout=("https://" + vault + ".vault.azure.net/secrets/workspace-llm-api-key/" + "2" * 32).encode(), stderr=b"")
+    backend.run = cli
+    backend._seed(state, "invented-master-" + "0" * 64)
+    assert seeded == {"workspace-llm-api-key": option.key.read_text()}
+    assert len(calls) == 2 and "WORKSPACE_LLM_API_KEY" in state["deployment"]["practice"]["secret_references"]
+    assert option.key.read_bytes() not in (backend.directory / "operation.json").read_bytes()
+    assert not (backend.directory / "seed-parameters.json").exists()
+    assert not (backend.directory / "admin-password").exists()
+    option.key.unlink()
+    backend._seed(state, "invented-master-" + "0" * 64)
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("fault", ["missing", "insecure"])
+def test_unavailable_protected_key_cannot_seed_or_activate_model(hosted, tmp_path, fault):
+    option = _model_host(hosted, tmp_path)
+    backend, state, vault = _seeded_model_state(option, hosted)
+    backend.run = lambda *_args, **_kwargs: pytest.fail("unavailable key reached a provider")
+    state["resources"]["key_vault_id"] = hosted.scope + "Microsoft.KeyVault/vaults/unrelated"
+    with pytest.raises(ValueError, match="this Box"):
+        backend._seed(state, "invented-master")
+    state["resources"]["key_vault_id"] = hosted.scope + "Microsoft.KeyVault/vaults/" + vault
+    references = state["deployment"]["practice"]["secret_references"]
+    references["WORKSPACE_LLM_API_KEY"] = "https://other.vault.azure.net/secrets/workspace-llm-api-key/" + "2" * 32
+    with pytest.raises(ValueError, match="versioned Box model"):
+        backend._seed(state, "invented-master")
+    references.pop("WORKSPACE_LLM_API_KEY")
+    if fault == "missing":
+        option.key.unlink()
+    else:
+        option.key.chmod(0o644)
+    with pytest.raises((FileNotFoundError, ValueError)):
+        backend._seed(state, "invented-master")
+    assert "WORKSPACE_LLM_API_KEY" not in state["deployment"]["practice"]["secret_references"]
+    assert state["deployment"]["deploy_workloads"] is False

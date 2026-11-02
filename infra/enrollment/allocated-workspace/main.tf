@@ -42,8 +42,11 @@ locals {
   google           = try(local.d.google, null)
   google_keys      = ["GOOGLE_CONNECTION_CLIENT_SECRET", "GOOGLE_CONNECTION_ENCRYPTION_KEY"]
   google_ready     = local.google != null && alltrue([for name in local.google_keys : contains(keys(local.d.practice.secret_references), name)])
-  secret_keys      = merge({ DATABASE_URL = "database-url", REDIS_URL = "redis-url", WORKSPACE_ENROLLMENT_ADMISSION_SECRET = "enrollment-admission-key", DATABASE_ADMIN_URL = "database-admin-url", OWNER_MANIFEST = "owner-manifest" }, local.google == null ? {} : { GOOGLE_CONNECTION_CLIENT_SECRET = "google-connection-client-secret", GOOGLE_CONNECTION_ENCRYPTION_KEY = "google-connection-encryption-key" })
-  runtime_secrets  = { for key, p in local.practices : key => { for name, reference in p.secret_references : name => reference if contains(concat(["DATABASE_URL", "REDIS_URL", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET"], local.google == null ? [] : local.google_keys), name) } }
+  model            = try(local.d.model, null)
+  model_keys       = ["WORKSPACE_LLM_API_KEY"]
+  model_ready      = local.model != null && alltrue([for name in local.model_keys : contains(keys(local.d.practice.secret_references), name)])
+  secret_keys      = merge({ DATABASE_URL = "database-url", REDIS_URL = "redis-url", WORKSPACE_ENROLLMENT_ADMISSION_SECRET = "enrollment-admission-key", DATABASE_ADMIN_URL = "database-admin-url", OWNER_MANIFEST = "owner-manifest" }, local.google == null ? {} : { GOOGLE_CONNECTION_CLIENT_SECRET = "google-connection-client-secret", GOOGLE_CONNECTION_ENCRYPTION_KEY = "google-connection-encryption-key" }, local.model == null ? {} : { WORKSPACE_LLM_API_KEY = "workspace-llm-api-key" })
+  runtime_secrets  = { for key, p in local.practices : key => { for name, reference in p.secret_references : name => reference if contains(concat(["DATABASE_URL", "REDIS_URL", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET"], local.google == null ? [] : local.google_keys, local.model == null ? [] : local.model_keys), name) } }
 }
 provider "azurerm" {
   subscription_id                 = local.f.subscription_id
@@ -119,6 +122,15 @@ resource "terraform_data" "guard" {
       (!local.d.deploy_workloads || local.google_ready), false)
       error_message = "Google requires an explicit exact account broker/client, both Box-only custody references and no default enablement."
     }
+    precondition {
+      condition = local.model == null ? alltrue([for name in keys(local.d.practice.api_env) : !startswith(name, "WORKSPACE_LLM_")]) : try(
+        toset(keys(local.model)) == toset(["backend", "endpoint", "deployment"]) &&
+        local.model.backend == "azure_gpt41" && local.model.endpoint == "https://cosmascode.services.ai.azure.com/openai/v1" && local.model.deployment == "gpt-4.1" &&
+        local.d.practice.api_env.WORKSPACE_LLM_BACKEND == local.model.backend && local.d.practice.api_env.WORKSPACE_LLM_ENDPOINT == local.model.endpoint &&
+        local.d.practice.api_env.WORKSPACE_LLM_DEPLOYMENT == local.model.deployment && !contains(keys(local.d.practice.api_env), "WORKSPACE_LLM_API_KEY") &&
+      (!local.d.deploy_workloads || local.model_ready), false)
+      error_message = "Model-backed Chief requires only the exact reviewed GPT-4.1 selection and a versioned Box-only key reference; default is off."
+    }
   }
 }
 
@@ -128,8 +140,8 @@ module "workspace_runtime" {
   source                  = "../../beta/environment/modules/workspace-runtime"
   hosted_enabled          = true
   features                = merge({ WORKSPACE_TEAM_SETUP_ENABLED = true, WORKSPACE_AI_ACTIVITY_ENABLED = true, WORKSPACE_ROUTINES_ENABLED = true, WORKSPACE_APPOINTMENTS_ENABLED = true }, local.google_ready ? { WORKSPACE_GOOGLE_CONNECTION_ENABLED = true, WORKSPACE_GOOGLE_MESSAGE_ENABLED = true, WORKSPACE_GOOGLE_CALENDAR_ENABLED = true } : {})
-  public_configuration    = local.google_ready ? { GOOGLE_CONNECTION_CLIENT_ID = local.google.client_id } : {}
-  secret_references       = local.google_ready ? { for name in local.google_keys : name => { secret_name = local.secret_keys[name], version = reverse(split("/", each.value.secret_references[name]))[0] } } : {}
+  public_configuration    = merge(local.google_ready ? { GOOGLE_CONNECTION_CLIENT_ID = local.google.client_id } : {}, local.model_ready ? { WORKSPACE_LLM_BACKEND = local.model.backend } : {})
+  secret_references       = { for name in concat(local.google_ready ? local.google_keys : [], local.model_ready ? local.model_keys : []) : name => { secret_name = local.secret_keys[name], version = reverse(split("/", each.value.secret_references[name]))[0] } }
   api_origin              = each.value.plan.api_origin
   web_origin              = each.value.web_origin
   key_vault_uri           = azurerm_key_vault.box[each.key].vault_uri
