@@ -55,6 +55,10 @@ import Foundation
     public func signOut() async throws {
         try await clerk.auth.signOut()
     }
+
+    public func clearStoredCredentials() throws {
+        try ClerkKeychainCredentials.clear(service: configuration.keychainService)
+    }
 }
 
 private struct NativeOriginMiddleware: ClerkRequestMiddleware {

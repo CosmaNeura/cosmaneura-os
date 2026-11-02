@@ -111,6 +111,28 @@ export async function createDesktopAuthSession({enabled = false, createHelper, a
       throw unavailable();
     }
   }
+  async function clearAccountCredentials() {
+    if (!enabled || disposed || storageFailed || (pending && pending.action !== 'signIn')) throw unavailable();
+    const recovery = !helper || state.phase === 'unavailable';
+    const operation = {id: randomUUID(), action: 'signOut'};
+    pending = operation; reconcile();
+    try {
+      await persist('logout_pending');
+      if (!currentOperation(operation)) throw unavailable();
+      if (recovery || !helper) { closeHelper(); await openHelper(operation); }
+      if (!currentOperation(operation)) throw unavailable();
+      const candidate = helper;
+      if (typeof candidate.clearAccountCredentials !== 'function') throw unavailable();
+      const result = parseAuthState(await candidate.clearAccountCredentials());
+      if (!currentOperation(operation) || helper !== candidate || result.phase !== 'signedOut') throw unavailable();
+      await persist('needs_login');
+      if (!currentOperation(operation) || helper !== candidate) throw unavailable();
+      pending = null; native = result; reconcile(); return state;
+    } catch {
+      if (pending === operation) { pending = null; reconcile(); }
+      throw unavailable();
+    }
+  }
   async function getToken(revision) {
     const expected = await getState();
     if (disposed || storageFailed || pending || expected.phase !== 'ready' || expected.revision !== revision ||
@@ -159,7 +181,7 @@ export async function createDesktopAuthSession({enabled = false, createHelper, a
     }
   }
   return Object.freeze({
-    getState, signIn, signOut, getToken, sourceRequest, snapshot: () => state,
+    getState, signIn, signOut, clearAccountCredentials, getToken, sourceRequest, snapshot: () => state,
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     close: () => { if (disposed) return; disposed = true; closeHelper(); reconcile(); },
   });
