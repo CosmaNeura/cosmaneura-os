@@ -15,7 +15,7 @@ The local tests use invented providers and do not qualify actual Azure hosting.
 Each registered canonical practice UUID receives its own UUID-derived Box,
 Clerk organization, PostgreSQL database, runtime identity, vault, Redis service,
 private artifact storage, and independently encrypted state key. Its paired
-addresses are `https://<practice UUID>.staging.cosmas.ai/Chief` and
+addresses are `https://<practice UUID>.staging.cosmas.ai/chief` and
 `https://api.<practice UUID>.staging.cosmas.ai`. Only the already selected
 development enrollment realm is supported by this staging implementation.
 

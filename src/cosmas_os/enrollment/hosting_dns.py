@@ -18,7 +18,7 @@ def bind_allocated_dns(config: HostingConfiguration, deployment: dict, resources
     plan = deployment["practice"]["plan"]
     practice = plan["practice_id"]
     hosts = {"web": practice + ".staging.cosmas.ai", "api": "api." + practice + ".staging.cosmas.ai"}
-    if (plan["workspace_url"] != "https://" + hosts["web"] + "/Chief"
+    if (plan["workspace_url"] != "https://" + hosts["web"] + "/chief"
             or plan["api_origin"] != "https://" + hosts["api"] or set(tokens) != {"web", "api"}):
         raise ValueError("only this registered practice's paired DNS hosts are allowed")
     selected = []

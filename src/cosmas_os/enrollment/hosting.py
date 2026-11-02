@@ -13,6 +13,7 @@ import re
 import stat
 from dataclasses import asdict
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import UUID, uuid5
 
 from sqlalchemy import select
@@ -139,7 +140,7 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
             raise EnrollmentError("workspace_allocation_conflict", "Registered practice identity changed.")
         web = "https://" + request.practice_id + ".staging.cosmas.ai"
         release = self.configuration.release
-        return WorkspaceAllocationDestination("https://api." + request.practice_id + ".staging.cosmas.ai", web + "/Chief",
+        return WorkspaceAllocationDestination("https://api." + request.practice_id + ".staging.cosmas.ai", web + "/chief",
             release["source_commit"], release["api_image"].split("@sha256:")[1])
 
     def _deployment(self, plan: WorkspacePlan, operation_id: str) -> dict:
@@ -174,7 +175,8 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
                     "clinic_display_name": names[0], "owner_display_name": names[1], "clerk_issuer": plan.issuer,
                     "clerk_subject": plan.owner_subject, "clerk_organization_id": plan.organization_id,
                     "reviewed_by": "CosmaBot approved allocation policy v1", "evidence_ref": evidence}
-        web = plan.workspace_url.removesuffix("/Chief")
+        selected = urlsplit(plan.workspace_url)
+        web = selected.scheme + "://" + selected.netloc
         origins = [c.account["app_origin"], web, *c.value["native_origins"]]
         public = {"COSMAS_ENV": "early_adopter_beta", "DATA_MODE": "synthetic", "AUTH_MODE": "clerk_jwt",
                   "SYNTH_SEED": "false", "SYNC_WORKER": "false", "BLOB_BACKEND": "azure", "BETA_BOX_ID": plan.box_id,

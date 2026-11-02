@@ -64,7 +64,7 @@ resource "terraform_data" "guard" {
         can(regex("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$", local.d.practice.plan.practice_id)) &&
         local.d.practice.web_origin == "https://${local.d.practice.plan.practice_id}.staging.cosmas.ai" &&
         local.d.practice.plan.api_origin == "https://api.${local.d.practice.plan.practice_id}.staging.cosmas.ai" &&
-      local.d.practice.plan.workspace_url == "${local.d.practice.web_origin}/Chief")
+      local.d.practice.plan.workspace_url == "${local.d.practice.web_origin}/chief")
       error_message = "Only one registered canonical UUID practice in dedicated synthetic staging is supported."
     }
     precondition {

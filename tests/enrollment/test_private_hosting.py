@@ -3,6 +3,7 @@ import base64
 import importlib.util
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4, uuid5
@@ -31,7 +32,7 @@ from cosmas_os.enrollment.hosting_build import build_allocated_web
 from cosmas_os.enrollment.hosting_cloud import AzureAllocationBackend
 from cosmas_os.enrollment.hosting_dns import bind_allocated_dns
 from cosmas_os.enrollment.migration import upgrade
-from cosmas_os.enrollment.models import Membership
+from cosmas_os.enrollment.models import Membership, Practice
 from cosmas_os.enrollment.provisioning import BOX_NAMESPACE, WorkspacePlan
 from cosmas_os.enrollment.service import EnrollmentService
 from cosmas_os.enrollment.synthetic import SyntheticCommerce, synthetic_settings
@@ -62,10 +63,6 @@ def hosted(tmp_path):
         "authority_confirmed": True, "accepted": True})
     practice = service.status(human)["practice"]["id"]
     box, org = str(uuid5(BOX_NAMESPACE, practice)), "org_host1"
-    web = "https://" + practice + ".staging.cosmas.ai"
-    api = "https://api." + practice + ".staging.cosmas.ai"
-    service.record_workspace(practice, box_id=box, organization_id=org, url=web + "/Chief", proof_sha256="1" * 64,
-        status="provisioning", workspace_api_origin=api, source_commit="2" * 40, image_sha256="3" * 64)
     subscription, tenant = str(uuid4()), str(uuid4())
     group, registry = "rg-cosmabot-enrollment-staging-fixture1", "acrcbotenrstgfixture1.azurecr.io"
     scope = f"/subscriptions/{subscription}/resourceGroups/{group}/providers/"
@@ -92,7 +89,12 @@ def hosted(tmp_path):
         "cloudflare_token_file": str(token), "native_origins": settings.native_authorized_origins}
     config = HostingConfiguration(value)
     allocator = OpenTofuWorkspaceAllocator(service, config)
-    plan = WorkspacePlan(practice, box, org, human.subject, human.issuer, api, web + "/Chief", "2" * 40, "3" * 64)
+    destination = allocator.destination(WorkspaceAllocationRequest(practice, box, "unused", human.subject, human.issuer))
+    service.record_workspace(practice, box_id=box, organization_id=org, url=destination.workspace_url, proof_sha256="1" * 64,
+        status="provisioning", workspace_api_origin=destination.api_origin, source_commit=destination.source_commit,
+        image_sha256=destination.image_sha256)
+    plan = WorkspacePlan(practice, box, org, human.subject, human.issuer, destination.api_origin,
+        destination.workspace_url, destination.source_commit, destination.image_sha256)
     operation = str(uuid4())
     yield SimpleNamespace(config=config, value=value, allocator=allocator, service=service, plan=plan, operation=operation,
         deployment=allocator._deployment(plan, operation), source=source, scope=scope)
@@ -110,6 +112,49 @@ def test_hosting_destination_and_public_runtime_are_registered_native_and_separa
     assert c.deployment["deploy_workloads"] is c.deployment["bind_domains"] is False
     key = box_admission_key(c.deployment, "invented-master-" + "0" * 64)
     assert len(key) == 64 and "invented" not in key
+
+
+def test_actual_allocator_destination_is_accepted_by_shared_native_profile_contract(hosted):
+    c = hosted
+    destination = c.allocator.destination(WorkspaceAllocationRequest(c.plan.practice_id, c.plan.box_id,
+        "unused", c.plan.owner_subject, c.plan.issuer))
+    profile = {"contract_version": "cosmas-native-workspace-profile.v1", "client": "apple", "nonce": str(uuid4()),
+        "native_origin": "capacitor://localhost", "data_mode": "synthetic",
+        "nativeIdentity": {"version": 1, "profile": "operational-staging-v1", "client": "apple",
+            "apiOrigin": destination.api_origin, "publishableKey": c.config.account["publishable_key"],
+            "frontendOrigin": c.plan.issuer, "organizationId": c.plan.organization_id, "audience": c.config.account["audience"]},
+        "practice": {"practice_id": c.plan.practice_id, "box_id": c.plan.box_id},
+        "workspace": {"url": destination.workspace_url, "source_commit": destination.source_commit,
+            "image_sha256": destination.image_sha256, "workspace_proof_sha256": "1" * 64,
+            "member_proof_sha256": "5" * 64, "native_qualification_sha256": "6" * 64},
+        "session": {"issuer": c.plan.issuer, "subject": c.plan.owner_subject, "session_id": "sess_host1"},
+        "issued_at": 1800000000, "expires_at": 1800000120}
+    # Cross the actual Python producer/JavaScript consumer boundary. Keeping
+    # the shared validator strict catches route case or paired-origin drift.
+    script = """
+import {readFileSync} from 'node:fs';
+import {validateRegisteredNativeProfile} from './clients/shared/native-practice-profile.mjs';
+const value=validateRegisteredNativeProfile(JSON.parse(readFileSync(0,'utf8')));
+console.log(JSON.stringify({url:value.workspace.url,api:value.nativeIdentity.apiOrigin}));
+"""
+    result = subprocess.run(["node", "--input-type=module", "-e", script], input=json.dumps(profile),
+        text=True, capture_output=True, check=True, cwd=c.source, timeout=20)
+    assert json.loads(result.stdout) == {"url": destination.workspace_url, "api": destination.api_origin}
+
+
+def test_new_destination_does_not_rewrite_a_different_saved_binding(hosted):
+    c = hosted
+    old = replace(c.plan, workspace_url=c.plan.workspace_url.replace("/chief", "/Chief"))
+    with c.service.sessions.begin() as session:
+        practice = session.get(Practice, c.plan.practice_id)
+        assert practice is not None
+        practice.workspace_url = old.workspace_url
+    with pytest.raises(EnrollmentError, match="immutable release changed"):
+        c.allocator.allocate(old, operation_id=c.operation)
+    with c.service.sessions() as session:
+        practice = session.get(Practice, c.plan.practice_id)
+        assert practice is not None and practice.workspace_url == old.workspace_url
+    assert not c.config.state_root.exists()
 
 
 @pytest.mark.parametrize("mutation", ["production", "foreign_group", "foreign_dns", "mutable_image", "account", "extra"])

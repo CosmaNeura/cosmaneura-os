@@ -1,4 +1,4 @@
-import {validateOperationalNativeIdentity} from '../desktop/native-identity-config.mjs';
+import {validateOperationalNativeIdentity} from './operational-native-identity.mjs';
 
 export const REGISTERED_NATIVE_PROFILE_CONTRACT = 'cosmas-native-workspace-profile.v1';
 export const ACTIVE_NATIVE_WORKSPACE_CONTRACT = 'cosmabot.native-active-workspace.v1';
