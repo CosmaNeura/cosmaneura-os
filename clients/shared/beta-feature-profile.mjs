@@ -56,11 +56,20 @@ function set(env, name, value) {
   if (env[name] !== undefined && env[name] !== '' && env[name] !== value) fail(`${name} conflicts with ${env.VITE_WORKSPACE_FEATURE_PROFILE}`);
   env[name] = value;
 }
+function forbiddenCaptureUploadHost(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'assemblyai.com' || host.endsWith('.assemblyai.com')
+    || host === 'recall.ai' || host.endsWith('.recall.ai');
+}
+
 function uploads(value) {
   if (typeof value !== 'string') fail('VITE_CAPTURE_UPLOAD_ORIGINS is required');
   const origins = value.split(',');
   if (!origins.length || origins.length > 4 || new Set(origins).size !== origins.length ||
       !origins.every(exactHostedOrigin)) fail('capture requires one to four distinct exact HTTPS upload origins');
+  if (origins.some(origin => forbiddenCaptureUploadHost(new URL(origin).hostname))) {
+    fail('capture upload origins cannot target AssemblyAI or Recall.ai');
+  }
   return origins;
 }
 

@@ -1,5 +1,6 @@
 import type { CiphertextUploadTarget, RequestOptions } from "./contracts";
 
+import { isForbiddenCaptureUploadHost } from "./forbidden-upload-hosts";
 import { parseRetryAfter } from "./http-client";
 
 export class UploadResponseError extends Error {
@@ -101,6 +102,9 @@ function normalizeAllowedOrigin(value: string): string {
   }
   if (origin.protocol !== "https:" && !isLoopback(origin.hostname)) {
     throw new Error("ciphertext upload origin must use HTTPS");
+  }
+  if (isForbiddenCaptureUploadHost(origin.hostname)) {
+    throw new Error("ciphertext upload origin host is forbidden");
   }
   return origin.origin;
 }
