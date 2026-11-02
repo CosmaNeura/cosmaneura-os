@@ -5,7 +5,7 @@ locals {
   )
   job_secrets = { for key, job in local.jobs : key => {
     for name, reference in local.practices[job.practice].secret_references : name => reference
-    if job.operation == "reserve" || contains(["DATABASE_ADMIN_URL", "DATABASE_URL"], name)
+    if(job.operation == "reserve" && contains(["DATABASE_URL", "DATABASE_ADMIN_URL", "REDIS_URL", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET", "OWNER_MANIFEST"], name)) || contains(["DATABASE_ADMIN_URL", "DATABASE_URL"], name)
   } }
   job_grants = merge({}, [for key, secrets in local.job_secrets : { for name, reference in secrets : "${key}-${name}" => { job = key, practice = local.jobs[key].practice, name = local.secret_keys[name] } }]...)
 }
@@ -66,7 +66,7 @@ resource "azurerm_container_app_job" "box" {
       command = ["python", "/app/cosmabot_allocated_workspace_job.py"]
       args    = [each.value.operation]
       dynamic "env" {
-        for_each = merge(local.practices[each.value.practice].api_env, {
+        for_each = merge({ for name, value in local.practices[each.value.practice].api_env : name => value if !startswith(name, "GOOGLE_") && !startswith(name, "WORKSPACE_GOOGLE_") }, {
           AZURE_STORAGE_ACCOUNT_URL    = trimsuffix(azurerm_storage_account.box[each.value.practice].primary_blob_endpoint, "/")
           AZURE_BLOB_CONTAINER         = azurerm_storage_container.box[each.value.practice].name
           AZURE_CLIENT_ID              = azurerm_user_assigned_identity.job[each.key].client_id

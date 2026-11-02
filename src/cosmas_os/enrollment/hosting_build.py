@@ -9,12 +9,29 @@ import shutil
 import tarfile
 from pathlib import Path
 
-from .hosting import canonical
+from .hosting import GOOGLE_SECRET_NAMES, canonical
 
 
 def build_allocated_web(backend, state: dict) -> str:
     config, d = backend.config, state["deployment"]
     plan, account = d["practice"]["plan"], config.account
+    google = d.get("google")
+    feature_profile = "standalone-practice-v1"
+    if google is not None:
+        public_env, references = d["practice"]["api_env"], d["practice"]["secret_references"]
+        vault = "kvca" + plan["practice_id"].replace("-", "")[:20]
+        if (config.google is None or google != {name: config.google[name] for name in ("client_id", "callback_uri")}
+                or google["callback_uri"] != account["api_origin"] + "/connections/google/callback"
+                or any(public_env.get(name) != "true" for name in ("WORKSPACE_GOOGLE_CONNECTION_ENABLED", "WORKSPACE_GOOGLE_MESSAGE_ENABLED",
+                                                                 "WORKSPACE_GOOGLE_CALENDAR_ENABLED", "GOOGLE_CONNECTION_BROKER_ENABLED"))
+                or public_env.get("GOOGLE_CONNECTION_CLIENT_ID") != google["client_id"]
+                or public_env.get("GOOGLE_CONNECTION_CALLBACK_URI") != google["callback_uri"]
+                or public_env.get("GOOGLE_CONNECTION_BROKER_ORIGIN") != account["api_origin"]
+                or public_env.get("GOOGLE_CONNECTION_RETURN_ORIGIN") != d["practice"]["web_origin"]
+                or any(not re.fullmatch(re.escape("https://" + vault + ".vault.azure.net/secrets/" + secret + "/") + r"[a-f0-9]{32}",
+                                        references.get(name, "")) for name, secret in GOOGLE_SECRET_NAMES.items())):
+            raise ValueError("registered Google web UI requires the exact enabled runtime and both Box-only secret references")
+        feature_profile = "independent-beta-v1"
     repository = config.foundation["registry_server"]
     registry = repository.split(".", 1)[0]
     tag = "allocated-workspace-web:" + d["operation_id"]
@@ -60,13 +77,15 @@ def build_allocated_web(backend, state: dict) -> str:
         profile = {"contract_version": "cosmas-allocated-web-image.v1", "source_commit": source,
                    "practice_id": plan["practice_id"], "box_id": plan["box_id"], "organization_id": plan["organization_id"],
                    "api_origin": plan["api_origin"], "workspace_url": plan["workspace_url"], "base_api_image": config.release["api_image"]}
+        if google is not None:
+            profile["google"] = google
         profile_raw = canonical(profile)
         proof = hashlib.sha256(profile_raw).hexdigest()
         (context / "allocated-web-profile.json").write_bytes(profile_raw)
         public = {"VITE_BUILD_SHA": source, "VITE_CLERK_PUBLISHABLE_KEY": account["publishable_key"],
                   "VITE_WORKSPACE_HOSTED_API_ORIGIN": plan["api_origin"], "VITE_WORKSPACE_WEB_ORIGIN": d["practice"]["web_origin"],
                   "VITE_WORKSPACE_ORGANIZATION_ID": plan["organization_id"], "VITE_WORKSPACE_DATA_MODE": "synthetic",
-                  "VITE_WORKSPACE_FEATURE_PROFILE": "standalone-practice-v1", "VITE_WORKSPACE_CAPTURE_MODE": "disabled",
+                  "VITE_WORKSPACE_FEATURE_PROFILE": feature_profile, "VITE_WORKSPACE_CAPTURE_MODE": "disabled",
                   "VITE_CAPTURE_UPLOAD_ORIGINS": "", "VITE_COSMANEURA_WEB_ORIGIN": "", "VITE_ENROLLMENT_API_BASE": account["api_origin"],
                   "VITE_MESSAGES_ENABLED": "true", "APP_IMAGE": config.release["api_image"]}
         arguments = ["-t", image, "-f", "infra/enrollment/allocated-workspace/Dockerfile.web"]
@@ -80,7 +99,9 @@ def build_allocated_web(backend, state: dict) -> str:
                 "b=json.loads(pathlib.Path('/app/practice-web/cosmas-workspace-build.json').read_text());assert b['apiOrigin']==" + repr(plan["api_origin"]) + ";"
                 "f=json.loads(pathlib.Path('/app/practice-web/cosmas-beta-features.json').read_text());"
                 "assert f['organizationId']==" + repr(plan["organization_id"]) + ";"
+                "assert f['profile']==" + repr(feature_profile) + ";"
                 "assert f['platformAccess']=='disabled' and f['captureMode']=='disabled';"
+                + ("assert all(n in f['enabledFlags'] for n in ['VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED']);" if google is not None else "") +
                 "print('COSMAS_ALLOCATED_WEB_VALIDATED:" + proof + "')")
         recipe = {"version": "v1.1.0", "stepTimeout": 1800, "steps": [
             {"id": "build", "build": shlex.join(arguments), "env": ["DOCKER_BUILDKIT=1"]},

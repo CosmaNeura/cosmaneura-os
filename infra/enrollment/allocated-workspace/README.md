@@ -43,12 +43,35 @@ with `contract_version: "cosmas-private-hosting.v1"`. Its schema is validated by
 | `state_root` | Persistent owner-controlled `0700` directory outside the checkout, with a durable private volume and backup/custody policy. |
 | `cloudflare_zone_id`, `cloudflare_token_file` | The public `cosmas.ai` zone identifier and absolute reference to a separately authorized, protected `0600` token file. Never put a token in the JSON, repository, arguments, or logs. |
 | `native_origins` | Explicit unique subset of `capacitor://localhost` and `app://cosmas`, matching the enrollment host configuration. |
+| `google` (optional) | Exactly `client_id`, `callback_uri`, and `client_secret_file`. The reviewed Google web client must match the enabled enrollment broker; callback is exactly `account.api_origin + "/connections/google/callback"`. The existing client-secret file reference is absolute, outside source, owner-controlled and mode `0600`; its contents are read only by the separately enabled private seed operation. Omit the whole object to preserve allocation without Google. |
 
 The enrollment host also needs its existing protected Clerk, Stripe, registry
 database and admission-key references. The worker requires native account,
 provisioning and allocation settings to be explicitly enabled together, the
 existing registry schema to be current, and synthetic mode to be selected.
 No new public registration endpoint can submit a Box, URL, proof, or ready bit.
+
+With the explicit Google option, the enrollment service must have matching
+`ENROLLMENT_GOOGLE_CALLBACK_BROKER_ENABLED`,
+`ENROLLMENT_GOOGLE_CALLBACK_BROKER_ORIGIN`, and
+`ENROLLMENT_GOOGLE_CALLBACK_CLIENT_ID` settings. The private plan contains only
+the public client/callback. The worker seeds the existing client secret and a
+separate-purpose per-Box token-custody key in that Box's own vault; the custody
+key derives from its existing admission custody. Broker signing uses the
+existing admission key, with no new relay secret. Only the Box runtime receives
+the two Google secret references. Migration and owner-preparation jobs keep
+their original five-secret boundary and receive no Google settings or custody.
+
+The unchanged shared runtime module still requires both versioned Google
+references before enabling its three Google flags. Only the reviewed broker
+callback overrides the module's default callback; other environment merge
+rules remain intact. The public web builder reuses its existing feature-profile
+argument to select `independent-beta-v1` after those runtime settings and exact
+Box-vault references are present. This includes only the existing standalone
+features plus Google, with the same synthetic/Org/origin guards. Omission keeps
+`standalone-practice-v1`; no secret or protected-file reference enters build
+arguments, public renderer assets, or provider logs. Native and web account
+consent and actual Google grant verification remain separate from allocation.
 
 ## Execution requirements still to qualify
 

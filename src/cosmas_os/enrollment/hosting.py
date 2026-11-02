@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -33,6 +34,8 @@ HOSTING_CONTRACT = "cosmas-private-hosting.v1"
 SECRET_NAMES = {"DATABASE_URL": "database-url", "DATABASE_ADMIN_URL": "database-admin-url",
                 "REDIS_URL": "redis-url", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET": "enrollment-admission-key",
                 "OWNER_MANIFEST": "owner-manifest"}
+GOOGLE_SECRET_NAMES = {"GOOGLE_CONNECTION_CLIENT_SECRET": "google-connection-client-secret",
+                       "GOOGLE_CONNECTION_ENCRYPTION_KEY": "google-connection-encryption-key"}
 
 
 def private_read(path: Path, maximum: int = 128_000) -> bytes:
@@ -59,7 +62,7 @@ class HostingConfiguration:
         expected = {"contract_version", "enabled", "synthetic_only", "foundation", "account", "release",
                     "worker_client_id", "worker_object_id", "source_repository", "state_root", "cloudflare_zone_id",
                     "cloudflare_token_file", "native_origins"}
-        if (set(value) != expected or value["contract_version"] != HOSTING_CONTRACT
+        if (not expected <= set(value) or set(value) - expected - {"google"} or value["contract_version"] != HOSTING_CONTRACT
                 or type(value["enabled"]) is not bool or value["synthetic_only"] is not True):
             raise ValueError("explicit dedicated synthetic hosting configuration required")
         self.value = json.loads(json.dumps(value))
@@ -113,6 +116,17 @@ class HostingConfiguration:
         if (not all(path.is_absolute() for path in (self.source, self.state_root, self.token_file))
                 or self.state_root == Path("/") or self.state_root.is_relative_to(self.source)):
             raise ValueError("private persistent worker state outside source required")
+        self.google = self.value.get("google")
+        if "google" in self.value:
+            google = self.google
+            if (not isinstance(google, dict) or set(google) != {"client_id", "callback_uri", "client_secret_file"}
+                    or not isinstance(google["client_id"], str)
+                    or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", google["client_id"])
+                    or google["callback_uri"] != a["api_origin"] + "/connections/google/callback"
+                    or not isinstance(google["client_secret_file"], str)
+                    or not Path(google["client_secret_file"]).is_absolute()
+                    or Path(google["client_secret_file"]).resolve().is_relative_to(self.source.resolve())):
+                raise ValueError("exact separately reviewed Google broker and protected client-secret file reference required")
 
     @classmethod
     def from_path(cls, path: Path):
@@ -154,6 +168,10 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
             raise EnrollmentError("workspace_allocation_disabled", "Private native workspace allocation is unavailable.", 503)
         if str(UUID(operation_id)) != operation_id:
             raise ValueError("stable registered operation required")
+        if c.google is not None and (settings.google_broker_errors() or not settings.google_callback_broker_enabled
+                or settings.google_callback_broker_origin != c.account["api_origin"]
+                or settings.google_callback_client_id != c.google["client_id"]):
+            raise EnrollmentError("workspace_allocation_disabled", "Private Google broker configuration is unavailable.", 503)
         expected = self.destination(WorkspaceAllocationRequest(plan.practice_id, plan.box_id, "unused", plan.owner_subject, plan.issuer))
         if (plan.api_origin, plan.workspace_url, plan.source_commit, plan.image_sha256) != (
                 expected.api_origin, expected.workspace_url, expected.source_commit, expected.image_sha256):
@@ -192,7 +210,7 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
                   "WORKSPACE_ENROLLMENT_ACCOUNT_ORIGIN": c.account["app_origin"],
                   "WORKSPACE_ENROLLMENT_ORIGIN_ALLOWLIST": c.account["api_origin"] + "," + c.account["app_origin"],
                   "WORKSPACE_RELEASE_SOURCE_COMMIT": plan.source_commit, "WORKSPACE_RELEASE_IMAGE_SHA256": plan.image_sha256}
-        return {"contract_version": "cosmas-allocated-workspace.v1", "version": 1, "environment": "staging", "synthetic_only": True,
+        deployment = {"contract_version": "cosmas-allocated-workspace.v1", "version": 1, "environment": "staging", "synthetic_only": True,
                 "namespace": plan.practice_id.replace("-", "")[:16], "operation_id": operation_id,
                 "allocator_object_id": c.value["worker_object_id"], "foundation": c.foundation, "account": c.account,
                 "release": c.release, "expected_schema_revision": EXPECTED_SCHEMA_REVISION,
@@ -201,6 +219,13 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
                     "secret_references": {}, "owner_manifest_sha256": hashlib.sha256(canonical(manifest)).hexdigest(),
                     "migration_receipt_sha256": None, "reservation_receipt_sha256": None, "dns_ownership_qualified": False},
                 "_owner_manifest": manifest}
+        if c.google is not None:
+            deployment["google"] = {name: c.google[name] for name in ("client_id", "callback_uri")}
+            public.update({"WORKSPACE_GOOGLE_CONNECTION_ENABLED": "true", "WORKSPACE_GOOGLE_MESSAGE_ENABLED": "true",
+                           "WORKSPACE_GOOGLE_CALENDAR_ENABLED": "true", "GOOGLE_CONNECTION_CLIENT_ID": c.google["client_id"],
+                           "GOOGLE_CONNECTION_CALLBACK_URI": c.google["callback_uri"], "GOOGLE_CONNECTION_RETURN_ORIGIN": web,
+                           "GOOGLE_CONNECTION_BROKER_ENABLED": "true", "GOOGLE_CONNECTION_BROKER_ORIGIN": c.account["api_origin"]})
+        return deployment
 
     def allocate(self, plan: WorkspacePlan, *, operation_id: str) -> None:
         deployment = self._deployment(plan, operation_id)
@@ -212,3 +237,10 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
 def box_admission_key(deployment: dict, master: str) -> str:
     plan = deployment["practice"]["plan"]
     return derive_runtime_admission_key(master, plan["practice_id"], plan["box_id"], plan["organization_id"])
+
+
+def box_google_custody_key(deployment: dict, master: str) -> str:
+    """Separate per-Box token custody; never a new relay or host master secret."""
+    key = box_admission_key(deployment, master)
+    raw = hmac.new(key.encode(), b"cosmas-box-google-token-custody.v1\x00", hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(raw).decode()

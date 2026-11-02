@@ -9,15 +9,25 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import secrets
 import subprocess
 import time
+from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
 
-from .hosting import SECRET_NAMES, HostingConfiguration, box_admission_key, canonical, private_read
+from .hosting import (
+    GOOGLE_SECRET_NAMES,
+    SECRET_NAMES,
+    HostingConfiguration,
+    box_admission_key,
+    box_google_custody_key,
+    canonical,
+    private_read,
+)
 
 
 class AzureAllocationBackend:
@@ -180,24 +190,50 @@ class AzureAllocationBackend:
         assert self.directory is not None
         d, resources = state["deployment"], state["resources"]
         references = d["practice"]["secret_references"]
-        if set(references) == set(SECRET_NAMES):
+        google = d.get("google")
+        if google is not None and (self.config.google is None
+                or google != {name: self.config.google[name] for name in ("client_id", "callback_uri")}):
+            raise ValueError("saved Google broker differs from reviewed host input")
+        secret_names = {**SECRET_NAMES, **(GOOGLE_SECRET_NAMES if google is not None else {})}
+        if not set(references) <= set(secret_names):
+            raise ValueError("unreviewed Box secret reference refused")
+        if google is not None:
+            vault = "kvca" + d["practice"]["plan"]["practice_id"].replace("-", "")[:20]
+            if resources["key_vault_id"] != self.config.scope + "Microsoft.KeyVault/vaults/" + vault:
+                raise ValueError("Google custody requires this Box's own vault")
+            for name, secret in GOOGLE_SECRET_NAMES.items():
+                if name in references and not re.fullmatch(
+                        re.escape("https://" + vault + ".vault.azure.net/secrets/" + secret + "/") + r"[a-f0-9]{32}", references[name]):
+                    raise ValueError("exact versioned Box Google secret reference unavailable")
+        if set(references) == set(secret_names):
             return
-        keys = self._json(["az", "rest", "--method", "post", "--url", "https://management.azure.com" + resources["redis_id"] + "/databases/default/listKeys?api-version=2024-11-01", "--output", "json"])
-        redis_key = keys.get("primaryKey")
-        if not isinstance(redis_key, str) or not redis_key:
-            raise ValueError("private Box Redis credential unavailable")
-        host = resources["postgres_fqdn"]
-        values = {"REDIS_URL": "rediss://:" + quote(redis_key, safe="") + "@" + resources["redis_hostname"] + ":10000/0?ssl_cert_reqs=required",
-                  "WORKSPACE_ENROLLMENT_ADMISSION_SECRET": box_admission_key(d, master),
-                  "OWNER_MANIFEST": canonical(d["_owner_manifest"]).decode()}
-        for name, role, filename in (("DATABASE_ADMIN_URL", "box_bootstrap", "admin-password"), ("DATABASE_URL", "box_runtime", "runtime-password")):
-            values[name] = "postgresql+psycopg://" + role + ":" + quote(private_read(self.directory / filename).decode(), safe="") + "@" + host + ":5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
+        values = {}
+        if not set(SECRET_NAMES) <= set(references):
+            keys = self._json(["az", "rest", "--method", "post", "--url", "https://management.azure.com" + resources["redis_id"] + "/databases/default/listKeys?api-version=2024-11-01", "--output", "json"])
+            redis_key = keys.get("primaryKey")
+            if not isinstance(redis_key, str) or not redis_key:
+                raise ValueError("private Box Redis credential unavailable")
+            host = resources["postgres_fqdn"]
+            values = {"REDIS_URL": "rediss://:" + quote(redis_key, safe="") + "@" + resources["redis_hostname"] + ":10000/0?ssl_cert_reqs=required",
+                      "WORKSPACE_ENROLLMENT_ADMISSION_SECRET": box_admission_key(d, master),
+                      "OWNER_MANIFEST": canonical(d["_owner_manifest"]).decode()}
+            for name, role, filename in (("DATABASE_ADMIN_URL", "box_bootstrap", "admin-password"), ("DATABASE_URL", "box_runtime", "runtime-password")):
+                values[name] = "postgresql+psycopg://" + role + ":" + quote(private_read(self.directory / filename).decode(), safe="") + "@" + host + ":5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
+        if google is not None:
+            if "GOOGLE_CONNECTION_CLIENT_SECRET" not in references:
+                assert self.config.google is not None
+                client_secret = private_read(Path(self.config.google["client_secret_file"]), maximum=8192).decode()
+                if not client_secret or any(ord(char) < 33 or ord(char) > 126 for char in client_secret):
+                    raise ValueError("bounded protected Google client secret required")
+                values["GOOGLE_CONNECTION_CLIENT_SECRET"] = client_secret
+            if "GOOGLE_CONNECTION_ENCRYPTION_KEY" not in references:
+                values["GOOGLE_CONNECTION_ENCRYPTION_KEY"] = box_google_custody_key(d, master)
         vault = resources["key_vault_id"].rsplit("/", 1)[1]
         template = self.config.source / "infra/enrollment/allocated-workspace/secret.template.json"
         for name, value in values.items():
             if name in references:
                 continue
-            secret = SECRET_NAMES[name]
+            secret = secret_names[name]
             self._write("seed-parameters.json", canonical({"vaultName": {"value": vault}, "secretName": {"value": secret}, "secretValue": {"value": value}}))
             self._command(["az", "deployment", "group", "create", "--subscription", self.config.foundation["subscription_id"],
                 "--resource-group", self.config.foundation["resource_group_name"], "--name", "allocation-" + d["operation_id"] + "-" + secret,
@@ -206,6 +242,8 @@ class AzureAllocationBackend:
                 "--api-version", "2024-11-01", "--query", "properties.secretUriWithVersion", "--output", "tsv"]).decode().strip()
             if not reference.startswith("https://" + vault + ".vault.azure.net/secrets/" + secret + "/") or len(reference.rsplit("/", 1)[1]) != 32:
                 raise ValueError("exact versioned Box secret reference unavailable")
+            if name in GOOGLE_SECRET_NAMES and not re.fullmatch(r"[a-f0-9]{32}", reference.rsplit("/", 1)[1]):
+                raise ValueError("exact versioned Box Google secret reference unavailable")
             references[name] = reference
             self._checkpoint(state)
         (self.directory / "seed-parameters.json").unlink(missing_ok=True)

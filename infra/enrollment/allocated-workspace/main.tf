@@ -39,8 +39,11 @@ locals {
   names            = { for key in keys(local.practices) : key => "cbaw-${replace(local.d.practice.plan.practice_id, "-", "")}" }
   tags             = { product = "cosmabot", component = "enrollment-practice-runtime", environment = "staging", clinical_data = "false" }
   scope            = lower("/subscriptions/${local.f.subscription_id}/resourceGroups/${local.f.resource_group_name}/providers/")
-  secret_keys      = { DATABASE_URL = "database-url", REDIS_URL = "redis-url", WORKSPACE_ENROLLMENT_ADMISSION_SECRET = "enrollment-admission-key", DATABASE_ADMIN_URL = "database-admin-url", OWNER_MANIFEST = "owner-manifest" }
-  runtime_secrets  = { for key, p in local.practices : key => { for name, reference in p.secret_references : name => reference if contains(["DATABASE_URL", "REDIS_URL", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET"], name) } }
+  google           = try(local.d.google, null)
+  google_keys      = ["GOOGLE_CONNECTION_CLIENT_SECRET", "GOOGLE_CONNECTION_ENCRYPTION_KEY"]
+  google_ready     = local.google != null && alltrue([for name in local.google_keys : contains(keys(local.d.practice.secret_references), name)])
+  secret_keys      = merge({ DATABASE_URL = "database-url", REDIS_URL = "redis-url", WORKSPACE_ENROLLMENT_ADMISSION_SECRET = "enrollment-admission-key", DATABASE_ADMIN_URL = "database-admin-url", OWNER_MANIFEST = "owner-manifest" }, local.google == null ? {} : { GOOGLE_CONNECTION_CLIENT_SECRET = "google-connection-client-secret", GOOGLE_CONNECTION_ENCRYPTION_KEY = "google-connection-encryption-key" })
+  runtime_secrets  = { for key, p in local.practices : key => { for name, reference in p.secret_references : name => reference if contains(concat(["DATABASE_URL", "REDIS_URL", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET"], local.google == null ? [] : local.google_keys), name) } }
 }
 provider "azurerm" {
   subscription_id                 = local.f.subscription_id
@@ -103,6 +106,19 @@ resource "terraform_data" "guard" {
       alltrue([for name in keys(local.d.practice.api_env) : !strcontains(name, "CORE") && !strcontains(name, "SECRET") && !contains(["DATABASE_URL", "REDIS_URL"], name)]))
       error_message = "This runtime must preserve registered Clerk/Box authority with no Core or secret public settings."
     }
+    precondition {
+      condition = local.google == null ? alltrue([for name in keys(local.d.practice.api_env) : !startswith(name, "GOOGLE_") && !startswith(name, "WORKSPACE_GOOGLE_")]) : try(
+        toset(keys(local.google)) == toset(["client_id", "callback_uri"]) &&
+        can(regex("^[A-Za-z0-9_-]{1,200}[.]apps[.]googleusercontent[.]com$", local.google.client_id)) &&
+        local.google.callback_uri == "${local.d.account.api_origin}/connections/google/callback" &&
+        alltrue([for name in ["WORKSPACE_GOOGLE_CONNECTION_ENABLED", "WORKSPACE_GOOGLE_MESSAGE_ENABLED", "WORKSPACE_GOOGLE_CALENDAR_ENABLED", "GOOGLE_CONNECTION_BROKER_ENABLED"] : local.d.practice.api_env[name] == "true"]) &&
+        local.d.practice.api_env.GOOGLE_CONNECTION_CLIENT_ID == local.google.client_id &&
+        local.d.practice.api_env.GOOGLE_CONNECTION_CALLBACK_URI == local.google.callback_uri &&
+        local.d.practice.api_env.GOOGLE_CONNECTION_BROKER_ORIGIN == local.d.account.api_origin &&
+        local.d.practice.api_env.GOOGLE_CONNECTION_RETURN_ORIGIN == local.d.practice.web_origin &&
+      (!local.d.deploy_workloads || local.google_ready), false)
+      error_message = "Google requires an explicit exact account broker/client, both Box-only custody references and no default enablement."
+    }
   }
 }
 
@@ -111,7 +127,9 @@ module "workspace_runtime" {
   for_each                = local.practices
   source                  = "../../beta/environment/modules/workspace-runtime"
   hosted_enabled          = true
-  features                = { WORKSPACE_TEAM_SETUP_ENABLED = true, WORKSPACE_AI_ACTIVITY_ENABLED = true, WORKSPACE_ROUTINES_ENABLED = true, WORKSPACE_APPOINTMENTS_ENABLED = true }
+  features                = merge({ WORKSPACE_TEAM_SETUP_ENABLED = true, WORKSPACE_AI_ACTIVITY_ENABLED = true, WORKSPACE_ROUTINES_ENABLED = true, WORKSPACE_APPOINTMENTS_ENABLED = true }, local.google_ready ? { WORKSPACE_GOOGLE_CONNECTION_ENABLED = true, WORKSPACE_GOOGLE_MESSAGE_ENABLED = true, WORKSPACE_GOOGLE_CALENDAR_ENABLED = true } : {})
+  public_configuration    = local.google_ready ? { GOOGLE_CONNECTION_CLIENT_ID = local.google.client_id } : {}
+  secret_references       = local.google_ready ? { for name in local.google_keys : name => { secret_name = local.secret_keys[name], version = reverse(split("/", each.value.secret_references[name]))[0] } } : {}
   api_origin              = each.value.plan.api_origin
   web_origin              = each.value.web_origin
   key_vault_uri           = azurerm_key_vault.box[each.key].vault_uri
@@ -310,7 +328,10 @@ resource "azurerm_role_assignment" "runtime_blob" {
 }
 locals {
   runtime_grants = merge({}, [for key, secrets in local.runtime_secrets : { for name, reference in secrets : "${key}-${name}" => { practice = key, name = local.secret_keys[name] } }]...)
-  runtime_env = { for key, p in local.practices : key => merge(p.api_env, module.workspace_runtime[key].public_env, {
+  runtime_env = { for key, p in local.practices : key => merge(p.api_env, module.workspace_runtime[key].public_env, local.google_ready ? {
+    # Only this reviewed callback differs from the shared module's Box API callback.
+    GOOGLE_CONNECTION_CALLBACK_URI = local.google.callback_uri
+    } : {}, {
     AZURE_CLIENT_ID           = azurerm_user_assigned_identity.runtime[key].client_id
     AZURE_STORAGE_ACCOUNT_URL = trimsuffix(azurerm_storage_account.box[key].primary_blob_endpoint, "/")
     AZURE_BLOB_CONTAINER      = azurerm_storage_container.box[key].name
