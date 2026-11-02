@@ -50,9 +50,11 @@ function Receipt({value}:{value:EnrollmentReceipt}) { const r=value.receipt; ret
   </dl><a href={value.document.pdf_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Download agreement</a></section>; }
 
 export function EnrollmentFlow({api,identity,config,accountControls,initialName='',initialEmail='',search=window.location.search,
-  navigate=url=>window.location.assign(url),openWorkspace,prepareWorkspaceToken,brand,invitationOrigin}:{
+  navigate=url=>window.location.assign(url),openWorkspace,openNativeWorkspace,prepareWorkspaceToken,brand,invitationOrigin}:{
   api:EnrollmentApi;identity:EnrollmentIdentity;config:EnrollmentConfig;accountControls?:ReactNode;initialName?:string;initialEmail?:string;search?:string;
   navigate?:(url:string)=>void;openWorkspace?:(status:EnrollmentStatus,url:string)=>Promise<void>;
+  /** The owned native host fetches its own registered profile; no URL is supplied. */
+  openNativeWorkspace?:()=>Promise<void>;
   prepareWorkspaceToken?:(status:EnrollmentStatus,signal:AbortSignal)=>Promise<string>;
   brand?:ReactNode;invitationOrigin?:string;
 }) {
@@ -182,8 +184,11 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
     }});};
   const portal=()=>{if(!status)return;void run(signal=>api.portal(identity,{expected_revision:status.revision},crypto.randomUUID(),signal),value=>navigate(stripeDestination(value.url,true)));};
   const chief=()=>{if(!status||status.stage!=='ready')return;void run(async()=>{
-    const latest=await api.status(identity);if(latest.stage!=='ready'||!latest.workspace.url)throw new EnrollmentError(403);
-    const url=workspaceDestination(latest.workspace.url,window.location.href,config.allowed_workspace_origins);if(openWorkspace)await openWorkspace(latest,url);else navigate(url);return latest;
+    const latest=await api.status(identity);if(latest.stage!=='ready')throw new EnrollmentError(403);
+    if(openNativeWorkspace)await openNativeWorkspace();
+    else{if(!latest.workspace.url)throw new EnrollmentError(403);
+      const url=workspaceDestination(latest.workspace.url,window.location.href,config.allowed_workspace_origins);if(openWorkspace)await openWorkspace(latest,url);else navigate(url);}
+    return latest;
   },accept);};
   const formDisabled=busy||uncertain;
   const ownsPractice=status?.practice?.role==='owner';

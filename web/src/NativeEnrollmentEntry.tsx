@@ -86,7 +86,7 @@ export function NativeEnrollmentEntry({plugin=NativePracticeConnection,available
     if(!identity.isCurrent()||signal.aborted)throw new EnrollmentError(401);
     return parseNativeToken(result,expected.revision);
   }
-  async function openWorkspace(_status:EnrollmentStatus,_url:string){
+  async function openNativeWorkspace(){
     if(!identity?.isCurrent())throw new EnrollmentError(401);
     // The native driver creates the nonce, fetches the fixed registry endpoint,
     // verifies current membership/Box/API and replaces the renderer itself.
@@ -102,5 +102,5 @@ export function NativeEnrollmentEntry({plugin=NativePracticeConnection,available
   return <EnrollmentFlow key={state.revision} api={api!} identity={identity} config={config} accountControls={controls}
     initialName={state.identity!.displayName} initialEmail={state.identity!.email} search="" navigate={navigate}
     brand={<span className="enrollment-brand">CosmaBot</span>} invitationOrigin="https://onboarding.staging.cosmas.ai"
-    prepareWorkspaceToken={prepareWorkspaceToken} openWorkspace={openWorkspace}/>;
+    prepareWorkspaceToken={prepareWorkspaceToken} openNativeWorkspace={openNativeWorkspace}/>;
 }

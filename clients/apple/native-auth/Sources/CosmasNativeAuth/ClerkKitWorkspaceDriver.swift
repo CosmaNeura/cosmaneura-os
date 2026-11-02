@@ -152,14 +152,34 @@ import Foundation
     public func activateOrganization(_ selection: NativePracticeOrganizationSelection) async throws {
         let expected = selection.receipt.account
         guard !retired, pending == 0, identity == expected,
+              selection.binding.realm == configuration else { throw NativePracticeProfileError.invalidBinding }
+        pending += 1; defer { pending -= 1 }
+        try Task.checkCancellation()
+        // The enrollment server may have just created this membership. Refresh
+        // the pinned SDK client before evaluating it; an earlier cached user
+        // cannot establish the newly selected organization.
+        let refreshed = try await clerk.refreshClient()
+        try Task.checkCancellation()
+        guard !retired, pending == 1, identity == expected,
               selection.binding.realm == configuration,
+              let refreshed, refreshed.lastActiveSessionId == expected.sessionID,
+              let refreshedSession = refreshed.sessions.first(where: { $0.id == expected.sessionID }),
+              refreshedSession.user?.id == expected.userID else {
+            throw NativePracticeProfileError.sessionChanged
+        }
+        guard refreshedSession.user?.organizationMemberships?.contains(where: {
+                  $0.organization.id == selection.receipt.organizationID
+              }) == true,
               clerk.user?.organizationMemberships?.contains(where: {
                   $0.organization.id == selection.receipt.organizationID
               }) == true else { throw NativePracticeProfileError.invalidBinding }
-        pending += 1; defer { pending -= 1 }
         try await clerk.auth.setActive(sessionId: expected.sessionID, organizationId: selection.receipt.organizationID)
         try Task.checkCancellation()
-        guard identity == expected, clerk.session?.lastActiveOrganizationId == selection.receipt.organizationID else {
+        guard !retired, pending == 1, identity == expected, selection.binding.realm == configuration,
+              clerk.session?.lastActiveOrganizationId == selection.receipt.organizationID,
+              clerk.user?.organizationMemberships?.contains(where: {
+                  $0.organization.id == selection.receipt.organizationID
+              }) == true else {
             throw NativePracticeProfileError.sessionChanged
         }
     }

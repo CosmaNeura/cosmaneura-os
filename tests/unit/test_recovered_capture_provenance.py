@@ -27,7 +27,7 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/native-auth/Bridge/NativeProviderConnection.swift": "61b1c30c279a940f3ffab824a74fe21aba01cdc053d63ed59530b9d12bde2ce9",
     "clients/apple/native-auth/Bridge/NativeProviderRecordingRuntime.swift": "c0e570f99371e1fa07ccac58db1a56db0c7994323fb50d1f8af5d98d462279c4",
     "clients/apple/native-auth/Bridge/NativeSourceProofJournal.swift": "851c0e23018aab0c898bd8563108aabfcf0ce07a4925af161e6d2fbda43e7c39",
-    "clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift": "a5b107a7019e4e65ffe4e4586a32e5494b32bab7d2b8722f4e0a69051ef755bd",
+    "clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift": "2409c3636573890de3c9ba6179ac1b3dfff533a92599e8ddc8d6638b2cf37a10",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/GoogleConnectionNavigation.swift": "f5e7b2606ed7972d9f96ea1cb8631c0fed84e902477d34f0946e13d639f4bdb5",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/KeychainAccessBlock.swift": "9985767055e2e36e208dd7b2696029ac5d88f34257fa4fa44df6fe3d3502403c",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeAuthAwait.swift": "48f59a9ade9ceca9e30c82c13c4bccbea0c69a45d26c9fefa2d4eaabc9a8501d",
@@ -117,6 +117,50 @@ def test_reviewed_native_counterpart_pins_cover_only_exact_modified_owned_source
         assert len(historical) == 1
         assert historical[0]["sha256"] != digest
         assert _sha256(ROOT / name) == digest
+
+
+def test_new_account_org_activation_uses_public_sdk_refresh_before_membership_and_fences_each_await():
+    """Supported SDK source and await fences; no live sign-in/build claim."""
+    sdk = ROOT / "apps/capture/native-plugins/cosmas-native-auth/vendor/Sources/ClerkKit"
+    clerk = (sdk / "Core/Clerk.swift").read_text(encoding="utf-8")
+    client = (sdk / "Domains/Client/Client.swift").read_text(encoding="utf-8")
+    session = (sdk / "Domains/Auth/Session/Session.swift").read_text(encoding="utf-8")
+    assert "public func refreshClient() async throws -> Client?" in clerk
+    refresh = clerk.split("func refreshClient(skipClientId: Bool)", 1)[1].split(
+        "/// Refreshes the current environment", 1
+    )[0]
+    assert refresh.index("dependencies.clientService.getResponse") < refresh.index("runtime.validateStableRuntime()")
+    assert "identityController.applyDecodedClientFallback(" in refresh
+    assert "public var sessions: [Session]" in client
+    assert "public var lastActiveSessionId: String?" in client
+    assert "public var user: User?" in session
+
+    driver = (ROOT / "clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift").read_text(
+        encoding="utf-8"
+    )
+    activation = driver.split(
+        "public func activateOrganization(_ selection: NativePracticeOrganizationSelection) async throws {", 1
+    )[1].split("    /// Scoped only", 1)[0]
+    prefix, after_refresh = activation.split("let refreshed = try await clerk.refreshClient()", 1)
+    before_active, after_active = after_refresh.split("try await clerk.auth.setActive(", 1)
+    assert "organizationMemberships" not in prefix
+    assert "guard !retired, pending == 0, identity == expected" in prefix
+    assert "selection.binding.realm == configuration" in prefix
+    assert "pending += 1; defer { pending -= 1 }" in prefix
+    assert "try Task.checkCancellation()" in prefix
+    for boundary in (before_active, after_active):
+        assert boundary.index("try Task.checkCancellation()") < boundary.index("guard !retired, pending == 1")
+        assert "identity == expected" in boundary
+        assert "selection.binding.realm == configuration" in boundary
+        assert "organizationMemberships?.contains(where:" in boundary
+        assert "$0.organization.id == selection.receipt.organizationID" in boundary
+    assert "refreshed.lastActiveSessionId == expected.sessionID" in before_active
+    assert "refreshedSession.user?.id == expected.userID" in before_active
+    assert "refreshedSession.user?.organizationMemberships" in before_active
+    assert "sessionId: expected.sessionID, organizationId: selection.receipt.organizationID" in after_active
+    assert "clerk.session?.lastActiveOrganizationId == selection.receipt.organizationID" in after_active
+    assert "catch" not in activation and "Clerk.shared" not in activation
+    assert "refreshed?.currentSession" not in activation
 
 
 def _portable():

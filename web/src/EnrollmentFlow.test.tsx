@@ -73,6 +73,13 @@ it('shows pending activation with no trial dates or unconfirmed Chief access',as
   expect(button('Open Chief')).toBeUndefined();expect(button('Continue securely with Stripe')).toBeUndefined();
   expect(host.textContent).toContain('First chargeNot started');
 });
+it('keeps the browser Chief handoff closed for a UUID practice outside its exact configured origins',async()=>{
+  current=enrollmentStatus('ready',5);current.workspace.url='https://20000000-0000-4000-8000-000000000001.staging.cosmas.ai/chief';
+  const openWorkspace=vi.fn();await act(async()=>root.render(<EnrollmentFlow api={api} identity={id}
+    config={enrollmentConfig()} navigate={navigate} openWorkspace={openWorkspace}/>));
+  await click('Open Chief');expect(openWorkspace).not.toHaveBeenCalled();expect(navigate).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('The result could not be confirmed. Check saved progress before trying again.');
+});
 it('lets the accepted owner continue prebilling setup through the existing confirmation POST while keeping card and Chief held',async()=>{
   current=enrollmentStatus('activation_pending',3);current.workspace={status:'provisioning',url:null,organization_id:'org_invented',box_id:'10000000-0000-4000-8000-000000000003'};
   current.practice!.role='staff';const config={...enrollmentConfig(),billing_configured:false};

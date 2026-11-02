@@ -5,6 +5,7 @@ import {NativeEnrollmentEntry} from './NativeEnrollmentEntry';
 import {createNativeEnrollmentApi,parseNativeAccountState,nativeAccountEntryRequested,type NativeAccountState,type NativeEnrollmentPort} from './native-enrollment';
 import {parseNativeAuthState} from './native-auth';
 import {enrollmentConfig,enrollmentStatus} from './enrollment-test-fixture';
+import {nativePracticeFixture} from './native-practice-test-fixture';
 const revision='00000000-0000-4000-8000-000000000001';
 const account:NativeAccountState={phase:'accountReady',revision,identity:{userId:'user_invented',sessionId:'sess_invented',email:'invented@example.invalid',displayName:'Invented clinician'}};
 function port(initial:NativeAccountState={phase:'signedOut',revision,identity:null}){
@@ -53,6 +54,33 @@ it('starts a new synthetic account setup only after the explicit native sign-in 
   expect(host.textContent).toContain('Your account');expect(host.querySelector('#enrollment-name')).not.toBeNull();
   expect(vi.mocked(owner.plugin.enrollmentRequest).mock.calls.map(([input])=>input.operation)).toEqual(['config','status','practices']);
   expect(owner.plugin.accountToken).not.toHaveBeenCalled();expect(owner.plugin.activateRegisteredPractice).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
+});
+it('takes a newly allocated UUID practice from native sign-in through membership confirmation to the owned Chief handoff',async()=>{
+  const owner=port(),practiceId='20000000-0000-4000-8000-000000000001';
+  let saved=enrollmentStatus('finishing_setup',4);saved.practice!.id=practiceId;saved.billing.status='trialing';
+  saved.workspace={status:'ready',url:null,organization_id:'org_invented',box_id:'00000000-0000-4000-8000-000000000004'};
+  const original=nativePracticeFixture(),snapshot={...original,profile:{...original.profile,
+    practice:{...original.profile.practice,practice_id:practiceId},
+    nativeIdentity:{...original.profile.nativeIdentity,apiOrigin:`https://api.${practiceId}.staging.cosmas.ai`},
+    workspace:{...original.profile.workspace,url:`https://${practiceId}.staging.cosmas.ai/chief`}}};
+  vi.mocked(owner.plugin.activatePracticeOrganization).mockResolvedValue({revision,token:'invented.scoped.token'});
+  vi.mocked(owner.plugin.activateRegisteredPractice).mockResolvedValue(snapshot);
+  vi.mocked(owner.plugin.enrollmentRequest).mockImplementation(async input=>{
+    if(input.operation==='confirmWorkspace'){
+      expect(input.body).toEqual({expected_revision:4,workspace_token:'invented.scoped.token'});
+      saved={...saved,stage:'ready',revision:5,workspace:{...saved.workspace,url:snapshot.profile.workspace.url}};
+    }
+    return {status:200,body:input.operation==='config'?enrollmentConfig():input.operation==='practices'?{
+      active_practice_id:practiceId,practices:[{id:practiceId,legal_name:saved.practice!.legal_name,
+        display_name:saved.practice!.display_name,role:'owner',workspace_status:'ready'}]}:structuredClone(saved)};
+  });
+  await act(async()=>root.render(<NativeEnrollmentEntry plugin={owner.plugin} available onReturn={vi.fn()}/>));
+  expect(owner.plugin.beginAccountSignIn).not.toHaveBeenCalled();await click('Sign in or create account');
+  expect(host.textContent).toContain('Finishing setup');await click('Confirm practice account');
+  expect(owner.plugin.activatePracticeOrganization).toHaveBeenCalledWith({expectedRevision:revision});
+  expect(enrollmentConfig().allowed_workspace_origins).not.toContain(`https://${practiceId}.staging.cosmas.ai`);
+  await click('Open Chief');expect(owner.plugin.activateRegisteredPractice).toHaveBeenCalledWith({expectedRevision:revision});
+  expect(host.textContent).toContain('Opening your practice');expect(fetch).not.toHaveBeenCalled();
 });
 it('cannot turn an account without an organization into workspace access',()=>{
   expect(parseNativeAccountState(account).identity).not.toHaveProperty('organizationId');expect(()=>parseNativeAuthState(account)).toThrow();
