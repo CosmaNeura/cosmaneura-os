@@ -1,4 +1,4 @@
-// INERT PROPOSAL: not part of any selected app or source package.
+// Desktop process fencing; iOS metadata operations are compiled out and fail closed.
 // Callers must bind a fixed private directory and persist the anchor in the
 // native-only Keychain. This file never accesses Keychain or captures audio.
 import Darwin
@@ -23,6 +23,7 @@ private final class NativeFenceFile {
     let identity: NativeFenceFileIdentity
 
     init(directoryPath: String, name: String, create: Bool) throws {
+#if os(macOS)
         let directory = try nativeFenceDirectory(directoryPath)
         guard directory >= 0 else { throw NativeFenceError.unavailable }
         var directoryStat = stat()
@@ -42,11 +43,15 @@ private final class NativeFenceFile {
         identity = NativeFenceFileIdentity(device: Int64(fileStat.st_dev), inode: UInt64(fileStat.st_ino))
         try verifyPath()
         guard fsync(descriptor) == 0, fsync(directory) == 0 else { throw NativeFenceError.unavailable }
+#else
+        throw NativeFenceError.unavailable
+#endif
     }
 
     deinit { Darwin.close(descriptor); Darwin.close(directory) }
 
     func verifyPath() throws {
+#if os(macOS)
         var value = stat()
         guard fstatat(directory, name, &value, AT_SYMLINK_NOFOLLOW) == 0,
               value.st_mode & S_IFMT == S_IFREG, value.st_nlink == 1,
@@ -54,6 +59,9 @@ private final class NativeFenceFile {
               Int64(value.st_dev) == identity.device, UInt64(value.st_ino) == identity.inode else {
             throw NativeFenceError.unavailable
         }
+#else
+        throw NativeFenceError.unavailable
+#endif
     }
 
     func lock(_ operation: Int32) throws {
@@ -67,9 +75,13 @@ private final class NativeFenceFile {
     }
 
     func isEmpty() throws -> Bool {
+#if os(macOS)
         var value = stat()
         guard fstat(descriptor, &value) == 0 else { throw NativeFenceError.unavailable }
         return value.st_size == 0
+#else
+        throw NativeFenceError.unavailable
+#endif
     }
 
     func writeEpoch(_ epoch: String) throws {
@@ -228,6 +240,7 @@ private func nativeFenceDirectory(_ path: String) throws -> Int32 {
 /// No command-line/renderer/environment path is accepted. Only the two new
 /// private directories can be created; existing parent permissions are retained.
 func nativeDesktopFenceDirectory() throws -> String {
+#if os(macOS)
     guard let record = getpwuid(getuid()), let home = record.pointee.pw_dir else { throw NativeFenceError.unavailable }
     let path = String(cString: home) + "/Library/Application Support/com.cosmasos.beta.desktop/SourceFence"
     var fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
@@ -249,4 +262,7 @@ func nativeDesktopFenceDirectory() throws -> String {
         else { throw NativeFenceError.unavailable }
     }
     return path
+#else
+    throw NativeFenceError.unavailable
+#endif
 }
