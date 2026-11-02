@@ -21,7 +21,7 @@ import {teamConfigurationChanged} from './team-configuration-diff';
 import {VisitCatalog} from './VisitCatalog';
 import {consumeWorkspaceStartupTeam} from './workspace-team-read';
 import {workspaceProtocolGeneration} from './workspace-protocol';
-import {readWorkspaceRoute,workspaceRouteHash,type WorkspaceRoute} from './workspace-route';
+import {practicePageFromRoute,readWorkspaceRoute,workspaceRouteHash,type WorkspaceRoute} from './workspace-route';
 import {deferredWorkspacePanel} from './DeferredWorkspacePanel';
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {PracticeAccessPanel} from './PracticeAccessPanel';
@@ -148,7 +148,18 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   practiceAccess?:PracticeAccessContext;
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
-  const [session]=useState(()=>new WorkspaceSession({presentation:{enabled:import.meta.env.VITE_MESSAGES_ENABLED==='true',phone:phoneLayout(),storage:deviceStorage()},initialPage:authenticated?'home':'visits',navigation:{initialRoute:readWorkspaceRoute(window.location.hash)}}));
+  const [session]=useState(()=>{
+    const initialRoute=readWorkspaceRoute(window.location.hash);
+    const fallback=authenticated?'home' as const:'visits' as const;
+    const created=new WorkspaceSession({presentation:{enabled:import.meta.env.VITE_MESSAGES_ENABLED==='true',phone:phoneLayout(),storage:deviceStorage()},initialPage:practicePageFromRoute(initialRoute,fallback),navigation:{initialRoute}});
+    // Seed helper/material chrome from the hash before Home can paint.
+    if(initialRoute?.page==='notebook'){
+      if(initialRoute.helper)created.setSelected(initialRoute.helper);
+      if(initialRoute.material){created.setMobilePanel(initialRoute.material);if(initialRoute.material!=='Conversation')created.setPanel(initialRoute.material);}
+    }else if(initialRoute?.page==='settings'){created.setSettingsOpen(true);created.setPracticeOpen(false);}
+    else if(initialRoute?.page==='work'){created.setPracticeOpen(true);created.setPracticeOpened(true);created.setSettingsOpen(false);}
+    return created;
+  });
   const [researchChief]=useState(()=>new ResearchChiefHandoff(session));
   const inboxOrganization=useSyncExternalStore(session.inboxPreferences.subscribe,session.inboxPreferences.getSnapshot,session.inboxPreferences.getSnapshot);
   const inboxDraftStatus=useSyncExternalStore(session.conversations.drafts.subscribe,session.conversations.drafts.getSnapshot,session.conversations.drafts.getSnapshot);
@@ -1542,10 +1553,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span>{showDemoLabels()&&<small className="team-phone-preview">Synthetic preview</small>}{accountControls&&phoneLayout()&&!nativeHome&&!nativeWorkspace&&!nativeChat&&<div className="team-phone-account-controls">{accountControls}</div>}</div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
       <nav ref={navigation} className="practice-navigation" aria-label="Workspace navigation">
-        {authenticated&&<button className={`team-nav-item ${(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} aria-label={messagesMode?'Messages':undefined} onClick={goHome}><WorkspaceNavIcon page="home"/>{messagesMode?'Chats':'Home'}</button>}
-        <button className={`team-nav-item ${!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'active':''}`} aria-current={!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} aria-label={messagesMode?'Visits and notes':undefined} onClick={()=>void (authenticated?loadEncounters():open())}><WorkspaceNavIcon page="visits"/>{messagesMode?'Visits':'Visits and notes'}</button>
+        {authenticated&&<button className={`team-nav-item ${(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}><WorkspaceNavIcon page="home"/>{messagesMode?'Chats':'Home'}</button>}
+        <button className={`team-nav-item ${!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'active':''}`} aria-current={!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void (authenticated?loadEncounters():open())}><WorkspaceNavIcon page="visits"/>{messagesMode?'Visits':'Visits and notes'}</button>
         {workspace&&<button className={`team-nav-item team-nav-secondary ${practicePage==='notebook'&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&!phoneLayout()?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goNotebook}>Current notebook</button>}
-        {hasWorkspaceIdentity&&<button aria-label={messagesMode?'Practice work':undefined} className={`team-nav-item ${practiceOpen?'active':''}`} aria-current={practiceOpen?'page':undefined} disabled={viewNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={()=>leaveTeamSettings(()=>{routeSequence.current++;routeApplying.current=false;routeReady.current=true;clearPageError();setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);})}><WorkspaceNavIcon page="work"/>{messagesMode?'Work':'Practice work'}</button>}
+        {hasWorkspaceIdentity&&<button className={`team-nav-item ${practiceOpen?'active':''}`} aria-current={practiceOpen?'page':undefined} disabled={viewNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={()=>leaveTeamSettings(()=>{routeSequence.current++;routeApplying.current=false;routeReady.current=true;clearPageError();setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);})}><WorkspaceNavIcon page="work"/>{messagesMode?'Work':'Practice work'}</button>}
         {authenticated&&CONNECTION_ONBOARDING_BUILD&&<button className="team-nav-item team-nav-secondary" disabled={viewNavigationLocked||busy||!!pending} onClick={()=>void openSettings('connections')}>Connections</button>}
         {hasWorkspaceIdentity&&<button className={`team-nav-item ${settingsOpen&&!practiceOpen?'active':''}`} aria-current={settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked} onClick={()=>void openSettings()}><WorkspaceNavIcon page="settings"/>Settings</button>}
       </nav>
