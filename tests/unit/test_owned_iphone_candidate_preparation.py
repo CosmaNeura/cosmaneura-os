@@ -110,6 +110,35 @@ def test_explicit_practice_adds_only_owned_config_and_does_not_change_beta_crede
     assert default["CosmasNativeIdentity"] == identity["identity"]
 
 
+def test_practice_google_pin_is_optional_exact_and_keeps_the_beta_callback_unchanged():
+    identity, retained = public_beta(), retained_beta(public_beta())
+    value = practice_configuration()
+    assert "googleConnection" not in PREPARE.native_practice_configuration(value)
+    value["googleConnection"] = {
+        "clientID": "invented-practice.apps.googleusercontent.com",
+        "callbackURI": value["accountOrigin"] + "/connections/google/callback",
+    }
+    result = PREPARE.configured_info(scaffold(), retained, identity, value, NAVIGATION.validate_google)
+    assert result[PREPARE.PRACTICE_KEY] == value
+    assert result["GoogleConnectionClientID"] == retained["GoogleConnectionClientID"]
+    assert result["GoogleConnectionCallbackURI"] == retained["GoogleConnectionCallbackURI"]
+    assert result["CosmasNativeIdentity"] == identity["identity"]
+    assert result["CosmasNativeAuth"] == identity["auth"]
+    assert PREPARE.PRACTICE_KEY not in PREPARE.configured_info(
+        scaffold(), retained, identity, validate_google=NAVIGATION.validate_google
+    )
+    for pair in (None, {}, {"clientID": value["googleConnection"]["clientID"]},
+                 {**value["googleConnection"], "clientID": ""},
+                 {**value["googleConnection"], "clientID": "invented"},
+                 {**value["googleConnection"], "callbackURI": retained["GoogleConnectionCallbackURI"]},
+                 {**value["googleConnection"], "callbackURI": value["googleConnection"]["callbackURI"] + "?next=other"},
+                 {**value["googleConnection"], "scope": "gmail.send"}):
+        rejected = copy.deepcopy(value)
+        rejected["googleConnection"] = pair
+        with pytest.raises(ValueError, match="pinned account-service callback"):
+            PREPARE.native_practice_configuration(rejected)
+
+
 @pytest.mark.parametrize("field", ["CFBundleIdentifier", "CosmasNativeIdentity", "CosmasNativeAuth"])
 def test_retained_account_mismatch_is_rejected(field):
     identity, retained = public_beta(), retained_beta(public_beta())

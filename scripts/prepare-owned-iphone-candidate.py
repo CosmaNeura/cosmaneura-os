@@ -74,7 +74,7 @@ def native_practice_configuration(value):
     """
     required = {"enabled", "accountOrigin", "realm", "apiOrigins"}
     if (not isinstance(value, dict) or not required <= value.keys()
-            or value.keys() - required - {"registeredPracticeOrigins"}
+            or value.keys() - required - {"registeredPracticeOrigins", "googleConnection"}
             or type(value["enabled"]) is not bool):
         raise ValueError("Native practice configuration must match the owned Info schema.")
     exact_origin(value["accountOrigin"])
@@ -109,6 +109,13 @@ def native_practice_configuration(value):
     checked = [exact_origin(origin) for origin in origins]
     if len(set(checked)) != len(checked):
         raise ValueError("Duplicate native API origins are not permitted.")
+    if "googleConnection" in value:
+        pair = value["googleConnection"]
+        if (not isinstance(pair, dict) or set(pair) != {"clientID", "callbackURI"}
+                or not isinstance(pair["clientID"], str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", pair["clientID"]) is None
+                or pair["callbackURI"] != value["accountOrigin"] + "/connections/google/callback"):
+            raise ValueError("Native practice Google requires an exact public client and the pinned account-service callback.")
     return copy.deepcopy(value)
 
 

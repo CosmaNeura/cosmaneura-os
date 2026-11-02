@@ -73,13 +73,49 @@ private final class RefusePracticeRedirect: NSObject, URLSessionTaskDelegate, @u
 
 /// Pure, build-owned public input. Loading it does not configure Clerk, query
 /// Keychain, sign in, select an Org or change the existing beta runtime.
+public struct NativePracticeGoogleConnection: Equatable, Sendable {
+    public let clientID: String
+    public let callbackURI: String
+    public init(clientID: String, callbackURI: String) throws {
+        guard !clientID.isEmpty, !callbackURI.isEmpty else { throw NativePracticeProfileError.invalidBinding }
+        _ = try GoogleConnectionNavigation(clientID: clientID, callbackURI: callbackURI)
+        self.clientID = clientID; self.callbackURI = callbackURI
+    }
+}
+
 public struct NativePracticeBundleConfiguration: Sendable {
     public let binding: NativePracticeAccountServiceBinding
-    public init(binding: NativePracticeAccountServiceBinding) { self.binding = binding }
+    public let googleConnection: NativePracticeGoogleConnection?
+    public init(binding: NativePracticeAccountServiceBinding, googleConnection: NativePracticeGoogleConnection? = nil) throws {
+        guard googleConnection == nil || googleConnection?.callbackURI == binding.accountOrigin + "/connections/google/callback" else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        self.binding = binding; self.googleConnection = googleConnection
+    }
+    /// A native-admitted profile may use only this same exact account realm's
+    /// separately pinned Google broker. Clinical/other-provider callbacks stay dark.
+    public func registeredNavigation(for profile: NativePracticeProfile) throws -> CosmaneuraRecordNavigation {
+        let realm = binding.realm
+        let expected = try NativeClerkConfiguration(publishableKey: realm.publishableKey, frontendOrigin: realm.frontendOrigin,
+            organizationID: profile.organizationID, bundleIdentifier: realm.bundleIdentifier, workspaceOrigin: realm.workspaceOrigin,
+            profile: realm.profile, storageNamespace: realm.storageNamespace)
+        guard profile.configuration == expected, profile.account.issuer == realm.frontendOrigin,
+              profile.audience == binding.audience, binding.allowsAPI(profile.apiOrigin, practiceID: profile.id) else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        return try CosmaneuraRecordNavigation(webOrigin: "", googleClientID: googleConnection?.clientID ?? "",
+            googleCallbackURI: googleConnection?.callbackURI ?? "")
+    }
     public static func load(bundle: Bundle = .main) throws -> NativePracticeBundleConfiguration? {
         guard let raw = bundle.object(forInfoDictionaryKey: "CosmasNativePracticeConnection") else { return nil }
-        guard let value = raw as? [String: Any], Set(value.keys).isSuperset(of: ["enabled", "accountOrigin", "realm", "apiOrigins"]),
-              Set(value.keys).isSubset(of: ["enabled", "accountOrigin", "realm", "apiOrigins", "registeredPracticeOrigins"]),
+        guard let value = raw as? [String: Any], let identifier = bundle.bundleIdentifier else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        return try parse(value, bundleIdentifier: identifier)
+    }
+    static func parse(_ value: [String: Any], bundleIdentifier: String) throws -> NativePracticeBundleConfiguration? {
+        guard Set(value.keys).isSuperset(of: ["enabled", "accountOrigin", "realm", "apiOrigins"]),
+              Set(value.keys).isSubset(of: ["enabled", "accountOrigin", "realm", "apiOrigins", "registeredPracticeOrigins", "googleConnection"]),
               let enabled = value["enabled"] as? Bool else { throw NativePracticeProfileError.invalidBinding }
         guard enabled else { return nil }
         guard let accountOrigin = value["accountOrigin"] as? String, let origins = value["apiOrigins"] as? [String],
@@ -88,10 +124,9 @@ public struct NativePracticeBundleConfiguration: Sendable {
               let key = realm["publishableKey"] as? String, let frontend = realm["frontendOrigin"] as? String,
               let audience = realm["audience"] as? String,
               realm["profile"] as? String == NativeIdentityProfile.operationalStaging.rawValue,
-              let namespace = realm["keychainNamespace"] as? String,
-              let identifier = bundle.bundleIdentifier else { throw NativePracticeProfileError.invalidBinding }
+              let namespace = realm["keychainNamespace"] as? String else { throw NativePracticeProfileError.invalidBinding }
         let configuration = try NativeClerkAccountConfiguration(publishableKey: key, frontendOrigin: frontend,
-            bundleIdentifier: identifier, profile: .operationalStaging, storageNamespace: namespace)
+            bundleIdentifier: bundleIdentifier, profile: .operationalStaging, storageNamespace: namespace)
         let policy: NativeRegisteredPracticeOriginPolicy
         if let raw = value["registeredPracticeOrigins"] {
             guard let name = raw as? String, let parsed = NativeRegisteredPracticeOriginPolicy(rawValue: name) else {
@@ -99,7 +134,15 @@ public struct NativePracticeBundleConfiguration: Sendable {
             }
             policy = parsed
         } else { policy = .exact }
-        return .init(binding: try .init(accountOrigin: accountOrigin, realm: configuration,
-            audience: audience, allowedAPIOrigins: Set(origins), registeredPracticeOrigins: policy))
+        let google: NativePracticeGoogleConnection?
+        if let raw = value["googleConnection"] {
+            guard let pair = raw as? [String: Any], Set(pair.keys) == ["clientID", "callbackURI"],
+                  let client = pair["clientID"] as? String, let callback = pair["callbackURI"] as? String else {
+                throw NativePracticeProfileError.invalidBinding
+            }
+            google = try .init(clientID: client, callbackURI: callback)
+        } else { google = nil }
+        return try .init(binding: .init(accountOrigin: accountOrigin, realm: configuration,
+            audience: audience, allowedAPIOrigins: Set(origins), registeredPracticeOrigins: policy), googleConnection: google)
     }
 }

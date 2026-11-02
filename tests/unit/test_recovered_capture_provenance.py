@@ -23,7 +23,7 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "5067448784d2410cd38798a516eb2bca0667442c0e776f2eb1d71f6f197cafe1",
     "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "bbd8277d2b7727103c0fd612a818e341964ac4f3f20fbc951448e0b1aaa77462",
     "clients/apple/startup-recovery/WorkspaceRecoveryState.swift": "c07f68af3d311b75890108c4fc5c04b5e38eeeda11cb0047f25424a04531cfd1",
-    "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift": "d1c4e4e4b1958aa241dbe4a3e75dc0f3cfe7208975450e7b3d72a0273231340b",
+    "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift": "c5f315aa8d19334cab8f364e0748b88fc0b4642e3904b57ea8fd1da395ac659e",
     "clients/apple/native-auth/Bridge/NativeProviderConnection.swift": "61b1c30c279a940f3ffab824a74fe21aba01cdc053d63ed59530b9d12bde2ce9",
     "clients/apple/native-auth/Bridge/NativeProviderRecordingRuntime.swift": "c0e570f99371e1fa07ccac58db1a56db0c7994323fb50d1f8af5d98d462279c4",
     "clients/apple/native-auth/Bridge/NativeSourceProofJournal.swift": "851c0e23018aab0c898bd8563108aabfcf0ce07a4925af161e6d2fbda43e7c39",
@@ -34,7 +34,7 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift": "fc1ecfc979fd051ae881ae8f8a3c7de3864ebedfb3cd40100346649bbc4ab492",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeTokenPolicy.swift": "f951145dbfabb7bc7244633b60267ddd65ba31ff378613f1fb75360f9a890298",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeWorkspaceAuth.swift": "618a81673f050b438313660a621792c88923b5c4b9c1de898daaa46821443868",
-    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/GoogleConnectionNavigationTests.swift": "6452c8a2ccd71468e09b55dbf4676883720e4e2d11827c5b2dc8226b7615a988",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/GoogleConnectionNavigationTests.swift": "f362d3569ee2c2194177d2f70e52ac908893c7fecd1a5dccbb43ee9731b1d73b",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift": "6083e5b8619d13b1014a11ca625e5a1f6860f4068c0fb24ee42caf265bd56db8",
 }
 

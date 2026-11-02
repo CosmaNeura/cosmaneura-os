@@ -50,9 +50,15 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
         guard recordNavigation == nil, bridge?.webView === webView else { throw CosmaneuraNavigationError.unavailable }
         initializeAuth()
         // A registered practice cannot borrow the compiled default practice's
-        // external callbacks. Those remain unavailable until separately pinned.
+        // callbacks. Only its exact account realm's separately pinned Google
+        // broker is eligible; the trusted-click handler still checks live auth.
         if Self.accountSetupHeld || Self.selectedPracticeProfile != nil {
-            let policy = try CosmaneuraRecordNavigation(webOrigin: "")
+            var policy = try CosmaneuraRecordNavigation(webOrigin: "")
+            if !Self.accountSetupHeld, let profile = Self.selectedPracticeProfile,
+               let configured = try? NativePracticeBundleConfiguration.load(),
+               let admitted = try? configured.registeredNavigation(for: profile) {
+                policy = admitted
+            }
             let navigation = CosmaneuraNavigationHandler(webView: webView, policy: policy) { [weak self] in self?.auth?.state() }
             try navigation.install(); recordNavigation = navigation; return
         }

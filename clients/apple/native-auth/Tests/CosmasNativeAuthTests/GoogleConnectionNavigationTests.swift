@@ -60,3 +60,66 @@ private func fullMailConsentLink(_ scope: String = fullMailConsentScope,
     #expect(!policy.accepts(fullMailConsentLink() + "&scope=duplicate"))
     #expect(!policy.accepts(fullMailConsentLink() + "&login_hint=synthetic%40example.invalid"))
 }
+
+private func practiceGoogleOptions(namespace: String = String(repeating: "b", count: 64)) -> [String: Any] {
+    let host = "invented.clerk.accounts.dev"
+    return ["enabled": true, "accountOrigin": "https://accounts.example.invalid",
+        "realm": ["publishableKey": "pk_test_" + Data((host + "$").utf8).base64EncodedString(),
+            "frontendOrigin": "https://" + host, "audience": "", "profile": "operational-staging-v1",
+            "keychainNamespace": namespace], "apiOrigins": ["https://api.a.staging.cosmas.ai"]]
+}
+
+@Test func nativePracticeGoogleConfigurationKeepsOmissionDarkAndRequiresItsExactAccountCallback() throws {
+    var value = practiceGoogleOptions()
+    let omitted = try #require(try NativePracticeBundleConfiguration.parse(value, bundleIdentifier: "com.cosmasos.beta.ios"))
+    #expect(omitted.googleConnection == nil)
+    let pair = ["clientID": "invented-practice.apps.googleusercontent.com",
+                "callbackURI": "https://accounts.example.invalid/connections/google/callback"]
+    value["googleConnection"] = pair
+    let pinned = try #require(try NativePracticeBundleConfiguration.parse(value, bundleIdentifier: "com.cosmasos.beta.ios"))
+    #expect(pinned.googleConnection?.clientID == pair["clientID"])
+    #expect(pinned.googleConnection?.callbackURI == pair["callbackURI"])
+    let invalidPairs: [[String: Any]] = [[:], ["clientID": pair["clientID"]!],
+        ["clientID": "", "callbackURI": pair["callbackURI"]!],
+        ["clientID": pair["clientID"]!, "callbackURI": "https://beta.example.invalid/connections/google/callback"],
+        ["clientID": pair["clientID"]!, "callbackURI": pair["callbackURI"]! + "?next=other"],
+        ["clientID": pair["clientID"]!, "callbackURI": pair["callbackURI"]!, "scope": "gmail.send"]]
+    for invalid in invalidPairs {
+        value["googleConnection"] = invalid
+        #expect((try? NativePracticeBundleConfiguration.parse(value, bundleIdentifier: "com.cosmasos.beta.ios")) == nil)
+    }
+}
+
+@MainActor private final class GooglePolicyProfileService: NativePracticeAccountService {
+    let binding: NativePracticeAccountServiceBinding
+    init(_ binding: NativePracticeAccountServiceBinding) { self.binding = binding }
+    func resolve(_ expectation: NativePracticeConnectionExpectation) async throws -> NativePracticeAccountServiceReceipt {
+        .init(expectation: expectation, expiresAt: Date().addingTimeInterval(30))
+    }
+}
+
+@Test @MainActor func nativeRegisteredGoogleNavigationRequiresThePinnedRealmAndKeepsSeparateReadOnlyConsent() async throws {
+    var value = practiceGoogleOptions()
+    let omitted = try #require(try NativePracticeBundleConfiguration.parse(value, bundleIdentifier: "com.cosmasos.beta.ios"))
+    let account = try NativeAccountIdentity(issuer: omitted.binding.realm.frontendOrigin, userID: "user_invented", sessionID: "sess_invented")
+    let expectation = try NativePracticeConnectionExpectation(selectionID: UUID(), nonce: UUID(), account: account,
+        organizationID: "org_invented", boxID: UUID(), apiOrigin: "https://api.a.staging.cosmas.ai")
+    let service = GooglePolicyProfileService(omitted.binding)
+    let resolver = try NativePracticeProfileResolver(binding: omitted.binding, service: service, currentAccount: { account })
+    let profile = try await resolver.resolve(expectation)
+    #expect(try !omitted.registeredNavigation(for: profile).google.enabled)
+    value["googleConnection"] = ["clientID": "invented-practice.apps.googleusercontent.com",
+        "callbackURI": "https://accounts.example.invalid/connections/google/callback"]
+    let pinned = try #require(try NativePracticeBundleConfiguration.parse(value, bundleIdentifier: "com.cosmasos.beta.ios"))
+    let policy = try pinned.registeredNavigation(for: profile)
+    #expect(policy.origin == nil && !policy.scheduling.enabled && !policy.microsoft.enabled && policy.google.enabled)
+    let client = "invented-practice.apps.googleusercontent.com", callback = "https://accounts.example.invalid/connections/google/callback"
+    #expect(policy.google.accepts(fullMailConsentLink("openid email https://www.googleapis.com/auth/gmail.metadata", clientID: client, callbackURI: callback)))
+    #expect(policy.google.accepts(fullMailConsentLink(clientID: client, callbackURI: callback)))
+    #expect(!policy.google.accepts(fullMailConsentLink(fullMailConsentScope + " https://www.googleapis.com/auth/gmail.send", clientID: client, callbackURI: callback)))
+    #expect(!policy.google.accepts(fullMailConsentLink(clientID: "invented.apps.googleusercontent.com", callbackURI: callback)))
+    #expect(!policy.google.accepts(fullMailConsentLink(clientID: client, callbackURI: "https://beta.example.invalid/connections/google/callback")))
+    var changed = practiceGoogleOptions(namespace: String(repeating: "c", count: 64)); changed["googleConnection"] = value["googleConnection"]
+    let otherRealm = try #require(try NativePracticeBundleConfiguration.parse(changed, bundleIdentifier: "com.cosmasos.beta.ios"))
+    #expect(throws: NativePracticeProfileError.invalidBinding) { try otherRealm.registeredNavigation(for: profile) }
+}

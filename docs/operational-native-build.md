@@ -38,13 +38,24 @@ Beta identity and navigation. To prepare the separately reviewed native
 practice-connection candidate, additionally supply
 `--native-practice-config /absolute/path/to/reviewed-public-native-practice.json`.
 That file contains the exact Info dictionary: `enabled` boolean,
-`accountOrigin`, `realm`, `apiOrigins`, and optional `registeredPracticeOrigins`.
+`accountOrigin`, `realm`, `apiOrigins`, and optional `registeredPracticeOrigins`
+and `googleConnection`.
 The realm contains only `publishableKey`, `frontendOrigin`, `audience`, `profile`,
 and `keychainNamespace`. The profile is `operational-staging-v1`, the audience
 is empty, the `pk_test_` public key encodes its exact Development
 `.clerk.accounts.dev` frontend, and the reviewed stable namespace is 64 lowercase
 hexadecimal characters. No credential or server secret belongs in this file.
 Callbacks and the native request origin derive from the unchanged bundle.
+
+The optional `googleConnection` is exactly `{ "clientID": "reviewed.apps.googleusercontent.com",
+"callbackURI": "<accountOrigin>/connections/google/callback" }`, using the
+separately reviewed account-service Google broker. Omit the whole pair until
+that broker is configured; empty, partial, extra or different-origin values are
+refused. This enables only the existing trusted-click Google consent opener for
+an admitted practice in that exact account realm. Its metadata/calendar and
+separately consented read-only message-body scopes keep their existing checks.
+It does not borrow Beta's callback, enable scheduling/Microsoft/clinical
+navigation, or qualify any provider connection merely by building the app.
 
 The origin policy defaults to `exact`, requiring 1–32 distinct exact HTTPS API
 origins. Explicit `synthetic-practice-uuid-staging-v1` permits the native host's
