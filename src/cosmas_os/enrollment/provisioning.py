@@ -75,6 +75,28 @@ class ClerkProvisioningPort:
         except Exception as exc:
             raise EnrollmentError("provisioning_identity_unavailable", "Practice identity setup can be retried safely.", 503) from exc
 
+    def delete_user(self, subject: str) -> None:
+        """Remove the Clerk login. Idempotent for an already-deleted user."""
+        if not isinstance(subject, str) or not subject.startswith("user_") or len(subject) > 255:
+            raise EnrollmentError("provisioning_identity_unavailable", "Practice identity setup can be retried safely.", 503)
+        try:
+            response = self.client.request(
+                "DELETE",
+                "https://api.clerk.com/v1/users/" + quote(subject, safe=""),
+                headers={"Authorization": "Bearer " + self.secret},
+            )
+            if response.status_code in {200, 204, 404}:
+                return
+            response.raise_for_status()
+        except EnrollmentError:
+            raise
+        except Exception as exc:
+            raise EnrollmentError(
+                "provisioning_identity_unavailable",
+                "Practice identity setup can be retried safely.",
+                503,
+            ) from exc
+
     def organization(self, slug: str, binding: dict, name: str, owner: str, seats: int) -> dict:
         path = "/organizations/" + quote(slug, safe="")
         value = self.request("GET", path, missing=True)

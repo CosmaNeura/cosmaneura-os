@@ -6,7 +6,7 @@ private let requestID = "00000000-0000-4000-8000-000000000001"
 
 @Suite struct DesktopAuthProtocolTests {
     @Test func acceptsOnlyClosedKnownRequests() throws {
-        for method in ["getState", "signIn", "signOut"] {
+        for method in ["getState", "signIn", "signOut", "clearAccountCredentials"] {
             let request = try DesktopAuthRequest(frame: Data("{\"id\":\"\(requestID)\",\"method\":\"\(method)\"}".utf8))
             #expect(request.method.rawValue == method)
             #expect(request.revision == nil)

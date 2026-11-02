@@ -135,6 +135,7 @@ import XCTest
     var identity: NativeAuthIdentity? = try! NativeAuthIdentity(userID: "user_one", sessionID: "sess_one", organizationID: "org_one")
     func signIn() async throws {}
     func signOut() async throws { identity = nil }
+    func clearStoredCredentials() throws {}
     func freshToken() async throws -> String? { tokens += 1; return nil }
 }
 @MainActor private final class PrivateGateBlock: NativeAuthAccessBlock {

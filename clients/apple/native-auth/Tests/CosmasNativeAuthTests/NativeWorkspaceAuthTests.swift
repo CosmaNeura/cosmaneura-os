@@ -50,6 +50,7 @@ private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:], omit:
     var tokenCalls = 0
     var signInCalls = 0
     var signOutCalls = 0
+    var clearCredentialCalls = 0
     var tokenBody: (@MainActor () async throws -> String?)?
     var signInBody: (@MainActor () async throws -> Void)?
     var signOutBody: (@MainActor () async throws -> Void)?
@@ -62,6 +63,7 @@ private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:], omit:
         if let signOutBody { try await signOutBody() }
         else { identity = nil }
     }
+    func clearStoredCredentials() throws { clearCredentialCalls += 1 }
     func freshToken() async throws -> String? {
         tokenCalls += 1
         if let tokenBody { return try await tokenBody() }
@@ -272,6 +274,15 @@ private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:], omit:
         }
         driver.signOutBody = nil
         #expect(try await restarted.signOut().phase == .signedOut)
+        #expect(!block.value)
+    }
+
+    @Test func accountDeletionClearsStoredCredentialsAfterSignOut() async throws {
+        let driver = Driver(), block = Block(); driver.identity = try identity()
+        let auth = try controller(driver, block)
+        #expect(try await auth.clearAccountCredentials().phase == .signedOut)
+        #expect(driver.signOutCalls == 1)
+        #expect(driver.clearCredentialCalls == 1)
         #expect(!block.value)
     }
 

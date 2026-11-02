@@ -99,7 +99,8 @@ export function createAuthHelperClient(child, {interactiveStartup = false,
       } else {
         result = parseAuthState(value.result);
         if ((request.method === 'signIn' && result.phase !== 'ready') ||
-            (request.method === 'signOut' && result.phase !== 'signedOut')) throw ERROR();
+            ((request.method === 'signOut' || request.method === 'clearAccountCredentials') &&
+              result.phase !== 'signedOut')) throw ERROR();
         publish(result);
       }
     } else {
@@ -147,6 +148,7 @@ export function createAuthHelperClient(child, {interactiveStartup = false,
   }
   return Object.freeze({
     getState: () => call('getState'), signIn: () => call('signIn'), signOut: () => call('signOut'),
+    clearAccountCredentials: () => call('clearAccountCredentials'),
     getToken: revision => call('getToken', revision), snapshot: () => current,
     sourceRequest: (method, payload) => {
       if (!SOURCE_METHODS.has(method) || !payload || typeof payload !== 'object' || Array.isArray(payload)) return Promise.reject(ERROR());
