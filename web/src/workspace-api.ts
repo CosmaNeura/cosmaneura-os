@@ -178,6 +178,7 @@ async function privateDraftRequest<T>(identity:AuthenticatedWorkspaceIdentity,pa
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
   let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
   const abort=new Promise<never>((_,reject)=>controller.signal.addEventListener('abort',()=>reject(new WorkspaceApiError(503)),{once:true}));
+  void abort.catch(()=>{});
   const wait=<V,>(value:Promise<V>)=>Promise.race([value,abort]);
   try {
     const base=workspaceApiBase(identity);

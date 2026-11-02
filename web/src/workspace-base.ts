@@ -15,17 +15,20 @@ export class NativeWorkspaceTransport {
   resolve(identity?:WorkspaceIdentity):ActiveNativeWorkspace|null {
     const current=this.current();
     if(!identity)return current;
-    const native='mode'in identity&&identity.mode==='clerk_jwt'?identity.nativeSession:undefined;
-    if(native&&!native.isCurrent())changed();
-    if('mode'in identity&&identity.mode==='desktop_native'&&!identity.isCurrent())changed();
     const previous=this.bindings.get(identity);
     const currentKey=current?key(current):null;
     if(previous&&previous.key!==currentKey)changed();
-    if(current){
-      const account=current.profile.session;
-      if(!native||native.revision!==current.revision||native.userId!==account.subject||
-          native.sessionId!==account.session_id||native.organizationId!==current.profile.nativeIdentity.organizationId)changed();
+    if(!current){
+      // Default requests retain their caller's session fence and error code; retired profiles cannot reach this path.
+      if(!previous)this.bindings.set(identity,{key:null});
+      return null;
     }
+    const native='mode'in identity&&identity.mode==='clerk_jwt'?identity.nativeSession:undefined;
+    if(native&&!native.isCurrent())changed();
+    if('mode'in identity&&identity.mode==='desktop_native'&&!identity.isCurrent())changed();
+    const account=current.profile.session;
+    if(!native||native.revision!==current.revision||native.userId!==account.subject||
+        native.sessionId!==account.session_id||native.organizationId!==current.profile.nativeIdentity.organizationId)changed();
     if(!previous)this.bindings.set(identity,{key:currentKey});
     return current;
   }

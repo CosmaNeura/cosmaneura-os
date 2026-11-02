@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import json
 import shlex
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -323,3 +325,172 @@ def test_database_job_queue_and_collect_preserve_digest_and_unqualified_database
     assert data["base_application_image"] == m["application_image_receipt"]["image"]
     assert data["database_job_qualified"] is False and data["private_clock_qualified"] is False
     assert data["hosted_journey_qualified"] is False and data["deployed"] is False
+
+
+def commit_allocated_fixture(c):
+    subprocess.run(["git", "add", "."], cwd=c.source, check=True)
+    subprocess.run(["git", "-c", "user.name=Synthetic operator", "-c", "user.email=operator@example.invalid",
+                    "commit", "--quiet", "-m", "synthetic allocated image fixture"], cwd=c.source, check=True)
+    c.commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=c.source).decode().strip()
+
+
+@pytest.fixture
+def allocated_case(build_case):
+    c = build_case
+    for name in (images.ALLOCATED_JOB_TARGET + "/Dockerfile.job", images.ALLOCATED_JOB_TARGET + "/job.py", *images.ALLOCATED_JOB_RUNTIME):
+        destination = c.source / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, destination)
+    commit_allocated_fixture(c)
+    return c
+
+
+def test_allocated_job_cli_prepares_exact_verified_base_minimal_source_and_closed_validation(allocated_case, monkeypatch, capsys):
+    c = allocated_case
+    base = app_receipt(c)
+    monkeypatch.setattr(sys, "argv", ["build-images.py", "prepare-job", "--source", str(c.source), "--commit", c.commit,
+                                    "--app-source-commit", c.commit, "--kind", images.ALLOCATED_JOB_KIND,
+                                    "--app-image-receipt", str(base), "--foundation", str(c.foundation),
+                                    "--secret-file", str(c.secret), "--output", str(c.output)])
+    assert images.main() == 0
+    assert json.loads(capsys.readouterr().out)["kind"] == images.ALLOCATED_JOB_KIND
+    manifest, job = images.load_prepared(c.output, images.ALLOCATED_JOB_KIND)
+    context = c.output / images.ALLOCATED_JOB_KIND
+    target = images.ALLOCATED_JOB_TARGET
+    assert {str(path.relative_to(context)) for path in context.rglob("*") if path.is_file()} == {
+        ".dockerignore", images.RECIPE, target + "/Dockerfile.job", target + "/job.py"}
+    for name in ("Dockerfile.job", "job.py"):
+        assert (context / target / name).read_bytes() == (c.source / target / name).read_bytes()
+    expected_hashes = {images.ALLOCATED_JOB_MODULE: hashlib.sha256((c.source / target / "job.py").read_bytes()).hexdigest()}
+    expected_hashes.update({"/app/" + path: hashlib.sha256((c.source / path).read_bytes()).hexdigest() for path in images.ALLOCATED_JOB_RUNTIME})
+    assert job["validation_module_sha256"] == expected_hashes
+    recipe = json.loads((context / images.RECIPE).read_text())
+    args = shlex.split(recipe["steps"][0]["build"])
+    assert args[args.index("-f") + 1] == target + "/Dockerfile.job"
+    assert args[args.index("--build-arg") + 1] == "APP_IMAGE=" + manifest["application_image_receipt"]["image"]
+    assert args.count("--build-arg") == 1
+    assert [step["id"] for step in recipe["steps"]] == ["build", "validate", "scan", "push"]
+    assert recipe["steps"][2]["when"] == ["validate"] and recipe["steps"][3]["when"] == ["scan"]
+    assert "--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1" in recipe["steps"][2]["cmd"]
+    code = shlex.split(recipe["steps"][1]["cmd"])[-1]
+    compile(code, "<allocated job image validation>", "exec")
+    assert "os.getuid()==10001" in code and "f17d7eec-39ee-5d1e-8071-0d94453d91bd" in code
+    assert manifest["expected_schema_revision"] in code and "for operation in ('migrate','reserve')" in code
+    assert "module.DATABASE" not in code and "module.LOGINS" not in code and "module.bootstrap" not in code
+    assert "invented-reference-never-upload-this-file" not in "".join(path.read_text() for path in context.rglob("*") if path.is_file())
+    assert manifest["allocated_workspace_job_qualified"] is False and manifest["workspace_ready"] is False
+
+
+@pytest.mark.parametrize("operation", ["migrate", "reserve"])
+def test_allocated_job_real_entrypoints_refuse_missing_config_before_database_or_provider_calls(allocated_case, monkeypatch, capsys, operation):
+    spec = importlib.util.spec_from_file_location("synthetic_closed_allocated_job", allocated_case.source / images.ALLOCATED_JOB_TARGET / "job.py")
+    job = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(job)
+    for name in ("prepare_beta_database", "create_engine", "persist_receipt", "Settings"):
+        monkeypatch.setattr(job, name, lambda *args, **kwargs: pytest.fail("closed entrypoint reached database or provider work"))
+    monkeypatch.setattr(job.os, "environ", {})
+    monkeypatch.setattr(sys, "argv", [str(spec.origin), operation])
+    assert job.main() == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and json.loads(captured.err) == {"error": "allocated_workspace_job_failed", "class": "ValueError"}
+
+
+@pytest.mark.parametrize("change", ["unscanned", "foreign-image", "wrong-source"])
+def test_allocated_job_denies_unverified_or_mixed_api_receipts(allocated_case, change):
+    c = allocated_case
+    receipt = app_receipt(c)
+    data = json.loads(receipt.read_text())
+    if change == "unscanned":
+        data["trivy_passed"] = False
+    elif change == "foreign-image":
+        data["image"] = "existingbeta.azurecr.io/enrollment/api@sha256:" + "a" * 64
+    else:
+        data["source_commit"] = "a" * 40
+    private(receipt, data)
+    with pytest.raises(ValueError, match="application receipt"):
+        images.prepare_job(c.source, c.commit, images.ALLOCATED_JOB_KIND, c.foundation, receipt, c.commit, [c.secret], c.output)
+    assert not c.output.exists()
+
+
+@pytest.mark.parametrize("change", ["dockerfile", "schema", "missing-runtime"])
+def test_allocated_job_rejects_unpinned_layout_schema_or_incomplete_runtime(allocated_case, change):
+    c = allocated_case
+    if change == "dockerfile":
+        path = c.source / images.ALLOCATED_JOB_TARGET / "Dockerfile.job"
+        path.write_text(path.read_text() + "RUN echo unreviewed\n")
+        message = "unchanged one-purpose"
+    elif change == "schema":
+        path = c.source / "src/cosmas_os/runtime_schema.py"
+        path.write_text(path.read_text() + "\nEXPECTED_SCHEMA_REVISION = get_unreviewed_revision()\n")
+        message = "one exact committed runtime schema"
+    else:
+        (c.source / "src/cosmas_os/application/practice_setup.py").unlink()
+        message = "complete committed job"
+    commit_allocated_fixture(c)
+    with pytest.raises(ValueError, match=message):
+        prepare_job(c, images.ALLOCATED_JOB_KIND)
+    assert not c.output.exists()
+
+
+@pytest.mark.parametrize("change", ["receipt", "context"])
+def test_allocated_job_changed_authority_or_context_stops_before_azure(allocated_case, monkeypatch, change):
+    c = allocated_case
+    prepare_job(c, images.ALLOCATED_JOB_KIND)
+    if change == "receipt":
+        path = c.public.parent / "api-image-receipt.json"
+        data = json.loads(path.read_text())
+        data["reference_marker"] = "changed"
+        private(path, data)
+    else:
+        path = c.output / images.ALLOCATED_JOB_KIND / images.ALLOCATED_JOB_TARGET / "job.py"
+        path.write_text(path.read_text() + "\n# Changed after preparation.\n")
+    monkeypatch.setattr(images, "azure", lambda *args: pytest.fail("changed prepared authority reached Azure"))
+    with pytest.raises(ValueError, match="changed"):
+        images.queue(c.output, images.ALLOCATED_JOB_KIND)
+
+
+def test_allocated_job_unknown_queue_preserves_intent_and_never_duplicates(allocated_case, monkeypatch):
+    c = allocated_case
+    prepare_job(c, images.ALLOCATED_JOB_KIND)
+    calls = fake_azure(c, monkeypatch, output=b"", error=b"unrecognized response")
+    with pytest.raises(ValueError, match="reconciliation"):
+        images.queue(c.output, images.ALLOCATED_JOB_KIND)
+    assert (c.output / (images.ALLOCATED_JOB_KIND + "-queue-intent.json")).exists()
+    assert not (c.output / (images.ALLOCATED_JOB_KIND + "-queued.json")).exists()
+    with pytest.raises(FileExistsError):
+        images.queue(c.output, images.ALLOCATED_JOB_KIND)
+    assert sum(command[:2] == ["acr", "run"] for command in calls) == 1
+
+
+@pytest.mark.parametrize("status,digest_matches", [("Running", True), ("Succeeded", True), ("Succeeded", False)])
+def test_allocated_job_collect_requires_real_matching_digest_and_keeps_workspace_unqualified(allocated_case, monkeypatch, status, digest_matches):
+    c = allocated_case
+    prepare_job(c, images.ALLOCATED_JOB_KIND)
+    fake_azure(c, monkeypatch)
+    images.queue(c.output, images.ALLOCATED_JOB_KIND)
+    manifest, job = images.load_prepared(c.output, images.ALLOCATED_JOB_KIND)
+    repository, tag = job["image_tag"].split("/", 1)[1].rsplit(":", 1)
+    digest = "sha256:" + "c" * 64
+    def run(command, timeout=60):
+        if command[:3] == ["acr", "task", "show-run"]:
+            data = {"runId": "cjsynthetic1", "status": status, "outputImages": [{"registry": manifest["foundation"]["registry_server"],
+                    "repository": repository, "tag": tag, "digest": digest if digest_matches else "sha256:" + "d" * 64}]}
+        elif command[:3] == ["acr", "repository", "show"]:
+            data = {"digest": digest}
+        else:
+            pytest.fail("unexpected Azure operation")
+        return SimpleNamespace(stdout=json.dumps(data).encode())
+    monkeypatch.setattr(images, "azure", run)
+    receipt = c.output / "allocated-job-observation.json"
+    if not digest_matches:
+        with pytest.raises(ValueError, match="disagree"):
+            images.collect(c.output, images.ALLOCATED_JOB_KIND, receipt)
+        assert not receipt.exists()
+    else:
+        assert images.collect(c.output, images.ALLOCATED_JOB_KIND, receipt)["pushed_verified"] is (status == "Succeeded")
+        data = json.loads(receipt.read_text())
+        assert data["base_application_image"] == manifest["application_image_receipt"]["image"]
+        assert data["application_image_receipt_sha256"] == manifest["application_image_receipt"]["sha256"]
+        assert data["allocated_workspace_job_qualified"] is False and data["workspace_ready"] is False
+        assert data["expected_schema_revision"] == manifest["expected_schema_revision"]
+        assert data["deployed"] is False and data["hosted_journey_qualified"] is False

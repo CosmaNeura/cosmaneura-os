@@ -665,7 +665,7 @@ def test_two_real_databases_private_jobs_then_signed_owner_setup_and_trial(
                 patch.setattr(api, "settings", runtime)
                 patch.setattr(api, "SessionLocal", sessions)
                 patch.setattr(api, "_clerk_verifier", lambda *_args, verifier=verifier: verifier)
-                patch.setattr(api, "_runtime_admission_adapter", lambda adapter=adapter: adapter)
+                patch.setattr(api, "_runtime_admission_adapter", lambda origins=None, adapter=adapter: adapter)
                 from cosmas_os.application import enrollment_access
 
                 patch.setattr(
