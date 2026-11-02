@@ -3,8 +3,10 @@ import {isPackagedWorkspaceDocument} from './workspace-document.mjs';
 
 export const AUTH_CHANNELS = Object.freeze({getState: 'cosmas:workspace-auth:state:v1',
   signIn: 'cosmas:workspace-auth:sign-in:v1', signOut: 'cosmas:workspace-auth:sign-out:v1',
+  clearAccountCredentials: 'cosmas:workspace-auth:clear-account-credentials:v1',
   changed: 'cosmas:workspace-auth:changed:v1'});
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const AUTH_METHODS = Object.freeze(['getState', 'signIn', 'signOut', 'clearAccountCredentials']);
 const unavailable = () => new Error('Secure session operation unavailable');
 
 export function installAuthIpc(ipcMain, renderer, auth) {
@@ -16,7 +18,7 @@ export function installAuthIpc(ipcMain, renderer, auth) {
         event.senderFrame !== renderer.mainFrame || !event.senderFrame ||
         !isPackagedWorkspaceDocument(event.senderFrame.url)) throw unavailable();
   }
-  for (const method of ['getState', 'signIn', 'signOut']) {
+  for (const method of AUTH_METHODS) {
     ipcMain.handle(AUTH_CHANNELS[method], async (event, payload) => {
       let id;
       try {
@@ -39,6 +41,6 @@ export function installAuthIpc(ipcMain, renderer, auth) {
   return () => {
     if (disposed) return;
     disposed = true; remove();
-    for (const method of ['getState', 'signIn', 'signOut']) ipcMain.removeHandler(AUTH_CHANNELS[method]);
+    for (const method of AUTH_METHODS) ipcMain.removeHandler(AUTH_CHANNELS[method]);
   };
 }
