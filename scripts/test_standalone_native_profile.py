@@ -43,12 +43,16 @@ class StandaloneNativeProfile(unittest.TestCase):
             "publishableKey": "pk_live_" + base64.b64encode(b"identity.example.invalid$").decode(),
             "organizationId": "org_invented_standalone", "audience": "cosmabot-standalone-api",
         }
+        independent = self.feature_profile == "independent-beta-v1"
+        core_origin = "https://staging-app.cosmaneura.com" if independent else ""
+        uploads = ["https://uploads.example.invalid"] if independent else []
         result = subprocess.run([
             "node", "--input-type=module", "-e",
             "const m=await import(process.argv[1]);process.stdout.write(JSON.stringify(m.workspaceIdentityInputs("
-            "JSON.parse(process.argv[2]),{webOrigin:'https://workspace.example.invalid',coreWebOrigin:'',"
-            "captureUploadOrigins:[],dataMode:'synthetic',featureProfile:process.argv[3]})));",
+            "JSON.parse(process.argv[2]),{webOrigin:'https://workspace.example.invalid',coreWebOrigin:process.argv[4],"
+            "captureUploadOrigins:JSON.parse(process.argv[5]),dataMode:'synthetic',featureProfile:process.argv[3]})));",
             (ROOT / "scripts/prepare-workspace-identity.mjs").as_uri(), json.dumps(self.identity), self.feature_profile,
+            core_origin, json.dumps(uploads),
         ], capture_output=True, text=True, check=True)
         files = json.loads(result.stdout)
         for client in ("desktop", "apple"):
@@ -93,6 +97,10 @@ class StandaloneNativeProfile(unittest.TestCase):
         self.assertFalse(output.exists())
 
     def test_both_native_preflights_reject_platform_or_capture_origin(self):
+        # Plain standalone-practice stays capture-dark. Independent-beta uses Core capture
+        # and is covered by IndependentAppleProfile / IndependentDesktopProfile instead.
+        if self.feature_profile != "standalone-practice-v1":
+            return
         output = self.root / "never-created"
         for extra in (["--cosmaneura-web-origin", "https://app.cosmaneura.com"],
                       ["--capture-upload-origin", "https://uploads.example.invalid"], ["--microphone-capture"]):

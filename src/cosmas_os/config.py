@@ -700,7 +700,9 @@ class Settings(BaseSettings):
             "workspace_draft_recovery_required"}
         if real_clerk:
             enabled_allowlist.update({"workspace_google_connection_enabled", "workspace_google_message_enabled",
-                                      "workspace_google_calendar_enabled"})
+                                      "workspace_google_calendar_enabled",
+                                      # Independent-beta launch: Chief tools + Core note capture only.
+                                      "workspace_agent_tools_enabled", "workspace_capture_notes_enabled"})
         enabled_allowlist.update({"workspace_hosted_enabled", "workspace_apple_hosted_transport_enabled",
             "workspace_desktop_hosted_transport_enabled"} if real_clerk else {
             "workspace_apple_local_transport_enabled", "workspace_desktop_local_transport_enabled"})
@@ -708,16 +710,29 @@ class Settings(BaseSettings):
             if name.endswith("_enabled") and name not in enabled_allowlist and getattr(self, name):
                 errors.append("Standalone external features and background workers must remain disabled")
                 break
+        # Core capture fields are admitted only with WORKSPACE_CAPTURE_BACKEND=core.
+        # Every other core_/azure_/scheduling_/microsoft address stays refused.
+        core_capture_fields = {
+            "core_capture_origin", "core_capture_scope",
+            "core_capture_managed_identity_client_id", "core_web_origin",
+        }
         empty_prefixes = ("core_", "azure_", "microsoft_connection_",
             "scheduling_", "managed_services_config_")
         for name in type(self).model_fields:
             value = getattr(self, name)
+            if name in core_capture_fields:
+                if value and self.workspace_capture_backend != "core":
+                    errors.append("Standalone Core capture fields require WORKSPACE_CAPTURE_BACKEND=core")
+                    break
+                continue
             reviewed_optional = real_clerk and name in {"workspace_llm_api_key", "google_connection_encryption_key"}
             if ((name.startswith(empty_prefixes) or name.endswith("_api_key")
                  or name.endswith("_encryption_key")) and value and not reviewed_optional):
                 errors.append("Standalone cannot contain external service addresses or credentials")
                 break
-        if (self.workspace_capture_backend != "disabled" or self.compact_web_root
+        if self.workspace_capture_backend == "core":
+            errors.extend(self._standalone_core_capture_errors())
+        elif (self.workspace_capture_backend != "disabled" or self.compact_web_root
                 or self.workspace_native_synthetic_enabled):
             errors.append("Standalone capture and alternate execution paths must be disabled")
         if real_clerk:
@@ -728,6 +743,31 @@ class Settings(BaseSettings):
                     for name in type(self).model_fields if name.startswith("google_connection_"))):
             errors.append("Offline standalone models and Google credentials must remain disabled")
         return errors
+
+    def _standalone_core_capture_errors(self) -> list[str]:
+        """Independent-beta Core capture: reviewed origin + exact scope/MI only.
+
+        Do not call workspace_capture_available here: that property reads
+        workspace_available, which re-enters standalone configuration errors.
+        """
+        # Observed Core web/API origin: docs/beta/WEB_RELEASE.md:171-176.
+        reviewed = "https://staging-app.cosmaneura.com"
+        try:
+            UUID(self.core_capture_managed_identity_client_id)
+            origin = urlparse(self.core_capture_origin)
+            valid_identity = origin.port in (None, 443) and not any(c.isspace() for c in self.core_capture_origin)
+        except ValueError:
+            valid_identity = False
+        if (not valid_identity or not self._is_exact_https_origin(self.core_capture_origin)
+                or not self.core_capture_scope.startswith("api://")
+                or not self.core_capture_scope.endswith("/.default")
+                or any(c.isspace() for c in self.core_capture_scope)):
+            return ["Standalone Core capture requires exact CORE_CAPTURE_ORIGIN, SCOPE and managed identity"]
+        if self.core_capture_origin != reviewed or self.core_web_origin != reviewed:
+            return ["Standalone Core capture requires the reviewed staging-app.cosmaneura.com origin"]
+        if not self.workspace_capture_notes_enabled or not self.workspace_agent_tools_enabled:
+            return ["Standalone Core capture requires capture notes and agent tools together"]
+        return []
 
     def _standalone_model_errors(self) -> list[str]:
         if self.workspace_llm_backend == "disabled":

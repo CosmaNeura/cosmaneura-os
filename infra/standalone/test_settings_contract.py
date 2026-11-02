@@ -38,7 +38,10 @@ if(process.argv[2]==='features'){
   input.resource_scope='owned-cosmabot-vm-instance';input.web_origin='https://'+webHost;input.api_origin='https://api.'+webHost;
   input.identity.apiOrigin=input.api_origin;input.tls.hostnames=[webHost,'api.'+webHost];
   input.beta_features={model:{origin:'https://invented-owned-chief.openai.azure.com',endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'},
-    google:{client_id:'invented-client.apps.googleusercontent.com',callback_uri:input.api_origin+'/connections/google/callback',return_origin:input.web_origin}};
+    google:{client_id:'invented-client.apps.googleusercontent.com',callback_uri:input.api_origin+'/connections/google/callback',return_origin:input.web_origin},
+    capture:{origin:'https://staging-app.cosmaneura.com',web_origin:'https://staging-app.cosmaneura.com',
+      scope:'api://invented-core-audience/.default',managed_identity_client_id:'00000000-0000-4000-8000-0000000000aa',
+      upload_origins:['https://uploads.example.invalid']}};
 }
 const files=render(input);console.log(JSON.stringify({environment:files['api-public.json'],contract:files['host-preparation.json']}));
 """
@@ -104,7 +107,10 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
                 self.assertTrue(settings.workspace_google_message_available)
                 self.assertTrue(settings.workspace_google_calendar_available)
                 self.assertFalse(settings.workspace_core_connection_available)
-                self.assertFalse(settings.workspace_agent_tools_enabled)
+                self.assertTrue(settings.workspace_agent_tools_enabled)
+                self.assertTrue(settings.workspace_capture_available)
+                self.assertTrue(settings.workspace_capture_notes_enabled)
+                self.assertEqual(settings.core_capture_origin, "https://staging-app.cosmaneura.com")
                 self.assertFalse(settings.workspace_routines_enabled)
 
     def test_beta_host_stays_standalone_synthetic(self):

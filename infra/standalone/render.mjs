@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {resolve,join} from 'node:path';
 import {workspaceIdentityInputs} from '../../scripts/prepare-workspace-identity.mjs';
+import {REVIEWED_CORE_CAPTURE_ORIGIN} from '../../clients/shared/beta-feature-profile.mjs';
 
 export class Refused extends Error {}
 const refuse=code=>{throw new Refused(code);};
@@ -27,9 +28,14 @@ function origin(value,ownedStaging=false){
   return url.hostname;
 }
 
+function exactHttpsOrigin(value){
+  let url;try{url=new URL(value);}catch{return false;}
+  return typeof value==='string'&&url.origin===value&&url.protocol==='https:'&&!url.port;
+}
+
 function betaFeatures(value){
-  if(value.beta_features===undefined)return {profile:'standalone-practice-v1',model:null,google:null};
-  const features=value.beta_features;object(features,['model','google'],'public_beta_features_shape');
+  if(value.beta_features===undefined)return {profile:'standalone-practice-v1',model:null,google:null,capture:null};
+  const features=value.beta_features;object(features,['model','google','capture'],'public_beta_features_shape');
   if(features.model!==null){
     object(features.model,['origin','endpoint','deployment'],'public_model_shape');
     const model=features.model;
@@ -43,6 +49,26 @@ function betaFeatures(value){
       !/^[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com$/.test(features.google.client_id)||
       features.google.callback_uri!==value.api_origin+'/connections/google/callback'||
       features.google.return_origin!==value.web_origin)refuse('matching_google_public_contract_required');
+  }
+  // Independent-beta (Google on) requires Core capture. Standalone-practice keeps capture null.
+  if(features.google===null){
+    if(features.capture!==null)refuse('core_capture_requires_independent_beta');
+  }else{
+    object(features.capture,['origin','web_origin','scope','managed_identity_client_id','upload_origins'],'public_core_capture_shape');
+    const capture=features.capture;
+    // Reviewed Core origin only: docs/beta/WEB_RELEASE.md:171-176.
+    if(capture.origin!==REVIEWED_CORE_CAPTURE_ORIGIN||capture.web_origin!==REVIEWED_CORE_CAPTURE_ORIGIN)
+      refuse('reviewed_core_capture_origin_required');
+    if(typeof capture.scope!=='string'||!capture.scope.startsWith('api://')||!capture.scope.endsWith('/.default')||
+      /\s/.test(capture.scope)||capture.scope.length<16||capture.scope.length>256)
+      refuse('exact_core_capture_scope_required');
+    if(typeof capture.managed_identity_client_id!=='string'||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(capture.managed_identity_client_id))
+      refuse('exact_core_capture_managed_identity_required');
+    if(!Array.isArray(capture.upload_origins)||!capture.upload_origins.length||capture.upload_origins.length>4||
+      new Set(capture.upload_origins).size!==capture.upload_origins.length||
+      !capture.upload_origins.every(exactHttpsOrigin))
+      refuse('exact_capture_upload_origins_required');
   }
   return {...features,profile:features.google?'independent-beta-v1':'standalone-practice-v1'};
 }
@@ -73,7 +99,9 @@ export function validateInput(value){
   // Audience identifies the reviewed receiving application. The exact issuer,
   // organization and Box bind the practice; storage remains instance-specific.
   // This existing generator owns public identity validation and every client flag.
-  workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,coreWebOrigin:'',captureUploadOrigins:[],
+  workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,
+    coreWebOrigin:features.capture?features.capture.web_origin:'',
+    captureUploadOrigins:features.capture?features.capture.upload_origins:[],
     dataMode:'synthetic',featureProfile:features.profile});
   object(value.ports,['api','postgres'],'ports_shape');
   if(Object.values(value.ports).some(port=>!Number.isInteger(port)||port<1024||port>65535)||
@@ -118,7 +146,9 @@ export function render(input){
   const config=ownedVm?parent+'/config':`/etc/cosmabot-standalone/${id}`,release=ownedVm?parent+'/release':`/opt/cosmabot-standalone/${id}`,proxyRoot=ownedVm?parent+'/proxy':`/var/lib/cosmabot-https/${id}`;
   const apiUser=`cosmabot-api-${short}`,pgUser=`cosmabot-pg-${short}`,proxyUser=`cosmabot-web-${short}`;
   const dbName=`cosmabot_standalone_${id.replaceAll('-','')}`,dbRole=`cosmabot_runtime_${short}`;
-  const files=workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,coreWebOrigin:'',captureUploadOrigins:[],
+  const files=workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,
+    coreWebOrigin:features.capture?features.capture.web_origin:'',
+    captureUploadOrigins:features.capture?features.capture.upload_origins:[],
     dataMode:'synthetic',featureProfile:features.profile});
   const parties=[value.web_origin,'app://cosmas','capacitor://localhost'].join(',');
   const environment={...Object.fromEntries(disabledFlags.map(name=>[name,'false'])),
@@ -130,6 +160,8 @@ export function render(input){
     WORKSPACE_HOSTED_ENABLED:'true',WORKSPACE_DRAFT_RECOVERY_REQUIRED:'true',
     WORKSPACE_APPLE_HOSTED_TRANSPORT_ENABLED:'true',WORKSPACE_DESKTOP_HOSTED_TRANSPORT_ENABLED:'true',
     WORKSPACE_CAPTURE_BACKEND:'disabled',WORKSPACE_LLM_BACKEND:'disabled',WORKSPACE_LLM_ENDPOINT:'',
+    // Compliance stays closed on every launch profile; no render path can enable these.
+    REAL_PATIENT_RECORDING_ENABLED:'false',COSMAS_EHR_REAL_DATA_ENABLED:'false',WORKSPACE_ENROLLMENT_MANAGED:'false',
     CORE_WEB_ORIGIN:'',CORE_CONNECTION_TENANT_REF:'',CORE_CAPTURE_ORIGIN:'',CORE_CAPTURE_SCOPE:'',
     CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID:'',CORE_SESSION_PREP_SCOPE:'',CORE_SESSION_PREP_MANAGED_IDENTITY_CLIENT_ID:'',
     CLERK_SESSION_POLICY:value.identity_policy,CLERK_ISSUER:value.identity.frontendOrigin,
@@ -141,6 +173,12 @@ export function render(input){
   if(features.google)Object.assign(environment,{WORKSPACE_GOOGLE_CONNECTION_ENABLED:'true',WORKSPACE_GOOGLE_MESSAGE_ENABLED:'true',
     WORKSPACE_GOOGLE_CALENDAR_ENABLED:'true',GOOGLE_CONNECTION_CLIENT_ID:features.google.client_id,
     GOOGLE_CONNECTION_CALLBACK_URI:features.google.callback_uri,GOOGLE_CONNECTION_RETURN_ORIGIN:features.google.return_origin});
+  if(features.capture)Object.assign(environment,{
+    WORKSPACE_CAPTURE_BACKEND:'core',WORKSPACE_CAPTURE_NOTES_ENABLED:'true',WORKSPACE_AGENT_TOOLS_ENABLED:'true',
+    CORE_CAPTURE_ORIGIN:features.capture.origin,CORE_WEB_ORIGIN:features.capture.web_origin,
+    CORE_CAPTURE_SCOPE:features.capture.scope,
+    CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID:features.capture.managed_identity_client_id,
+  });
   const contract={schema:'cosmabot-standalone-host-preparation/v1',state:'PREPARATION_ONLY_STARTUP_HELD',
     instance_id:id,box_id:value.box_id,source_commit:value.source_commit,resource_scope:value.resource_scope,
     deployment_authorized:false,resource_ownership_verified:false,account_mapping_verified:false,
@@ -188,10 +226,26 @@ export function render(input){
     external_workers:[],platform_connections:[],automatic_migrations:false,automatic_seed:false};
   if(value.beta_features!==undefined){
     contract.feature_profile=features.profile;
-    contract.optional_runtime_features={model:!!features.model,google:!!features.google,live_provider_acceptance:false,
-      secrets_in_package:false,practice_records:'invented synthetic records',google_content:'actual consenting account content; never relabelled as invented'};
+    contract.optional_runtime_features={model:!!features.model,google:!!features.google,core_capture:!!features.capture,
+      live_provider_acceptance:false,secrets_in_package:false,practice_records:'invented synthetic records',
+      google_content:'actual consenting account content; never relabelled as invented',
+      real_patient_recording:'off; Box switch default-off and cannot be enabled by this profile'};
     if(features.model)contract.private_environment.exact_names.push('WORKSPACE_LLM_API_KEY');
     if(features.google)contract.private_environment.exact_names.push('GOOGLE_CONNECTION_CLIENT_SECRET','GOOGLE_CONNECTION_ENCRYPTION_KEY');
+    if(features.capture){
+      // docs/operational-service-startup.md:60-61 — AgentApi.Access on Core API app.
+      // Not applied from this package; John approved use with no Cosmas changes.
+      contract.core_capture_permission={
+        identity:'CosmaBot runtime user-assigned managed identity (CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID)',
+        identity_source:'infra/beta/vm/foundation/outputs.tf:16 (runtime_client_id) or infra/beta/environment/outputs.tf:222',
+        app_role:'AgentApi.Access',
+        scope_field:'CORE_CAPTURE_SCOPE',
+        scope_pattern:'api://<Core audience>/.default',
+        evidence:'docs/operational-service-startup.md:60-61',
+        azure_apply_from_this_package:false,
+        cosmas_core_change_required:false,
+      };
+    }
   }
   if(ownedVm){
     contract.resource_identity.host_name='vm-cosmabot-staging-eus2-lab01';
@@ -221,10 +275,22 @@ export function render(input){
       firewall.api_egress.push({protocol:'https',hostname,tcp_port:443,redirects_allowed:false});
     firewall.browser_oauth_origins=['https://accounts.google.com'];
   }
+  if(features.capture){
+    // Core capture uses ManagedIdentityCredential → IMDS, then HTTPS to Core only.
+    firewall.api_egress.push({protocol:'https',hostname:new URL(features.capture.origin).hostname,tcp_port:443,redirects_allowed:false});
+    firewall.api_egress.push({protocol:'http',hostname:'169.254.169.254',tcp_port:80,path:'/metadata/identity/oauth2/token',
+      purpose:'user-assigned managed identity token for CORE_CAPTURE_SCOPE only'});
+    firewall.deny=firewall.deny.filter(item=>item!=='*.cosmaneura.com');
+    firewall.deny.push('*.cosmaneura.com except the exact reviewed Core capture origin');
+  }
   if(value.beta_features!==undefined){
-    firewall.dns='Only the exact configured Clerk/model and documented Google API hostnames; qualify resolver enforcement separately.';
+    firewall.dns=features.capture
+      ?'Only the exact configured Clerk/model/Google API hostnames plus the reviewed Core capture origin; qualify resolver enforcement separately.'
+      :'Only the exact configured Clerk/model and documented Google API hostnames; qualify resolver enforcement separately.';
     contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
-      'Host firewall and DNS qualification: only declared Clerk, optional own model and Google API egress; no metadata or other providers':item);
+      (features.capture
+        ?'Host firewall and DNS qualification: only declared Clerk, optional own model, Google API, reviewed Core capture origin and IMDS for that managed identity; no other providers'
+        :'Host firewall and DNS qualification: only declared Clerk, optional own model and Google API egress; no metadata or other providers'):item);
   }
   if(ownedVm){
     firewall.dedicated_host_required=false;firewall.existing_owned_cosmabot_host_required=true;
