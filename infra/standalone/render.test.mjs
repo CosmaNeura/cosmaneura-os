@@ -23,6 +23,16 @@ test('dedicated host preparation binds every client, database, service, TLS and 
   assert.equal(contract.database.pre_migrated_required,true);assert.equal(contract.database.initialization_service,false);
   assert.match(contract.resource_identity.database,/^cosmabot_standalone_[a-f0-9]{32}$/);
   assert.match(contract.resource_identity.database_role,/^cosmabot_runtime_[a-f0-9]{12}$/);
+  assert.match(contract.resource_identity.database_migration_role,/^cbpg_[a-f0-9]{12}$/);
+  assert.equal(contract.database.migration_role,contract.resource_identity.database_migration_role);
+  assert.equal(contract.database.role,contract.resource_identity.database_role);
+  assert.notEqual(contract.database.migration_role,contract.database.role);
+  assert.equal(contract.database.migrate_entrypoint,'infra/standalone/package/migrate.py');
+  assert.match(contract.database.migrate_roles,/derived from instance_id/);
+  assert.equal(contract.database.migration_role.startsWith('cbpg_'),true);
+  assert.equal(contract.database.role.startsWith('cosmabot_runtime_'),true);
+  assert.equal(contract.database.migration_role.includes(sample.instance_id.replaceAll('-','').slice(0,12)),true);
+  assert.equal(contract.database.role.includes(sample.instance_id.replaceAll('-','').slice(0,12)),true);
   for(const key of ['standalone_root','postgres_root','proxy_root','configuration_root','release_root'])
     assert.ok(contract.resource_identity[key].endsWith('/'+sample.instance_id));
   assert.equal(env.COSMAS_ENV,'standalone_clerk_synthetic');assert.equal(env.WORKSPACE_HOSTED_ENABLED,'true');
@@ -67,6 +77,8 @@ test('dedicated host preparation binds every client, database, service, TLS and 
   assert.equal(contract.tls.private_key_permissions.group,contract.resource_identity.proxy_user);
   assert.equal(contract.tls.private_key_permissions.api_user_access,false);
   assert.doesNotMatch(files['pg_hba.review.conf'],/\btrust\b/);
+  assert.match(files['pg_hba.review.conf'],new RegExp(`host ${contract.resource_identity.database} ${contract.database.role} 127\\.0\\.0\\.1/32 scram-sha-256`));
+  assert.match(files['pg_hba.review.conf'],new RegExp(`host ${contract.resource_identity.database} ${contract.database.migration_role} 127\\.0\\.0\\.1/32 scram-sha-256`));
 });
 
 test('staging session policy must be explicitly matched to existing development client identity; live readiness stays unqualified',()=>{
