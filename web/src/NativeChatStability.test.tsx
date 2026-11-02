@@ -296,6 +296,47 @@ it('releases native conversation containment for a saved transcription review an
   expect(host.querySelector('.saved-recording-flow')).toBe(flow);
 });
 
+
+it('does not let a deferred saved-recording scroll run after notebook containment returns',async()=>{
+  const flow=host.querySelector<HTMLDivElement>('.saved-recording-flow')!,scroll=vi.fn();flow.scrollIntoView=scroll;
+  await click('Home');await click('Start recording');await click('Finish synthetic saved recording');
+  await ready(()=>expect(host.querySelector('.workspace-notebook-body[data-native-chat="false"]')).toBeTruthy());
+  await ready(()=>expect(scroll).toHaveBeenCalledExactlyOnceWith({block:'start'}));
+  await click('Open synthetic saved transcript');
+  await ready(()=>expect(host.querySelector('[aria-label="Saved recording transcription"]')).toBeTruthy());
+  await click('Open saved visit notebook');
+  await type('Keep typing after a deferred scroll');
+  const realRaf=window.requestAnimationFrame.bind(window);
+  const realCancel=window.cancelAnimationFrame.bind(window);
+  const pending=new Map<number,FrameRequestCallback>();
+  const released:FrameRequestCallback[]=[];
+  let nextId=0;
+  // Model a frame that has already left the cancellable table before cleanup runs:
+  // cancel(id) only clears the table, so a released callback can still fire later.
+  window.requestAnimationFrame=(cb:FrameRequestCallback)=>{
+    const id=++nextId;
+    pending.set(id,cb);
+    realRaf(()=>{const current=pending.get(id);if(!current)return;pending.delete(id);released.push(current);});
+    return id;
+  };
+  window.cancelAnimationFrame=(id:number)=>{pending.delete(id);};
+  try{
+    await click('Back to Scribe');
+    // Let the Back-to-Scribe frame leave the cancellable table before notebook opens.
+    await act(async()=>{await new Promise<void>(resolve=>realRaf(()=>resolve()));});
+    const restoredScrolls=scroll.mock.calls.length;
+    await click('Open notebook');
+    await click('Conversation view');
+    await type('Keep typing after a deferred scroll, still open');
+    expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();
+    expect(host.querySelector<HTMLElement>('.saved-recording-flow')?.hidden).toBe(true);
+    await act(async()=>{while(released.length){const next=released.shift()!;next(performance.now());}});
+    expect(scroll).toHaveBeenCalledTimes(restoredScrolls);
+  }finally{
+    window.requestAnimationFrame=realRaf;window.cancelAnimationFrame=realCancel;
+  }
+});
+
 it.each(['saved','unconfirmed'] as const)('reveals the imported note only after its exact Scribe save is %s',async outcome=>{
   await click('Home');await click('Start recording');await click('Finish synthetic saved recording');await click('Open synthetic saved transcript');
   const review=host.querySelector('[aria-label="Saved recording transcription"]')!;
