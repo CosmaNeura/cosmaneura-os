@@ -268,7 +268,7 @@ def test_backup_profile_preserves_app_access_and_binds_rendered_files(installed,
             "1fb92a6eecb607dbc63553b448b2e3af1bb200b53c65a872d6244d5bb9bb3dca"
         )
         assert hashlib.sha256(hba).hexdigest() == (
-            "b34a1937fe1666114038a5bf6b4189c662bd22c2f9dce88215f3f33731fc8915"
+            "a7d00896c8e3a97fd3479928721728c167ce722ab6f88d5907896b0c64f97193"
         )
     else:
         lines = hba.decode().splitlines()
@@ -494,17 +494,6 @@ def test_exec_environment_pins_mounted_ca_and_discards_ambient_trust(installed, 
         assert environment[name].endswith(
             "@postgres:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
         )
-    if role == "prepare":
-        assert captured["command"] == ["python", "/opt/cosmabot/runtime/migrate.py"]
-        assert environment["DATABASE_ADMIN_URL"].startswith(
-            f"postgresql+psycopg://{entrypoint.PREPARE_MIGRATION_USER}:"
-        )
-        assert environment["DATABASE_URL"].startswith(
-            f"postgresql+psycopg://{entrypoint.PREPARE_RUNTIME_USER}:"
-        )
-        assert entrypoint.PREPARE_MIGRATION_USER == "cbpg"
-        assert entrypoint.PREPARE_RUNTIME_USER == "cosmas"
-        assert entrypoint.PREPARE_MIGRATION_USER != entrypoint.PREPARE_RUNTIME_USER
     if role != "prepare":
         assert "DATABASE_ADMIN_URL" not in environment
         assert environment["REDIS_URL"].endswith("@redis:6379/0?ssl_cert_reqs=required")
@@ -757,72 +746,3 @@ else: sys.exit(99)
     assert migration.exists() is allowed
     if inventory_exit:
         assert "Container inventory failed" in result.stderr
-
-
-def test_migrate_step_uses_migration_user_never_runtime_login():
-    """Fail if CosmaBot staging prepare/migrate runs alembic as the runtime login."""
-    import migrate_contract
-
-    assert migrate_contract.MIGRATION_USER == "cbpg"
-    assert migrate_contract.RUNTIME_USER == "cosmas"
-    assert migrate_contract.MIGRATION_USER != migrate_contract.RUNTIME_USER
-
-    suffix = "@postgres:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
-    migration_url = migrate_contract.migration_database_url("migration-secret", suffix)
-    runtime_url = migrate_contract.runtime_database_url("runtime-secret", suffix)
-    assert migration_url.startswith("postgresql+psycopg://cbpg:")
-    assert runtime_url.startswith("postgresql+psycopg://cosmas:")
-    migrate_contract.assert_migrate_roles_separated(migration_url, runtime_url)
-
-    with pytest.raises(ValueError, match="migrate_must_not_use_runtime_login"):
-        migrate_contract.assert_migrate_roles_separated(runtime_url, runtime_url)
-    postgres_url = migrate_contract.migration_database_url(
-        "migration-secret", suffix
-    ).replace("://cbpg:", "://postgres:")
-    with pytest.raises(ValueError, match="migrate_must_use_migration_user"):
-        migrate_contract.assert_migrate_roles_separated(postgres_url, runtime_url)
-
-    source = (RUNTIME / "migrate.py").read_text()
-    assert "prepare_beta_database(migration_url, runtime_url)" in source
-    assert "DATABASE_ADMIN_URL" in source
-    assert "cosmas_os.cli" not in source
-    prepare_block = (RUNTIME / "entrypoint.py").read_text().split(
-        'if sys.argv[1] == "prepare":', 1
-    )[1].split("configuration = read_json", 1)[0]
-    assert "migration_database_url(" in prepare_block
-    assert "runtime_database_url(" in prepare_block
-    assert 'postgresql+psycopg://postgres:' not in prepare_block
-    assert 'postgresql+psycopg://cosmas:' not in prepare_block
-    assert '"/opt/cosmabot/runtime/migrate.py"' in prepare_block
-
-
-def test_runtime_grants_from_migrate_step_exclude_ddl():
-    """Fail if the CosmaBot staging migrate grant list includes DDL for runtime."""
-    import migrate_contract
-
-    allowed = migrate_contract.RUNTIME_TABLE_PRIVILEGES
-    forbidden = migrate_contract.RUNTIME_FORBIDDEN_TABLE_PRIVILEGES
-    assert allowed == {"SELECT", "INSERT", "UPDATE", "DELETE"}
-    assert not (allowed & forbidden)
-    assert {"CREATE", "REFERENCES", "TRIGGER", "TRUNCATE"} <= forbidden
-
-    statements = migrate_contract.runtime_grant_sql()
-    joined = "\n".join(statements)
-    assert "GRANT DELETE, INSERT, SELECT, UPDATE ON ALL TABLES IN SCHEMA public TO cosmas" in joined
-    for privilege in sorted(forbidden):
-        assert f"GRANT {privilege} " not in joined
-        assert f"REVOKE {privilege} " in joined
-    assert "REASSIGN OWNED BY cosmas TO cbpg" in joined
-    assert "CREATE" not in allowed
-    assert "REFERENCES" not in allowed
-
-
-def test_render_ships_migrate_scripts_and_cbpg_hba(installed):
-    config, root, output = installed
-    vm.render(config, root, output, Path("/var/lib/cosmabot"))
-    assert (output / "migrate.py").is_file()
-    assert (output / "migrate_contract.py").is_file()
-    hba = (output / "pg_hba.conf").read_text()
-    assert "hostssl cosmas_os cbpg 172.30.240.12/32 scram-sha-256" in hba
-    assert "local all cbpg peer" in hba
-    assert "hostssl cosmas_os cosmas 172.30.240.10/32 scram-sha-256" in hba

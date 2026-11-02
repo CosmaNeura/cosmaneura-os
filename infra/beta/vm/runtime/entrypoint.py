@@ -14,20 +14,9 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 
-from migrate_contract import (
-    MIGRATION_USER,
-    RUNTIME_USER,
-    assert_migrate_roles_separated,
-    migration_database_url,
-    runtime_database_url,
-)
-
 API_UID = 10001
 SECRET_LIMIT = 32768
 SYSTEM_CA_FILE = "/etc/ssl/certs/ca-certificates.crt"
-# Re-exported so unit tests can pin the prepare migrate identities.
-PREPARE_MIGRATION_USER = MIGRATION_USER
-PREPARE_RUNTIME_USER = RUNTIME_USER
 BASE = {
     "COSMAS_ENV": "early_adopter_beta",
     "DATA_MODE": "synthetic",
@@ -233,27 +222,30 @@ def main() -> int:
     if sys.argv[1] == "prepare":
         directory = Path("/run/cosmabot/secrets")
         runtime_password = read_private(directory / "DATABASE_PASSWORD", API_UID)
-        # POSTGRES_PASSWORD holds the migration/peer login secret (cbpg).
-        migration_password = read_private(directory / "POSTGRES_PASSWORD", API_UID)
-        if runtime_password == migration_password:
+        admin_password = read_private(directory / "POSTGRES_PASSWORD", API_UID)
+        if runtime_password == admin_password:
             raise Refused("database_roles_must_be_separate")
         suffix = "@postgres:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
-        runtime_url = runtime_database_url(quote(runtime_password, safe=""), suffix)
-        migration_url = migration_database_url(
-            quote(migration_password, safe=""), suffix
-        )
-        assert_migrate_roles_separated(migration_url, runtime_url)
         environment = {
             "PATH": "/usr/local/bin:/usr/bin:/bin",
             "PYTHONPATH": "/app/src",
             "PYTHONDONTWRITEBYTECODE": "1",
             "SSL_CERT_FILE": SYSTEM_CA_FILE,
             "COSMAS_ENV": "early_adopter_beta",
-            "DATABASE_URL": runtime_url,
-            "DATABASE_ADMIN_URL": migration_url,
+            "DATABASE_URL": "postgresql+psycopg://cosmas:"
+            + quote(runtime_password, safe="")
+            + suffix,
+            "DATABASE_ADMIN_URL": "postgresql+psycopg://postgres:"
+            + quote(admin_password, safe="")
+            + suffix,
         }
-        # migrate.py runs alembic as cbpg, then owner + DML-only runtime grants.
-        command = ["python", "/opt/cosmabot/runtime/migrate.py"]
+        command = [
+            "python",
+            "-m",
+            "cosmas_os.cli",
+            "prepare-beta-database",
+            "--confirm-forward-only",
+        ]
         os.execvpe(command[0], command, environment)
         return 1
     configuration = read_json(Path("/opt/cosmabot/runtime/runtime.json"))

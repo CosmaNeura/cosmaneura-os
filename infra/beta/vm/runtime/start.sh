@@ -62,8 +62,6 @@ case "$action" in
 $inventory
 EOF
         fi
-        # database_prepare runs infra/beta/vm/runtime/migrate.py as peer user cbpg
-        # (never the runtime login), then applies DML-only runtime grants.
         compose --profile prepare run --rm --no-deps database_prepare
         ;;
     run) compose up -d --wait --wait-timeout 180 ;;
