@@ -118,15 +118,30 @@ def _guard(s, runtime, manifest):
             or not runtime.workspace_available
             or runtime.standalone_instance_id != str(manifest.instance_id)
             or not _matches_runtime(manifest.identity, runtime)
-            or runtime.workspace_capture_backend != "disabled"):
+            or runtime.workspace_capture_backend not in {"disabled", "core"}):
         raise StandalonePracticeError("standalone_runtime_required")
-    # These fields are inert only when absent/disabled, including inherited inputs.
+    # Core capture admits only the exact capture fields when backend=core; every
+    # other Core/Athena/prep address stays forbidden. Backend=core also requires
+    # notes+availability.
+    allowed_core_capture = {
+        "workspace_capture_backend", "workspace_capture_notes_enabled",
+        "core_capture_origin", "core_capture_scope",
+        "core_capture_managed_identity_client_id", "core_web_origin",
+        "workspace_capture_proxy_origin",
+    }
     for name, value in runtime.model_dump().items():
+        if name in allowed_core_capture:
+            if name != "workspace_capture_backend" and value and runtime.workspace_capture_backend != "core":
+                raise StandalonePracticeError("standalone_core_configuration_forbidden")
+            continue
         if (name.startswith("core_") or name.startswith("workspace_core_")
                 or name.startswith("workspace_capture_") or name.startswith("workspace_athena_")
                 or name in {"workspace_session_prep_enabled", "workspace_prep_enabled", "workspace_prep_work_enabled"}):
-            if name != "workspace_capture_backend" and value:
+            if value:
                 raise StandalonePracticeError("standalone_core_configuration_forbidden")
+    if runtime.workspace_capture_backend == "core" and (
+            not runtime.workspace_capture_available or not runtime.workspace_capture_notes_enabled):
+        raise StandalonePracticeError("standalone_core_capture_required")
     if s.bind.dialect.name != "postgresql":
         raise StandalonePracticeError("owned_postgresql_required")
     s.execute(select(func.pg_advisory_xact_lock(_LOCK)))
