@@ -1,9 +1,8 @@
 """Exercise the actual owned Foundation-only native CSP transformation."""
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import pytest
-
 
 ROOT = Path(__file__).resolve().parents[2]
 

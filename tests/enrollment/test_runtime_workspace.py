@@ -85,7 +85,7 @@ def runtime_case(admission_case, monkeypatch, runtime_engine):
     monkeypatch.setattr(api, "settings", runtime)
     monkeypatch.setattr(api, "SessionLocal", sessions)
     monkeypatch.setattr(api, "_clerk_verifier", lambda *_args: verifier)
-    monkeypatch.setattr(api, "_runtime_admission_adapter", lambda: c.adapter)
+    monkeypatch.setattr(api, "_runtime_admission_adapter", lambda origins=None: c.adapter)
     for module in (provider_team, conversation, handoffs):
         monkeypatch.setattr(module, "runtime_settings", runtime)
     from cosmas_os.application import enrollment_access
