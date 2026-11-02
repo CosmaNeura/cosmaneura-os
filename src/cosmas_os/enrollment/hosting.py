@@ -36,6 +36,9 @@ SECRET_NAMES = {"DATABASE_URL": "database-url", "DATABASE_ADMIN_URL": "database-
                 "OWNER_MANIFEST": "owner-manifest"}
 GOOGLE_SECRET_NAMES = {"GOOGLE_CONNECTION_CLIENT_SECRET": "google-connection-client-secret",
                        "GOOGLE_CONNECTION_ENCRYPTION_KEY": "google-connection-encryption-key"}
+MODEL_SECRET_NAMES = {"WORKSPACE_LLM_API_KEY": "workspace-llm-api-key"}
+REVIEWED_MODEL = {"backend": "azure_gpt41", "endpoint": "https://cosmascode.services.ai.azure.com/openai/v1",
+                  "deployment": "gpt-4.1"}
 
 
 def private_read(path: Path, maximum: int = 128_000) -> bytes:
@@ -62,7 +65,7 @@ class HostingConfiguration:
         expected = {"contract_version", "enabled", "synthetic_only", "foundation", "account", "release",
                     "worker_client_id", "worker_object_id", "source_repository", "state_root", "cloudflare_zone_id",
                     "cloudflare_token_file", "native_origins"}
-        if (not expected <= set(value) or set(value) - expected - {"google"} or value["contract_version"] != HOSTING_CONTRACT
+        if (not expected <= set(value) or set(value) - expected - {"google", "model"} or value["contract_version"] != HOSTING_CONTRACT
                 or type(value["enabled"]) is not bool or value["synthetic_only"] is not True):
             raise ValueError("explicit dedicated synthetic hosting configuration required")
         self.value = json.loads(json.dumps(value))
@@ -127,6 +130,14 @@ class HostingConfiguration:
                     or not Path(google["client_secret_file"]).is_absolute()
                     or Path(google["client_secret_file"]).resolve().is_relative_to(self.source.resolve())):
                 raise ValueError("exact separately reviewed Google broker and protected client-secret file reference required")
+        self.model = self.value.get("model")
+        if "model" in self.value:
+            model = self.model
+            if (not isinstance(model, dict) or set(model) != set(REVIEWED_MODEL) | {"api_key_file"}
+                    or {name: model[name] for name in REVIEWED_MODEL} != REVIEWED_MODEL
+                    or not isinstance(model["api_key_file"], str) or not Path(model["api_key_file"]).is_absolute()
+                    or Path(model["api_key_file"]).resolve().is_relative_to(self.source.resolve())):
+                raise ValueError("exact reviewed GPT-4.1 configuration and protected model-key file reference required")
 
     @classmethod
     def from_path(cls, path: Path):
@@ -225,6 +236,12 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
                            "WORKSPACE_GOOGLE_CALENDAR_ENABLED": "true", "GOOGLE_CONNECTION_CLIENT_ID": c.google["client_id"],
                            "GOOGLE_CONNECTION_CALLBACK_URI": c.google["callback_uri"], "GOOGLE_CONNECTION_RETURN_ORIGIN": web,
                            "GOOGLE_CONNECTION_BROKER_ENABLED": "true", "GOOGLE_CONNECTION_BROKER_ORIGIN": c.account["api_origin"]})
+        if c.model is not None:
+            # Host opt-in chooses only the existing reviewed model. Its key is
+            # seeded separately into this Box's vault, never this public plan.
+            deployment["model"] = dict(REVIEWED_MODEL)
+            public.update({"WORKSPACE_LLM_BACKEND": c.model["backend"], "WORKSPACE_LLM_ENDPOINT": c.model["endpoint"],
+                           "WORKSPACE_LLM_DEPLOYMENT": c.model["deployment"]})
         return deployment
 
     def allocate(self, plan: WorkspacePlan, *, operation_id: str) -> None:

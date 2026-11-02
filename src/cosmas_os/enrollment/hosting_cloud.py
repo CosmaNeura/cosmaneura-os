@@ -21,6 +21,8 @@ import httpx
 
 from .hosting import (
     GOOGLE_SECRET_NAMES,
+    MODEL_SECRET_NAMES,
+    REVIEWED_MODEL,
     SECRET_NAMES,
     HostingConfiguration,
     box_admission_key,
@@ -191,10 +193,15 @@ class AzureAllocationBackend:
         d, resources = state["deployment"], state["resources"]
         references = d["practice"]["secret_references"]
         google = d.get("google")
+        model = d.get("model")
         if google is not None and (self.config.google is None
                 or google != {name: self.config.google[name] for name in ("client_id", "callback_uri")}):
             raise ValueError("saved Google broker differs from reviewed host input")
-        secret_names = {**SECRET_NAMES, **(GOOGLE_SECRET_NAMES if google is not None else {})}
+        if model is not None and (self.config.model is None or model != REVIEWED_MODEL
+                or model != {name: self.config.model[name] for name in REVIEWED_MODEL}):
+            raise ValueError("saved model differs from reviewed host input")
+        secret_names = {**SECRET_NAMES, **(GOOGLE_SECRET_NAMES if google is not None else {}),
+                        **(MODEL_SECRET_NAMES if model is not None else {})}
         if not set(references) <= set(secret_names):
             raise ValueError("unreviewed Box secret reference refused")
         if google is not None:
@@ -205,6 +212,14 @@ class AzureAllocationBackend:
                 if name in references and not re.fullmatch(
                         re.escape("https://" + vault + ".vault.azure.net/secrets/" + secret + "/") + r"[a-f0-9]{32}", references[name]):
                     raise ValueError("exact versioned Box Google secret reference unavailable")
+        if model is not None:
+            vault = "kvca" + d["practice"]["plan"]["practice_id"].replace("-", "")[:20]
+            if resources["key_vault_id"] != self.config.scope + "Microsoft.KeyVault/vaults/" + vault:
+                raise ValueError("model custody requires this Box's own vault")
+            for name, secret in MODEL_SECRET_NAMES.items():
+                if name in references and not re.fullmatch(
+                        re.escape("https://" + vault + ".vault.azure.net/secrets/" + secret + "/") + r"[a-f0-9]{32}", references[name]):
+                    raise ValueError("exact versioned Box model secret reference unavailable")
         if set(references) == set(secret_names):
             return
         values = {}
@@ -228,6 +243,12 @@ class AzureAllocationBackend:
                 values["GOOGLE_CONNECTION_CLIENT_SECRET"] = client_secret
             if "GOOGLE_CONNECTION_ENCRYPTION_KEY" not in references:
                 values["GOOGLE_CONNECTION_ENCRYPTION_KEY"] = box_google_custody_key(d, master)
+        if model is not None and "WORKSPACE_LLM_API_KEY" not in references:
+            assert self.config.model is not None
+            api_key = private_read(Path(self.config.model["api_key_file"]), maximum=8192).decode()
+            if not api_key or any(ord(char) < 33 or ord(char) > 126 for char in api_key):
+                raise ValueError("bounded protected model key required")
+            values["WORKSPACE_LLM_API_KEY"] = api_key
         vault = resources["key_vault_id"].rsplit("/", 1)[1]
         template = self.config.source / "infra/enrollment/allocated-workspace/secret.template.json"
         for name, value in values.items():
@@ -244,6 +265,8 @@ class AzureAllocationBackend:
                 raise ValueError("exact versioned Box secret reference unavailable")
             if name in GOOGLE_SECRET_NAMES and not re.fullmatch(r"[a-f0-9]{32}", reference.rsplit("/", 1)[1]):
                 raise ValueError("exact versioned Box Google secret reference unavailable")
+            if name in MODEL_SECRET_NAMES and not re.fullmatch(r"[a-f0-9]{32}", reference.rsplit("/", 1)[1]):
+                raise ValueError("exact versioned Box model secret reference unavailable")
             references[name] = reference
             self._checkpoint(state)
         (self.directory / "seed-parameters.json").unlink(missing_ok=True)

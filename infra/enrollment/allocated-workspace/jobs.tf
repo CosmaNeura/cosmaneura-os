@@ -66,7 +66,7 @@ resource "azurerm_container_app_job" "box" {
       command = ["python", "/app/cosmabot_allocated_workspace_job.py"]
       args    = [each.value.operation]
       dynamic "env" {
-        for_each = merge({ for name, value in local.practices[each.value.practice].api_env : name => value if !startswith(name, "GOOGLE_") && !startswith(name, "WORKSPACE_GOOGLE_") }, {
+        for_each = merge({ for name, value in local.practices[each.value.practice].api_env : name => value if !startswith(name, "GOOGLE_") && !startswith(name, "WORKSPACE_GOOGLE_") && !startswith(name, "WORKSPACE_LLM_") }, {
           AZURE_STORAGE_ACCOUNT_URL    = trimsuffix(azurerm_storage_account.box[each.value.practice].primary_blob_endpoint, "/")
           AZURE_BLOB_CONTAINER         = azurerm_storage_container.box[each.value.practice].name
           AZURE_CLIENT_ID              = azurerm_user_assigned_identity.job[each.key].client_id
