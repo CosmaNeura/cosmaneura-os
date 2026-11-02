@@ -82,6 +82,7 @@ def lab_reports(
         port._transport,
         enabled=lambda: port.labs_available(scope.connection_scope),
         authorize=allowed,
+        sandbox_enabled=True,
     )
     page = reader.list_reports()
     if not allowed():
@@ -113,6 +114,7 @@ def lab_report(
         port._transport,
         enabled=lambda: port.labs_available(scope.connection_scope),
         authorize=allowed,
+        sandbox_enabled=True,
     )
     observed = reader.read_report(
         page, report_id, expected_candidates_sha256=expected_candidates_sha256

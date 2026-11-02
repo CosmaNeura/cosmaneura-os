@@ -10,9 +10,7 @@ from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
 
 from cosmas_os.api.plugin_catalog import CONTRACT, META
-from cosmas_os.plugins.athena import NAMES as ATHENA_NAMES
 from cosmas_os.plugins.atlas_md import NAMES, RECOVERY, UNSUPPORTED, tool_definitions
-from cosmas_os.plugins.elation import NAMES as ELATION_NAMES
 from cosmas_os.plugins.runtime import AuthenticatedSession, PluginError, PluginRuntime
 from cosmas_os.plugins.server import JOURNEY, create_server
 
@@ -191,7 +189,7 @@ async def test_mcp_lists_atlas_reads_as_read_only_after_elation():
                     await session.initialize()
                     listed = await session.list_tools()
                     names = {row.name for row in listed.tools}
-                    assert names == {"workspace_read", *ELATION_NAMES, *ATHENA_NAMES, *NAMES}
+                    assert set(NAMES) <= names
                     for row in listed.tools:
                         if row.name in NAMES:
                             assert row.annotations.read_only_hint is True

@@ -216,6 +216,10 @@ def run_once(s, box, owner, address, *, incoming_sources=None):
     state, scheduled = _eligibility(s, bot, revision, now)
     if state != "due":
         return {"status": state}
+    if getattr(settings, "workspace_enrollment_managed", False):
+        from cosmas_os.application.enrollment_access import require_worker_admission
+        require_worker_admission(s, settings, box=box, owner=owner, operation_id=revision.id,
+                                 approval_sha256=revision.request_hash)
     config = BriefSchedule.model_validate(revision.configuration)
     day = now.astimezone(ZoneInfo(config.timezone)).date()
     snapshot = _snapshot(s, box, owner, day.isoformat())
@@ -239,6 +243,9 @@ def run_once(s, box, owner, address, *, incoming_sources=None):
         if checked != snapshot["incoming"]:
             raise ws.WorkspaceError("routine_sources_changed")
     _local(s)
+    if getattr(settings, "workspace_enrollment_managed", False):
+        require_worker_admission(s, settings, box=box, owner=owner, operation_id=revision.id,
+                                 approval_sha256=revision.request_hash)
     row = RoutineRun(agent_id=bot.agent_id, box_id=box, owner_id=owner,
         routine_revision_id=revision.id, local_date=day, scheduled_at=scheduled,
         completed_at=_now(s), snapshot=snapshot, snapshot_hash=payload_hash(snapshot))

@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 
+from cosmas_os import ehr_read_audit
 from cosmas_os.adapters.athena_allergy_read import AthenaAllergyError
 from cosmas_os.adapters.athena_medication_read import AthenaMedicationError
 from cosmas_os.adapters.ehr_read_runtime import (
@@ -608,6 +609,17 @@ def _digest(value):
         raise ws.WorkspaceError("invalid_ehr_read_request", 422)
 
 
+def _read_kind(body, *, parent=None):
+    action = body["action"]
+    if action in (*fhir.KINDS, *athena.KINDS, *athena_medications.KINDS, *labs.KINDS):
+        return action
+    if parent is None:
+        return "window"
+    if action in ("problems", "medications"):
+        return action
+    return "verify"
+
+
 def _reserve(s, account, binding, body, window, *, parent=None, item_handle=None, port=None, workspace=None, grant=None):
     key, request_hash = body["idempotency_key"], payload_hash(body)
     if s.scalar(select(ElationSandboxInstallationReceipt.id).where(
@@ -624,6 +636,17 @@ def _reserve(s, account, binding, body, window, *, parent=None, item_handle=None
         _current(s, replay)
         _review_custody(s, replay)
         return replay, _receipt(replay, _snapshot(s, replay))
+    kind = _read_kind(body, parent=parent)
+    ehr_read_audit.ensure_resource_allowed(
+        s,
+        box_id=account.box_id,
+        connection_id=binding.connection_id,
+        resource_type=ehr_read_audit.resource_type_for_kind(kind),
+        actor_principal_id=account.principal_id,
+        vendor=binding.vendor,
+        practice_id=binding.practice_id,
+        request_hash=request_hash,
+    )
     now = model_work.now(s)
     ordinal = (s.scalar(select(func.max(EhrReadRequest.ordinal)).where(EhrReadRequest.binding_id == binding.id)) or 0) + 1
     if ordinal > 500:
@@ -634,7 +657,7 @@ def _reserve(s, account, binding, body, window, *, parent=None, item_handle=None
     read = EhrReadRequest(box_id=account.box_id, owner_id=account.principal_id, account_id=account.id,
         binding_id=binding.id, connection_id=binding.connection_id, credential_generation=binding.credential_generation,
         practice_id=binding.practice_id, binding_digest=binding.binding_digest, clinical_scope=binding.clinical_scope,
-        kind=body["action"] if body["action"] in (*fhir.KINDS, *athena.KINDS, *athena_medications.KINDS, *labs.KINDS) else "window" if parent is None else body["action"] if body["action"] in ("problems", "medications") else "verify", idempotency_key=key, request_hash=request_hash,
+        kind=kind, idempotency_key=key, request_hash=request_hash,
         request_json=body, ordinal=ordinal, parent_snapshot_id=parent.id if parent else None,
         transport=_runtime(port, binding.vendor, binding.protocol, binding.clinical_scope).transport_mode,
         item_handle=item_handle, window_start=window.starts_at if window is not None else None, window_end=window.ends_at if window is not None else None,
@@ -674,6 +697,7 @@ def _store(s, read_id, payload, port, reauthenticate):
         reauthenticate()
     _authorize(s, read, port=port)
     _current(s, read)
+    ehr_read_audit.audit_stored_read(s, read, value, outcome="ok")
     s.commit()
     # Committing releases the authority locks. Reacquire the same inspection
     # fence used by recovery before exposing the now-persisted observation.

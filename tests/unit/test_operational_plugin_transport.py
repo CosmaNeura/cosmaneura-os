@@ -24,11 +24,22 @@ from cosmas_os.plugins.configure import generate
 from cosmas_os.plugins.elation import NAMES as ELATION_NAMES
 from cosmas_os.plugins.runtime import AuthenticatedSession, PluginError, PluginRuntime
 from cosmas_os.plugins.server import create_server, main
+from cosmas_os.plugins.tebra import NAMES as TEBRA_NAMES
 
 UUID = "11111111-1111-4111-8111-111111111111"
 OTHER = "22222222-2222-4222-8222-222222222222"
 CHIEF = {"expected_revision": 2, "team_revision": 1, "idempotency_key": "exact-draft-key-1",
          "role": "chief", "content": "Prepare private saved-source drafts."}
+REQUIRED_TOOLS = {"workspace_read", *ELATION_NAMES, *ATHENA_NAMES, *ATLAS_NAMES, *TEBRA_NAMES}
+
+
+def assert_required_tools_are_present_once_and_read_only(names, rows_by_name, *, read_only, destructive):
+    """Membership only. A new plugin may add tools; order does not matter."""
+    assert len(names) == len(set(names))
+    assert REQUIRED_TOOLS <= set(names)
+    for name in REQUIRED_TOOLS:
+        assert read_only(rows_by_name[name]) is True
+        assert destructive(rows_by_name[name]) is False
 
 
 def catalog(*identities):
@@ -69,9 +80,13 @@ async def test_real_mcp_lists_reads_and_preserves_current_workspace_without_get_
                 async with ClientSession(*client_streams) as session:
                     await session.initialize()
                     tools = await session.list_tools()
-                    assert [row.name for row in tools.tools] == [
-                        "workspace_read", *ELATION_NAMES, *ATLAS_NAMES, *ATHENA_NAMES]
-                    assert set(tools.tools[0].input_schema["required"]) == {"workspace_id"}
+                    listed = {row.name: row for row in tools.tools}
+                    assert_required_tools_are_present_once_and_read_only(
+                        [row.name for row in tools.tools], listed,
+                        read_only=lambda row: row.annotations.read_only_hint,
+                        destructive=lambda row: row.annotations.destructive_hint,
+                    )
+                    assert set(listed["workspace_read"].input_schema["required"]) == {"workspace_id"}
                     result = await session.call_tool("workspace_read", {"workspace_id": UUID})
                     assert not result.is_error and result.structured_content["result"]["revision"] == 7
                     resource = await session.read_resource("cosmabot://journey")
@@ -420,6 +435,17 @@ def test_injected_server_check_reports_only_catalog_not_connected_account(capsys
                                    lambda: "signed-in-current-session")
     assert main(["--origin", "https://fixture.invalid", "--check"], session=adapter) == 0
     receipt = json.loads(capsys.readouterr().out)
-    assert receipt == {"ready": True, "transport": "current_app_session",
-                       "tools": ["workspace_read", *ELATION_NAMES, *ATLAS_NAMES, *ATHENA_NAMES],
-                       "account_status": "not_checked"}
+    runtime = PluginRuntime("https://fixture.invalid", session=adapter)
+    try:
+        definitions = {row["name"]: row for row in runtime.tool_definitions()}
+    finally:
+        runtime.close()
+    assert set(receipt) == {"ready", "transport", "tools", "account_status"}
+    assert receipt["ready"] is True and receipt["transport"] == "current_app_session"
+    assert receipt["account_status"] == "not_checked"
+    assert set(receipt["tools"]) == set(definitions)
+    assert_required_tools_are_present_once_and_read_only(
+        receipt["tools"], definitions,
+        read_only=lambda row: row["annotations"]["readOnlyHint"],
+        destructive=lambda row: row["annotations"]["destructiveHint"],
+    )

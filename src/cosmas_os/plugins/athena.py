@@ -31,6 +31,7 @@ from cosmas_os.adapters.athena_medication_read import (
 )
 from cosmas_os.api.ehr_read_schemas import AthenaAllergies, AthenaMedications, Status
 from cosmas_os.domain.hashing import payload_hash
+from cosmas_os.plugins.ehr.manifest import CapabilityManifest
 from cosmas_os.plugins.runtime import PluginError
 from cosmas_os.ports.athena_allergy_ehr import AthenaAllergiesObservation
 from cosmas_os.ports.athena_medication_ehr import AthenaMedicationsObservation
@@ -56,6 +57,9 @@ WRONG_PRACTICE = (
     "That request is for a different practice than the Athena account connected to this sign-in."
 )
 EXPIRED = "Athena access expired or was revoked. Reconnect Athena in CosmaBot before reading again."
+RECORD_ACCESS = (
+    "Access to this patient's record isn't available for this read. No chart data is shown."
+)
 MALFORMED = "Athena returned a response CosmaBot could not read. No chart data is shown."
 TIMEOUT = (
     "The Athena read timed out before a result was confirmed. "
@@ -92,13 +96,17 @@ EHR_COMMANDS = {
     "core_allergies": AthenaAllergies,
     "core_medications": AthenaMedications,
 }
-UNSUPPORTED_DETAILS = {"ehr_read_unavailable"}
+UNSUPPORTED_DETAILS = {"ehr_read_unavailable", "unsupported"}
 EXPIRED_DETAILS = {
     "ehr_read_binding_changed",
     "ehr_read_binding_unavailable",
     "workspace_access_denied",
     "ehr_read_source_unavailable",
     "core_connection_access_denied",
+}
+RECORD_ACCESS_DETAILS = {
+    "ehr_read_core_grant_unavailable",
+    "ehr_read_core_medication_grant_unavailable",
 }
 MALFORMED_DETAILS = {
     "ehr_read_response_invalid",
@@ -501,6 +509,8 @@ def _failure(payload: object) -> dict[str, Any] | None:
         return _state("unsupported", UNSUPPORTED)
     if detail == "core_connection_required":
         return _state("not_connected", NOT_CONNECTED)
+    if detail in RECORD_ACCESS_DETAILS:
+        return _state("unavailable", RECORD_ACCESS)
     if detail in EXPIRED_DETAILS or status == 403:
         return _state("expired", EXPIRED)
     if detail == "ehr_read_provider_mismatch":
@@ -859,3 +869,43 @@ def call(runtime, name: str, arguments: object) -> dict[str, Any]:
     if not _same(spec, status, after):
         return _done(spec, _state("stale", STALE))
     return _done(spec, projected)
+
+
+# Capability declaration for the shared EHR connector contract.
+# Does not change tool behavior, routes, or receipts.
+EHR_CAPABILITY = CapabilityManifest(
+    vendor_id="athena",
+    display_name="athenaOne",
+    auth_styles=frozenset({
+        "cosmas_session",
+        "athena_platform_bearer",
+        # C2 2-legged client-credentials for Cosmaneura CosmaBot FHIR (not live-wired).
+        "oauth2_client_credentials",
+    }),
+    readable_resources=frozenset({
+        "appointments",
+        "medications",
+        "allergies",
+        "visit_link_status",
+    }),
+    unsupported_actions=frozenset({
+        "write_chart",
+        "prescribe",
+        "sign_note",
+        "book_appointment",
+        "link_visit",
+        "unlink_visit",
+        "read_problems",
+        "read_labs",
+        "production_target",
+    }),
+    sandbox_supported=True,
+    production_supported=False,
+    writes_supported=False,
+    notes=(
+        "Plugin tools call signed CosmaBot routes only. Athena Platform preview "
+        "is treated as the sandbox class for this contract; production stays refused. "
+        "oauth2_client_credentials is declared for the Cosmaneura CosmaBot FHIR "
+        "sandbox auth module; no live token exchange is enabled from this plugin yet."
+    ),
+)
