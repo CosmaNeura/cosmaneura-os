@@ -196,6 +196,8 @@ import Foundation
                     result = NativeAuthPayload.state(state)
                 case .signIn: result = NativeAuthPayload.state(try await interactive(requestID: request.id, signingIn: true))
                 case .signOut: result = NativeAuthPayload.state(try await interactive(requestID: request.id, signingIn: false))
+                case .clearAccountCredentials:
+                    result = NativeAuthPayload.state(try await interactiveClearCredentials(requestID: request.id))
                 case .getToken:
                     guard let revision = request.revision else { throw NativeAuthError.unavailable }
                     result = ["token": try await auth.token(expectedRevision: revision), "revision": revision]
@@ -249,6 +251,37 @@ import Foundation
                 try Task.checkCancellation()
                 diagnostics.record(signingIn ? .signingIn : .signingOut)
                 let state = signingIn ? try await auth.signIn() : try await auth.signOut()
+                diagnostics.record(.operationComplete)
+                return state
+            }
+        } catch {
+            diagnostics.record(.operationUnavailable)
+            throw error
+        }
+    }
+
+    @MainActor private func interactiveClearCredentials(requestID: String) async throws -> NativeAuthState {
+        do {
+            try Task.checkCancellation()
+            guard let accessBlock else {
+                diagnostics.record(.configurationUnavailable)
+                throw NativeAuthError.unavailable
+            }
+            return try await accessBlock.withAuthenticationUI {
+                diagnostics.record(.interactiveStorageCheck)
+                _ = auth.state()
+                if auth.allowsStorageRecovery {
+                    guard sourceHost == nil else {
+                        diagnostics.record(.sourceRecoveryUnavailable)
+                        throw NativeAuthError.unavailable
+                    }
+                    auth.onChange = nil
+                    auth = makeAuth()
+                    attachAuth()
+                }
+                try Task.checkCancellation()
+                diagnostics.record(.signingOut)
+                let state = try await auth.clearAccountCredentials()
                 diagnostics.record(.operationComplete)
                 return state
             }

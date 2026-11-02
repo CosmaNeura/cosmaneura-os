@@ -133,5 +133,6 @@ import Testing
         identity = try NativeAuthIdentity(userID: "user_invented", sessionID: "sess_invented", organizationID: "org_invented")
     }
     func signOut() async throws { await mutationBody?(); identity = nil }
+    func clearStoredCredentials() throws {}
     func freshToken() async throws -> String? { await tokenBody?() }
 }

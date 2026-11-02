@@ -4,6 +4,7 @@ import {hostedWorkspaceRequested} from './hosted-workspace';
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceAuth, nativeWorkspaceAuthAvailable, type WorkspaceAuthPlugin } from "../../clients/capture/src/native/workspace-auth-plugin";
 import {AppleHostedStatus as StatusScreen} from "./AppleHostedStatus";
+import { AccountControls } from "./AccountControls";
 import { EncounterWorkspace } from "./EncounterWorkspace";
 import { parseNativeAuthState, parseNativeToken, sameNativeState, type NativeAuthState } from "./native-auth";
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
@@ -161,7 +162,10 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     detail="Complete or cancel the sign-in window to return to Cosmas." role="status" />;
 
   if (state?.phase === "ready" && identity) {
-    const controls=<button className="button secondary" onClick={() => void act("signOut")}>Log out</button>;
+    const clearNative=plugin.clearAccountCredentials
+      ? async()=>{try{await plugin.clearAccountCredentials!();}finally{await act("signOut");}}
+      : undefined;
+    const controls=<AccountControls identity={identity} onSignOut={()=>void act("signOut")} clearNativeCredentials={clearNative}/>;
     return hostedWorkspaceRequested()
       ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate key={state.revision} identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
       : <EncounterWorkspace key={state.revision} authenticated={identity} accountControls={controls}/>;

@@ -66,8 +66,16 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
         else:
             raise AssertionError(equivalent["status"])
     assert differed == [
+        "native-plugins/cosmas-native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift",
         "native-plugins/cosmas-native-auth/Package.swift",
+        "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift",
+        "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/DesktopAuthProtocol.swift",
         "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
+        "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeWorkspaceAuth.swift",
+        "native-plugins/cosmas-native-auth/Tests/CosmasNativeAuthTests/DesktopAuthProtocolTests.swift",
+        "native-plugins/cosmas-native-auth/Tests/CosmasNativeAuthTests/KeychainInteractionPolicyTests.swift",
+        "native-plugins/cosmas-native-auth/Tests/CosmasNativeAuthTests/NativePrivateRecordingGateTests.swift",
+        "native-plugins/cosmas-native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift",
         "native-plugins/native-recording-pcm/Package.swift",
     ]
 

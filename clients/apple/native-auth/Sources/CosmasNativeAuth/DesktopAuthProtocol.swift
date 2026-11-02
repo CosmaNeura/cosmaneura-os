@@ -3,7 +3,7 @@ import Foundation
 /// Dedicated parent/child pipes only. There is no TCP or renderer entry point.
 public struct DesktopAuthRequest: Sendable {
     public enum Method: String, Sendable {
-        case getState, signIn, signOut, getToken
+        case getState, signIn, signOut, clearAccountCredentials, getToken
         case sourceIdle, sourcePrepare, sourceAuthorize, sourceExtend, sourceRelease, sourceStopped, sourcePreparationRelease
         public var isSource: Bool { rawValue.hasPrefix("source") }
     }
