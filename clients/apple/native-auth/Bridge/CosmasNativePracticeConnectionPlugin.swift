@@ -56,7 +56,8 @@ import Foundation
         guard call.options.isEmpty else { throw NativePracticeProfileError.invalidBinding }
     }
     private static func revision(_ call: CAPPluginCall, additional: Set<String> = []) throws -> String {
-        guard Set(call.options.keys) == additional.union(["expectedRevision"]),
+        guard let options = call.options as? [String: Any],
+              Set(options.keys) == additional.union(["expectedRevision"]),
               let revision = call.getString("expectedRevision"),
               UUID(uuidString: revision)?.uuidString.lowercased() == revision else { throw NativePracticeProfileError.invalidBinding }
         return revision
