@@ -30,10 +30,11 @@ import CosmaneuraIOSPCMCapacitor
         super.viewDidLoad()
         overrideUserInterfaceStyle = .light
         view.backgroundColor = .systemBackground
-        // Synthetic XCUITest fixtures stay off the product path unless the
-        // exact launch argument is present on the synthetic simulator bundle.
-        if CosmasSyntheticUITestSurface.isEnabled {
-            let surface = CosmasSyntheticUITestSurface()
+        // Debug synthetic Simulator only: local invented demo rows (no network,
+        // no sign-in). Compiled out of Release/TestFlight (DEBUG condition only).
+        #if DEBUG
+        if CosmasSyntheticDemoSurface.isEnabled {
+            let surface = CosmasSyntheticDemoSurface()
             addChild(surface)
             surface.view.frame = view.bounds
             surface.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -41,6 +42,7 @@ import CosmaneuraIOSPCMCapacitor
             surface.didMove(toParent: self)
             return
         }
+        #endif
         buildPanel()
         buildKeyboardDismissal()
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)),
@@ -338,14 +340,20 @@ import CosmaneuraIOSPCMCapacitor
     }
 }
 
-/// Synthetic-only XCUITest surface. Enabled solely for `com.cosmasos.synthetic`
-/// when launched with `-COSMAS_UI_TEST_FIXTURES`. Invented rows only; no PHI.
-@MainActor final class CosmasSyntheticUITestSurface: UIViewController {
+#if DEBUG
+/// Debug + `com.cosmasos.synthetic` only. Local invented Chief rows and visit
+/// timer — no network, no secrets, no sign-in. Entire type is compiled out of
+/// Release so TestFlight/production binaries cannot reach it.
+@MainActor final class CosmasSyntheticDemoSurface: UIViewController {
+    /// Optional XCUITest opt-in; Debug synthetic also enables without it.
     static let launchArgument = "-COSMAS_UI_TEST_FIXTURES"
+
     static var isEnabled: Bool {
         Bundle.main.bundleIdentifier == "com.cosmasos.synthetic"
-            && ProcessInfo.processInfo.arguments.contains(launchArgument)
     }
+
+    /// Proof hook for unit tests: this type exists only under DEBUG.
+    static let isCompiledIntoThisBinary = true
 
     private let elapsedLabel = UILabel()
     private let startButton = UIButton(type: .system)
@@ -361,7 +369,7 @@ import CosmaneuraIOSPCMCapacitor
         view.accessibilityIdentifier = "cosmas.uiTest.surface"
 
         let title = UILabel()
-        title.text = "Synthetic UI fixtures"
+        title.text = "Synthetic demo"
         title.font = .preferredFont(forTextStyle: .title2)
         title.adjustsFontForContentSizeCategory = true
 
@@ -477,3 +485,11 @@ import CosmaneuraIOSPCMCapacitor
         visitTimer?.invalidate()
     }
 }
+#else
+/// Release/TestFlight: demo surface is not compiled in. Keep a named hook so
+/// source audits and tests can prove the Debug-only gate without shipping UI.
+enum CosmasSyntheticDemoSurface {
+    static let isCompiledIntoThisBinary = false
+    static var isEnabled: Bool { false }
+}
+#endif

@@ -1,18 +1,20 @@
 import XCTest
 
-/// Drives the synthetic simulator app (`com.cosmasos.synthetic`) with
-/// `-COSMAS_UI_TEST_FIXTURES`. Invented engagements only; no PHI.
+/// Drives the Debug synthetic simulator app (`com.cosmasos.synthetic`).
+/// Invented engagements only; no PHI. The demo surface is compiled into Debug
+/// synthetic builds only (see CosmasSyntheticDemoSurface / SyntheticDemoFixtureGate).
 final class VisitTimerAndChiefIconUITests: XCTestCase {
     private var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication(bundleIdentifier: "com.cosmasos.synthetic")
+        // Launch arg remains accepted; Debug synthetic also presents without it.
         app.launchArguments = ["-COSMAS_UI_TEST_FIXTURES"]
         app.launch()
         XCTAssertTrue(
             app.otherElements["cosmas.uiTest.surface"].waitForExistence(timeout: 10),
-            "Synthetic UI fixtures surface should appear for the synthetic bundle"
+            "Synthetic demo surface should appear for the Debug synthetic bundle"
         )
     }
 
@@ -20,7 +22,6 @@ final class VisitTimerAndChiefIconUITests: XCTestCase {
         app?.terminate()
         app = nil
     }
-
 
     private func elapsedText(_ element: XCUIElement) -> String {
         if let value = element.value as? String, value.contains(":") { return value }
@@ -73,7 +74,6 @@ final class VisitTimerAndChiefIconUITests: XCTestCase {
             let row = rows.element(boundBy: index)
             XCTAssertTrue(row.exists)
             let icons = row.images.matching(identifier: "cosmas.messages.chief.icon")
-            // Prefer images; fall back to any element with the icon identifier.
             let iconCount = icons.count > 0
                 ? icons.count
                 : row.descendants(matching: .any).matching(identifier: "cosmas.messages.chief.icon").count

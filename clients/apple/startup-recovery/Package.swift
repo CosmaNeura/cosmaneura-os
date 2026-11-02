@@ -7,7 +7,7 @@ let package = Package(
     targets: [
         .target(name: "CosmasWorkspaceRecoveryPolicy", path: ".",
                 exclude: ["CosmasBridgeViewController.swift", "CosmasWorkspaceViewController.swift", "SceneDelegate.swift", "Tests"],
-                sources: ["WorkspaceRecoveryState.swift", "WorkspaceSceneSignalState.swift"]),
+                sources: ["WorkspaceRecoveryState.swift", "WorkspaceSceneSignalState.swift", "SyntheticDemoFixtureGate.swift"]),
         .testTarget(name: "CosmasWorkspaceRecoveryPolicyTests", dependencies: ["CosmasWorkspaceRecoveryPolicy"], path: "Tests"),
     ]
 )
