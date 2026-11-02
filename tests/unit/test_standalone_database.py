@@ -36,8 +36,24 @@ def _url(user: str, database: str = DB, *, password: str | None = None) -> str:
     )
 
 
-def _peer_url(user: str = MIGRATOR, database: str = DB, socket: str = "/var/run/postgresql") -> str:
-    return f"postgresql+psycopg://{user}@/{database}?host={socket}"
+def _peer_url(
+    user: str = MIGRATOR,
+    database: str = DB,
+    socket: str = "/var/run/postgresql",
+    *,
+    port: int | None = None,
+    port_in: str = "query",
+) -> str:
+    if port is None:
+        return f"postgresql+psycopg://{user}@/{database}?host={socket}"
+    if port_in == "query":
+        return (
+            f"postgresql+psycopg://{user}@/{database}"
+            f"?host={socket}&port={port}"
+        )
+    if port_in == "url":
+        return f"postgresql+psycopg://{user}@:{port}/{database}?host={socket}"
+    raise AssertionError(port_in)
 
 
 def test_standalone_roles_are_derived_from_instance_identity_not_hardcoded():
@@ -236,6 +252,85 @@ def test_standalone_boundaries_accept_peer_socket_migrator_without_password():
             _url(RUNTIME),
             INSTANCE,
         )
+
+
+def test_peer_socket_migrator_accepts_port_in_query_or_url():
+    """Box Postgres may listen as .s.PGSQL.54111; port must not require renaming."""
+
+    for peer in (
+        _peer_url(port=54111, port_in="query"),
+        _peer_url(port=54111, port_in="url"),
+    ):
+        admin = standalone._safe_standalone_migrator_url(peer)
+        assert standalone.is_peer_socket_migrator_url(admin)
+        assert standalone.peer_socket_port(admin) == 54111
+        assert admin.password is None
+        validated = standalone._validate_standalone_boundaries(
+            peer, _url(RUNTIME), INSTANCE
+        )
+        assert validated[0].database == DB
+        assert standalone.peer_socket_port(validated[0]) == 54111
+
+    with pytest.raises(
+        standalone.StandaloneDatabaseError, match="unsupported query parameters"
+    ):
+        standalone._safe_standalone_migrator_url(
+            f"postgresql+psycopg://{MIGRATOR}@/{DB}"
+            f"?host=/var/run/postgresql&port=54111&sslmode=disable"
+        )
+    with pytest.raises(
+        standalone.StandaloneDatabaseError, match="peer migrator port is invalid"
+    ):
+        standalone._safe_standalone_migrator_url(
+            f"postgresql+psycopg://{MIGRATOR}@/{DB}"
+            f"?host=/var/run/postgresql&port=not-a-port"
+        )
+
+
+def test_migrate_log_lines_are_credential_free_and_describe_alembic():
+    no_op = standalone.credential_free_migrate_log_lines(
+        connected_user=MIGRATOR,
+        session_user=MIGRATOR,
+        schema_before="bb57e3d10c964",
+        schema_after="bb57e3d10c964",
+    )
+    assert no_op == (
+        f"connected_user={MIGRATOR}",
+        f"session_user={MIGRATOR}",
+        "alembic_before=bb57e3d10c964",
+        "alembic_after=bb57e3d10c964",
+        "alembic_action=no-op",
+    )
+    upgrade = standalone.credential_free_migrate_log_lines(
+        connected_user=MIGRATOR,
+        session_user=MIGRATOR,
+        schema_before="z35e1b98a742",
+        schema_after="bb57e3d10c964",
+    )
+    assert upgrade[-1] == "alembic_action=upgrade"
+    empty = standalone.credential_free_migrate_log_lines(
+        connected_user=MIGRATOR,
+        session_user=MIGRATOR,
+        schema_before=None,
+        schema_after="z35e1b98a742",
+    )
+    assert empty[2] == "alembic_before=none"
+    assert empty[-1] == "alembic_action=upgrade"
+
+    joined = "\n".join(no_op + upgrade + empty)
+    assert "://" not in joined
+    assert "password" not in joined.lower()
+    assert "DATABASE_ADMIN_URL" not in joined
+    assert "invented-" not in joined
+
+    source = (PACKAGE / "migrate.py").read_text()
+    assert "credential_free_migrate_log_lines" in source
+    assert "alembic_action" in source or "credential_free_migrate_log_lines" in source
+    assert "print(line)" in source
+    # Never interpolate the admin/runtime URL into progress output.
+    assert "print(migration_url" not in source
+    assert "print(runtime_url" not in source
+    assert "print(os.environ" not in source
 
 
 def test_shipped_schema_head_reads_alembic_graph_not_hardcoded_constant():

@@ -63,6 +63,10 @@ class StandaloneDatabaseEvidence:
     contract: str
     status: str
     schema_revision: str
+    schema_before: str
+    alembic_action: str
+    connected_user: str
+    session_user: str
     schema_at_expected_head: bool
     runtime_role_non_admin: bool
     runtime_ddl_denied: bool
@@ -79,6 +83,32 @@ class StandaloneDatabaseEvidence:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         payload["evidence_sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def credential_free_migrate_log_lines(
+    *,
+    connected_user: str,
+    session_user: str,
+    schema_before: str | None,
+    schema_after: str,
+) -> tuple[str, ...]:
+    """Progress lines for migrate.py. Never include URLs or passwords."""
+
+    if not connected_user or not session_user or not schema_after:
+        raise StandaloneDatabaseError("migrate_log_identity_required")
+    before = schema_before if schema_before else "none"
+    action = "no-op" if schema_before == schema_after else "upgrade"
+    lines = (
+        f"connected_user={connected_user}",
+        f"session_user={session_user}",
+        f"alembic_before={before}",
+        f"alembic_after={schema_after}",
+        f"alembic_action={action}",
+    )
+    joined = "\n".join(lines)
+    if "://" in joined or "password" in joined.lower():
+        raise StandaloneDatabaseError("migrate_log_must_be_credential_free")
+    return lines
 
 
 def standalone_identity_short(instance_id: str | UUID) -> str:
@@ -192,6 +222,24 @@ def _socket_directory(url: URL) -> str | None:
     return None
 
 
+def peer_socket_port(url: URL) -> int | None:
+    """Optional Postgres socket port (``.s.PGSQL.<port>``), from URL or query."""
+
+    if url.port is not None:
+        if not 1 <= int(url.port) <= 65535:
+            raise StandaloneDatabaseError("peer migrator port is invalid")
+        return int(url.port)
+    raw = url.query.get("port") if url.query else None
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.isdigit():
+        raise StandaloneDatabaseError("peer migrator port is invalid")
+    port = int(raw)
+    if not 1 <= port <= 65535:
+        raise StandaloneDatabaseError("peer migrator port is invalid")
+    return port
+
+
 def is_peer_socket_migrator_url(url: URL) -> bool:
     """True when the migrator URL is a passwordless Unix-socket peer login."""
 
@@ -215,8 +263,14 @@ def _safe_standalone_migrator_url(value: str) -> URL:
     if _socket_directory(parsed) is not None:
         # Live pg_hba admits cbpg_* only as local peer. A socket URL must not
         # carry a password, and must not fall through to the TCP password path.
+        # Optional port selects .s.PGSQL.<port> without renaming the socket file.
         if parsed.password is not None:
             raise StandaloneDatabaseError("peer migrator URL must omit the password")
+        if not set(parsed.query) <= {"host", "port"}:
+            raise StandaloneDatabaseError(
+                "peer migrator URL has unsupported query parameters"
+            )
+        peer_socket_port(parsed)
         return parsed
     # TCP / private-Box migrator still uses a password URL.
     try:
@@ -288,6 +342,28 @@ def _repair_runtime_owned_objects(connection: Any, migrator: str, runtime: str) 
         )
 
 
+def _current_schema_revision(connection: Any) -> str | None:
+    exists = connection.execute(
+        text(
+            "SELECT EXISTS ("
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = 'alembic_version')"
+        )
+    ).scalar_one()
+    if not exists:
+        return None
+    revisions = tuple(
+        connection.execute(
+            text("SELECT version_num FROM public.alembic_version ORDER BY version_num")
+        ).scalars()
+    )
+    if not revisions:
+        return None
+    if len(revisions) != 1 or not revisions[0]:
+        raise StandaloneDatabaseError("alembic_version is inconsistent")
+    return str(revisions[0])
+
+
 def _run_standalone_forward_migrations(connection: Any, config_path: Path) -> str:
     """Upgrade to the single head shipped in this tree; do not pin a constant."""
 
@@ -325,13 +401,17 @@ def prepare_standalone_database(
     config_path = alembic_config_path or Path(__file__).resolve().parents[3] / "alembic.ini"
     expected_head = shipped_schema_head(config_path)
 
+    schema_before: str | None = None
+    connected_user = ""
+    session_user = ""
     admin_engine = create_engine(admin_url, pool_pre_ping=True)
     try:
         with admin_engine.connect() as connection:
             identity = connection.execute(
                 text("SELECT current_user, session_user")
             ).one()
-            if tuple(identity) != (migrator, migrator):
+            connected_user, session_user = str(identity[0]), str(identity[1])
+            if (connected_user, session_user) != (migrator, migrator):
                 raise StandaloneDatabaseError("migrate_must_use_migration_user")
             connection.execute(
                 text("SELECT pg_advisory_lock(hashtext(:key))"), {"key": _LOCK_KEY}
@@ -342,12 +422,18 @@ def prepare_standalone_database(
                     _repair_runtime_owned_objects(connection, migrator, runtime_role)
                     try:
                         _ensure_unprivileged_role(connection, runtime)
+                        schema_before = _current_schema_revision(connection)
                         shipped_head = _run_standalone_forward_migrations(
                             connection, config_path
                         )
                         if shipped_head != expected_head:
                             raise StandaloneDatabaseError(
                                 "migration graph does not have a single head"
+                            )
+                        schema_after = _current_schema_revision(connection)
+                        if schema_after != expected_head:
+                            raise StandaloneDatabaseError(
+                                "schema is not at the expected head"
                             )
                         _apply_runtime_privileges(connection, runtime)
                         for statement in runtime_grant_sql(instance_id):
@@ -372,10 +458,15 @@ def prepare_standalone_database(
     if not verification["non_admin"] or not verification["ddl_denied"]:
         raise StandaloneDatabaseError("runtime role retained elevated privileges")
 
+    alembic_action = "no-op" if schema_before == expected_head else "upgrade"
     return StandaloneDatabaseEvidence(
         contract=STANDALONE_DATABASE_CONTRACT,
         status="ready",
         schema_revision=expected_head,
+        schema_before=schema_before or "none",
+        alembic_action=alembic_action,
+        connected_user=connected_user,
+        session_user=session_user,
         schema_at_expected_head=True,
         runtime_role_non_admin=bool(verification["non_admin"]),
         runtime_ddl_denied=bool(verification["ddl_denied"]),

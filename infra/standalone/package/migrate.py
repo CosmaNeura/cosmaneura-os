@@ -4,15 +4,16 @@ The cosmabot-standalone-* API containers do not migrate on start. Operators
 (and staging proof) invoke this module from the reviewed release/source as:
 
   STANDALONE_INSTANCE_ID=<uuid> \\
-  DATABASE_ADMIN_URL=postgresql+psycopg://cbpg_<short>@/cosmabot_standalone_...?host=/var/run/postgresql \\
-  DATABASE_URL=postgresql+psycopg://cosmabot_runtime_<short>:...@127.0.0.1:5432/cosmabot_standalone_... \\
+  DATABASE_ADMIN_URL=postgresql+psycopg://cbpg_<short>@/cosmabot_standalone_...?host=/var/run/postgresql&port=54111 \\
+  DATABASE_URL=postgresql+psycopg://cosmabot_runtime_<short>:...@127.0.0.1:54111/cosmabot_standalone_... \\
   python infra/standalone/package/migrate.py
 
 DATABASE_ADMIN_URL may be a Unix-socket peer login (socket directory in
-``host=``, no password) when live pg_hba allows ``local ... peer`` for
-``cbpg_*``. The runtime URL stays a password login. Alembic runs as the
-derived peer migrator role. The runtime role receives DML only. Secrets are
-never printed.
+``host=``, optional ``port=`` for ``.s.PGSQL.<port>``, no password) when live
+pg_hba allows ``local ... peer`` for ``cbpg_*``. The runtime URL stays a
+password login. Alembic runs as the derived peer migrator role. The runtime
+role receives DML only. Progress lines and evidence never include URLs or
+passwords.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ def main() -> int:
         RUNTIME_TABLE_PRIVILEGES,
         StandaloneDatabaseError,
         assert_standalone_migrate_roles,
+        credential_free_migrate_log_lines,
         prepare_standalone_database,
         runtime_grant_sql,
         standalone_role_names,
@@ -64,6 +66,14 @@ def main() -> int:
         evidence = prepare_standalone_database(
             migration_url, runtime_url, instance_id
         )
+        before = None if evidence.schema_before == "none" else evidence.schema_before
+        for line in credential_free_migrate_log_lines(
+            connected_user=evidence.connected_user,
+            session_user=evidence.session_user,
+            schema_before=before,
+            schema_after=evidence.schema_revision,
+        ):
+            print(line)
         print(evidence.sanitized_json())
         return 0
     except StandaloneDatabaseError:
