@@ -270,7 +270,14 @@ def main() -> int:
             database_owner = "compact_synth" if profile == "compact" else owner
             if profile == "compact":
                 role_file = output / "compact-role.sql"
-                role_file.write_text(f"CREATE ROLE compact_synth LOGIN PASSWORD '{password}';\n")
+                role_file.write_text(
+                    f"CREATE ROLE compact_synth LOGIN CREATEROLE PASSWORD '{password}';\n"
+                    "DO $$ BEGIN\n"
+                    "  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cosmas_patient_deletion') THEN\n"
+                    "    GRANT cosmas_patient_deletion TO compact_synth WITH SET TRUE;\n"
+                    "  END IF;\n"
+                    "END $$;\n"
+                )
                 role_file.chmod(0o600)
                 try:
                     if checks.run("compact-role", [str(pg_bin / "psql"), "-X", "-v", "ON_ERROR_STOP=1",
@@ -327,6 +334,18 @@ def main() -> int:
             if checks.run(f"{profile}-migrations", [sys.executable, "-m", "alembic", "upgrade", "head"], 120, test_env):
                 result = 1
                 continue
+            if profile == "compact":
+                # The migration needs SET only long enough to hand the function
+                # to cosmas_patient_deletion. The compact login must not keep it.
+                revoke_file = output / "compact-deletion-role.sql"
+                revoke_file.write_text(
+                    "REVOKE cosmas_patient_deletion FROM compact_synth;\n"
+                )
+                if checks.run("compact-deletion-role", [str(pg_bin / "psql"), "-X", "-v", "ON_ERROR_STOP=1",
+                                                        "-h", "127.0.0.1", "-p", str(port), "-U", owner,
+                                                        "-d", "postgres", "-f", str(revoke_file)]):
+                    result = 1
+                    continue
             command = [sys.executable, "-m", "pytest", *tests, "-v", "-ra", "--tb=short",
                        "--basetemp", test_env["COSMAS_TEST_TMP_ROOT"],
                        "-o", f"cache_dir={folder / 'pytest-cache'}",
