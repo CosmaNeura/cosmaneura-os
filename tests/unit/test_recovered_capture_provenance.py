@@ -3,6 +3,8 @@
 import hashlib
 import importlib.util
 import json
+import plistlib
+import re
 from pathlib import Path
 
 import pytest
@@ -40,7 +42,21 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
         if equivalent is None:
             continue
         live = ROOT / equivalent["path"]
-        assert _sha256(live) == equivalent["sha256"]
+        if equivalent["path"] == "clients/apple/native-auth/Bridge/NativeCaptureProcessFence.swift":
+            current = live.read_text(encoding="utf-8")
+            old_header = "// INERT PROPOSAL: not part of any selected app or source package."
+            new_header = "// Desktop process fencing; iOS metadata operations are compiled out and fail closed."
+            assert current.startswith(new_header + "\n")
+            assert current.count("#if os(macOS)") == 4
+            fallbacks = re.findall(r"#else\n(.*?)#endif", current, re.DOTALL)
+            assert len(fallbacks) == 4
+            assert all(part.strip() == "throw NativeFenceError.unavailable" for part in fallbacks)
+            macos = re.sub(r"#if os\(macOS\)\n(.*?)#else\n.*?#endif\n", r"\1", current, flags=re.DOTALL)
+            assert macos.replace(new_header, old_header, 1) == recovered.read_text(encoding="utf-8")
+            iphone = re.sub(r"#if os\(macOS\)\n.*?#else\n(.*?)#endif\n", r"\1", current, flags=re.DOTALL)
+            assert re.search(r"\bfstat(?:at)?\s*\(", iphone) is None
+        else:
+            assert _sha256(live) == equivalent["sha256"]
         same = equivalent["sha256"] == item["repository_sha256"]
         if equivalent["status"] == "byte-identical":
             assert same
@@ -90,7 +106,29 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     assert manifest["compiled_signed_or_installed"] is False
     assert manifest["generated_web_assets"] == "absent"
     assert not (output / "apps/capture/ios/App/App/public").exists()
-    assert len(manifest["files"]) == json.loads(PROVENANCE.read_text(encoding="utf-8"))["native_source_file_count"]
+    frozen_count = json.loads(PROVENANCE.read_text(encoding="utf-8"))["native_source_file_count"]
+    assert len(manifest["files"]) == frozen_count + 1
+    assert len({item["path"] for item in manifest["files"]}) == len(manifest["files"])
+    privacy = [item for item in manifest["files"] if item["path"] == "ios/App/App/PrivacyInfo.xcprivacy"]
+    assert len(privacy) == 1
+    assert privacy[0]["role"] == "implementation"
+    assert privacy[0]["owner"] == "clients/apple"
+    assert privacy[0]["authoritative_counterpart"] == "clients/apple/startup-recovery/PrivacyInfo.xcprivacy"
+    assert plistlib.loads((output / "apps/capture/ios/App/App/PrivacyInfo.xcprivacy").read_bytes()) == {
+        "NSPrivacyAccessedAPITypes": [{
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
+        }],
+    }
+    assert (output / "apps/capture/ios/App/App/Info.plist").read_bytes() == (
+        ROOT / "apps/capture/ios/App/App/Info.plist"
+    ).read_bytes()
+    default_info = plistlib.loads((output / "apps/capture/ios/App/App/Info.plist").read_bytes())
+    assert default_info["CosmasNativeAuth"]["enabled"] is False
+    assert default_info["CosmasConfiguredCapture"]["enabled"] is False
+    derived = [item for item in manifest["files"] if item["role"] == "derived-app-resource-wiring"]
+    assert len(derived) == 1
+    assert derived[0]["path"] == "ios/App/App.xcodeproj/project.pbxproj"
 
     owners = set()
     for item in manifest["files"]:
@@ -111,6 +149,22 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
             assert placed.read_bytes() == (ROOT / "apps/capture" / item["path"]).read_bytes()
             counterpart = item["authoritative_counterpart"]
             assert counterpart.startswith("clients/apple/") or counterpart.startswith("clients/capture/")
+        elif item["role"] == "derived-app-resource-wiring":
+            assert item["owner"] == "apps/capture"
+            assert item["path"] == "ios/App/App.xcodeproj/project.pbxproj"
+            original = ROOT / "apps/capture" / item["path"]
+            assert item["scaffold_input_sha256"] == _sha256(original)
+            assert item["derivation_source"] == "scripts/compose-portable-iphone.py"
+            assert item["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)
+            text = placed.read_text(encoding="utf-8")
+            privacy_lines = [line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" in line]
+            assert len(privacy_lines) == 4
+            assert "".join(line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" not in line) == original.read_text(encoding="utf-8")
+        elif item["role"] == "app-scaffold":
+            assert item["owner"] == "apps/capture"
+            assert placed.read_bytes() == (ROOT / "apps/capture" / item["path"]).read_bytes()
+        else:
+            raise AssertionError(item["role"])
     assert owners == {"clients/apple", "clients/capture"}
     apple = output / "apps/capture/ios/App/App/SceneDelegate.swift"
     capture = output / "apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/IOSPCMCore.swift"
