@@ -50,7 +50,7 @@ from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"synthetic-card"
 ROOT = Path(__file__).resolve().parents[2]
-PARENT_REVISION = "y24f0a87c631"
+PARENT_REVISION = "z35e1b98a742"
 GUARD_FUNCTIONS = (
     "reject_workspace_history_change",
     "reject_provider_history_change",

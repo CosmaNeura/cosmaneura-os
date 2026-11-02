@@ -48,6 +48,16 @@ MINIMUM_IOS_VERSION = "17.0"
 SIMULATOR_IDENTITY_PREFIX = "COSMASW8NT"  # Invented local prefix, never an Apple team.
 STAGING_CLERK_HOST = "clerk.staging.cosmas.ai"
 STAGING_API_ORIGIN = "https://api.staging.cosmas.ai"
+# Web addresses the synthetic simulator may follow. Clerk and API hosts use the
+# same name with the clerk. and api. labels. Synthetic data mode stays required.
+ALLOWED_SYNTHETIC_WEB_HOSTS = ("staging.cosmas.ai", "beta.cosmas.ai")
+FORBIDDEN_COSMA_HOSTS = frozenset({
+    "cosmas.ai",
+    "www.cosmas.ai",
+    "app.cosmas.ai",
+    "api.cosmas.ai",
+    "bot.cosmas.ai",
+})
 # Runtime profile for the synthetic simulator only. Device builds keep the
 # identity file's own profile and the com.cosmasos.beta.ios callback.
 SIMULATOR_RUNTIME_PROFILE = "simulator-staging-v1"
@@ -67,8 +77,8 @@ PRODUCTION_SIGN_IN_REFUSAL = (
 SYNTHETIC_DATA_REFUSAL = "Simulator staging native auth requires synthetic data mode."
 SIMULATOR_STAGING_REFUSAL = (
     "Simulator staging native auth requires hosted services, "
-    "frontend origin and publishable-key host clerk.staging.cosmas.ai, "
-    "and API origin https://api.staging.cosmas.ai."
+    "frontend origin and publishable-key host clerk.staging.cosmas.ai or clerk.beta.cosmas.ai, "
+    "and API origin https://api.staging.cosmas.ai or https://api.beta.cosmas.ai."
 )
 RECOVERY_UI = Path(__file__).parents[1] / "clients/apple/startup-recovery"
 RECOVERY_INPUTS = {
@@ -287,8 +297,23 @@ def publishable_key_host(value: object) -> str | None:
     return _https_host("https://" + decoded[:-1])
 
 
+def _forbidden_sign_in_host(host: str | None) -> bool:
+    """Refuse product Cosmas and Cosmaneura hosts. The synthetic pair is checked separately."""
+    if not isinstance(host, str) or not host:
+        return False
+    if host in PRODUCTION_SIGN_IN_HOSTS or host in FORBIDDEN_COSMA_HOSTS:
+        return True
+    return host == "cosmaneura.com" or host.endswith(".cosmaneura.com")
+
+
+def _allowed_simulator_auth(frontend: str | None, api_origin: object) -> bool:
+    pairs = {(f"clerk.{host}", f"https://api.{host}") for host in ALLOWED_SYNTHETIC_WEB_HOSTS}
+    pairs.add((STAGING_CLERK_HOST, STAGING_API_ORIGIN))
+    return (frontend, api_origin) in pairs
+
+
 def authorize_simulator_staging_native_auth(identity: dict, selected_data_mode: str, *, hosted_workspace: bool) -> None:
-    """Allow native sign-in on the synthetic simulator only for the staging allowlist.
+    """Allow native sign-in on the synthetic simulator only for staging.cosmas.ai or beta.cosmas.ai.
 
     The identity profile name is not a substitute for the host check. operational-beta-v1
     and a staging profile are both accepted when the hosts and data mode match.
@@ -301,14 +326,13 @@ def authorize_simulator_staging_native_auth(identity: dict, selected_data_mode: 
         _https_host(record.get("apiOrigin")),
         publishable_key_host(record.get("publishableKey")),
     }
-    if hosts & PRODUCTION_SIGN_IN_HOSTS:
+    if any(_forbidden_sign_in_host(host) for host in hosts):
         raise ValueError(PRODUCTION_SIGN_IN_REFUSAL)
     if selected_data_mode != "synthetic":
         raise ValueError(SYNTHETIC_DATA_REFUSAL)
     frontend = _https_host(record.get("frontendOrigin"))
-    if (not hosted_workspace or frontend != STAGING_CLERK_HOST
-            or publishable_key_host(record.get("publishableKey")) != STAGING_CLERK_HOST
-            or record.get("apiOrigin") != STAGING_API_ORIGIN):
+    if (not hosted_workspace or frontend != publishable_key_host(record.get("publishableKey"))
+            or not _allowed_simulator_auth(frontend, record.get("apiOrigin"))):
         raise ValueError(SIMULATOR_STAGING_REFUSAL)
 
 
@@ -715,7 +739,7 @@ def main() -> None:
     parser.add_argument("--native-source-access-group", help="Exact signing-team private bundle Keychain group for builds compiled without provisioning")
     parser.add_argument("--data-mode", choices=("synthetic", "authorized_beta"), help="Explicit hosted data classification; synthetic for staging with a real identity")
     parser.add_argument("--allow-simulator-staging-native-auth", action="store_true",
-                        help="Enable native sign-in on the synthetic simulator variant for clerk.staging.cosmas.ai and synthetic data only")
+                        help="Enable native sign-in on the synthetic simulator variant for clerk.staging.cosmas.ai or clerk.beta.cosmas.ai and synthetic data only")
     args = parser.parse_args()
     try:
         project = prepare(args.scribe_source, args.web_dist, args.output, args.verification_variant,

@@ -136,7 +136,7 @@ class ManagedElationSandboxReads:
             raise ElationReadError("not_configured")
         return ElationReadAdapter(scope, self._credentials, enabled=self.current(scope),
             authorize_read=allowed, permit_request=permit, transport=transport, problems_enabled=problems,
-            medications_enabled=medications)
+            medications_enabled=medications, sandbox_enabled=True)
 
     def window(self, scope: ElationReadScope, starts_at: datetime, ends_at: datetime, *, authorize):
         async def run():

@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -267,6 +268,31 @@ class EhrReadSnapshot(OwnerScope, Base):
     source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False,
         server_default=func.clock_timestamp())
+
+
+class EhrPracticeResourceScope(Base):
+    """Per-practice FHIR resource allow-list for EHR reads. No PHI columns."""
+
+    __tablename__ = "ehr_practice_resource_scopes"
+    __table_args__ = (
+        UniqueConstraint("box_id", "connection_id", name="uq_ehr_practice_resource_scope"),
+        CheckConstraint(
+            "jsonb_typeof(allowed_resources) = 'array' AND jsonb_array_length(allowed_resources) BETWEEN 1 AND 32",
+            name="ck_ehr_practice_resource_scope_list",
+        ),
+    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    box_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("box_contexts.id"), nullable=False
+    )
+    connection_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    allowed_resources: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp()
+    )
 
 
 class EhrReadSourceReview(WorkspaceScope, Base):

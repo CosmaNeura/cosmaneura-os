@@ -8,7 +8,7 @@ survive the transaction.
 from alembic import op
 
 revision = "z35c2d09e853"
-down_revision = "y24f0a87c631"
+down_revision = "z35e1b98a742"
 branch_labels = None
 depends_on = None
 

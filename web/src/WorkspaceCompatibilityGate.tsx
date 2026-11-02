@@ -5,8 +5,12 @@ import {WorkspaceStartupShell} from './WorkspaceStartupShell';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {admitWorkspaceProtocol,subscribeWorkspaceProtocol,workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-protocol';
 import './workspace-compatibility.css';
+import {WorkspaceEnrollmentRecoveryGate} from './WorkspaceEnrollmentRecoveryGate';
 
 export function WorkspaceCompatibilityGate({identity,accountControls,children}:{identity:AuthenticatedWorkspaceIdentity;accountControls:ReactNode;children:ReactNode}) {
+  return <WorkspaceEnrollmentRecoveryGate identity={identity} accountControls={accountControls}><WorkspaceProtocolGate identity={identity} accountControls={accountControls}>{children}</WorkspaceProtocolGate></WorkspaceEnrollmentRecoveryGate>;
+}
+function WorkspaceProtocolGate({identity,accountControls,children}:{identity:AuthenticatedWorkspaceIdentity;accountControls:ReactNode;children:ReactNode}) {
   const [admitted,setAdmitted]=useState<AuthenticatedWorkspaceIdentity|null>(null);
   const [phase,setPhase]=useState(()=>workspaceProtocolPhase(identity));
   const [error,setError]=useState('');

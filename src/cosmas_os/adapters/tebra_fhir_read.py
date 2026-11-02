@@ -19,6 +19,7 @@ import httpx
 from pydantic import SecretStr
 
 from cosmas_os.domain.hashing import canonical_json, payload_hash
+from cosmas_os.ehr_real_data_gate import EhrRealDataGateError, assert_ehr_request_allowed
 
 FHIR_BASE = "https://fhir.prd.cloud.tebra.com/fhir-request"
 MAX_BYTES = 262144
@@ -31,7 +32,8 @@ _TIME = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})T(?:[01][0-9]|2[0-3]):[0-5][0-9
 _STATUSES = {"active", "on-hold", "cancelled", "completed", "entered-in-error", "stopped", "draft", "unknown"}
 ErrorCode = Literal["connector_disabled", "provider_qualification_required", "access_denied", "scope_changed",
     "request_invalid", "response_invalid", "response_too_large", "too_many_results", "unsupported_record",
-    "patient_changed", "provider_throttled", "provider_rejected", "transport_unconfirmed"]
+    "patient_changed", "provider_throttled", "provider_rejected", "transport_unconfirmed",
+    "real_data_required", "sandbox_flag_required"]
 
 
 class TebraFhirReadError(Exception):
@@ -381,12 +383,29 @@ class TebraFhirReadAdapter:
 
     def __init__(self, *, enabled=False, transport=None, authorize_read: Callable[[TebraFhirScope], bool] | None = None,
                  verify_patient: Callable[[TebraFhirScope, TebraFhirPatient], bool] | None = None,
-                 now=lambda: datetime.now(UTC), monotonic=time.monotonic):
-        if type(enabled) is not bool:
+                 now=lambda: datetime.now(UTC), monotonic=time.monotonic,
+                 real_data_enabled: bool = False, practice_baa_recorded: bool = False):
+        if type(enabled) is not bool or type(real_data_enabled) is not bool or type(practice_baa_recorded) is not bool:
             raise TebraFhirReadError("request_invalid")
         self._enabled, self._transport = enabled, transport
         self._authorize, self._verify_patient = authorize_read, verify_patient
         self._now, self._monotonic = now, monotonic
+        self._real_data_enabled = real_data_enabled
+        self._practice_baa_recorded = practice_baa_recorded
+
+    def _guard_origin(self):
+        try:
+            assert_ehr_request_allowed(
+                vendor="tebra",
+                origin=FHIR_BASE,
+                sandbox_enabled=False,
+                real_data_enabled=self._real_data_enabled,
+                practice_baa_recorded=self._practice_baa_recorded,
+                mock_transport_only=type(self._transport) is httpx.MockTransport,
+            )
+        except EhrRealDataGateError as exc:
+            code = exc.code if exc.code in {"real_data_required", "sandbox_flag_required"} else "request_invalid"
+            raise TebraFhirReadError(code) from None  # type: ignore[arg-type]
 
     def medication_history(self, scope: TebraFhirScope, credential: TebraFhirCredential) -> TebraFhirMedicationRead:
         if not self._enabled:
@@ -409,6 +428,7 @@ class TebraFhirReadAdapter:
 
         try:
             authorized()
+            self._guard_origin()
             if type(credential) is not TebraFhirCredential or credential.scope_sha256 != scope.commitment():
                 raise TebraFhirReadError("scope_changed")
             if not isinstance(credential.access_token, SecretStr):
@@ -420,6 +440,7 @@ class TebraFhirReadAdapter:
                 def get(resource, *, params=None):
                     nonlocal used
                     authorized()
+                    self._guard_origin()
                     client.cookies.clear()
                     with client.stream("GET", FHIR_BASE+"/"+resource, params=params,
                             headers={"Authorization": "Bearer "+token, "Accept": "application/fhir+json", "Accept-Encoding": "identity"}) as response:

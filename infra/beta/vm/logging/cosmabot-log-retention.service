@@ -1,0 +1,27 @@
+[Unit]
+Description=Dry-run plan for app, API, worker, and proxy log retention; does not delete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /opt/cosmabot/logging/retention.py plan --config /etc/cosmabot/logging/retention.json --log-file /var/lib/cosmabot-logging/retention.log
+StateDirectory=cosmabot-logging
+StateDirectoryMode=0700
+StandardOutput=journal
+StandardError=journal
+UMask=0077
+NoNewPrivileges=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=
+MemoryMax=256M
+CPUQuota=10%
+TasksMax=16

@@ -55,7 +55,7 @@ class Harness:
         self.clock = 1000.0
         self.credentials = ElationCredentials(SCOPE.commitment(), SecretStr("synthetic-client"),
             SecretStr("synthetic-secret"))
-        self.port = ElationReadAdapter(SCOPE, self.secrets, enabled=enabled,
+        self.port = ElationReadAdapter(SCOPE, self.secrets, enabled=enabled, sandbox_enabled=True,
             problems_enabled=problems_enabled, authorize_read=self.authorize,
             transport=httpx.MockTransport(self.send), now=lambda: NOW,
             monotonic=lambda: self.clock, sleep=self.sleep)

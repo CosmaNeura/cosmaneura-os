@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "enabled": false,
+  "dry_run": true,
+  "policy": "retain_count",
+  "retain_count": 14,
+  "retain_days": 30
+}

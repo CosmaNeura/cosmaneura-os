@@ -42,14 +42,29 @@ class OpenVisitContext:
         )
 
     @staticmethod
+    def limit(draft_only=False):
+        return 12000 if draft_only else 4000
+
+    @staticmethod
+    def notice(draft_only=False):
+        limit = OpenVisitContext.limit(draft_only)
+        return (
+            "The open visit was left off this question because adding it would go over "
+            f"{limit:,} characters. Shorten the question and ask again to include the visit."
+        )
+
+    @staticmethod
     def question(content, visit, *, draft_only=False):
         if not visit:
             return content
         block = "\n\n" + OpenVisitContext.MARK + visit
-        limit = 12000 if draft_only else 4000
-        if len(content) + len(block) > limit:
-            return content
-        return content + block
+        limit = OpenVisitContext.limit(draft_only)
+        if len(content) + len(block) <= limit:
+            return content + block
+        notice = "\n\n" + OpenVisitContext.notice(draft_only)
+        if len(content) + len(notice) <= limit:
+            return content + notice
+        return content
 
     @staticmethod
     def supplied(question):
@@ -58,3 +73,36 @@ class OpenVisitContext:
             return None
         visit = question.rsplit(mark, 1)[1].strip()
         return visit or None
+
+    @staticmethod
+    def stated_omission(question):
+        if OpenVisitContext.supplied(question):
+            return None
+        for draft_only in (False, True):
+            notice = OpenVisitContext.notice(draft_only)
+            if notice in question:
+                return notice
+        return None
+
+    @staticmethod
+    def omitted(content, visit, question, *, draft_only=False):
+        if not visit or OpenVisitContext.supplied(question):
+            return False
+        block = "\n\n" + OpenVisitContext.MARK + visit
+        return len(content) + len(block) > OpenVisitContext.limit(draft_only)
+
+    @staticmethod
+    def with_notice(response, content, visit, question, *, draft_only=False):
+        if not OpenVisitContext.omitted(content, visit, question, draft_only=draft_only):
+            return response
+        notice = OpenVisitContext.notice(draft_only)
+        if notice in response:
+            return response
+        if OpenVisitContext.MISSING in response:
+            replaced = response.replace(OpenVisitContext.MISSING, notice, 1)
+            if notice in replaced:
+                return replaced
+        combined = response + "\n\n" + notice
+        if len(combined) > 20000:
+            return response
+        return combined

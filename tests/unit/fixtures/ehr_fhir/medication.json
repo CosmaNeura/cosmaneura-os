@@ -1,0 +1,28 @@
+{
+  "resourceType": "Medication",
+  "id": "synth-medication-9001",
+  "meta": {
+    "profile": ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-medication"]
+  },
+  "code": {
+    "coding": [
+      {
+        "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+        "code": "197361",
+        "display": "Lisinopril 10 MG Oral Tablet"
+      }
+    ],
+    "text": "Invented lisinopril tablet"
+  },
+  "status": "active",
+  "form": {
+    "coding": [
+      {
+        "system": "http://snomed.info/sct",
+        "code": "385055001",
+        "display": "Tablet"
+      }
+    ],
+    "text": "Tablet"
+  }
+}

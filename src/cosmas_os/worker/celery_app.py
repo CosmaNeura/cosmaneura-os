@@ -3,8 +3,10 @@ from __future__ import annotations
 from celery import Celery
 
 from cosmas_os.config import settings
+from cosmas_os.logging_setup import install_worker
 from cosmas_os.worker.readiness import install_worker_readiness
 
+install_worker()
 settings.validate_runtime_configuration()
 
 celery_app = Celery("cosmas_os", broker=settings.redis_url, include=["cosmas_os.worker.tasks"])

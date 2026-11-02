@@ -86,7 +86,10 @@ fresh bootstrap. A temporary service policy prevents APT from starting services;
 Docker, its socket and containerd are masked before installation and remain
 masked afterward. Docker configuration explicitly selects its **iptables**
 firewall backend, preserving the runtime's DOCKER-USER guard contract, and bounds
-local container logs. `dockerd --validate` checks configuration without starting
+local container logs. The size and file count come from
+`infra/beta/vm/logging/retention.json` (default `10m` and 3 files, the same limits
+as before). Journald limits in that file are not installed by this bootstrap.
+See `infra/beta/vm/logging/README.md`. `dockerd --validate` checks configuration without starting
 the daemon. Compose version is checked without starting containers.
 
 The host receipt is `/etc/cosmabot/host-bootstrap.json`; private command output

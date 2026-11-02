@@ -81,3 +81,45 @@ def test_open_visit_enters_only_the_chief_request_payload():
     assert all(item["kind"] != "open_visit" for item in payload["sources"])
     named = WorkspaceReviewConnector().review(chief)
     assert "Jordan Cypress" in named.content and "one-week sleep diary" in named.content
+
+
+def test_over_limit_visit_is_left_off_and_the_reply_says_so():
+    visit = OpenVisitContext.text(_appointment())
+    block = "\n\n" + OpenVisitContext.MARK + visit
+    for draft_only, limit in ((False, 4000), (True, 12000)):
+        notice = OpenVisitContext.notice(draft_only)
+        fitting = "Q" * (limit - len(block))
+        kept = OpenVisitContext.question(fitting, visit, draft_only=draft_only)
+        assert kept == fitting + block
+        assert notice not in kept
+        overflowing = "Q" * (limit - len(block) + 1)
+        asked = OpenVisitContext.question(overflowing, visit, draft_only=draft_only)
+        assert asked.startswith(overflowing)
+        assert visit not in asked
+        assert notice in asked
+        assert len(asked) <= limit
+        reply = WorkspaceReviewConnector().review(context(role="chief", sources=(), question=asked))
+        shown = OpenVisitContext.with_notice(
+            reply.content, overflowing, visit, asked, draft_only=draft_only
+        )
+        assert notice in shown
+        assert shown.count(notice) == 1
+        assert "Jordan Cypress" not in shown
+        assert OpenVisitContext.MISSING not in shown
+        snapshot = {"id": "workspace", "revision": 1, "entries": [], "follow_ups": []}
+        version = SimpleNamespace(id="team", configuration={"practice_context": "Invented practice"})
+        chief = build_context(
+            snapshot, version, _settings("chief"), "chief", overflowing, open_visit=visit, draft_only=draft_only
+        )
+        assert chief.question == asked
+        GPT41Connector(lambda: "invented-offline").prepare(chief)
+        capped = "Q" * limit
+        dropped = OpenVisitContext.question(capped, visit, draft_only=draft_only)
+        assert dropped == capped
+        assert visit not in dropped
+        silent = WorkspaceReviewConnector().review(context(role="chief", sources=(), question=dropped))
+        told = OpenVisitContext.with_notice(
+            silent.content, capped, visit, dropped, draft_only=draft_only
+        )
+        assert notice in told
+        assert OpenVisitContext.MISSING not in told

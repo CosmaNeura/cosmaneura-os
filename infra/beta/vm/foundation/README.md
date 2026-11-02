@@ -127,7 +127,8 @@ The application account keeps versioning off to preserve existing exact-deletion
 behavior. The backup account enables versioning and seven-day blob/container
 soft deletion. This is **not** an immutable backup or an installed backup job.
 The host integration must still provide the scoped writer/restore credential
-separation, database base backups plus WAL, retention cleanup, deletion
+separation, database base backups plus WAL, retention cleanup (the dry-run
+WAL-G plan under `vm/backup`; this module does not enable it), deletion
 protection, freshness alerts and a measured isolated restore before acceptance.
 Single-VM availability remains distinct from the managed HA design.
 

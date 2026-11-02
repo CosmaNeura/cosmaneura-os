@@ -18,9 +18,8 @@ version 1 manifest contains exactly:
   digests. The review must prove the chosen digest contains the declared image,
   expected UID and matching application/web configuration. This renderer does
   not pull images or infer their provenance from their names.
-- Exact `web_origin` `https://staging.cosmas.ai` and selected `api_origin`
-  `https://api.staging.cosmas.ai`. DNS/control and this separate API name remain
-  required deployment inputs. An alternative origin needs a reviewed change.
+- Exact `web_origin` `https://staging.cosmas.ai` or `https://beta.cosmas.ai`, and the matching `api_origin`.
+  Any other hostname is refused. Synthetic mode stays on. DNS and this separate API name remain required inputs.
 - `runtime`: `environment`, `secret_names`, `runtime_identity_client_id`.
   Public environment keys are actual application Settings names in uppercase.
   Every Boolean setting must be explicitly `true` or `false`, preserving the
@@ -140,7 +139,11 @@ proxy adds `NET_BIND_SERVICE` after dropping all capabilities; it retains UID
 10001, `no-new-privileges`, a read-only root filesystem and ports 8080/8443.
 Every other service drops all capabilities and adds none. Native amd64 execution
 of Caddy 2.11.4 confirmed this requirement; full proxy/TLS operation still needs
-runtime acceptance. Public certificate issuance/renewal and private certificate rotation
+runtime acceptance. App, API, worker, and proxy container logs use the Docker
+`local` driver limits in `infra/beta/vm/logging/retention.json`. The default remains
+10 MB and 3 files. Caddy file rolling stays out of the Caddyfile until
+`caddy.enabled` is true and this renderer is run again for a new release.
+See `infra/beta/vm/logging/README.md`. Public certificate issuance/renewal and private certificate rotation
 must be exercised and monitored. Registry pulls and backup custody are host-only;
 the runtime identity must not acquire deployment, registry-admin or backup powers.
 

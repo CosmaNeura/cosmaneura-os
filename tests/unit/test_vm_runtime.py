@@ -314,6 +314,68 @@ def test_backup_profile_requires_explicit_manifest_version(installed, version, i
     assert not output.exists()
 
 
+def use_web_host(config, host):
+    web = f"https://{host}"
+    api = f"https://api.{host}"
+    config["web_origin"] = web
+    config["api_origin"] = api
+    environment = config["runtime"]["environment"]
+    environment["CORS_ALLOWED_ORIGINS"] = web
+    environment["CLERK_AUTHORIZED_PARTIES"] = web
+    return config
+
+
+def test_beta_cosmas_host_renders_and_stays_synthetic(installed):
+    config, root, output = installed
+    use_web_host(config, "beta.cosmas.ai")
+    vm.render(config, root, output, Path("/var/lib/cosmabot"))
+    runtime = json.loads((output / "runtime.json").read_text())
+    assert runtime["environment"]["DATA_MODE"] == "synthetic"
+    assert runtime["environment"]["COSMAS_ENV"] == "early_adopter_beta"
+    caddy = (output / "Caddyfile").read_text()
+    assert "https://beta.cosmas.ai" in caddy
+    assert "api.beta.cosmas.ai" in caddy
+    assert "staging.cosmas.ai" not in caddy
+
+
+@pytest.mark.parametrize(
+    ("web", "api"),
+    [
+        ("https://app.cosmaneura.com", "https://api.cosmaneura.com"),
+        ("https://cosmas.ai", "https://api.cosmas.ai"),
+        ("https://www.cosmas.ai", "https://api.www.cosmas.ai"),
+        ("https://app.cosmas.ai", "https://api.cosmas.ai"),
+        ("https://foo.cosmaneura.com", "https://api.foo.cosmaneura.com"),
+        ("https://random.example.invalid", "https://api.random.example.invalid"),
+        ("https://beta.cosmas.ai", "https://api.staging.cosmas.ai"),
+        ("https://staging.cosmas.ai", "https://api.beta.cosmas.ai"),
+    ],
+)
+def test_vm_refuses_cosmas_addresses_and_random_hosts(installed, web, api):
+    config, root, output = installed
+    config["web_origin"] = web
+    config["api_origin"] = api
+    with pytest.raises(vm.Refused):
+        vm.render(config, root, output, Path("/var/lib/cosmabot"))
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"DATA_MODE": "authorized_beta"},
+        {"COSMAS_ENV": "production"},
+    ],
+)
+def test_beta_host_cannot_leave_synthetic_mode(installed, updates):
+    config, root, output = installed
+    use_web_host(config, "beta.cosmas.ai")
+    config["runtime"]["environment"].update(updates)
+    with pytest.raises(vm.Refused):
+        vm.render(config, root, output, Path("/var/lib/cosmabot"))
+    assert not output.exists()
+
+
 @pytest.mark.parametrize(
     "change",
     [
