@@ -193,6 +193,20 @@ export function render(input){
     if(features.model)contract.private_environment.exact_names.push('WORKSPACE_LLM_API_KEY');
     if(features.google)contract.private_environment.exact_names.push('GOOGLE_CONNECTION_CLIENT_SECRET','GOOGLE_CONNECTION_ENCRYPTION_KEY');
   }
+  // Staging-only: allow ACCOUNT_DELETE_CLERK_SECRET_KEY by Key Vault reference.
+  // Production / beta.cosmas.ai profiles leave private_environment byte-for-byte
+  // unchanged (no new keys on that object).
+  const stagingHost=value.web_origin==='https://staging.cosmas.ai';
+  const stagingProfile=value.identity_policy==='shared_staging'||stagingHost;
+  if(stagingProfile){
+    contract.private_environment.optional_exact_names=['ACCOUNT_DELETE_CLERK_SECRET_KEY'];
+    // Names only — never secret values. John pastes the Clerk Secret key into KV.
+    contract.private_environment.key_vault_secret_names={
+      ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key',
+    };
+    contract.private_environment.key_vault_name='kv-cbot-stg-stg0925c1';
+    contract.private_environment.key_vault_uri='https://kv-cbot-stg-stg0925c1.vault.azure.net/';
+  }
   if(ownedVm){
     contract.resource_identity.host_name='vm-cosmabot-staging-eus2-lab01';
     contract.private_environment.file=config+'/private/api-private.json';
@@ -214,6 +228,12 @@ export function render(input){
       '*.cosmaneura.com',...platformHosts],
     network_namespace:'Dedicated host; never the main platform host or its network/deployment identity',
     qualification:'Service configuration alone does not enforce destination allowlisting; demonstrate host egress policy before release.'};
+  if(stagingProfile){
+    // Account delete uses Clerk Backend API; JWKS-only issuer egress is not enough.
+    firewall.api_egress.push({protocol:'https',hostname:'api.clerk.com',tcp_port:443,
+      path:'/v1/users/',redirects_allowed:false,purpose:'account_delete_clerk_backend'});
+    firewall.dns='Only the exact configured Clerk issuer, Clerk Backend API, and any declared optional model/Google hostnames; qualify resolver enforcement separately.';
+  }
   if(features.model)firewall.api_egress.push({protocol:'https',hostname:new URL(features.model.origin).hostname,tcp_port:443,
     path:'/openai/v1/chat/completions',redirects_allowed:false});
   if(features.google){
@@ -222,9 +242,13 @@ export function render(input){
     firewall.browser_oauth_origins=['https://accounts.google.com'];
   }
   if(value.beta_features!==undefined){
-    firewall.dns='Only the exact configured Clerk/model and documented Google API hostnames; qualify resolver enforcement separately.';
+    firewall.dns=stagingProfile
+      ?'Only the exact configured Clerk issuer, Clerk Backend API, optional own model and documented Google API hostnames; qualify resolver enforcement separately.'
+      :'Only the exact configured Clerk/model and documented Google API hostnames; qualify resolver enforcement separately.';
     contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
-      'Host firewall and DNS qualification: only declared Clerk, optional own model and Google API egress; no metadata or other providers':item);
+      (stagingProfile
+        ?'Host firewall and DNS qualification: only declared Clerk JWKS, Clerk Backend API, optional own model and Google API egress; no metadata or other providers'
+        :'Host firewall and DNS qualification: only declared Clerk, optional own model and Google API egress; no metadata or other providers'):item);
   }
   if(ownedVm){
     firewall.dedicated_host_required=false;firewall.existing_owned_cosmabot_host_required=true;
