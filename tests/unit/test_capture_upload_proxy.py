@@ -7,7 +7,6 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from cosmas_os.application import capture_upload_proxy as proxy
