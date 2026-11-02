@@ -1,4 +1,5 @@
 """Exercise the actual owned Foundation-only native CSP transformation."""
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -53,7 +54,9 @@ import Foundation
 }
 ''', encoding="utf-8")
     executable = folder / "policy-check"
-    command = ["/usr/bin/swiftc", "-swift-version", "6", "-module-cache-path", str(folder / "module-cache"), str(ROOT / "clients/apple/startup-recovery/WorkspaceRecoveryState.swift"), str(runner), "-o", str(executable)]
+    compiler = shutil.which("swiftc")
+    assert compiler is not None, "The native document policy check requires a Swift compiler on PATH."
+    command = [compiler, "-swift-version", "6", "-module-cache-path", str(folder / "module-cache"), str(ROOT / "clients/apple/startup-recovery/WorkspaceRecoveryState.swift"), str(runner), "-o", str(executable)]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     return executable
