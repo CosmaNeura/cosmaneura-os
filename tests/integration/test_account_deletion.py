@@ -61,7 +61,7 @@ def deletion(session, seeded, monkeypatch):
         clerk_audience="cosmas-identity-local",
         clerk_organization_id="org_identity_invented",
         clerk_authorized_parties=ORIGIN,
-        clerk_secret_key="sk_test_invented_account_deletion",
+        account_delete_clerk_secret_key="sk_test_invented_account_deletion",
         beta_box_id=box,
         cors_allowed_origins=ORIGIN,
     )
@@ -321,18 +321,24 @@ def _snapshot_account_rows(session, box_id: str, principal_id: str, binding_id: 
 @pytest.mark.parametrize(
     "secret_value",
     [None, ""],
-    ids=["clerk_secret_unset", "clerk_secret_empty_string"],
+    ids=["account_delete_clerk_secret_unset", "account_delete_clerk_secret_empty_string"],
 )
 def test_hosted_delete_fails_closed_without_clerk_secret(
     deletion, session, monkeypatch, secret_value
 ):
-    """Staging without CLERK_SECRET_KEY must refuse delete without mutating anything."""
+    """Staging without ACCOUNT_DELETE_CLERK_SECRET_KEY must refuse delete without mutating anything."""
 
     api.app.dependency_overrides.pop(api._clerk_user_deletion_port, None)
     monkeypatch.setattr(
         api.settings,
-        "clerk_secret_key",
+        "account_delete_clerk_secret_key",
         None if secret_value is None else SecretStr(secret_value),
+    )
+    # CLERK_SECRET_KEY must not unlock delete; only the dedicated account-delete name does.
+    monkeypatch.setattr(
+        api.settings,
+        "clerk_secret_key",
+        SecretStr("sk_test_must_not_be_used_for_account_delete"),
     )
 
     clerk_constructions: list[str] = []
@@ -375,3 +381,44 @@ def test_hosted_delete_fails_closed_without_clerk_secret(
     identity = still_signed_in.json()
     assert identity["state"] == "allowed"
     assert identity["box_id"] == deletion.box
+
+
+def test_staging_delete_succeeds_when_account_delete_clerk_secret_present(
+    deletion, session, monkeypatch
+):
+    """Staging with ACCOUNT_DELETE_CLERK_SECRET_KEY deletes and calls Clerk once."""
+
+    api.app.dependency_overrides.pop(api._clerk_user_deletion_port, None)
+    fake_secret = "sk_test_invented_account_delete_present"
+    monkeypatch.setattr(
+        api.settings,
+        "account_delete_clerk_secret_key",
+        SecretStr(fake_secret),
+    )
+    monkeypatch.setattr(api.settings, "clerk_secret_key", None)
+
+    constructions: list[str] = []
+    real_init = ClerkProvisioningPort.__init__
+
+    def tracking_init(self, secret: str, *, client=None):  # noqa: ANN001
+        constructions.append(secret)
+        return real_init(
+            self,
+            secret,
+            client=httpx.Client(transport=httpx.MockTransport(deletion.clerk_transport)),
+        )
+
+    monkeypatch.setattr(ClerkProvisioningPort, "__init__", tracking_init)
+
+    response = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers.get("cache-control") == "no-store"
+    assert response.json() == {"status": "deleted"}
+    assert constructions == [fake_secret]
+    assert deletion.clerk_transport.deleted == ["user_delete_peer"]
+
+    peer = session.get(Principal, deletion.people["peer"])
+    session.refresh(peer)
+    assert peer.state == PrincipalState.TOMBSTONED.value

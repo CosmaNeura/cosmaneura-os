@@ -1511,8 +1511,12 @@ def account_identity(request: Request, response: Response, identity: RequestIden
 
 
 def _clerk_user_deletion_port():
-    """Clerk Backend delete client. Tests override this dependency."""
-    secret = settings.clerk_secret_key
+    """Clerk Backend delete client. Tests override this dependency.
+
+    Reads only ACCOUNT_DELETE_CLERK_SECRET_KEY so sign-in stays JWKS-only and
+    CLERK_SECRET_KEY is never required for CosmaBot auth.
+    """
+    secret = settings.account_delete_clerk_secret_key
     if secret is None or not secret.get_secret_value():
         return None
     from cosmas_os.enrollment.provisioning import ClerkProvisioningPort

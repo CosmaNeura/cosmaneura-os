@@ -43,8 +43,13 @@ class Settings(BaseSettings):
     clerk_session_policy: Literal["audience", "shared_staging", "enrollment_default"] = "audience"
     clerk_organization_id: str | None = None
     clerk_authorized_parties: str = ""
-    # Backend API secret for self-serve account deletion only. Never logged or committed.
+    # Legacy Backend secret name; CosmaBot account delete does not read it.
+    # Standalone entrypoint refuses CLERK_SECRET_KEY so sign-in stays JWKS-only.
     clerk_secret_key: SecretStr | None = None
+    # Dedicated Backend secret for self-serve account deletion only. Never logged
+    # or committed. Staging standalone may mount ACCOUNT_DELETE_CLERK_SECRET_KEY;
+    # production standalone profiles refuse it.
+    account_delete_clerk_secret_key: SecretStr | None = None
     beta_box_id: str | None = None
 
     clinic_approval_ref: str | None = None
