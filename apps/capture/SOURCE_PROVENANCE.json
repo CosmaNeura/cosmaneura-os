@@ -175,8 +175,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift",
-        "sha256": "0c4a09403d1270099411f5131265ce10ebea8f104f494fb156e845de9c09c36f",
-        "status": "byte-identical"
+        "sha256": "8f25543f9864e636acd64c74b4293102d52967144692b4b03c5466798ffe87fb",
+        "status": "differs"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },

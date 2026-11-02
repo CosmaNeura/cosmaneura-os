@@ -66,6 +66,7 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
         else:
             raise AssertionError(equivalent["status"])
     assert differed == [
+        "ios/App/App/CosmasWorkspaceViewController.swift",
         "native-plugins/cosmas-native-auth/Package.swift",
         "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
         "native-plugins/native-recording-pcm/Package.swift",
