@@ -64,6 +64,7 @@ describe("private encounter workspace", () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     vi.stubGlobal('crypto',webcrypto);
     vi.clearAllMocks(); draftStorage = memoryDraftStorage();
+    history.replaceState(null,'','/');
     // One-shot responses belong to one journey, including ones it never sends.
     for(const method of Object.values(workspaceApi))if(vi.isMockFunction(method))method.mockReset();
     vi.mocked(modelWorkApi.resolve).mockReset();
@@ -75,7 +76,7 @@ describe("private encounter workspace", () => {
     container = document.createElement("div"); document.body.append(container); root = createRoot(container);
     await act(async () => root.render(<EncounterWorkspace draftStorage={draftStorage} />));
   });
-  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+  afterEach(async () => { await act(async () => root.unmount()); container.remove(); history.replaceState(null,'','/'); vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
   async function click(text: string) {
     const visits = () => [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace navigation"] button')].find(button=>button.textContent==='Visits and notes')!;
     if(text==='Choose an encounter'){await act(async()=>visits().click());return;}
@@ -570,6 +571,8 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.ask).mockReset();
     vi.mocked(workspaceApi.ask).mockImplementation(async(_identity,_id,body)=>answer(empty,body,2));
     await act(async()=>root.unmount());root=createRoot(container);
+    // Fresh admission starts at visits; clear any notebook hash left by the prior shell.
+    history.replaceState(null,'','/');
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage}/>));
     await click('Open synthetic encounter');await chooseBot('Chief');
     expect(container.textContent).toContain(ChiefOpenVisit.missing);

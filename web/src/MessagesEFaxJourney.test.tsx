@@ -68,7 +68,7 @@ const passage=()=>[...host.querySelectorAll<HTMLElement>('[aria-label="Review re
 async function editPassage(text=RECEIVED_FAX_PASSAGE,pageNumbers='1'){
  await wait(()=>expect(passage()?.querySelector('textarea')?.matches(':disabled')).toBe(false));
  await act(async()=>{const field=passage()!.querySelector<HTMLTextAreaElement>('textarea')!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,text);field.dispatchEvent(new Event('input',{bubbles:true}));});
- await act(async()=>{const field=passage()!.querySelector<HTMLInputElement>('input[aria-label="Pages used"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(field,pageNumbers);field.dispatchEvent(new Event('input',{bubbles:true}));});
+ await act(async()=>{const field=passage()!.querySelector<HTMLInputElement>('input[name="fax-pages"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(field,pageNumbers);field.dispatchEvent(new Event('input',{bubbles:true}));});
 }
 async function openPassage(){await click('Review a passage for the current visit');await wait(()=>expect(passage()?.querySelector('textarea')?.matches(':disabled')).toBe(false));}
 async function confirmPassage(){await wait(()=>expect(passage()?.querySelector('fieldset input')?.matches(':disabled')).toBe(false));for(const field of passage()!.querySelectorAll<HTMLInputElement>('fieldset input'))await act(async()=>field.click());}
