@@ -1,4 +1,4 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useId,useRef,useState} from 'react';
 import type {EditorRecoveryAccess} from './editor-recovery';
 import {editorAddress} from './draft-journal';
 import {validatePrivateDraftLinkRecovery,type PrivateDraftLink} from './private-draft-recovery';
@@ -8,6 +8,7 @@ export function PrivateDraftLinkPanel({identity,workspace,recovery,locked,recove
   recovery:EditorRecoveryAccess|null;locked:boolean;recoveryLocked?:boolean;onSaved:(value:Workspace)=>void;onAccessLost:(cause:unknown)=>void;onBusyChange?:(busy:boolean)=>void;onPendingChange?:(pending:boolean)=>void;forTranscription?:boolean;compact?:boolean}){
   const [pending,setPending]=useState<PrivateDraftLink|null>(null),[choices,setChoices]=useState<WorkspaceEncounter[]|null>(null);
   const [search,setSearch]=useState('');
+  const searchId=useId(),visitId=useId(),confirmId=useId();
   const [selection,setSelection]=useState(''),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),[ready,setReady]=useState(false),[retryAllowed,setRetryAllowed]=useState(false),[error,setError]=useState('');
   const live=useRef({identity,workspaceId:workspace.id,recovery,epoch:0,alive:true});
   if(live.current.identity!==identity||live.current.workspaceId!==workspace.id||live.current.recovery!==recovery)live.current={identity,workspaceId:workspace.id,recovery,epoch:live.current.epoch+1,alive:true};
@@ -50,13 +51,13 @@ export function PrivateDraftLinkPanel({identity,workspace,recovery,locked,recove
     {pending?<><p>The earlier visit link is unconfirmed. Its exact request is retained. You can return Home and reopen this notebook to continue.</p><button disabled={!ready||busy||recoveryLocked} onClick={()=>void resolve()}>Check saved visit link</button>{retryAllowed&&<button disabled={!ready||busy||recoveryLocked} onClick={()=>void link(true)}>Retry same visit link</button>}</>:<details open={forTranscription||undefined}><summary>{forTranscription?'Choose the patient and visit for this recording':'Link a confirmed visit'}</summary>
       {!forTranscription&&<p>Choose an appointment you can access, then confirm the note belongs to that patient and visit. Your draft history is kept.</p>}
       {(!forTranscription||choices===null)&&<button disabled={!ready||busy||locked} onClick={()=>void load()}>{forTranscription?(busy?'Finding your visits…':'Try loading visits again'):'Load available visits'}</button>}
-      {choices&&<><label>Search visits<input type="search" value={search} disabled={busy||locked} onChange={event=>{setSearch(event.target.value);setSelection('');setConfirmed(false);}} placeholder="Patient or visit title"/></label>
-        <label>Visit<select disabled={busy||locked} value={selection} onChange={event=>{setSelection(event.target.value);setConfirmed(false);}}><option value="">Choose a visit…</option>{choices.filter(choice=>choice.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).map(choice=><option key={choice.appointment_id} value={choice.appointment_id} disabled={!available(choice)}>{choice.label}{available(choice)?'':' · already has a notebook'}</option>)}</select></label>
+      {choices&&<><label htmlFor={searchId}>Search visits<input id={searchId} name="visit-search" type="search" autoComplete="off" value={search} disabled={busy||locked} onChange={event=>{setSearch(event.target.value);setSelection('');setConfirmed(false);}} placeholder="Patient or visit title"/></label>
+        <label htmlFor={visitId}>Visit<select id={visitId} name="visit" autoComplete="off" disabled={busy||locked} value={selection} onChange={event=>{setSelection(event.target.value);setConfirmed(false);}}><option value="">Choose a visit…</option>{choices.filter(choice=>choice.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).map(choice=><option key={choice.appointment_id} value={choice.appointment_id} disabled={!available(choice)}>{choice.label}{available(choice)?'':' · already has a notebook'}</option>)}</select></label>
         {selection&&<p><strong>Selected patient and visit:</strong> {choices.find(choice=>choice.appointment_id===selection)?.label}</p>}
         {choices.some(choice=>!available(choice))&&<p>Visits with an existing notebook cannot be linked to this private notebook. {forTranscription?'Your recording remains saved on this device.':'Your private note remains saved.'}</p>}
         {!!choices.length&&!choices.some(available)&&<p>No visits are available for this notebook. Return Home, then use Visits and notes to find another visit.</p>}
         {!choices.length&&<p>{forTranscription?'No visits are available. Your recording is still saved on this device.':'No confirmed visits are available. Your private note remains available.'}</p>}
-        <label><input type="checkbox" disabled={busy||locked||!selectedAvailable} checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/>{forTranscription?'I checked that this recording belongs to the selected patient and visit.':'I checked that this note belongs to the selected patient and visit.'}</label>
+        <label htmlFor={confirmId}><input id={confirmId} name="visit-confirm" type="checkbox" disabled={busy||locked||!selectedAvailable} checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/>{forTranscription?'I checked that this recording belongs to the selected patient and visit.':'I checked that this note belongs to the selected patient and visit.'}</label>
         <button disabled={!ready||busy||locked||!selectedAvailable||!confirmed} onClick={()=>void link()}>{forTranscription?'Confirm this visit':'Link this visit'}</button></>}
     </details>}{error&&<p role="alert">{error}</p>}</section>;
 }
