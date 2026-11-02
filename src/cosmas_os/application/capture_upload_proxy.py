@@ -28,20 +28,42 @@ from cosmas_os.ports.capture_protocol import UploadReceipt
 MAX_CIPHERTEXT_BYTES = 327_680
 
 
-def _exact_https_origin(value: str) -> bool:
+def _loopback_host(hostname: str | None) -> bool:
+    host = (hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def _exact_proxy_origin(value: str) -> bool:
+    """Production: exact HTTPS. Synth labs may use loopback HTTP."""
     parsed = urlparse(value)
-    return (
-        parsed.scheme == "https"
-        and parsed.port in (None, 443)
-        and parsed.username is None
-        and parsed.password is None
-        and parsed.path in ("", "/")
-        and parsed.params == ""
-        and parsed.query == ""
-        and parsed.fragment == ""
-        and bool(parsed.hostname)
-        and not any(c.isspace() for c in value)
-    )
+    if (
+        parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+        or not parsed.hostname
+        or any(c.isspace() for c in value)
+    ):
+        return False
+    if parsed.scheme == "https" and parsed.port in (None, 443):
+        return True
+    return parsed.scheme == "http" and _loopback_host(parsed.hostname)
+
+
+def _allowed_target_upload_url(value: str) -> bool:
+    parsed = urlparse(value)
+    if parsed.username or parsed.password or not parsed.hostname:
+        return False
+    host = parsed.hostname.lower()
+    # Never proxy back into AssemblyAI/Recall; Core must have issued blob/HTTPS
+    # (loopback HTTP is allowed only for local synth labs).
+    if host == "assemblyai.com" or host.endswith(".assemblyai.com") or host == "recall.ai" or host.endswith(".recall.ai"):
+        return False
+    if parsed.scheme == "https":
+        return True
+    return parsed.scheme == "http" and _loopback_host(host)
 
 
 def mint_proxy_upload(
@@ -55,15 +77,10 @@ def mint_proxy_upload(
     proxy_origin: str,
 ) -> UploadReceipt:
     """Replace Core's blob upload_url with a CosmaBot API proxy URL."""
-    if not _exact_https_origin(proxy_origin):
+    if not _exact_proxy_origin(proxy_origin):
         raise ws.WorkspaceError("capture_connection_required", 503)
     target = receipt.upload_url
-    parsed = urlparse(target)
-    if parsed.scheme != "https" or parsed.username or parsed.password:
-        raise ws.WorkspaceError("capture_request_unconfirmed", 503)
-    host = (parsed.hostname or "").lower()
-    # Never proxy back into AssemblyAI/Recall; Core must have issued blob/HTTPS.
-    if host == "assemblyai.com" or host.endswith(".assemblyai.com") or host == "recall.ai" or host.endswith(".recall.ai"):
+    if not _allowed_target_upload_url(target):
         raise ws.WorkspaceError("capture_request_unconfirmed", 503)
     proxy_id = str(uuid4())
     row = CaptureUploadProxy(

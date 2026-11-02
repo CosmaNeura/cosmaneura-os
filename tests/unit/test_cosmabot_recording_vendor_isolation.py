@@ -47,6 +47,7 @@ REFUSAL_FILES = {
     REPO / "clients/capture/src/bff/forbidden-upload-hosts.ts",
     REPO / "clients/capture/src/bff/upload-target.ts",
     REPO / "clients/shared/beta-feature-profile.mjs",
+    REPO / "src/cosmas_os/application/capture_upload_proxy.py",
 }
 
 DORMANT_RECALL_CONFIG = REPO / "clients/desktop/recorder/config.ts"

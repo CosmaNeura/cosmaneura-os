@@ -92,7 +92,9 @@ def test_mint_rewrites_blob_url_to_cosmabot_api_proxy(db):
         f"https://api.staging.cosmas.ai/workspaces/{workspace.id}/capture/ciphertexts/"
     )
     assert "blob.core.windows.net" not in rewritten.upload_url
-    row = db.execute(select(CaptureUploadProxy)).scalar_one()
+    proxy_id = rewritten.upload_url.rsplit("/", 1)[-1]
+    row = db.get(CaptureUploadProxy, proxy_id)
+    assert row is not None
     assert row.target_upload_url.startswith("https://cosmaneurastaginguploads.blob.core.windows.net/")
     assert str(row.authorization_receipt_id) == str(receipt.authorization_receipt_id)
 
