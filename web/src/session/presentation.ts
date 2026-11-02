@@ -12,7 +12,9 @@ export class WorkspacePresentationPreference {
     try{const saved=this.storage?.getItem(PRESENTATION_KEY);if(saved==='workspace'||saved==='messages')session.setPresentationPreference(saved);}catch{/* Default until the device preference can be read. */}
   }
   current():Presentation {
-    if(!this.enabled||!this.session.getSnapshot().team?.revision)return 'workspace';
+    // Prefer the saved/device default immediately. Do not wait on team load, or
+    // chrome labels flip from workspace → messages when revision arrives.
+    if(!this.enabled)return 'workspace';
     return this.session.getSnapshot().presentationPreference??(this.phone?'messages':'workspace');
   }
   choose(value:Presentation,transitionBlocked:boolean):boolean {
