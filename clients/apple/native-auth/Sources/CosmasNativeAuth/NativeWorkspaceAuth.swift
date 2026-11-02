@@ -45,6 +45,8 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
     func signIn() async throws
     func freshToken() async throws -> String?
     func signOut() async throws
+    /// Remove Clerk Keychain credentials after server-side account deletion.
+    func clearStoredCredentials() throws
 }
 
 /// A persisted local access block, not a token store. Write before remote logout.
@@ -248,6 +250,14 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
             abandonMutation(operation)
             throw NativeAuthError.signOutPending
         }
+    }
+
+    /// Sign out, then wipe Clerk Keychain credentials after server account deletion.
+    public func clearAccountCredentials() async throws -> NativeAuthState {
+        let state = try await signOut()
+        guard let driver else { throw NativeAuthError.unavailable }
+        try driver.clearStoredCredentials()
+        return state
     }
 
     private func abandonMutation(_ operation: UUID) {

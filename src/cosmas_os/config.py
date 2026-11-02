@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     clerk_session_policy: Literal["audience", "shared_staging", "enrollment_default"] = "audience"
     clerk_organization_id: str | None = None
     clerk_authorized_parties: str = ""
+    # Backend API secret for self-serve account deletion only. Never logged or committed.
+    clerk_secret_key: SecretStr | None = None
     beta_box_id: str | None = None
 
     clinic_approval_ref: str | None = None

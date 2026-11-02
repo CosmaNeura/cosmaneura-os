@@ -65,12 +65,14 @@ contextBridge.exposeInMainWorld('cosmasWorkspaceLifecycle', Object.freeze({
 }));
 const channels = Object.freeze({getState: 'cosmas:workspace-auth:state:v1',
   signIn: 'cosmas:workspace-auth:sign-in:v1', signOut: 'cosmas:workspace-auth:sign-out:v1',
+  clearAccountCredentials: 'cosmas:workspace-auth:clear-account-credentials:v1',
   changed: 'cosmas:workspace-auth:changed:v1'});
 const invoke = method => ipcRenderer.invoke(channels[method], {schemaVersion: 1, requestId: globalThis.crypto.randomUUID()});
 const listeners = new Set();
 contextBridge.exposeInMainWorld('cosmasDesktopAuth', Object.freeze({
   version: 1,
   getState: () => invoke('getState'), signIn: () => invoke('signIn'), signOut: () => invoke('signOut'),
+  clearAccountCredentials: () => invoke('clearAccountCredentials'),
   onStateChanged(callback) {
     if (typeof callback !== 'function' || listeners.size >= 32) throw new Error('Secure session unavailable');
     const listener = (_event, state) => callback(state);

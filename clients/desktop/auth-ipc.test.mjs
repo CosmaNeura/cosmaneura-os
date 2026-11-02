@@ -11,14 +11,16 @@ function fixture() {
   const ipc = {handle: (name, fn) => handlers.set(name, fn), removeHandler: name => handlers.delete(name)};
   let listener;
   const auth = {getState: async () => { calls.push('state'); return state; }, signIn: async () => state,
-    signOut: async () => state, subscribe: fn => { listener = fn; return () => { listener = null; }; }};
+    signOut: async () => state, clearAccountCredentials: async () => state,
+    subscribe: fn => { listener = fn; return () => { listener = null; }; }};
   const dispose = installAuthIpc(ipc, renderer, auth);
   return {handlers, renderer, auth, dispose, sends, calls, emit: value => listener?.(value),
     event: {sender: renderer, senderFrame: renderer.mainFrame}, payload: () => ({schemaVersion: 1, requestId: randomUUID()})};
 }
-test('exposes three bounded operations and safe state events, with no credential channel', async () => {
+test('exposes bounded auth operations and safe state events, with no credential channel', async () => {
   const f = fixture();
-  assert.equal(f.handlers.size, 3); assert.equal([...f.handlers.keys()].some(name => name.includes('token')), false);
+  assert.equal(f.handlers.size, 4); assert.equal([...f.handlers.keys()].some(name => name.includes('token')), false);
+  assert.ok(f.handlers.has(AUTH_CHANNELS.clearAccountCredentials));
   assert.deepEqual(await f.handlers.get(AUTH_CHANNELS.getState)(f.event, f.payload()), state);
   f.emit(state); assert.deepEqual(f.sends, [[AUTH_CHANNELS.changed, state]]);
   f.dispose(); assert.equal(f.handlers.size, 0);
