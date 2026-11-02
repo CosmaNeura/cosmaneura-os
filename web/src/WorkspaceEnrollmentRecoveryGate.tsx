@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {useEffect,useState,useSyncExternalStore,type ReactNode} from 'react';
 import {usePracticeAccessTask} from './PracticeAccessGate';
 import {practiceAccessApi} from './practice-access-api';
@@ -32,7 +33,7 @@ async function bounded<T>(signal:AbortSignal|undefined,work:(signal:AbortSignal)
   try{return await Promise.race([work(controller.signal),interrupted]);}finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);controller.abort();}
 }
 async function request(identity:AuthenticatedWorkspaceIdentity,path:string,signal:AbortSignal):Promise<Response>{
-  const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+  const base=workspaceApiBase(identity);
   if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
   const headers=await workspaceAuthHeaders(identity,base);signal.throwIfAborted();assertCurrentDesktopSession(identity);
   const response=await workspaceFetch(identity,base+path,{headers,signal,method:'GET',credentials:'omit',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'},true);

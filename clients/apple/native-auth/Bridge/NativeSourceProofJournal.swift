@@ -181,14 +181,17 @@ struct NativeSourceProofRecord: Codable, Equatable, Sendable, CustomStringConver
     private let query: [CFString: Any]
     private let calls: Calls
 
-    init(platform: NativeSourceJournalPlatform, bundleIdentifier: String, accessGroup: String, calls: Calls = .live) throws {
+    init(platform: NativeSourceJournalPlatform, bundleIdentifier: String, accessGroup: String, profileNamespace: String? = nil, calls: Calls = .live) throws {
         guard bundleIdentifier == platform.bundleID,
               accessGroup.hasSuffix("." + bundleIdentifier),
               accessGroup.dropLast(bundleIdentifier.count + 1).range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil else { throw NativeSourceJournalError.unavailable }
         self.calls = calls
+        guard profileNamespace == nil || profileNamespace?.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+            throw NativeSourceJournalError.unavailable
+        }
         var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
-            kSecAttrService: bundleIdentifier + ".source-owner",
+            kSecAttrService: bundleIdentifier + ".source-owner" + (profileNamespace.map { "." + $0 } ?? ""),
             kSecAttrAccount: "journal-v1",
             kSecAttrAccessGroup: accessGroup,
             kSecAttrSynchronizable: false,

@@ -1,4 +1,5 @@
 import {AthenaVisitTask} from './AthenaVisitTask';
+import {configuredWorkspaceApiBase} from './workspace-base';
 import {ATHENA_VISIT_LINK_BUILD} from './athena-visit-link-api';
 import {MessagesInbox,NewMessagePicker,MessagesThreadHeader,ConversationDetails,LayoutSetting} from './MessagesPresentation';
 import {nativePresentationFeedback,setNativePresentation} from './native-presentation';
@@ -474,7 +475,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
 
   function recoveryRead(value:ProviderTeam,currentWorkspace:Workspace|null,current:number,reloadParent=false){
     return {authenticated,team:value,workspace:currentWorkspace,generation:current,reloadParent,
-      apiBase:import.meta.env.VITE_API_BASE||'http://127.0.0.1:8000',
+      apiBase:configuredWorkspaceApiBase(authenticated??identity??undefined)||'http://127.0.0.1:8000',
       native:import.meta.env.VITE_WORKSPACE_NATIVE_AUTH_ENABLED==='true',draftStorage};
   }
   function prepareRecovery(value:ProviderTeam,currentWorkspace:Workspace|null,current:number,reloadParent=false){

@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {WORKSPACE_BUILD,WORKSPACE_AUTHENTICATED_BUILD,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
 import {workspaceFetch} from './workspace-protocol';
@@ -53,7 +54,7 @@ export async function faxInboundRequest(identity:AuthenticatedWorkspaceIdentity,
  const wait=<T,>(p:Promise<T>)=>Promise.race([p,interrupted]);const timer=setTimeout(abort,50000);signal?.addEventListener('abort',abort,{once:true});
  const check=()=>{if(performance.now()>=deadline)c.abort();if(c.signal.aborted)throw new WorkspaceApiError(503,'fax_inbound_unconfirmed');assertCurrentDesktopSession(identity);if(identity.mode==='clerk_jwt'&&identity.nativeSession&&!identity.nativeSession.isCurrent())throw new WorkspaceApiError(401);};
  try{
-  if(signal?.aborted)abort();check();const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+  if(signal?.aborted)abort();check();const base=workspaceApiBase(identity);
   if(base.includes('?')||base.includes('#')||!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
   const headers=await wait(workspaceAuthHeaders(identity,base));check();headers.set('X-Cosmas-Fax-Inbound','1');headers.set('Accept',binary?'application/pdf':'application/json');
   const payload=body===undefined?undefined:JSON.stringify(body);if(payload!==undefined&&new TextEncoder().encode(payload).length>8192)throw new WorkspaceApiError(422);

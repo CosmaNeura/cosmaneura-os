@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,WORKSPACE_BUILD,WORKSPACE_AUTHENTICATED_BUILD} from './workspace-api';
 import {workspaceFetch} from './workspace-protocol';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
@@ -76,7 +77,7 @@ async function send<T>(identity:AuthenticatedWorkspaceIdentity,workspaceId:strin
  if(!SCHEDULING_PATIENT_BUILD)throw new WorkspaceApiError(404);
  if(!uuid(workspaceId))throw new WorkspaceApiError(422);
  const encoded=JSON.stringify(Object.freeze({...body}));if(new TextEncoder().encode(encoded).byteLength>4096)throw new WorkspaceApiError(422);
- const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+ const base=workspaceApiBase(identity);
  if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
  const c=new AbortController(),abort=()=>c.abort(),deadline=Date.now()+50000;let response:Response|undefined,reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
  const stop=(v:{cancel:()=>Promise<unknown>}|null|undefined)=>{try{void v?.cancel().catch(()=>{});}catch{/* bounded cleanup */}};

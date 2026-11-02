@@ -50,10 +50,11 @@ function Receipt({value}:{value:EnrollmentReceipt}) { const r=value.receipt; ret
   </dl><a href={value.document.pdf_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Download agreement</a></section>; }
 
 export function EnrollmentFlow({api,identity,config,accountControls,initialName='',initialEmail='',search=window.location.search,
-  navigate=url=>window.location.assign(url),openWorkspace,prepareWorkspaceToken}:{
+  navigate=url=>window.location.assign(url),openWorkspace,prepareWorkspaceToken,brand,invitationOrigin}:{
   api:EnrollmentApi;identity:EnrollmentIdentity;config:EnrollmentConfig;accountControls?:ReactNode;initialName?:string;initialEmail?:string;search?:string;
   navigate?:(url:string)=>void;openWorkspace?:(status:EnrollmentStatus,url:string)=>Promise<void>;
   prepareWorkspaceToken?:(status:EnrollmentStatus,signal:AbortSignal)=>Promise<string>;
+  brand?:ReactNode;invitationOrigin?:string;
 }) {
   const [status,setStatus]=useState<EnrollmentStatus|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[errors,setErrors]=useState<Errors>({});
   const [name,setName]=useState(initialName),[title,setTitle]=useState(''),[practice,setPractice]=useState<PracticeDraft>({...emptyPractice,administrative_email:initialEmail});
@@ -188,10 +189,10 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
   const ownsPractice=status?.practice?.role==='owner';
   const ownerSetupPending=ownsPractice&&status?.stage==='activation_pending'&&status.workspace.status!=='ready';
   const newTrial=status?.billing.status==='none'||status?.billing.status==='pending'&&!status.billing.trial_ends_at;
-  const inviteLink=invitation?new URL('/onboarding?invite='+encodeURIComponent(invitation.token),window.location.origin).href:'';
+  const inviteLink=invitation?new URL('/onboarding?invite='+encodeURIComponent(invitation.token),invitationOrigin??window.location.origin).href:'';
   const errorSummary=Object.keys(errors).length>0&&<ul>{Object.entries(errors).map(([key,value])=><li key={key}><a href={`#enrollment-${key}`}>{value}</a></li>)}</ul>;
   return <main className="enrollment-page">
-    <header className="enrollment-header"><a className="enrollment-brand" href="/onboarding">CosmaBot</a><nav aria-label="Account">{accountControls}</nav></header>
+    <header className="enrollment-header">{brand??<a className="enrollment-brand" href="/onboarding">CosmaBot</a>}<nav aria-label="Account">{accountControls}</nav></header>
     {config.data_mode==='synthetic'&&<p className="enrollment-synthetic-note" role="note">Synthetic staging · Use invented account and practice information only.</p>}
     <section className="enrollment-card" aria-busy={busy}>
       <ol className="enrollment-progress" aria-label="Enrollment progress">{steps.map((step,index)=><li key={step} aria-current={status&&index===stageIndex(status.stage)?'step':undefined}>{step}</li>)}</ol>

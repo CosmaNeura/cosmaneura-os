@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type WorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
@@ -17,7 +18,7 @@ async function exchange<T>(identity:WorkspaceIdentity,maximum:number,prepare:()=
   const timer=setTimeout(abort,15000),cancel=()=>stop(reader);signal?.addEventListener('abort',abort,{once:true});controller.signal.addEventListener('abort',cancel,{once:true});if(signal?.aborted)abort();
   try{
     check();const prepared=await wait(prepare());check();
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
+    const base=workspaceApiBase(identity);if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
     const headers='mode'in identity?await wait(workspaceAuthHeaders(identity,base).catch(()=>{throw new WorkspaceApiError(401);})):new Headers({'X-Box-Id':identity.boxId,'X-Actor-Principal-Id':identity.actorId});
     check();headers.set('X-Cosmas-Vendor-Setup-Contract','1');headers.set('Accept','application/json');headers.set('Content-Type','application/json');
     const response=await wait(workspaceFetch(identity,base+prepared.path,{method:prepared.method,headers,body:prepared.body,signal:controller.signal,credentials:'omit',redirect:'error',cache:'no-store',referrerPolicy:'no-referrer'}));

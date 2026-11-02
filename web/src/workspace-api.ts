@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import type {PracticeProfile} from './practice-profile';
 import {validNotebookSummaries,validNotebookRename,validTitleReceipt,validTitleResolution,type NotebookRename,type NotebookSummaries,type NotebookTitleReceipt,type NotebookTitleResolution} from './notebook-metadata-contract';
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
@@ -28,7 +29,7 @@ export const WORKSPACE_AUTHENTICATED_BUILD = import.meta.env.VITE_WORKSPACE_AUTH
 
 export type AuthenticatedWorkspaceIdentity = {
   mode: "clerk_jwt"; getToken: (options: { skipCache: true }) => Promise<string | null>;
-  nativeSession?: {revision:string;isCurrent:()=>boolean};
+  nativeSession?: {revision:string;isCurrent:()=>boolean;userId?:string;sessionId?:string;organizationId?:string};
 } | { mode: "desktop_native"; revision: string; isCurrent: () => boolean };
 export type WorkspaceIdentity = { boxId: string; actorId: string } | AuthenticatedWorkspaceIdentity;
 export type WorkspaceEncounter = { appointment_id: string; label: string; workspace_id: string | null; start_at?:string; source?:string };
@@ -179,7 +180,7 @@ async function privateDraftRequest<T>(identity:AuthenticatedWorkspaceIdentity,pa
   const abort=new Promise<never>((_,reject)=>controller.signal.addEventListener('abort',()=>reject(new WorkspaceApiError(503)),{once:true}));
   const wait=<V,>(value:Promise<V>)=>Promise.race([value,abort]);
   try {
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    const base=workspaceApiBase(identity);
     if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
     const encoded=body===undefined?undefined:JSON.stringify(body);
     if(encoded&&new TextEncoder().encode(encoded).length>4096)throw new WorkspaceApiError(422);
@@ -267,7 +268,7 @@ async function request<T>(path: string, identity?: WorkspaceIdentity, body?: unk
   void interrupted.catch(()=>{});
   const wait=<V,>(promise:Promise<V>)=>Promise.race([promise,interrupted]);
   try {
-  const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8000";
+  const base = workspaceApiBase(identity);
   if (!permittedWorkspaceApi(base, import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED === "true", window.location.href)) {
     throw new Error("The synthetic workspace requires its approved local API.");
   }
@@ -327,7 +328,7 @@ export async function requestTeamPayload<T = unknown>(identity: WorkspaceIdentit
   const wait=<T,>(promise:Promise<T>)=>Promise.race([promise,interrupted]);
   try {
     checkDeadline();
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,"")||"http://127.0.0.1:8000";
+    const base=workspaceApiBase(identity);
     if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==="true",window.location.href))throw new WorkspaceApiError(503);
     const encoded=body===undefined?undefined:JSON.stringify(body);
     if(encoded!==undefined&&new TextEncoder().encode(encoded).length>TEAM_REQUEST_BYTES)throw new WorkspaceApiError(422,"invalid_team_setup_request");

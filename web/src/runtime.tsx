@@ -1,4 +1,5 @@
 import { ClerkProvider } from "@clerk/react";
+import {configuredWorkspaceApiBase} from './workspace-base';
 import { Component, useEffect, type ErrorInfo, type ReactNode } from "react";
 import { notifyWorkspaceLifecycle } from "./workspace-lifecycle";
 import { WORKSPACE_AUTHENTICATED_BUILD, WORKSPACE_BUILD } from "./workspace-api";
@@ -117,7 +118,7 @@ export function RuntimeApp(props: RuntimeAppProps) {
 function RuntimeRoutes({
   runtimeMode = configuredRuntimeMode,
   clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
-  apiBase = import.meta.env.VITE_API_BASE,
+  apiBase = configuredWorkspaceApiBase(),
   authenticatedWorkspace = WORKSPACE_AUTHENTICATED_BUILD,
   workspaceEnabled = WORKSPACE_BUILD,
   enrollmentEnabled = import.meta.env.VITE_ENROLLMENT_ENABLED === 'true',

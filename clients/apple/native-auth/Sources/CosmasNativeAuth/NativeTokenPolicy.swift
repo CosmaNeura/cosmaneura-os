@@ -32,6 +32,18 @@ public struct NativeTokenPolicy: Sendable {
     }
 
     public func validate(_ token: String, identity: NativeAuthIdentity, now: Date = Date()) throws {
+        let claims = try validatedClaims(token, userID: identity.userID, sessionID: identity.sessionID, now: now)
+        let legacy = claims["org_id"] as? String
+        let compact = (claims["o"] as? [String: Any])?["id"] as? String
+        let organizations = [legacy, compact].compactMap { $0 }
+        guard !organizations.isEmpty, organizations.allSatisfy({ $0 == identity.organizationID }) else {
+            throw NativeAuthError.tokenUnavailable
+        }
+    }
+
+    // Same native issuer/session/audience/freshness checks. Only the separate
+    // account-service policy may omit workspace Org binding; it grants no Box.
+    func validatedClaims(_ token: String, userID: String, sessionID: String, now: Date) throws -> [String: Any] {
         guard token.utf8.count <= 8192 else { throw NativeAuthError.tokenUnavailable }
         let pieces = token.split(separator: ".", omittingEmptySubsequences: false)
         guard pieces.count == 3, let header = object(pieces[0]), let claims = object(pieces[1]),
@@ -41,19 +53,16 @@ public struct NativeTokenPolicy: Sendable {
               claims["iss"] as? String == issuer,
               (claims["azp"] as? String == authorizedParty ||
                (nativeSessionWithoutOrigin && claims["azp"] == nil)),
-              claims["sub"] as? String == identity.userID,
-              claims["sid"] as? String == identity.sessionID else { throw NativeAuthError.tokenUnavailable }
+              claims["sub"] as? String == userID,
+              claims["sid"] as? String == sessionID else { throw NativeAuthError.tokenUnavailable }
         let audiences = (claims["aud"] as? String).map { [$0] } ?? claims["aud"] as? [String] ?? []
-        let legacy = claims["org_id"] as? String
-        let compact = (claims["o"] as? [String: Any])?["id"] as? String
-        let organizations = [legacy, compact].compactMap { $0 }
         let audienceMatches = sharedStagingSession ? claims["aud"] == nil : audiences.contains(audience)
-        guard audienceMatches, !organizations.isEmpty,
-              organizations.allSatisfy({ $0 == identity.organizationID }),
+        guard audienceMatches,
               let expiration = time(claims["exp"]), let issued = time(claims["iat"]),
               let notBefore = time(claims["nbf"]), expiration > now.timeIntervalSince1970,
               issued <= now.timeIntervalSince1970 + 5,
               notBefore <= now.timeIntervalSince1970 + 5 else { throw NativeAuthError.tokenUnavailable }
+        return claims
     }
 
     private func bytes(_ value: Substring) -> Data? {

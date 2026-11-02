@@ -1,3 +1,4 @@
+import {registeredNativeWorkspace} from './workspace-base';
 export const COMPACT_LOCAL = import.meta.env.VITE_COMPACT_LOCAL === "true" &&
   import.meta.env.VITE_COSMAS_ENV === "synth_os";
 const API_BASE = COMPACT_LOCAL ? "" :
@@ -66,6 +67,9 @@ async function addIdentityHeaders(headers: Headers, identity: ApiIdentity): Prom
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  // Registered native practices use the scoped Chief transport. This legacy
+  // queue identity cannot authorize or retarget requests across native realms.
+  if(registeredNativeWorkspace())throw new Error('Secure session is unavailable. Sign in again.');
   const { identity, ...init } = options;
   const headers = new Headers(options.headers);
   if (init.body !== undefined) headers.set("Content-Type", "application/json");

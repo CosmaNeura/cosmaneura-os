@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError, type Workspace, type WorkspaceIdentity} from "./workspace-api";
 import {assertCurrentDesktopSession, workspaceAuthHeaders} from "./workspace-auth-headers";
@@ -23,7 +24,7 @@ async function bounded<T>(identity:WorkspaceIdentity,path:string,body:unknown|un
   const wait=<V,>(promise:Promise<V>)=>Promise.race([promise,interrupted]);
   try {
     check();
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,"")||"http://127.0.0.1:8000";
+    const base=workspaceApiBase(identity);
     if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==="true",window.location.href))throw new WorkspaceApiError(503);
     const encoded=body===undefined?undefined:JSON.stringify(body);
     if(encoded!==undefined&&new TextEncoder().encode(encoded).length>inputLimit)throw new WorkspaceApiError(422,"model_request_too_large");

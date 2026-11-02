@@ -1,0 +1,56 @@
+# Node 24.19 matches the hosted client runtime and is pinned by registry digest.
+ARG APP_IMAGE
+ARG NODE_BUILD_IMAGE=node:24.19.0-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
+FROM ${NODE_BUILD_IMAGE} AS build
+WORKDIR /build/web
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN corepack enable && pnpm config set store-dir /pnpm/store && pnpm fetch --frozen-lockfile --ignore-scripts
+RUN --network=none pnpm install --frozen-lockfile --offline --ignore-scripts
+WORKDIR /build/clients/capture
+COPY clients/capture/package.json clients/capture/pnpm-lock.yaml ./
+RUN pnpm fetch --frozen-lockfile --ignore-scripts
+RUN --network=none pnpm install --frozen-lockfile --offline --ignore-scripts
+WORKDIR /build/web
+COPY web/ ./
+COPY clients/capture/ /build/clients/capture/
+COPY clients/shared/ /build/clients/shared/
+COPY clients/scribe-review/ /build/clients/scribe-review/
+COPY clients/desktop/google-navigation.mjs /build/clients/desktop/google-navigation.mjs
+COPY clients/desktop/google-navigation.d.mts /build/clients/desktop/google-navigation.d.mts
+COPY clients/desktop/scribe-source-requests.mjs /build/clients/desktop/scribe-source-requests.mjs
+COPY clients/desktop/scribe-source-requests.d.mts /build/clients/desktop/scribe-source-requests.d.mts
+COPY tests/fixtures/ /build/tests/fixtures/
+ARG VITE_CLERK_PUBLISHABLE_KEY
+ARG VITE_WORKSPACE_HOSTED_API_ORIGIN
+ARG VITE_WORKSPACE_WEB_ORIGIN
+ARG VITE_WORKSPACE_ORGANIZATION_ID
+ARG VITE_WORKSPACE_DATA_MODE=synthetic
+ARG VITE_COSMANEURA_WEB_ORIGIN
+ARG VITE_CAPTURE_UPLOAD_ORIGINS
+ARG VITE_WORKSPACE_CAPTURE_MODE=browser_microphone
+ARG VITE_WORKSPACE_FEATURE_PROFILE
+ARG VITE_MESSAGES_ENABLED=false
+ENV VITE_MESSAGES_ENABLED=${VITE_MESSAGES_ENABLED}
+ENV VITE_WORKSPACE_FEATURE_PROFILE=${VITE_WORKSPACE_FEATURE_PROFILE} \
+    VITE_WORKSPACE_HOSTED_CLIENT=web \
+    VITE_WORKSPACE_DATA_MODE=${VITE_WORKSPACE_DATA_MODE} \
+    VITE_WORKSPACE_CAPTURE_MODE=${VITE_WORKSPACE_CAPTURE_MODE} \
+    VITE_CAPTURE_UPLOAD_ORIGINS=${VITE_CAPTURE_UPLOAD_ORIGINS} \
+    VITE_COSMANEURA_WEB_ORIGIN=${VITE_COSMANEURA_WEB_ORIGIN} \
+    VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY} \
+    VITE_API_BASE=${VITE_WORKSPACE_HOSTED_API_ORIGIN} \
+    VITE_WORKSPACE_HOSTED_API_ORIGIN=${VITE_WORKSPACE_HOSTED_API_ORIGIN} \
+    VITE_WORKSPACE_WEB_ORIGIN=${VITE_WORKSPACE_WEB_ORIGIN} \
+    VITE_WORKSPACE_ORGANIZATION_ID=${VITE_WORKSPACE_ORGANIZATION_ID}
+ARG VITE_BUILD_SHA
+ENV VITE_BUILD_SHA=${VITE_BUILD_SHA}
+ARG VITE_ENROLLMENT_API_BASE
+ENV VITE_ENROLLMENT_API_BASE=${VITE_ENROLLMENT_API_BASE}
+RUN --network=none pnpm run build:beta
+FROM ${APP_IMAGE}
+COPY --from=build --chown=10001:10001 /build/web/dist /app/practice-web
+COPY --chown=10001:10001 infra/enrollment/allocated-workspace/serve_web.py /app/serve_allocated_web.py
+COPY --chown=10001:10001 allocated-web-profile.json /app/allocated-web-profile.json
+COPY --chown=10001:10001 docs/third-party/activepieces-LICENSE.txt /app/practice-web/licenses/activepieces-LICENSE.txt
+EXPOSE 8080
+ENTRYPOINT ["python", "/app/serve_allocated_web.py"]

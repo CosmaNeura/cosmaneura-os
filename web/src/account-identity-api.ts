@@ -1,3 +1,4 @@
+import {workspaceApiBase,assertRegisteredWorkspaceBox} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type WorkspaceIdentity,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
@@ -66,7 +67,7 @@ async function read(identity:WorkspaceIdentity,signal?:AbortSignal):Promise<Acco
       checkDeadline();
     };
     check();
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    const base=workspaceApiBase(identity);
     if(base.includes('?')||base.includes('#')||!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503,'identity_unavailable');
     const headers=await wait(workspaceAuthHeaders(account,base).catch(()=>{throw new WorkspaceApiError(401,'identity_authentication_required');}));
     check();headers.set('X-Cosmas-Team-Contract','2');headers.set('X-Cosmas-Draft-Recovery','2');headers.set('Accept','application/json');
@@ -96,7 +97,9 @@ async function read(identity:WorkspaceIdentity,signal?:AbortSignal):Promise<Acco
     try{value=parseVendorJson(new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes.subarray(0,size)));}catch{return invalid();}
     check();
     if(response.status!==200)throw serverError(response.status,value);
-    const result=validateAccountIdentity(value);check();return result;
+    const result=validateAccountIdentity(value);check();
+    try{assertRegisteredWorkspaceBox(identity,result.box_id);}catch{throw new WorkspaceApiError(401,'identity_authentication_required');}
+    return result;
   }catch(error){
     checkDeadline();
     if(error instanceof WorkspaceApiError){

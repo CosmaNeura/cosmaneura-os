@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type WorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
@@ -29,7 +30,7 @@ async function exchange<T>(identity:WorkspaceIdentity,prepare:()=>Promise<Prepar
   try{
     check();if(!('mode'in identity))validateInboxHandoffActor({box_id:identity.boxId,actor_id:identity.actorId});
     const prepared=await wait(prepare());check();checkActor(identity,prepared.actor);
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    const base=workspaceApiBase(identity);
     if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
     const headers='mode'in identity?await wait(workspaceAuthHeaders(identity,base).catch(()=>{throw new WorkspaceApiError(401);})):new Headers({'X-Box-Id':identity.boxId,'X-Actor-Principal-Id':identity.actorId});
     check();headers.set('X-Cosmas-Inbox-Handoff-Contract','1');headers.set('Accept','application/json');headers.set('Content-Type','application/json');

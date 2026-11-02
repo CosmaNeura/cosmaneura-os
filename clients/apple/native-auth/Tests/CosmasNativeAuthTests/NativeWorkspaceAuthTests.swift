@@ -469,4 +469,92 @@ private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:], omit:
             try policy().validate(jwt(user, changes: ["o": ["id": "org_foreign"]]), identity: user)
         }
     }
+
+    @Test func retirementIsTerminalAndDoesNotClearTheLegacyLogoutFence() async throws {
+        let driver = Driver(), block = Block()
+        driver.identity = try identity(); block.value = true
+        let auth = try controller(driver, block)
+        auth.retire(); let retired = auth.state()
+        block.value = false; driver.identity = try identity("replacement")
+        auth.retire()
+        #expect(auth.isRetired && auth.state() == retired && retired.phase == .unavailable)
+        #expect(!auth.allowsStorageRecovery && block.writes.isEmpty)
+        await #expect(throws: NativeAuthError.unavailable) { try await auth.signIn() }
+        await #expect(throws: NativeAuthError.unavailable) { try await auth.signOut() }
+        await #expect(throws: NativeAuthError.sessionChanged) { try await auth.token(expectedRevision: retired.revision) }
+        #expect(driver.signInCalls == 0 && driver.signOutCalls == 0 && driver.tokenCalls == 0)
+    }
+
+    @Test func retirementCancelsTokenCallerButRetainsUnsettledSDKOwnership() async throws {
+        let driver = Driver(), block = Block(); driver.identity = try identity()
+        let auth = try controller(driver, block), before = auth.state()
+        var finish: CheckedContinuation<String?, Never>?
+        driver.tokenBody = { await withCheckedContinuation { finish = $0 } }
+        let token = Task { try await auth.token(expectedRevision: before.revision) }
+        try await spinUntil { finish != nil }
+        auth.retire(); let retired = auth.state()
+        let result = await token.result
+        if case .success = result { Issue.record("Retired token caller succeeded") }
+        #expect(auth.hasUnsettledOperations && block.writes.isEmpty)
+        finish?.resume(returning: try jwt(identity())); finish = nil
+        try await spinUntil { !auth.hasUnsettledOperations }
+        driver.identity = try identity("new")
+        #expect(auth.state() == retired && retired.revision != before.revision)
+    }
+
+    @Test func retirementRejectsLateSignInWithoutOpeningItsDurableBlock() async throws {
+        let driver = Driver(), block = Block()
+        let owned = try controller(driver, block)
+        var finish: CheckedContinuation<Void, Never>?
+        driver.signInBody = { await withCheckedContinuation { finish = $0 }; driver.identity = try identity() }
+        let signIn = Task { try await owned.signIn() }
+        try await spinUntil { finish != nil }
+        owned.retire(); let retired = owned.state()
+        if case .success = await signIn.result { Issue.record("Retired sign-in succeeded") }
+        #expect(owned.hasUnsettledOperations && block.value && block.writes == [true])
+        finish?.resume(); finish = nil
+        try await spinUntil { !owned.hasUnsettledOperations }
+        #expect(owned.state() == retired && block.value && block.writes == [true])
+    }
+
+    @Test func retirementRejectsLateSignOutWithoutClearingLostLogoutFence() async throws {
+        let driver = Driver(), block = Block(); driver.identity = try identity()
+        let auth = try controller(driver, block)
+        var finish: CheckedContinuation<Void, Never>?
+        driver.signOutBody = { await withCheckedContinuation { finish = $0 }; driver.identity = nil }
+        let signOut = Task { try await auth.signOut() }
+        try await spinUntil { finish != nil }
+        auth.retire(); let retired = auth.state()
+        if case .success = await signOut.result { Issue.record("Retired sign-out succeeded") }
+        #expect(auth.hasUnsettledOperations && block.value)
+        finish?.resume(); finish = nil
+        try await spinUntil { !auth.hasUnsettledOperations }
+        #expect(auth.state() == retired && block.value && block.writes == [true])
+    }
+
+
+    @Test func accountBeforePracticeTokenCannotGrantWorkspaceWithoutOrganization() throws {
+        let key = "pk_test_" + Data("invented.clerk.accounts.dev$".utf8).base64EncodedString()
+        let configuration = try NativeClerkAccountConfiguration(publishableKey: key,
+            frontendOrigin: "https://invented.clerk.accounts.dev", bundleIdentifier: "com.cosmasos.beta.ios",
+            profile: .operationalStaging, storageNamespace: String(repeating: "a", count: 64))
+        let accountPolicy = try NativeAccountTokenPolicy(configuration: configuration, audience: "")
+        let user = try identity(), account = try NativeAccountIdentity(issuer: configuration.frontendOrigin,
+            userID: user.userID, sessionID: user.sessionID)
+        let token = try jwt(user, omit: ["org_id", "aud", "azp"])
+        try accountPolicy.validate(token, identity: account)
+        let workspacePolicy = try NativeTokenPolicy(issuer: configuration.frontendOrigin, audience: "",
+            nativeSessionWithoutOrigin: true, sharedStagingSession: true)
+        #expect(throws: NativeAuthError.tokenUnavailable) { try workspacePolicy.validate(token, identity: user) }
+        for changes: [String: Any] in [["iss": "https://other.clerk.accounts.dev"], ["sub": "user_other"],
+            ["sid": "sess_other"], ["aud": "other-api"], ["azp": "https://other.invalid"], ["exp": 1]] {
+            #expect(throws: NativeAuthError.tokenUnavailable) {
+                var omit = ["org_id"]
+                if changes["aud"] == nil { omit.append("aud") }
+                if changes["azp"] == nil { omit.append("azp") }
+                try accountPolicy.validate(jwt(user, changes: changes, omit: omit), identity: account)
+            }
+        }
+    }
+
 }

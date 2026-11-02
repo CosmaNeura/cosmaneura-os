@@ -72,30 +72,37 @@ async function request<T>(base: string, path: string, validate: (value: unknown)
   finally { clearTimeout(timer); signal?.removeEventListener('abort',abort); controller.abort(); }
 }
 
-export function createEnrollmentApi(base: string) {
+export type EnrollmentRequest = <T>(path:string,validate:(value:unknown)=>T,
+  identity?:EnrollmentIdentity,body?:object,key?:string,signal?:AbortSignal,method?:string)=>Promise<T>;
+
+/** Parsers and document hashes are identical for browser and owned native transports. */
+export function enrollmentApiForOwnedTransport(request:EnrollmentRequest) {
   return {
-    config: (signal?:AbortSignal) => request(base,'/config',validateEnrollmentConfig,undefined,undefined,undefined,signal),
-    status: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/status',validateEnrollmentStatus,id,undefined,undefined,signal),
-    practices: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/practices',validateEnrollmentPractices,id,undefined,undefined,signal),
-    selectPractice: (id:EnrollmentIdentity,body:{expected_revision:number;practice_id:string},key:string,signal?:AbortSignal) => request(base,'/select-practice',validateEnrollmentStatus,id,body,key,signal),
-    profile: (id:EnrollmentIdentity,body:ProfileInput,key:string,signal?:AbortSignal) => request(base,'/profile',validateEnrollmentStatus,id,body,key,signal,'PUT'),
-    practice: (id:EnrollmentIdentity,body:PracticeInput,key:string,signal?:AbortSignal) => request(base,'/practice',validateEnrollmentStatus,id,body,key,signal,'PUT'),
-    join: (id:EnrollmentIdentity,body:{expected_revision:number;token:string},key:string,signal?:AbortSignal) => request(base,'/join',validateEnrollmentStatus,id,body,key,signal),
-    document: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/baa/current',validateEnrollmentDocument,id,undefined,undefined,signal).then(verifiedDocument),
-    accept: (id:EnrollmentIdentity,body:AgreementInput,key:string,signal?:AbortSignal) => request(base,'/baa/accept',validateEnrollmentStatus,id,body,key,signal),
-    receipt: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/baa/receipt',validateEnrollmentReceipt,id,undefined,undefined,signal).then(async value=>{
+    config: (signal?:AbortSignal) => request('/config',validateEnrollmentConfig,undefined,undefined,undefined,signal),
+    status: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/status',validateEnrollmentStatus,id,undefined,undefined,signal),
+    practices: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/practices',validateEnrollmentPractices,id,undefined,undefined,signal),
+    selectPractice: (id:EnrollmentIdentity,body:{expected_revision:number;practice_id:string},key:string,signal?:AbortSignal) => request('/select-practice',validateEnrollmentStatus,id,body,key,signal),
+    profile: (id:EnrollmentIdentity,body:ProfileInput,key:string,signal?:AbortSignal) => request('/profile',validateEnrollmentStatus,id,body,key,signal,'PUT'),
+    practice: (id:EnrollmentIdentity,body:PracticeInput,key:string,signal?:AbortSignal) => request('/practice',validateEnrollmentStatus,id,body,key,signal,'PUT'),
+    join: (id:EnrollmentIdentity,body:{expected_revision:number;token:string},key:string,signal?:AbortSignal) => request('/join',validateEnrollmentStatus,id,body,key,signal),
+    document: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/baa/current',validateEnrollmentDocument,id,undefined,undefined,signal).then(verifiedDocument),
+    accept: (id:EnrollmentIdentity,body:AgreementInput,key:string,signal?:AbortSignal) => request('/baa/accept',validateEnrollmentStatus,id,body,key,signal),
+    receipt: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/baa/receipt',validateEnrollmentReceipt,id,undefined,undefined,signal).then(async value=>{
       await verifiedDocument(value.document);return value;
     }),
-    quote: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/quote',validateEnrollmentQuote,id,undefined,undefined,signal),
-    checkout: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request(base,'/checkout',validateEnrollmentCheckout,id,body,key,signal),
-    recover: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request(base,'/recover',validateEnrollmentStatus,id,body,key,signal),
-    confirmWorkspace: (id:EnrollmentIdentity,body:{expected_revision:number;workspace_token:string},key:string,signal?:AbortSignal) => request(base,'/workspace/confirm',validateEnrollmentStatus,id,body,key,signal),
-    invitation: (id:EnrollmentIdentity,body:{expected_revision:number;email:string;role:'admin'|'staff';can_sign:boolean},key:string,signal?:AbortSignal) => request(base,'/invitations',validateEnrollmentInvitation,id,body,key,signal),
-    portal: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request(base,'/portal',value => {
+    quote: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/quote',validateEnrollmentQuote,id,undefined,undefined,signal),
+    checkout: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request('/checkout',validateEnrollmentCheckout,id,body,key,signal),
+    recover: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request('/recover',validateEnrollmentStatus,id,body,key,signal),
+    confirmWorkspace: (id:EnrollmentIdentity,body:{expected_revision:number;workspace_token:string},key:string,signal?:AbortSignal) => request('/workspace/confirm',validateEnrollmentStatus,id,body,key,signal),
+    invitation: (id:EnrollmentIdentity,body:{expected_revision:number;email:string;role:'admin'|'staff';can_sign:boolean},key:string,signal?:AbortSignal) => request('/invitations',validateEnrollmentInvitation,id,body,key,signal),
+    portal: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request('/portal',value => {
       if (!value || typeof value !== 'object' || !('url' in value) || typeof value.url !== 'string') throw new EnrollmentError(502);
       return {url:value.url};
     },id,body,key,signal),
   };
+}
+export function createEnrollmentApi(base:string) {
+  return enrollmentApiForOwnedTransport((...args)=>request(base,...args));
 }
 export type EnrollmentApi = ReturnType<typeof createEnrollmentApi>;
 export function stripeDestination(value: string, portal = false): string {

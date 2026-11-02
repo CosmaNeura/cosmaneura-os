@@ -8,7 +8,14 @@ import time
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from .domain import EnrollmentError
 
@@ -26,15 +33,32 @@ class AdmissionRequest(BaseModel):
     issuer: str = Field(min_length=8, max_length=255)
     subject: str = Field(min_length=6, max_length=255)
     purpose: Literal["workspace", "qualification", "worker"]
+    native_origin: Literal["capacitor://localhost", "app://cosmas"] | None = None
     nonce: str
     issued_at: int
     token_sha256: str = Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
     operation_id: str | None = None
     approval_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
+    @model_serializer(mode="wrap")
+    def preserve_browser_wire(self, handler):
+        value = handler(self)
+        if self.native_origin is None:
+            value.pop("native_origin", None)
+        return value
+
+    @model_validator(mode="before")
+    @classmethod
+    def explicit_native_transport(cls, value):
+        if isinstance(value, dict) and "native_origin" in value and value["native_origin"] is None:
+            raise ValueError("native origin must be explicit or absent")
+        return value
+
     @model_validator(mode="after")
     def retained_worker_scope(self):
         if self.purpose == "worker":
+            if self.native_origin is not None:
+                raise ValueError("workers do not select native transports")
             if not self.operation_id or str(UUID(self.operation_id)) != self.operation_id or not self.approval_sha256:
                 raise ValueError("retained human request identity required")
             if self.token_sha256 != hashlib.sha256(b"").hexdigest():
@@ -77,5 +101,8 @@ def verify_request(key: str, request: AdmissionRequest, raw: bytes, token: str, 
 
 
 def proof(request: AdmissionRequest) -> dict:
-    return {"contract_version": ADMISSION_CONTRACT, "enforced": True,
-            "practice_id": request.practice_id, "purpose": request.purpose}
+    result = {"contract_version": ADMISSION_CONTRACT, "enforced": True,
+              "practice_id": request.practice_id, "purpose": request.purpose}
+    if request.native_origin is not None:
+        result["native_origin"] = request.native_origin
+    return result

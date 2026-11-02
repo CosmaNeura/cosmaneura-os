@@ -17,6 +17,22 @@ IMPLEMENTATION_OWNERS = ("clients/apple", "clients/capture")
 SUPPORTING_CLIENT = "clients/shared"
 APP_SCAFFOLD = "apps/capture"
 PROVENANCE_NAME = "SOURCE_PROVENANCE.json"
+# The frozen 1107 manifest cannot name later owned implementations. Place only
+# these reviewed additions; never glob an SDK, external checkout or generated app.
+NATIVE_PRACTICE_ADDITIONS = (
+    "Sources/CosmasNativeAuth/NativePracticeProfile.swift",
+    "Sources/CosmasNativeAuth/NativePracticeActivationOwner.swift",
+    "Sources/CosmasNativeAuth/NativePracticeConnectionContracts.swift",
+    "Sources/CosmasNativeAuth/NativePracticeWorkspaceBootstrap.swift",
+    "Sources/CosmasNativeAuth/NativePracticeAccountTransport.swift",
+    "Sources/CosmasNativeAuth/NativePracticeSelectionStore.swift",
+    "Bridge/CosmasNativePracticeConnectionPlugin.swift",
+    "Bridge/NativePracticeConnectionController.swift",
+    "Tests/CosmasNativeAuthTests/NativePracticeProfileTests.swift",
+    "Tests/CosmasNativeAuthTests/NativePracticeBootstrapTests.swift",
+    "Tests/CosmasNativeAuthTests/NativePracticeConnectionContractTests.swift",
+    "Tests/CosmasNativeAuthTests/NativePracticeOriginAndSelectionTests.swift",
+)
 # These composed manifests are scaffold wiring. The owned package files describe
 # a library layout, so replacing them would drop the iPhone target graph.
 SCAFFOLD_PACKAGE_WIRING = frozenset({
@@ -226,6 +242,23 @@ def compose(repository: Path, output: Path) -> Path:
     if owners_used != set(IMPLEMENTATION_OWNERS):
         raise ValueError("Portable composition must select both client implementation owners.")
 
+    for addition in NATIVE_PRACTICE_ADDITIONS:
+        relative = _relative(addition)
+        key = (Path("native-plugins/cosmas-native-auth") / relative).as_posix()
+        if key in seen:
+            raise ValueError(f"Owned native practice addition duplicates frozen wiring: {key}")
+        seen.add(key)
+        counterpart = (Path("clients/apple/native-auth") / relative).as_posix()
+        source = _regular_file(repository, repository / counterpart)
+        plan.append({
+            "path": key,
+            "role": "implementation",
+            "owner": "clients/apple",
+            "source": source,
+            "authoritative_counterpart": counterpart,
+            "wiring_note": "Explicit owned native practice addition; frozen scaffold unchanged.",
+        })
+
     output.mkdir(parents=True)
     try:
         placed: list[dict[str, object]] = []
@@ -263,6 +296,7 @@ def compose(repository: Path, output: Path) -> Path:
             "implementation_owners": list(IMPLEMENTATION_OWNERS),
             "supporting_clients": [SUPPORTING_CLIENT],
             "scaffold_package_wiring": sorted(SCAFFOLD_PACKAGE_WIRING),
+            "native_practice_additions": list(NATIVE_PRACTICE_ADDITIONS),
             "generated_web_assets": "absent",
             "mac_before_qualified_install": list(MAC_BEFORE_QUALIFIED_INSTALL),
             "project": f"{APP_SCAFFOLD}/ios/App/App.xcodeproj",

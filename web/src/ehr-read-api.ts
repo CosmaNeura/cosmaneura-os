@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {validElationLabObservation,elationLabPatient,type ElationLabCandidate,type ElationLabReportItem,type ElationLabReportsObservation,type ElationLabReportObservation} from './elation-lab-contract';
 import {workspaceFetch} from './workspace-protocol';
 import {permittedWorkspaceApi} from './workspace-origin';
@@ -124,7 +125,7 @@ const REFUSALS=new Set(['ehr_read_core_medication_grant_changed','ehr_read_core_
 export const ehrReviewProvesNoCommit=(e:unknown)=>e instanceof EhrReadRefusal&&['workspace_revision_conflict','invalid_ehr_read_review'].includes(e.code??'');
 export async function sendEhrRequest<T>(identity:AuthenticatedWorkspaceIdentity,path:string,body:object,validate:(value:unknown)=>Promise<T>,signal?:AbortSignal,large=false):Promise<T> {
   if(!EHR_READ_BUILD)throw new WorkspaceApiError(404);
-  const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+  const base=workspaceApiBase(identity);
   if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
   const encoded=JSON.stringify(Object.freeze({...body}));if(new TextEncoder().encode(encoded).length>4096)throw new WorkspaceApiError(422);
   const controller=new AbortController(),abort=()=>controller.abort();let rejectAbort:()=>void=()=>{};

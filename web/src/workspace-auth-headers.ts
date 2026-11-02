@@ -1,12 +1,15 @@
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
+import {assertNativeWorkspaceTransport} from './workspace-base';
 import { permittedDesktopWorkspaceApi, permittedSignedWorkspaceApi } from "./workspace-origin";
 import {hostedWorkspaceConfiguration, hostedWorkspaceRequested} from "./hosted-workspace";
 
 export function assertCurrentDesktopSession(identity: AuthenticatedWorkspaceIdentity): void {
+  assertNativeWorkspaceTransport(identity);
   if (identity.mode === "desktop_native" && !identity.isCurrent()) throw new Error("Secure session unavailable");
 }
 
 export async function workspaceAuthHeaders(identity: AuthenticatedWorkspaceIdentity, base: string): Promise<Headers> {
+  assertNativeWorkspaceTransport(identity,base);
   const headers = new Headers({ "Content-Type": "application/json", "X-Cosmas-Draft-Recovery": "2" });
   if (hostedWorkspaceRequested()) headers.set("X-Cosmas-Workspace-Protocol", "1");
   if (identity.mode === "desktop_native") {
@@ -24,11 +27,11 @@ export async function workspaceAuthHeaders(identity: AuthenticatedWorkspaceIdent
     headers.set("X-Cosmas-Desktop-Session", identity.revision);
   } else {
     const checkNative=()=>{if(identity.nativeSession&&!identity.nativeSession.isCurrent())throw new Error("Secure session unavailable");};
-    checkNative();
+    checkNative();assertNativeWorkspaceTransport(identity,base);
     if (!permittedSignedWorkspaceApi(base, window.location.href,
       import.meta.env.VITE_WORKSPACE_APPLE_LOCAL_TRANSPORT_ENABLED === "true")) throw new Error("Secure session unavailable");
     const token = await identity.getToken({ skipCache: true });
-    checkNative();
+    checkNative();assertNativeWorkspaceTransport(identity,base);
     if (!token || token.length > 8192 || /\s/.test(token)) throw new Error("Secure session unavailable");
     headers.set("Authorization", `Bearer ${token}`);
   }

@@ -13,7 +13,12 @@ from cosmas_os.adapters.enrollment_admission import (
     existing_user_admission,
     require_runtime_admission,
 )
-from cosmas_os.api.auth import AccessDenied, AuthenticationFailed, _organization_id
+from cosmas_os.api.auth import (
+    AccessDenied,
+    AuthenticationFailed,
+    _organization_id,
+    native_clerk_origin,
+)
 from cosmas_os.api.practice_access_schemas import (
     CompletePracticeSetup,
     CreateInvitation,
@@ -48,6 +53,7 @@ PATHS = {"/practice-access/invitations": ("GET", None, practice_invites.list_inv
          "/practice-access/compatibility": ("GET", None, compatibility),
          "/practice-access": ("GET", None, access.status),
          "/practice-access/enrollment-qualification": ("GET", None, access.enrollment_qualification),
+         "/practice-access/native-qualification": ("GET", None, access.enrollment_qualification),
          "/practice-access/setup": ("GET", None, practice_setup.status),
          "/practice-access/setup/complete": ("POST", CompletePracticeSetup, practice_setup.complete),
          "/practice-access/request": ("POST", SubmitAccess, access.submit),
@@ -89,7 +95,49 @@ def verified(runtime, authorization, verifier):
                                  runtime.clerk_organization_id, subject)
 
 
-def register(app, *, runtime, verifier, session_factory, admission_adapter=None):
+def _native_qualification(runtime, origins, authorization, verifier, session_factory):
+    """Measure local native transport and setup; grants no enrollment admission.
+
+    This read does not call central enrollment: central qualification measures it,
+    so doing so would recurse. Workspace routes retain their admission checks.
+    Retention/legal hooks belong in enrollment, not in this transport receipt.
+    """
+    config = runtime()
+    origin = native_clerk_origin(config, origins)
+    if origin is None:
+        raise access.PracticeAccessError("practice_access_not_found", 404)
+    checked = verifier(origins)
+    member = verified(config, authorization, checked)
+    session_id = checked.verify(authorization[7:]).get("sid")
+    if (not isinstance(session_id, str) or not session_id.startswith("sess_")
+            or len(session_id) > 255):
+        raise AuthenticationFailed()
+    with session_factory() as session:
+        principal = access._binding(session, member)
+        if principal is None or session.get(PracticeSetupProfile, member.box_id) is None:
+            raise access.PracticeAccessError("practice_access_denied", 403)
+        principal_id = principal.id
+
+        def fence():
+            check_capture_deadline()
+            if (runtime() is not config or native_clerk_origin(config, origins) != origin
+                    or verified(config, authorization, checked) != member
+                    or checked.verify(authorization[7:]).get("sid") != session_id):
+                raise AccessDenied()
+            current = access._binding(session, member)
+            if (current is None or current.id != principal_id
+                    or session.get(PracticeSetupProfile, member.box_id,
+                                   populate_existing=True) is None):
+                raise AccessDenied()
+
+        result = access.enrollment_qualification(session, config, member, fence=fence)
+        fence()
+        return {**result, "native_origin": origin, "session_id": session_id,
+                "initial_setup_complete": True}
+
+
+def register(app, *, runtime, verifier, session_factory, admission_adapter=None,
+             native_admission_adapter=None):
     async def dispatch(request: Request):
         spec = PATHS.get(request.url.path)
         if spec is None:
@@ -113,6 +161,10 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                         raise ValueError
                     body.extend(chunk)
             def invoke():
+                if request.url.path == "/practice-access/native-qualification":
+                    return _native_qualification(
+                        runtime, request.headers.getlist("origin"),
+                        request.headers["authorization"], verifier, session_factory)
                 config = runtime()
                 if ((not config.workspace_hosted_enabled and config.cosmas_env != "standalone_synthetic")
                         or not config.workspace_available):
@@ -120,6 +172,13 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                 token_verifier = verifier(request.headers.getlist("origin"))
                 member = verified(config, request.headers["authorization"], token_verifier)
                 purpose = "qualification" if request.url.path in {"/practice-access/enrollment-qualification", "/practice-access/setup", "/practice-access/setup/complete"} else "workspace"
+
+                def selected_adapter():
+                    origins = request.headers.getlist("origin")
+                    if (native_admission_adapter is not None
+                            and native_clerk_origin(config, origins) is not None):
+                        return native_admission_adapter(origins)
+                    return admission_adapter() if admission_adapter else None
 
                 def fence():
                     check_capture_deadline()
@@ -139,7 +198,7 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                         # local authority changes never turn it into enrollment.
                         return
                     current_admission = require_runtime_admission(config, request.headers["authorization"], member.subject,
-                        purpose=purpose, adapter=admission_adapter() if admission_adapter else None, session=session)
+                        purpose=purpose, adapter=selected_adapter(), session=session)
                     if (checked_admission is not None and checked_admission.get("existing_user") is not True and (current_admission is None
                             or current_admission["member_role"] != checked_admission["member_role"]
                             or current_admission["display_name"] != checked_admission["display_name"])):
@@ -161,7 +220,7 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
                             raise RuntimeAdmissionError(ACCESS_REQUIRED, 403)
                         checked_admission = existing if existing is not None else require_runtime_admission(
                             config, request.headers["authorization"], member.subject, purpose=purpose,
-                            adapter=admission_adapter() if admission_adapter else None, session=session)
+                            adapter=selected_adapter(), session=session)
                         if (getattr(config, "workspace_enrollment_managed", False)
                                 and (checked_admission is None or checked_admission.get("existing_user") is not True)
                                 and request.url.path == "/practice-access/setup/complete"
@@ -186,7 +245,9 @@ def register(app, *, runtime, verifier, session_factory, admission_adapter=None)
 
             with capture_budget(CaptureBudget(15)):
                 result = await run_in_threadpool(invoke)
-            return response(result)
+            headers = ({"X-Cosmas-Workspace-Protocol": "1"}
+                       if request.url.path == "/practice-access/native-qualification" else None)
+            return response(result, headers=headers)
         except AuthenticationFailed:
             return response({"detail": "practice_access_authentication_required"}, 401)
         except RuntimeAdmissionError as error:

@@ -25,6 +25,8 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
 
     private var auth: NativeWorkspaceAuth?
     private static var processRuntime: NativeProviderRecordingRuntime?
+    private static var selectedPracticeProfile: NativePracticeProfile?
+    private static var accountSetupHeld = false
     private var runtime: NativeProviderRecordingRuntime?
     private let rendererID = UUID()
     private var recordNavigation: CosmaneuraNavigationHandler?
@@ -36,7 +38,7 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
     private var providerSourceID: UUID?
     private let sourceLifecycle = NativeRendererSourceLifecycle()
     private var providerRequestsAvailable: Bool {
-        guard Bundle.main.bundleIdentifier == "com.cosmasos.beta.ios",
+        guard !Self.accountSetupHeld, Self.selectedPracticeProfile == nil, Bundle.main.bundleIdentifier == "com.cosmasos.beta.ios",
               let value = Bundle.main.object(forInfoDictionaryKey: "CosmasConfiguredCapture") as? [String: Any]
         else { return false }
         return value["enabled"] as? Bool == true
@@ -47,6 +49,13 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
     public func prepareCosmaneuraNavigation(on webView: WKWebView) throws {
         guard recordNavigation == nil, bridge?.webView === webView else { throw CosmaneuraNavigationError.unavailable }
         initializeAuth()
+        // A registered practice cannot borrow the compiled default practice's
+        // external callbacks. Those remain unavailable until separately pinned.
+        if Self.accountSetupHeld || Self.selectedPracticeProfile != nil {
+            let policy = try CosmaneuraRecordNavigation(webOrigin: "")
+            let navigation = CosmaneuraNavigationHandler(webView: webView, policy: policy) { [weak self] in self?.auth?.state() }
+            try navigation.install(); recordNavigation = navigation; return
+        }
         let raw = Bundle.main.object(forInfoDictionaryKey: "CosmaneuraWebOrigin")
         guard raw == nil || raw is String else { throw CosmaneuraNavigationError.unavailable }
         let client = Bundle.main.object(forInfoDictionaryKey: "SchedulingGoogleClientID")
@@ -127,6 +136,119 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
         attachRuntimeObserver(runtime)
     }
 
+    /// Native scene has already closed renderer/capture/source custody. SDK
+    /// reconfiguration is never permitted over late original-account work.
+    @nonobjc public static func retireProcessForPracticeTransition() async throws {
+        guard let runtime = processRuntime else { return }
+        try runtime.confirmRendererReplacement()
+        guard !runtime.recording.hasRetainedRecording else { throw NativePracticeProfileError.busy }
+        runtime.retireForPracticeSwitch()
+        let end = ContinuousClock.now.advanced(by: .seconds(15))
+        while !runtime.isIdleForPracticeSwitch {
+            try Task.checkCancellation()
+            guard ContinuousClock.now < end else { throw NativePracticeProfileError.busy }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    /// Native setup intent only, before its renderer loads. A cold marked
+    /// restart must not configure the compiled beta SDK while restoring the
+    /// separate account realm. This owner is unavailable and grants no identity.
+    @nonobjc public static func holdProcessForAccountSetup() throws {
+        guard processRuntime == nil || processRuntime?.auth.isRetired == true else {
+            throw NativePracticeProfileError.busy
+        }
+        accountSetupHeld = true
+        if processRuntime == nil {
+            let auth = NativeWorkspaceAuth(enabled: false, organizationID: "",
+                driver: { throw NativeAuthError.unavailable }, accessBlock: { throw NativeAuthError.unavailable })
+            let runtime = NativeProviderRecordingRuntime(auth: auth) { _ in throw ProviderNativeError.unavailable }
+            auth.retire(); processRuntime = runtime
+        }
+    }
+
+    @nonobjc public static func makeRegisteredPracticeRuntime(profile: NativePracticeProfile,
+                                                             driver: any NativeAuthDriver) throws -> NativePracticeRuntime {
+        let policy = try profile.tokenPolicy
+        let auth = NativeWorkspaceAuth(enabled: true, organizationID: profile.organizationID, tokenPolicy: policy,
+            driver: { driver }, accessBlock: {
+                try KeychainAccessBlock(bundleIdentifier: profile.configuration.bundleIdentifier,
+                    profile: profile.configuration.profile, profileNamespace: profile.storageNamespace)
+            })
+        let connection = NativeProviderConnection(auth: auth,
+            wire: try WorkspaceSourceTransport(settings: ["enabled": true, "apiOrigin": profile.apiOrigin]))
+        let recording = NativeProviderRecordingRuntime(auth: auth, onAuthChange: { connection.authChanged($0) }, makeResources: { _ in
+            guard let group = Bundle.main.object(forInfoDictionaryKey: "CosmasSourceAccessGroup") as? String else {
+                throw ProviderNativeError.unavailable
+            }
+            let journal = try NativeSourceProofJournal(platform: .ios,
+                backing: KeychainNativeSourceJournal(platform: .ios, bundleIdentifier: profile.configuration.bundleIdentifier,
+                    accessGroup: group, profileNamespace: profile.storageNamespace))
+            return (connection, NativeSourceRecovery(journal: journal))
+        })
+        let resources = RegisteredPracticeResources(origin: profile.apiOrigin, runtime: recording, connection: connection)
+        return try NativePracticeRuntime(profile: profile, auth: auth, resources: resources)
+    }
+
+    @nonobjc public static func admitRegisteredPractice(runtime: NativePracticeRuntime,
+                                                       expectedRevision: String) async throws -> NativePracticeWorkspaceBinding {
+        guard let profile = runtime.profile, let resources = runtime.resources as? RegisteredPracticeResources,
+              runtime.auth.state().revision == expectedRevision, let identity = runtime.auth.state().identity else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        let account = try await resources.connection.recordingAccount(revision: expectedRevision)
+        guard account.boxID == profile.boxID, runtime.auth.state().revision == expectedRevision else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        return .init(identity: identity, boxID: account.boxID, actorID: account.actorID, apiOrigin: profile.apiOrigin)
+    }
+
+    @nonobjc public static func installRegisteredPracticeRuntime(_ runtime: NativePracticeRuntime) throws {
+        guard let profile = runtime.profile, let resources = runtime.resources as? RegisteredPracticeResources,
+              runtime.auth.state().phase == .ready, processRuntime == nil || processRuntime?.auth.isRetired == true else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        processRuntime = resources.runtime; selectedPracticeProfile = profile; accountSetupHeld = false
+        NativePrivateRecordingGate.configure(auth: runtime.auth) { revision in
+            let account = try await resources.connection.recordingAccount(revision: revision)
+            return (try NativePrivateRecordingGate.scope(apiBase: profile.apiOrigin, recoveryScope: account.serverRecoveryScope), account.accountDigest)
+        }
+    }
+
+    @nonobjc public static func restoreCompiledBetaRuntime() async throws {
+        try await retireProcessForPracticeTransition()
+        guard let settings = Bundle.main.object(forInfoDictionaryKey: "CosmasNativeAuth") as? [String: Any],
+              let key = settings["publishableKey"] as? String, let origin = settings["frontendOrigin"] as? String,
+              let organization = settings["organizationId"] as? String, let audience = settings["audience"] as? String,
+              let bundle = Bundle.main.bundleIdentifier,
+              settings["profile"] as? String == NativeIdentityProfile.operationalBeta.rawValue else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        let configuration = try NativeClerkConfiguration(publishableKey: key, frontendOrigin: origin,
+            organizationID: organization, bundleIdentifier: bundle, profile: .operationalBeta)
+        let block = try KeychainAccessBlock(bundleIdentifier: bundle, profile: .operationalBeta)
+        _ = try block.isBlocked() // Preserve the exact existing durable logout fence.
+        let driver = try await ClerkKitWorkspaceDriver.reconfigured(configuration: configuration)
+        let auth = NativeWorkspaceAuth(enabled: true, organizationID: organization,
+            tokenPolicy: try NativeTokenPolicy(issuer: origin, audience: audience, nativeSessionWithoutOrigin: true),
+            driver: { driver }, accessBlock: { block })
+        let runtime = NativeProviderRecordingRuntime(auth: auth) { auth in
+            guard let capture = Bundle.main.object(forInfoDictionaryKey: "CosmasConfiguredCapture") as? [String: Any],
+                  let group = Bundle.main.object(forInfoDictionaryKey: "CosmasSourceAccessGroup") as? String else { throw ProviderNativeError.unavailable }
+            let connection = NativeProviderConnection(auth: auth, wire: try WorkspaceSourceTransport(settings: capture))
+            let journal = try NativeSourceProofJournal(platform: .ios,
+                backing: KeychainNativeSourceJournal(platform: .ios, bundleIdentifier: bundle, accessGroup: group))
+            return (connection, NativeSourceRecovery(journal: journal))
+        }
+        processRuntime = runtime; selectedPracticeProfile = nil; accountSetupHeld = false
+        NativePrivateRecordingGate.configure(auth: auth) { revision in
+            guard let capture = Bundle.main.object(forInfoDictionaryKey: "CosmasConfiguredCapture") as? [String: Any],
+                  let api = capture["apiOrigin"] as? String else { throw NativeAuthError.unavailable }
+            let account = try await runtime.resources().connection.recordingAccount(revision: revision)
+            return (try NativePrivateRecordingGate.scope(apiBase: api, recoveryScope: account.serverRecoveryScope), account.accountDigest)
+        }
+    }
+
     private func attachRuntimeObserver(_ runtime: NativeProviderRecordingRuntime) {
         runtime.attach(rendererID) { [weak self] state in
             if state.phase != .ready || state.revision != self?.providerSourceRevision {
@@ -201,7 +323,14 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
             self.initializeAuth()
             do {
                 guard let auth = self.auth else { throw NativeAuthError.unavailable }
-                call.resolve(Self.payload(try await auth.signIn()))
+                let state = try await auth.signIn()
+                if Self.selectedPracticeProfile != nil {
+                    guard let host = CosmasNativePracticeConnectionPlugin.installedHost as? NativePracticeConnectionController else {
+                        throw NativePracticeProfileError.unavailable
+                    }
+                    try await host.revalidateRegisteredSignIn(expectedRevision: state.revision)
+                }
+                call.resolve(Self.payload(state))
             } catch { Self.reject(call) }
         }
     }
@@ -394,5 +523,23 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
 
     private static func reject(_ call: CAPPluginCall) {
         call.reject("Secure session operation unavailable", NativeAuthError.unavailable.rawValue)
+    }
+}
+
+/// Native-only candidate request resources. The identity probe uses its fixed
+/// connection without opening a capture journal. Capture/source factories stay
+/// dark and create a separate profile-scoped journal only if later authorized.
+@MainActor private final class RegisteredPracticeResources: NativePracticeRequestResources {
+    let apiOrigin: String
+    let runtime: NativeProviderRecordingRuntime
+    let connection: NativeProviderConnection
+    init(origin: String, runtime: NativeProviderRecordingRuntime, connection: NativeProviderConnection) {
+        apiOrigin = origin; self.runtime = runtime; self.connection = connection
+    }
+    var isIdle: Bool { runtime.isIdleForPracticeSwitch && !connection.hasUnsettledOperations }
+    func fence() { runtime.retireForPracticeSwitch(); connection.close() }
+    func close() async throws {
+        try runtime.confirmRendererReplacement()
+        guard isIdle else { throw NativePracticeProfileError.busy }
     }
 }

@@ -72,6 +72,8 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
     var signInTimeout: Duration = .seconds(180)
     var networkTimeout: Duration = .seconds(30)
     private var storageFailed = false
+    private var retired = false
+    private var retirementCancellations: [UUID: @MainActor () -> Void] = [:]
     public var onChange: (@MainActor (NativeAuthState) -> Void)?
 
     public init(
@@ -101,7 +103,7 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
     }
 
     public func state() -> NativeAuthState {
-        guard !storageFailed else { return snapshot() }
+        guard !retired, !storageFailed else { return snapshot() }
         guard transition == nil else { return snapshot() }
         guard let driver else { return snapshot() }
         do {
@@ -118,11 +120,39 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
         return snapshot()
     }
 
+    /// Irreversible retirement of this immutable account owner, before replacing
+    /// the shared SDK or request graph. This is not logout: no credential/draft
+    /// record or durable logout block is copied, deleted, or cleared here.
+    public func retire() {
+        guard !retired else { return }
+        retired = true
+        transition = nil
+        change(.unavailable)
+        for cancel in Array(retirementCancellations.values) { cancel() }
+    }
+
+    public var isRetired: Bool { retired }
+
+    /// Native immutable-graph check, not a token or admission grant.
+    public func matches(organizationID: String, policy: NativeTokenPolicy) -> Bool {
+        guard !retired, self.organizationID == organizationID, let tokenPolicy else { return false }
+        return tokenPolicy.issuer == policy.issuer && tokenPolicy.audience == policy.audience &&
+            tokenPolicy.authorizedParty == policy.authorizedParty &&
+            tokenPolicy.nativeSessionWithoutOrigin == policy.nativeSessionWithoutOrigin &&
+            tokenPolicy.sharedStagingSession == policy.sharedStagingSession
+    }
+
+    /// Cancellation releases callers, not SDK ownership. A replacement must not
+    /// reuse the shared SDK while an abandoned operation has not actually ended.
+    public var hasUnsettledOperations: Bool {
+        !pendingSignIns.isEmpty || !pendingSignOuts.isEmpty || !pendingTokens.isEmpty
+    }
+
     /// An explicit desktop recovery may rebuild a failed storage coordinator
     /// only after every SDK operation has settled. Its native source host must
     /// separately consent by not retaining this coordinator.
     public var allowsStorageRecovery: Bool {
-        phase == .unavailable && (storageFailed || driver == nil) && transition == nil &&
+        !retired && phase == .unavailable && (storageFailed || driver == nil) && transition == nil &&
             pendingSignIns.isEmpty && pendingSignOuts.isEmpty && pendingTokens.isEmpty
     }
 
@@ -146,6 +176,7 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
     }
 
     public func signIn() async throws -> NativeAuthState {
+        guard !retired else { throw NativeAuthError.unavailable }
         guard transition == nil, pendingSignIns.isEmpty, pendingSignOuts.isEmpty else { throw NativeAuthError.busy }
         guard !storageFailed, let driver else { throw NativeAuthError.unavailable }
         let operation = UUID()
@@ -160,7 +191,10 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
             // SDK session later without an explicit successful completion here.
             try block(true)
             launched = true
-            try await NativeAuthAwait<Void>().run(timeout: signInTimeout,
+            let waiting = NativeAuthAwait<Void>()
+            retirementCancellations[operation] = { waiting.cancel() }
+            defer { retirementCancellations.removeValue(forKey: operation) }
+            try await waiting.run(timeout: signInTimeout,
                 onAbandon: { self.abandonMutation(operation) }) {
                 // Keep the guard until the actual SDK call ends, even if its
                 // caller has already timed out. Late sign-in cannot undo logout.
@@ -168,12 +202,12 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
                 try Task.checkCancellation()
                 if previouslyBlocked { try await driver.signOut() }
                 try Task.checkCancellation()
-                guard self.transition == operation else { throw NativeAuthError.sessionChanged }
+                guard !self.retired, self.transition == operation else { throw NativeAuthError.sessionChanged }
                 try await driver.signIn()
             }
             // Only this caller can open access; an abandoned SDK task cannot.
             try Task.checkCancellation()
-            guard transition == operation, let current = driver.identity,
+            guard !retired, transition == operation, let current = driver.identity,
                   current.organizationID == organizationID else { throw NativeAuthError.sessionChanged }
             try block(false)
             change(.ready, identity: current)
@@ -186,6 +220,7 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
     }
 
     public func token(expectedRevision: String) async throws -> String {
+        guard !retired else { throw NativeAuthError.sessionChanged }
         let before = state()
         guard before.phase == .ready, before.revision == expectedRevision,
               let expected = before.identity, let driver, let tokenPolicy else {
@@ -196,14 +231,17 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
         let operation = UUID()
         pendingTokens.insert(operation)
         do {
-            let token = try await NativeAuthAwait<String?>().run(timeout: networkTimeout,
-                onAbandon: { if self.revision == expectedRevision { self.change(.unavailable) } }) {
+            let waiting = NativeAuthAwait<String?>()
+            retirementCancellations[operation] = { waiting.cancel() }
+            defer { retirementCancellations.removeValue(forKey: operation) }
+            let token = try await waiting.run(timeout: networkTimeout,
+                onAbandon: { if !self.retired, self.revision == expectedRevision { self.change(.unavailable) } }) {
                 defer { self.pendingTokens.remove(operation) }
                 try Task.checkCancellation()
                 return try await driver.freshToken()
             }
             try Task.checkCancellation()
-            guard transition == nil, revision == expectedRevision,
+            guard !retired, transition == nil, revision == expectedRevision,
                   driver.identity == expected, !(try blocked()) else {
                 throw NativeAuthError.sessionChanged
             }
@@ -211,12 +249,13 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
             try tokenPolicy.validate(token, identity: expected)
             return token
         } catch {
-            if revision == expectedRevision { change(.unavailable) }
+            if !retired, revision == expectedRevision { change(.unavailable) }
             throw NativeAuthError.tokenUnavailable
         }
     }
 
     public func signOut() async throws -> NativeAuthState {
+        guard !retired else { throw NativeAuthError.unavailable }
         guard !storageFailed, let driver else { throw NativeAuthError.unavailable }
         guard pendingSignOuts.isEmpty, transition == nil || phase == .signingIn else { throw NativeAuthError.busy }
         // Immediately fence a concurrent hosted flow or token, before any await.
@@ -229,14 +268,17 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
         do {
             try block(true)
             launched = true
-            try await NativeAuthAwait<Void>().run(timeout: networkTimeout,
+            let waiting = NativeAuthAwait<Void>()
+            retirementCancellations[operation] = { waiting.cancel() }
+            defer { retirementCancellations.removeValue(forKey: operation) }
+            try await waiting.run(timeout: networkTimeout,
                 onAbandon: { self.abandonMutation(operation) }) {
                 defer { self.pendingSignOuts.remove(operation) }
                 try Task.checkCancellation()
                 try await driver.signOut()
             }
             try Task.checkCancellation()
-            guard transition == operation, driver.identity == nil, pendingSignIns.isEmpty else {
+            guard !retired, transition == operation, driver.identity == nil, pendingSignIns.isEmpty else {
                 throw NativeAuthError.signOutPending
             }
             try block(false)
@@ -251,7 +293,7 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
     }
 
     private func abandonMutation(_ operation: UUID) {
-        guard transition == operation else { return }
+        guard !retired, transition == operation else { return }
         transition = nil
         if !storageFailed { change(.signOutPending) }
     }
@@ -261,7 +303,7 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
     }
 
     private func blocked() throws -> Bool {
-        guard let accessBlock, !storageFailed else { throw NativeAuthError.storageUnavailable }
+        guard !retired, let accessBlock, !storageFailed else { throw NativeAuthError.storageUnavailable }
         do { return try accessBlock.isBlocked() }
         catch {
             storageFailed = true
@@ -271,7 +313,7 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
     }
 
     private func block(_ blocked: Bool) throws {
-        guard let accessBlock, !storageFailed else { throw NativeAuthError.storageUnavailable }
+        guard !retired, let accessBlock, !storageFailed else { throw NativeAuthError.storageUnavailable }
         do { try accessBlock.setBlocked(blocked) }
         catch {
             storageFailed = true

@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from './workspace-api';
 import {EFAX_INBOUND_BUILD} from './efax-inbound-api';
 import {workspaceAuthHeaders,assertCurrentDesktopSession} from './workspace-auth-headers';
@@ -51,7 +52,7 @@ const REFUSALS=new Set(['efax_inbound_source_disabled','efax_inbound_source_unav
 async function send(identity:AuthenticatedWorkspaceIdentity,scope:EFaxSourceScope,body:EFaxSourceReviewRequest|{idempotency_key:string},resolve:boolean,signal?:AbortSignal):Promise<unknown>{
  if(!EFAX_INBOUND_SOURCE_BUILD)throw new WorkspaceApiError(404);
  if(!validEFaxSourceScope(scope))throw new WorkspaceApiError(422);
- const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+ const base=workspaceApiBase(identity);
  if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
  const encoded=JSON.stringify(structuredClone(body));if(new TextEncoder().encode(encoded).length>(resolve?2048:65536))throw new WorkspaceApiError(422);
  const c=new AbortController(),abort=()=>c.abort();let rejectAbort:()=>void=()=>{};

@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {ConnectorTools, parseAgentResearchHistory, parseAgentResearchReview, type ConnectorTransport, type AgentResearchHandle} from '../../clients/capture/src/team/connector-tools';
 import {validAgentResearchApproval, type AgentResearchApproval} from './agent-research-recovery';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
@@ -37,7 +38,7 @@ export function connectorTransport(identity: AuthenticatedWorkspaceIdentity): Co
     if (!reviewPath && !['/connections/plugins', '/connections/google/session', '/connections/google/messages',
       '/connections/google/calendar-summaries', '/connections/microsoft/session', '/fax-inbound', '/efax-inbound',
       '/portal-setup', '/finance-setup'].includes(path)) throw new WorkspaceApiError(422);
-    const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, '') || 'http://127.0.0.1:8000';
+    const base = workspaceApiBase(identity);
     const controller = new AbortController(), abort = () => controller.abort();
     const interrupted = new Promise<never>((_, reject) => controller.signal.addEventListener('abort',
       () => reject(new WorkspaceApiError(503)), {once: true}));

@@ -1,0 +1,370 @@
+"""Private allocator failure/recovery boundaries; invented provider data only."""
+import base64
+import importlib.util
+import json
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4, uuid5
+
+import httpx
+import pytest
+from pydantic import SecretStr
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
+
+from cosmas_os.enrollment.allocation import WorkspaceAllocationRequest
+from cosmas_os.enrollment.domain import (
+    BAA_DOC_ID,
+    BAA_SHA256,
+    BAA_VERSION,
+    EnrollmentError,
+    HumanIdentity,
+)
+from cosmas_os.enrollment.hosting import (
+    HostingConfiguration,
+    OpenTofuWorkspaceAllocator,
+    box_admission_key,
+    canonical,
+)
+from cosmas_os.enrollment.hosting_build import build_allocated_web
+from cosmas_os.enrollment.hosting_cloud import AzureAllocationBackend
+from cosmas_os.enrollment.hosting_dns import bind_allocated_dns
+from cosmas_os.enrollment.migration import upgrade
+from cosmas_os.enrollment.models import Membership
+from cosmas_os.enrollment.provisioning import BOX_NAMESPACE, WorkspacePlan
+from cosmas_os.enrollment.service import EnrollmentService
+from cosmas_os.enrollment.synthetic import SyntheticCommerce, synthetic_settings
+
+
+@pytest.fixture
+def hosted(tmp_path):
+    source = Path(__file__).resolve().parents[2]
+    settings = synthetic_settings()
+    settings.clerk_issuer = "https://hosting-fixture.clerk.accounts.dev"
+    settings.clerk_publishable_key = "pk_test_" + base64.b64encode(b"hosting-fixture.clerk.accounts.dev$").decode()
+    settings.native_account_enabled = True
+    settings.native_authorized_origins = ["capacitor://localhost", "app://cosmas"]
+    settings.workspace_allocation_enabled = True
+    settings.provisioning_enabled = True
+    settings.database_url = SecretStr("sqlite:///" + str(tmp_path / "registry.db"))
+    engine = create_engine(settings.database_url.get_secret_value())
+    upgrade(engine)
+    service = EnrollmentService(sessionmaker(engine, expire_on_commit=False), settings, SyntheticCommerce(settings))
+    human = HumanIdentity(settings.clerk_issuer, "user_host1", "sess_host1", "owner@example.invalid", "Invented Owner")
+    service.profile(human, str(uuid4()), {"expected_revision": 0, "display_name": "Invented Owner", "title": "Owner"})
+    service.practice(human, str(uuid4()), {"expected_revision": service.status(human)["revision"], "legal_name": "Invented Practice LLC",
+        "display_name": "Invented Practice", "address_line1": "123 Invented Street", "address_line2": "", "city": "Invented City",
+        "region": "NY", "postal_code": "10001", "country": "US", "administrative_email": "office@example.invalid",
+        "human_seats": 1, "covered_entity": True})
+    service.accept(human, str(uuid4()), {"expected_revision": service.status(human)["revision"], "doc_id": BAA_DOC_ID,
+        "version": BAA_VERSION, "sha256": BAA_SHA256, "signature_name": "Invented Owner", "signature_title": "Owner",
+        "authority_confirmed": True, "accepted": True})
+    practice = service.status(human)["practice"]["id"]
+    box, org = str(uuid5(BOX_NAMESPACE, practice)), "org_host1"
+    web = "https://" + practice + ".staging.cosmas.ai"
+    api = "https://api." + practice + ".staging.cosmas.ai"
+    service.record_workspace(practice, box_id=box, organization_id=org, url=web + "/Chief", proof_sha256="1" * 64,
+        status="provisioning", workspace_api_origin=api, source_commit="2" * 40, image_sha256="3" * 64)
+    subscription, tenant = str(uuid4()), str(uuid4())
+    group, registry = "rg-cosmabot-enrollment-staging-fixture1", "acrcbotenrstgfixture1.azurecr.io"
+    scope = f"/subscriptions/{subscription}/resourceGroups/{group}/providers/"
+    foundation = {"contract_version": "enrollment-foundation.v1", "environment": "staging", "subscription_id": subscription,
+        "tenant_id": tenant, "resource_group_name": group, "location": "eastus2", "registry_server": registry,
+        "vnet_id": scope + "Microsoft.Network/virtualNetworks/owned", "container_app_environment_id": scope + "Microsoft.App/managedEnvironments/owned",
+        "container_registry_id": scope + "Microsoft.ContainerRegistry/registries/" + registry.split(".")[0],
+        "postgres_subnet_id": scope + "Microsoft.Network/virtualNetworks/owned/subnets/postgres",
+        "private_endpoint_subnet_id": scope + "Microsoft.Network/virtualNetworks/owned/subnets/endpoints",
+        **{kind + "_private_dns_zone_id": scope + "Microsoft.Network/privateDnsZones/" + name for kind, name in
+           (("vault", "privatelink.vaultcore.azure.net"), ("blob", "privatelink.blob.core.windows.net"), ("redis", "privatelink.redis.azure.net"))},
+        "state_backend": {"resource_group_name": group, "storage_account_name": "stcbotenrstgfixture1", "container_name": "enrollment-runtime-state", "use_azuread_auth": True}}
+    token = tmp_path / "invented-dns-token"
+    token.write_text("invented-provider-boundary-only")
+    token.chmod(0o600)
+    value = {"contract_version": "cosmas-private-hosting.v1", "enabled": True, "synthetic_only": True,
+        "foundation": foundation, "account": {"app_origin": "https://onboarding.staging.cosmas.ai",
+            "api_origin": "https://enrollment-api.staging.cosmas.ai", "issuer": settings.clerk_issuer,
+            "publishable_key": settings.clerk_publishable_key, "audience": settings.clerk_audience},
+        "release": {"source_commit": "2" * 40, "api_image": registry + "/api@sha256:" + "3" * 64,
+                    "job_image": registry + "/allocated-job@sha256:" + "4" * 64},
+        "worker_client_id": str(uuid4()), "worker_object_id": str(uuid4()), "source_repository": str(source),
+        "state_root": str(tmp_path / "owned-worker-state"), "cloudflare_zone_id": "5" * 32,
+        "cloudflare_token_file": str(token), "native_origins": settings.native_authorized_origins}
+    config = HostingConfiguration(value)
+    allocator = OpenTofuWorkspaceAllocator(service, config)
+    plan = WorkspacePlan(practice, box, org, human.subject, human.issuer, api, web + "/Chief", "2" * 40, "3" * 64)
+    operation = str(uuid4())
+    yield SimpleNamespace(config=config, value=value, allocator=allocator, service=service, plan=plan, operation=operation,
+        deployment=allocator._deployment(plan, operation), source=source, scope=scope)
+    engine.dispose()
+
+
+def test_hosting_destination_and_public_runtime_are_registered_native_and_separate(hosted):
+    c = hosted
+    destination = c.allocator.destination(WorkspaceAllocationRequest(c.plan.practice_id, c.plan.box_id, "unused", c.plan.owner_subject, c.plan.issuer))
+    assert destination.api_origin == c.plan.api_origin and destination.workspace_url == c.plan.workspace_url
+    public = c.deployment["practice"]["api_env"]
+    assert public["WORKSPACE_APPLE_HOSTED_TRANSPORT_ENABLED"] == public["WORKSPACE_DESKTOP_HOSTED_TRANSPORT_ENABLED"] == "true"
+    assert public["BETA_BOX_ID"] == c.plan.box_id and public["CLERK_ORGANIZATION_ID"] == c.plan.organization_id
+    assert not any("CORE" in name or "SECRET" in name or name in {"DATABASE_URL", "REDIS_URL"} for name in public)
+    assert c.deployment["deploy_workloads"] is c.deployment["bind_domains"] is False
+    key = box_admission_key(c.deployment, "invented-master-" + "0" * 64)
+    assert len(key) == 64 and "invented" not in key
+
+
+@pytest.mark.parametrize("mutation", ["production", "foreign_group", "foreign_dns", "mutable_image", "account", "extra"])
+def test_host_configuration_rejects_foreign_or_unreviewed_inputs(hosted, mutation):
+    value = json.loads(json.dumps(hosted.value))
+    if mutation == "production":
+        value["synthetic_only"] = False
+    elif mutation == "foreign_group":
+        value["foundation"]["resource_group_name"] = "cosmaneura-prod"
+    elif mutation == "foreign_dns":
+        value["foundation"]["blob_private_dns_zone_id"] = "/subscriptions/other/resourceGroups/other/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net"
+    elif mutation == "mutable_image":
+        value["release"]["api_image"] = value["foundation"]["registry_server"] + "/api:latest"
+    elif mutation == "account":
+        value["account"]["app_origin"] = "https://app.cosmaneura.com"
+    else:
+        value["ready"] = True
+    with pytest.raises(ValueError):
+        HostingConfiguration(value)
+
+
+def test_disabled_hosting_and_fake_backend_make_no_provider_calls(hosted):
+    c = hosted
+    c.config.value["enabled"] = False
+    with pytest.raises(EnrollmentError):
+        c.allocator.allocate(c.plan, operation_id=c.operation)
+    assert not c.config.state_root.exists()
+    with pytest.raises(ValueError):
+        OpenTofuWorkspaceAllocator(c.service, c.config, backend=SimpleNamespace(allocate=lambda *args: None))
+
+
+@pytest.mark.parametrize("change", ["inactive", "not_owner"])
+def test_revoked_or_changed_owner_cannot_start_private_provider_calls(hosted, change):
+    c = hosted
+    with c.service.sessions.begin() as session:
+        member = session.scalar(select(Membership).where(Membership.practice_id == c.plan.practice_id))
+        assert member is not None
+        if change == "inactive":
+            member.active = False
+        else:
+            member.role = "staff"
+    with pytest.raises(EnrollmentError, match="ownership"):
+        c.allocator.allocate(c.plan, operation_id=c.operation)
+    assert not c.config.state_root.exists()
+
+
+def test_private_operation_reuses_exact_scope_and_freezes_display_manifest(hosted):
+    c = hosted
+    backend = c.allocator.backend
+    saved = backend._open(c.deployment)
+    changed = json.loads(json.dumps(c.deployment))
+    changed["_owner_manifest"]["owner_display_name"] = "Updated Display Name"
+    changed["practice"]["owner_manifest_sha256"] = "f" * 64
+    assert backend._open(changed)["deployment"]["_owner_manifest"] == saved["deployment"]["_owner_manifest"]
+    changed["practice"]["plan"]["source_commit"] = "f" * 40
+    with pytest.raises(ValueError):
+        backend._open(changed)
+
+
+def test_private_operation_refuses_symlink_state(hosted, tmp_path):
+    c = hosted
+    outside = tmp_path / "unrelated"
+    outside.mkdir()
+    c.config.state_root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError):
+        c.allocator.backend._open(c.deployment)
+    assert list(outside.iterdir()) == []
+
+
+def test_actual_capacity_preflight_leaves_queued_without_terraform_apply(hosted):
+    c = hosted
+    calls = []
+    def cli(arguments, **kwargs):
+        calls.append(arguments)
+        if arguments[0] == "git":
+            if "rev-parse" in arguments:
+                body = c.config.release["source_commit"].encode()
+            elif "ls-tree" in arguments:
+                body = "\n".join(str(path.relative_to(c.source)) for path in
+                    (c.source / "infra/enrollment/allocated-workspace").rglob("*") if path.is_file()).encode()
+            elif "show" in arguments:
+                body = (c.source / arguments[-1].split(":", 1)[1]).read_bytes()
+            else:
+                body = b""
+        elif arguments[:3] == ["az", "account", "show"]:
+            body = canonical({"id": c.config.foundation["subscription_id"], "tenantId": c.config.foundation["tenant_id"], "state": "Enabled"})
+        elif arguments[0] == "tofu":
+            body = canonical({"terraform_version": "1.12.5"})
+        elif "subnet" in arguments:
+            body = canonical({"id": arguments[arguments.index("--ids") + 1], "addressPrefix": "10.240.8.0/29"})
+        elif "check-ip-address" in arguments:
+            body = canonical({"available": False})
+        else:
+            body = b""
+        return subprocess.CompletedProcess(arguments, 0, stdout=body, stderr=b"")
+    backend = AzureAllocationBackend(c.config, run=cli, sleep=lambda _: None)
+    backend._open(c.deployment)
+    with pytest.raises(RuntimeError, match="capacity"):
+        backend.preflight()
+    assert not any("apply" in arguments for arguments in calls)
+    assert not (backend.directory / "admin-password").exists()
+
+
+def test_redis_uses_supported_stable_provider_version_before_secret_preparation(hosted):
+    c = hosted
+    backend = c.allocator.backend
+    state = backend._open(c.deployment)
+    state["resources"] = {"redis_id": c.scope + "Microsoft.Cache/redisEnterprise/invented"}
+    calls = []
+    def cli(arguments, **kwargs):
+        calls.append(arguments)
+        raise subprocess.CalledProcessError(1, arguments)
+    backend.run = cli
+    with pytest.raises(RuntimeError, match="provider operation pending"):
+        backend._seed(state, "invented-master-" + "0" * 64)
+    assert len(calls) == 1
+    assert calls[0][calls[0].index("--url") + 1].endswith("/databases/default/listKeys?api-version=2024-11-01")
+    assert not (backend.directory / "seed-parameters.json").exists()
+
+
+def test_per_box_job_binding_uses_canonical_allocated_host_and_rejects_central_database(hosted):
+    c = hosted
+    spec = importlib.util.spec_from_file_location("owned_allocated_job", c.source / "infra/enrollment/allocated-workspace/job.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    host = "psql-cbaw-" + c.plan.practice_id.replace("-", "") + ".postgres.database.azure.com"
+    environment = {**c.deployment["practice"]["api_env"], "EXPECTED_SCHEMA_REVISION": c.deployment["expected_schema_revision"],
+        "RESERVED_OWNER_SUBJECT": c.plan.owner_subject, "BOX_POSTGRES_HOST": host,
+        "DATABASE_ADMIN_URL": "postgresql+psycopg://box_bootstrap:invented@" + host + ":5432/cosmas_os?sslmode=verify-full&sslrootcert=system",
+        "DATABASE_URL": "postgresql+psycopg://box_runtime:invented@" + host + ":5432/cosmas_os?sslmode=verify-full&sslrootcert=system"}
+    assert module.binding(environment)["box_id"] == c.plan.box_id
+    environment["BOX_POSTGRES_HOST"] = "enrollment.postgres.database.azure.com"
+    with pytest.raises(ValueError):
+        module.binding(environment)
+
+
+def test_known_failed_job_has_bounded_retry_and_preserves_actual_execution_history(hosted):
+    c = hosted
+    backend = c.allocator.backend
+    state = backend._open(c.deployment)
+    state["resources"] = {"storage_id": c.scope + "Microsoft.Storage/storageAccounts/invented"}
+    executions = []
+    def cli(arguments, **kwargs):
+        if "list" in arguments:
+            body = json.dumps([{"name": name} for name in executions]).encode()
+        elif "start" in arguments:
+            executions.append("invented-execution-" + str(len(executions) + 1))
+            body = canonical({"name": executions[-1]})
+        else:
+            body = canonical({"properties": {"status": "Failed"}})
+        return subprocess.CompletedProcess(arguments, 0, stdout=body, stderr=b"")
+    backend.run = cli
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="bounded retry remains pending"):
+            backend._job(state, "migrate")
+    with pytest.raises(RuntimeError, match="retry limit"):
+        backend._job(state, "migrate")
+    assert len(executions) == 3 and state["migrate_executions"] == executions
+    assert "migrate_execution" not in state
+    assert not (backend.directory / "migrate-receipt.json").exists()
+
+
+def test_lost_job_start_reply_recovers_same_execution_and_requires_real_bound_receipt(hosted):
+    c = hosted
+    backend = c.allocator.backend
+    state = backend._open(c.deployment)
+    state["resources"] = {"storage_id": c.scope + "Microsoft.Storage/storageAccounts/invented"}
+    calls = []
+    executions = []
+    def cli(arguments, **kwargs):
+        calls.append(arguments)
+        if "list" in arguments:
+            body = json.dumps([{"name": name} for name in executions]).encode()
+        elif "start" in arguments:
+            executions.append("invented-lost-execution")
+            raise subprocess.TimeoutExpired(arguments, 900)
+        elif "download" in arguments:
+            receipt = {"contract": "enrollment-workspace-migration.v1", "allocation_operation_id": c.operation,
+                **{key: getattr(c.plan, key) for key in ("practice_id", "box_id", "organization_id", "source_commit", "image_sha256")},
+                "owner_ready": False, "workspace_ready": False}
+            Path(arguments[arguments.index("--file") + 1]).write_bytes(canonical(receipt))
+            body = b""
+        else:
+            body = canonical({"properties": {"status": "Succeeded"}})
+        return subprocess.CompletedProcess(arguments, 0, stdout=body, stderr=b"")
+    backend.run = cli
+    with pytest.raises(RuntimeError, match="provider operation pending"):
+        backend._job(state, "migrate")
+    assert state["migrate_start_pending"] is True
+    assert len(backend._job(state, "migrate")) == 64
+    assert sum("start" in arguments for arguments in calls) == 1
+    assert state["migrate_execution"] == "invented-lost-execution"
+    assert state["migrate_executions"] == executions
+
+
+@pytest.mark.parametrize("failure", ["foreign_zone", "foreign_record", "propagation"])
+def test_dns_validates_all_ownership_before_writes_and_requires_actual_propagation(hosted, failure):
+    c = hosted
+    writes = []
+    def cloudflare(request):
+        if request.method == "POST":
+            body = json.loads(request.content)
+            writes.append(body)
+            return httpx.Response(200, json={"success": True, "result": body})
+        if request.url.path.endswith("/dns_records"):
+            rows = [] if failure != "foreign_record" else [{"type": request.url.params["type"], "name": request.url.params["name"],
+                    "content": "foreign.azurecontainerapps.io", "proxied": False}]
+            return httpx.Response(200, json={"success": True, "result": rows})
+        return httpx.Response(200, json={"success": True, "result": {"id": c.value["cloudflare_zone_id"],
+                    "name": "cosmaneura.com" if failure == "foreign_zone" else "cosmas.ai"}})
+    resources = {"api_fqdn": "api-invented.azurecontainerapps.io", "web_fqdn": "web-invented.azurecontainerapps.io"}
+    with pytest.raises((ValueError, RuntimeError)):
+        bind_allocated_dns(c.config, c.deployment, resources, {"api": "invented-api-proof", "web": "invented-web-proof"},
+            client=httpx.Client(transport=httpx.MockTransport(cloudflare)),
+            run=lambda *args, **kwargs: SimpleNamespace(stdout=""), sleep=lambda _: None)
+    assert len(writes) == (4 if failure == "propagation" else 0)
+
+
+def test_web_image_does_not_pass_without_actual_validation_and_scanner_steps(hosted):
+    c = hosted
+    calls = []
+    backend = c.allocator.backend
+    state = backend._open(c.deployment)
+    (backend.directory / "web-context").mkdir()
+    state["web_build"] = {"run_id": "invented-run", "image": c.value["foundation"]["registry_server"] + "/allocated-workspace-web:" + c.operation,
+        "profile_sha256": "f" * 64, "queue_sent": True}
+    def cli(arguments, **kwargs):
+        calls.append(arguments)
+        if "show-run" in arguments:
+            body = canonical({"status": "Succeeded", "outputImages": []})
+        else:
+            body = b"Step ID: validate marked as successful\nStep ID: scan marked as failed\n"
+        return subprocess.CompletedProcess(arguments, 0, stdout=body, stderr=b"")
+    backend.run = cli
+    with pytest.raises(ValueError, match="scanner"):
+        build_allocated_web(backend, state)
+    assert not any("update" in arguments for arguments in calls)
+    assert "image_digest" not in state["web_build"]
+
+
+def test_interrupted_unqueued_web_context_is_discarded_before_rechecking_release(hosted):
+    c = hosted
+    backend = c.allocator.backend
+    state = backend._open(c.deployment)
+    context = backend.directory / "web-context"
+    context.mkdir()
+    (context / "unreviewed-stale-file").write_text("invented interrupted extraction")
+    calls = []
+    def cli(arguments, **kwargs):
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, stdout=b"different-release", stderr=b"")
+    backend.run = cli
+    with pytest.raises(ValueError, match="exact committed build source"):
+        build_allocated_web(backend, state)
+    assert not context.exists()
+    assert len(calls) == 1 and calls[0][0] == "git"
+    assert "web_build" not in state
