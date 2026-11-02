@@ -15,12 +15,21 @@ from sqlalchemy import func, select
 
 from cosmas_os.api import app as api
 from cosmas_os.api.auth import ClerkTokenVerifier
-from cosmas_os.application.account_deletion import CONFIRM_PHRASE
+from pydantic import SecretStr
+
+from cosmas_os.application.account_deletion import CONFIRM_PHRASE, NOT_CONFIGURED
 from cosmas_os.config import Settings
 from cosmas_os.domain.enums import PrincipalState
 from cosmas_os.enrollment.provisioning import ClerkProvisioningPort
 from cosmas_os.google_connection_models import GoogleConnectionCredential
-from cosmas_os.models import AuditEvent, ExternalIdentity, PatientLink, Principal, Ticket
+from cosmas_os.models import (
+    AuditEvent,
+    ExternalIdentity,
+    PatientLink,
+    Principal,
+    Ticket,
+    WorkspaceNote,
+)
 
 ORIGIN = "http://localhost:5173"
 PATH = "/account/delete"
@@ -263,3 +272,107 @@ def test_owner_with_active_teammate_must_transfer_first(deletion):
     assert response.status_code == 400
     assert response.json() == {"detail": "transfer ownership before deleting this owner account"}
     assert deletion.clerk_transport.deleted == []
+
+
+def _snapshot_account_rows(session, box_id: str, principal_id: str, binding_id: str) -> dict:
+    peer = session.get(Principal, principal_id)
+    binding = session.get(ExternalIdentity, binding_id)
+    credential = session.get(GoogleConnectionCredential, binding_id)
+    session.refresh(peer)
+    session.refresh(binding)
+    if credential is not None:
+        session.refresh(credential)
+    return {
+        "principal_state": peer.state,
+        "tombstoned_at": peer.tombstoned_at,
+        "display_name": peer.display_name,
+        "is_owner": peer.is_owner,
+        "binding_active": binding.active,
+        "credential_status": None if credential is None else credential.status,
+        "credential_sealed": None if credential is None else credential.sealed,
+        "credential_refresh_id": None if credential is None else credential.refresh_id,
+        "patients": session.scalar(
+            select(func.count()).select_from(PatientLink).where(PatientLink.box_id == box_id)
+        ),
+        "tickets": session.scalar(
+            select(func.count()).select_from(Ticket).where(Ticket.box_id == box_id)
+        ),
+        "notes": session.scalar(
+            select(func.count()).select_from(WorkspaceNote).where(WorkspaceNote.box_id == box_id)
+        ),
+        "principals": session.scalar(
+            select(func.count()).select_from(Principal).where(Principal.box_id == box_id)
+        ),
+        "bindings": session.scalar(
+            select(func.count())
+            .select_from(ExternalIdentity)
+            .where(ExternalIdentity.box_id == box_id)
+        ),
+        "deleted_audits": session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(
+                AuditEvent.box_id == box_id,
+                AuditEvent.event_type == "account.deleted",
+            )
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    "secret_value",
+    [None, ""],
+    ids=["clerk_secret_unset", "clerk_secret_empty_string"],
+)
+def test_hosted_delete_fails_closed_without_clerk_secret(
+    deletion, session, monkeypatch, secret_value
+):
+    """Staging without CLERK_SECRET_KEY must refuse delete without mutating anything."""
+
+    api.app.dependency_overrides.pop(api._clerk_user_deletion_port, None)
+    monkeypatch.setattr(
+        api.settings,
+        "clerk_secret_key",
+        None if secret_value is None else SecretStr(secret_value),
+    )
+
+    clerk_constructions: list[str] = []
+
+    def refuse_construction(self, secret: str, *, client=None):  # noqa: ANN001
+        clerk_constructions.append(secret)
+        raise AssertionError("Clerk Backend client must not be constructed without a secret")
+
+    monkeypatch.setattr(ClerkProvisioningPort, "__init__", refuse_construction)
+
+    before = _snapshot_account_rows(
+        session, deletion.box, deletion.people["peer"], deletion.bindings["peer"].id
+    )
+
+    response = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+
+    assert response.status_code == 400
+    assert response.status_code != 500
+    assert response.headers.get("cache-control") == "no-store"
+    body = response.json()
+    assert body == {"detail": NOT_CONFIGURED}
+    assert body["detail"] == "account deletion is not configured"
+    text = response.text.lower()
+    assert "traceback" not in text
+    assert "secret" not in text
+    assert "sk_" not in text
+    assert clerk_constructions == []
+    assert deletion.clerk_transport.deleted == []
+
+    after = _snapshot_account_rows(
+        session, deletion.box, deletion.people["peer"], deletion.bindings["peer"].id
+    )
+    assert after == before
+
+    still_signed_in = deletion.client.get("/account/identity", headers=deletion.headers("peer"))
+    assert still_signed_in.status_code == 200, still_signed_in.text
+    assert still_signed_in.headers.get("cache-control") == "no-store"
+    identity = still_signed_in.json()
+    assert identity["state"] == "allowed"
+    assert identity["box_id"] == deletion.box
