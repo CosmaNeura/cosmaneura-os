@@ -39,11 +39,15 @@ export const STANDALONE_FEATURE_FLAGS = Object.freeze([
 ]);
 // Main beta keeps its own practice and reviewed Google sources. The server's
 // signed readiness and account grants still control every model/provider call.
+// Core capture + notes are the live Cosmas recording/note path (T-REL-6 item 1).
 export const INDEPENDENT_BETA_FEATURE_FLAGS = Object.freeze([
   ...STANDALONE_FEATURE_FLAGS,
   'VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED', 'VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED',
   'VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED',
+  'VITE_WORKSPACE_CAPTURE_ENABLED', 'VITE_WORKSPACE_CAPTURE_NOTES_ENABLED',
 ]);
+// Observed Core web/API origin: docs/beta/WEB_RELEASE.md:171-176.
+export const REVIEWED_CORE_CAPTURE_ORIGIN = 'https://staging-app.cosmaneura.com';
 // The same existing platform hosts are reserved by infra/beta/environment.
 // This rejects known collisions, not a claim that arbitrary public DNS proves
 // deployment isolation; resource ownership must also be reviewed before use.
@@ -56,11 +60,20 @@ function set(env, name, value) {
   if (env[name] !== undefined && env[name] !== '' && env[name] !== value) fail(`${name} conflicts with ${env.VITE_WORKSPACE_FEATURE_PROFILE}`);
   env[name] = value;
 }
+function forbiddenCaptureUploadHost(hostname) {
+  const host = String(hostname || '').toLowerCase();
+  return host === 'assemblyai.com' || host.endsWith('.assemblyai.com')
+    || host === 'recall.ai' || host.endsWith('.recall.ai');
+}
+
 function uploads(value) {
   if (typeof value !== 'string') fail('VITE_CAPTURE_UPLOAD_ORIGINS is required');
   const origins = value.split(',');
   if (!origins.length || origins.length > 4 || new Set(origins).size !== origins.length ||
       !origins.every(exactHostedOrigin)) fail('capture requires one to four distinct exact HTTPS upload origins');
+  if (origins.some(origin => forbiddenCaptureUploadHost(new URL(origin).hostname))) {
+    fail('capture upload origins cannot target AssemblyAI or Recall.ai');
+  }
   return origins;
 }
 
@@ -109,15 +122,42 @@ function resolveProfile(input, checkPublishableKey) {
       if (platformHosts.has(new URL(origin).hostname)) fail('standalone practice requires dedicated CosmaBot API and web origins');
     }
     if (checkPublishableKey && !/^pk_(test|live)_\S+$/.test(env.VITE_CLERK_PUBLISHABLE_KEY ?? '')) fail('standalone practice requires an explicit Clerk public identity');
-    set(env, 'VITE_COSMANEURA_WEB_ORIGIN', '');
-    set(env, 'VITE_CAPTURE_UPLOAD_ORIGINS', '');
-    set(env, 'VITE_WORKSPACE_CAPTURE_MODE', 'disabled');
-    for (const key of captureFlags) set(env, key, 'false');
-    return {env: Object.freeze(env), manifest: {version: 1, profile: env.VITE_WORKSPACE_FEATURE_PROFILE, ...hosted,
+    if (!independent) {
+      set(env, 'VITE_COSMANEURA_WEB_ORIGIN', '');
+      set(env, 'VITE_CAPTURE_UPLOAD_ORIGINS', '');
+      set(env, 'VITE_WORKSPACE_CAPTURE_MODE', 'disabled');
+      for (const key of captureFlags) set(env, key, 'false');
+      return {env: Object.freeze(env), manifest: {version: 1, profile: env.VITE_WORKSPACE_FEATURE_PROFILE, ...hosted,
+        ...(client === 'web' ? {organizationId: env.VITE_WORKSPACE_ORGANIZATION_ID} : {}),
+        enabledFlags: [...standaloneFlags], disabledFlags: [...knownGates].filter(key => env[key] === 'false'),
+        authentication: 'verified_hosted_identity', platformAccess: 'disabled',
+        captureMode: 'disabled', captureUploadOrigins: [], coreWebOrigin: '', athenaAccess: 'disabled'}};
+    }
+    // Independent-beta launch: Core capture only (no Core connection / Athena / prep).
+    if (env.VITE_COSMANEURA_WEB_ORIGIN !== REVIEWED_CORE_CAPTURE_ORIGIN) {
+      fail('independent beta requires the reviewed Core web origin');
+    }
+    const captureMode = env.VITE_WORKSPACE_CAPTURE_MODE;
+    if (!['browser_microphone', 'ios_native'].includes(captureMode) ||
+        captureMode === 'ios_native' && client !== 'apple' ||
+        captureMode === 'browser_microphone' && client === 'apple') {
+      fail('select a supported capture mode for this client/data profile');
+    }
+    set(env, captureFlags[0], captureMode === 'browser_microphone' ? 'true' : 'false');
+    set(env, captureFlags[1], captureMode === 'ios_native' ? 'true' : 'false');
+    // Staging test profile only: ciphertext PUTs go to CosmaBot's own API origin
+    // (S2S proxy to Core). Never Core web or Scribe blob — those need Cosmas CORS.
+    set(env, 'VITE_CAPTURE_UPLOAD_ORIGINS', hosted.apiOrigin);
+    const uploadOrigins = uploads(env.VITE_CAPTURE_UPLOAD_ORIGINS);
+    if (uploadOrigins.length !== 1 || uploadOrigins[0] !== hosted.apiOrigin) {
+      fail('independent beta requires CosmaBot API origin as the sole capture upload origin');
+    }
+    return {env: Object.freeze(env), manifest: {version: 1, profile: INDEPENDENT_BETA_FEATURE_PROFILE, ...hosted,
       ...(client === 'web' ? {organizationId: env.VITE_WORKSPACE_ORGANIZATION_ID} : {}),
       enabledFlags: [...standaloneFlags], disabledFlags: [...knownGates].filter(key => env[key] === 'false'),
       authentication: 'verified_hosted_identity', platformAccess: 'disabled',
-      captureMode: 'disabled', captureUploadOrigins: [], coreWebOrigin: '', athenaAccess: 'disabled'}};
+      captureMode, captureUploadOrigins: uploadOrigins,
+      coreWebOrigin: REVIEWED_CORE_CAPTURE_ORIGIN, athenaAccess: 'disabled'}};
   }
   if (staging) {
     set(env, 'VITE_COSMANEURA_WEB_ORIGIN', '');
@@ -173,7 +213,7 @@ export function validateNativeBetaProfile(manifest, expected) {
       manifest.apiOrigin !== expected.apiOrigin || manifest.coreWebOrigin !== expected.coreWebOrigin ||
       JSON.stringify(manifest.captureUploadOrigins) !== JSON.stringify(expected.captureUploadOrigins)) fail('native and web feature/origin profiles differ');
   if (manifest.profile === NATIVE_STAGING_FEATURE_PROFILE && expected.microphoneCapture === true) fail('native capture is disabled for first-owner staging');
-  if ([STANDALONE_FEATURE_PROFILE, INDEPENDENT_BETA_FEATURE_PROFILE].includes(manifest.profile) && expected.microphoneCapture === true) fail('native capture is disabled for standalone practice');
+  if (manifest.profile === STANDALONE_FEATURE_PROFILE && expected.microphoneCapture === true) fail('native capture is disabled for standalone practice');
   if (expected.client === 'desktop' && expected.microphoneCapture !== (manifest.captureMode === 'browser_microphone') ||
       expected.client === 'apple' && manifest.captureMode === 'ios_native' &&
       (!expected.renewableNativeCapture || !expected.nativeRendererRecovery ||

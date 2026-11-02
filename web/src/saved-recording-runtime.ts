@@ -12,6 +12,7 @@ import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {SavedRecordingSource} from './saved-recording-source';
 import type {PrivateRecordingRuntime} from './private-recording-runtime';
 import {acquireCaptureFlowLock} from '../../clients/capture/src/flow/capture-lock';
+import {workspaceAuthHeaders} from './workspace-auth-headers';
 
 export async function importSavedChunks(controller:Pick<CaptureFlowController,'snapshot'|'startRecording'|'pauseRecording'|'prepareContinuation'|'stopRecording'|'resumePendingWork'>,
   source:SavedRecordingSource,total:number,current:()=>boolean):Promise<void>{
@@ -62,13 +63,18 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
       reference=`${kind}_response_${status}`;
     });
     const origins=String(import.meta.env.VITE_CAPTURE_UPLOAD_ORIGINS??'').split(',').map(v=>v.trim()).filter(Boolean);
+    const apiBase=(import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, '')||'http://127.0.0.1:8000');
+    const apiOrigin=new URL(apiBase).origin;
+    const authorizeCosmaBot=origins.length===1&&origins[0]===apiOrigin
+      ?async()=>{const headers=await workspaceAuthHeaders(identity,apiBase);headers.set('Content-Type','application/octet-stream');return headers;}
+      :undefined;
     const upload=new HttpCiphertextUploadTarget(origins,async(input,init)=>{
       try{
         const response=await fetch(input,{...init,signal:init?.signal?AbortSignal.any([init.signal,abort.signal]):abort.signal});
         if(response.status!==201)reference=`audio_upload_response_${response.status}`;
         return response;
       }catch(error){reference='audio_upload_response_unconfirmed';throw error;}
-    });
+    },authorizeCosmaBot);
     const captureQueue=new CaptureQueue(queue.storage),transport=new BffCaptureQueueTransport(bff,upload);
     controller=new CaptureFlowController({bff,profiles:bff,flowStore:flow,queue:captureQueue,source,
       queueTransport:transport});

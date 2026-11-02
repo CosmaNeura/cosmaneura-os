@@ -37,7 +37,7 @@ def main():
     identity = _identity.load(args.native_identity_config, "desktop")
     if identity and args.verification_variant:
         parser.error("Operational and synthetic helper identities cannot be combined.")
-    capture_disabled = args.native_feature_profile in ("first-owner-staging-v1", "standalone-practice-v1", "independent-beta-v1")
+    capture_disabled = args.native_feature_profile in ("first-owner-staging-v1", "standalone-practice-v1")
     if capture_disabled and not identity:
         parser.error("A capture-disabled profile requires an operational native identity.")
     if args.output.is_symlink() or output.exists() or output.suffix != ".app" or not identity and not re.fullmatch(r"w[1-9][0-9]*[a-z]?", args.verification_variant):

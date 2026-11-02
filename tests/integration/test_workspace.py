@@ -339,21 +339,30 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
     try:
         migrate("0002_external_identities")
         with Session(target) as s:
-            seed = svc.provision_box(svc.Container(s), "Migration invented practice")
-            # Seed the historical schema's columns, before current ORM fields
-            # such as private source ownership have been introduced.
+            # Seed only columns present at 0002. Current ORM models may carry
+            # later additive columns (e.g. real-patient recording flags).
             historical = MetaData()
+            boxes = Table("box_contexts", historical, autoload_with=s.connection())
+            principals = Table("principals", historical, autoload_with=s.connection())
             links = Table("patient_links", historical, autoload_with=s.connection())
             appointments = Table("appointment_observations", historical, autoload_with=s.connection())
+            box_id, owner_id = str(uuid4()), str(uuid4())
             link_id, appointment_id = str(uuid4()), str(uuid4())
             now = datetime.now(UTC)
+            s.execute(boxes.insert().values(id=box_id, display_name="Migration invented practice"))
+            s.execute(principals.insert().values(
+                id=owner_id, box_id=box_id, principal_type="human",
+                display_name="Alex Owner", state="active", is_owner=True,
+                charter_version="charter-v1", config_version="config-v1",
+                policy_version="policy-v1",
+            ))
             s.execute(links.insert().values(
-                id=link_id, box_id=seed["box_id"], source_pair_key="invented:" + str(uuid4()),
+                id=link_id, box_id=box_id, source_pair_key="invented:" + str(uuid4()),
                 label="Invented person", state="confirmed",
-                confirmed_by_principal_id=seed["owner_id"], attested_at=now,
+                confirmed_by_principal_id=owner_id, attested_at=now,
             ))
             s.execute(appointments.insert().values(
-                id=appointment_id, box_id=seed["box_id"], external_id="invented-" + str(uuid4()),
+                id=appointment_id, box_id=box_id, external_id="invented-" + str(uuid4()),
                 source="synthetic", start_at=now, patient_label="Invented person",
                 patient_link_id=link_id, coverage_status="missing",
             ))
@@ -364,11 +373,23 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
         migrate("head")
         with Session(target) as s:
             assert api_module.ready(request, session=s)["status"] == "ready"
-            w = ws.create(s, seed["box_id"], seed["owner_id"], appointment_id, "migration-create")
+            # Head migration must leave historical rows readable with defaults.
+            box_flags = s.execute(text(
+                "SELECT real_patient_recording_enabled, real_patient_recording_kill_engaged "
+                "FROM box_contexts WHERE id = :id"
+            ), {"id": box_id}).one()
+            assert box_flags == (False, True)
+            assert s.execute(text(
+                "SELECT recording_class FROM patient_links WHERE id = :id"
+            ), {"id": link_id}).scalar_one() == "synthetic"
+            assert s.execute(text(
+                "SELECT recording_class FROM appointment_observations WHERE id = :id"
+            ), {"id": appointment_id}).scalar_one() == "synthetic"
+            w = ws.create(s, box_id, owner_id, appointment_id, "migration-create")
             ws.append(
                 s,
-                seed["box_id"],
-                seed["owner_id"],
+                box_id,
+                owner_id,
                 w["id"],
                 expected=1,
                 key="migration-note",
@@ -381,7 +402,7 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
             migrate("0002_external_identities", downgrade=True)
         with Session(target) as s:
             assert (
-                ws.read(s, seed["box_id"], seed["owner_id"], w["id"])["entries"][-1]["content"]
+                ws.read(s, box_id, owner_id, w["id"])["entries"][-1]["content"]
                 == "Survives recovery"
             )
             assert api_module.ready(request, session=s)["status"] == "ready"

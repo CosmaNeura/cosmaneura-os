@@ -255,6 +255,39 @@ test('existing Scribe source routes admit only exact reviewed selections before 
   }
 });
 
+test('independent-beta ciphertext PUT admits only CosmaBot API proxy path', async () => {
+  const path = `/workspaces/${id}/capture/ciphertexts/${id}`;
+  assert.equal(permittedAuthenticatedApiPath('app://cosmas/api' + path, 'PUT'), path);
+  for (const method of ['GET', 'POST', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'put'])
+    assert.equal(permittedAuthenticatedApiPath('app://cosmas/api' + path, method), null);
+  for (const suffix of ['?', `?owner=${id}`, '/send', '/', '/resolve'])
+    assert.equal(permittedAuthenticatedApiPath('app://cosmas/api' + path + suffix, 'PUT'), null);
+  const auth = fixture();
+  const body = new Uint8Array([1, 2, 3]);
+  const result = await proxyAuthenticatedWorkspaceRequest(
+    new Request('app://cosmas/api' + path, {
+      method: 'PUT', body,
+      headers: {'Content-Type': 'application/octet-stream', 'X-Cosmas-Desktop-Session': id,
+        'X-Cosmas-Workspace-Protocol': '1', 'X-Cosmas-Draft-Recovery': '2'},
+    }), auth, async (url, options) => {
+      assert.equal(url, 'http://127.0.0.1:8046' + path);
+      assert.equal(options.method, 'PUT');
+      assert.equal(options.headers['Content-Type'], 'application/octet-stream');
+      assert.equal(options.headers.Authorization, 'Bearer local.binding.fixture');
+      assert.deepEqual(new Uint8Array(options.body), body);
+      return new Response('{}', {status: 201, headers: {
+        'Content-Type': 'application/json', 'Cache-Control': 'no-store',
+        'X-Cosmas-Workspace-Protocol': '1'}});
+    });
+  assert.equal(result.status, 201);
+  assert.equal(auth.tokenCalls(), 1);
+  assert.equal((await proxyAuthenticatedWorkspaceRequest(
+    new Request('app://cosmas/api' + path, {
+      method: 'PUT', body,
+      headers: {'Content-Type': 'application/json', 'X-Cosmas-Desktop-Session': id},
+    }), fixture(), () => assert.fail('json ciphertext body must not dispatch'))).status, 400);
+});
+
 test('allows exact private workspace/capture operations and denies demo/admin or generic effects', () => {
   for (const path of ['/workspaces', '/provider-team', `/workspaces/${id}`, '/practice-work', `/practice-work/${id}`, `/practice-work/pages/${id}`]) {
     assert.equal(permittedAuthenticatedApiPath('app://cosmas/api' + path, 'GET'), path);

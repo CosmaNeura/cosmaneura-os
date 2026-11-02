@@ -1,5 +1,6 @@
 import type { CiphertextUploadTarget, RequestOptions } from "./contracts";
 
+import { isForbiddenCaptureUploadHost } from "./forbidden-upload-hosts";
 import { parseRetryAfter } from "./http-client";
 
 export class UploadResponseError extends Error {
@@ -19,12 +20,16 @@ export class UploadTargetPolicyError extends Error {
   }
 }
 
+export type CiphertextUploadAuthorize = (target: URL) => Promise<HeadersInit | undefined>;
+
 export class HttpCiphertextUploadTarget implements CiphertextUploadTarget {
   private readonly allowedOrigins: ReadonlySet<string>;
 
   public constructor(
     allowedOrigins: readonly string[],
     private readonly fetchImplementation: typeof fetch = fetch,
+    /** CosmaBot API proxy uploads need workspace auth; blob SAS URLs do not. */
+    private readonly authorize: CiphertextUploadAuthorize | undefined = undefined,
   ) {
     if (allowedOrigins.length === 0) {
       throw new Error("at least one ciphertext upload origin is required");
@@ -57,14 +62,20 @@ export class HttpCiphertextUploadTarget implements CiphertextUploadTarget {
     const body = new ArrayBuffer(envelope.byteLength);
     new Uint8Array(body).set(envelope);
     target.hash = "";
+    const blobHost = target.hostname.endsWith(".blob.core.windows.net");
+    // Independent-beta: CosmaBot API proxy only. Never attach workspace auth to
+    // a blob SAS PUT (and never PUT browser→blob on that profile).
+    const authHeaders = blobHost || this.authorize === undefined
+      ? undefined
+      : await this.authorize(target);
+    const headers = new Headers(authHeaders);
+    headers.set("Content-Type", "application/octet-stream");
+    if (blobHost) headers.set("x-ms-blob-type", "BlockBlob");
+    if (receipt !== null) headers.set("X-Capture-Upload-Receipt", receipt);
     const response = await this.fetchImplementation.call(globalThis, target, {
       method: "PUT",
       body,
-      headers: {
-        "Content-Type": "application/octet-stream",
-        ...(target.hostname.endsWith(".blob.core.windows.net") ? { "x-ms-blob-type": "BlockBlob" } : {}),
-        ...(receipt === null ? {} : { "X-Capture-Upload-Receipt": receipt }),
-      },
+      headers,
       credentials: "omit",
       redirect: "error",
       cache: "no-store",
@@ -101,6 +112,9 @@ function normalizeAllowedOrigin(value: string): string {
   }
   if (origin.protocol !== "https:" && !isLoopback(origin.hostname)) {
     throw new Error("ciphertext upload origin must use HTTPS");
+  }
+  if (isForbiddenCaptureUploadHost(origin.hostname)) {
+    throw new Error("ciphertext upload origin host is forbidden");
   }
   return origin.origin;
 }

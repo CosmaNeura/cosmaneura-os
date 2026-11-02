@@ -42,6 +42,10 @@ class BoxContext(Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # T-REL-6: Box DB only. Process env must keep the matching Settings flag false.
+    real_patient_recording_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Kill engaged by default: real-patient recording stays off until ops clears it.
+    real_patient_recording_kill_engaged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class Principal(Base):
@@ -119,6 +123,27 @@ class CoreCaptureAccount(Base):
     evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CaptureUploadProxy(Base):
+    """Server-side Core/Scribe upload URL; browser PUTs only to CosmaBot API."""
+
+    __tablename__ = "capture_upload_proxies"
+    __table_args__ = (
+        Index("ix_capture_upload_proxies_workspace_expires", "workspace_id", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("box_contexts.id"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    session_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    object_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    principal_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    authorization_receipt_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    target_upload_url: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SchedulingAccount(Base):
@@ -218,6 +243,8 @@ class PatientLink(Base):
     attested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     state: Mapped[str] = mapped_column(String(32), default="unconfirmed")
+    # Default synthetic: existing rows never become real-patient recording targets.
+    recording_class: Mapped[str] = mapped_column(String(16), nullable=False, default="synthetic")
 
 
 class AppointmentObservation(Base):
@@ -245,6 +272,8 @@ class AppointmentObservation(Base):
         UUID(as_uuid=False), ForeignKey("patient_links.id"), nullable=True
     )
     coverage_status: Mapped[str] = mapped_column(String(32), default=CoverageStatus.MISSING.value)
+    # Visit recording class; defaults synthetic so live users are unchanged.
+    recording_class: Mapped[str] = mapped_column(String(16), nullable=False, default="synthetic")
 
 
 class Ticket(Base):
