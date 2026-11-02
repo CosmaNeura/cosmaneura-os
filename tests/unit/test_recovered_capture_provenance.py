@@ -68,6 +68,8 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
     assert differed == [
         "native-plugins/cosmas-native-auth/Package.swift",
         "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
+        "native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift",
+        "native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift",
         "native-plugins/native-recording-pcm/Package.swift",
     ]
 
