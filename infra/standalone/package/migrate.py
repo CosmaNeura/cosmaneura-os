@@ -4,12 +4,15 @@ The cosmabot-standalone-* API containers do not migrate on start. Operators
 (and staging proof) invoke this module from the reviewed release/source as:
 
   STANDALONE_INSTANCE_ID=<uuid> \\
-  DATABASE_ADMIN_URL=postgresql+psycopg://cbpg_<short>:...@.../cosmabot_standalone_... \\
-  DATABASE_URL=postgresql+psycopg://cosmabot_runtime_<short>:...@.../cosmabot_standalone_... \\
+  DATABASE_ADMIN_URL=postgresql+psycopg://cbpg_<short>@/cosmabot_standalone_...?host=/var/run/postgresql \\
+  DATABASE_URL=postgresql+psycopg://cosmabot_runtime_<short>:...@127.0.0.1:5432/cosmabot_standalone_... \\
   python infra/standalone/package/migrate.py
 
-Alembic runs as the derived peer migrator role. The runtime role receives
-DML only. Secrets are never printed.
+DATABASE_ADMIN_URL may be a Unix-socket peer login (socket directory in
+``host=``, no password) when live pg_hba allows ``local ... peer`` for
+``cbpg_*``. The runtime URL stays a password login. Alembic runs as the
+derived peer migrator role. The runtime role receives DML only. Secrets are
+never printed.
 """
 
 from __future__ import annotations

@@ -6,10 +6,12 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+from sqlalchemy.engine import make_url
 from typer.testing import CliRunner
 
 from cosmas_os.application import standalone_database as standalone
 from cosmas_os.cli import app
+from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 INSTANCE = UUID("e0a41418-4674-4f53-8c31-774b214bf612")
 SHORT = "e0a414184674"
@@ -17,13 +19,25 @@ MIGRATOR = f"cbpg_{SHORT}"
 RUNTIME = f"cosmabot_runtime_{SHORT}"
 DB = f"cosmabot_standalone_{INSTANCE.hex}_r5r_deadbeef"
 PACKAGE = Path(__file__).resolve().parents[2] / "infra/standalone/package"
+ROOT = Path(__file__).resolve().parents[2]
 
 
-def _url(user: str, database: str = DB) -> str:
+def _url(user: str, database: str = DB, *, password: str | None = None) -> str:
+    secret = password
+    if secret is None:
+        secret = (
+            "invented-migrator-password-1234"
+            if user == MIGRATOR
+            else "invented-runtime-password-1234"
+        )
     return (
-        f"postgresql+psycopg://{user}:invented-standalone-password-1234@"
+        f"postgresql+psycopg://{user}:{secret}@"
         f"127.0.0.1:15432/{database}"
     )
+
+
+def _peer_url(user: str = MIGRATOR, database: str = DB, socket: str = "/var/run/postgresql") -> str:
+    return f"postgresql+psycopg://{user}@/{database}?host={socket}"
 
 
 def test_standalone_roles_are_derived_from_instance_identity_not_hardcoded():
@@ -114,6 +128,58 @@ def test_runtime_grants_exclude_ddl_and_schema_create():
     assert "REFERENCES" not in standalone.RUNTIME_TABLE_PRIVILEGES
 
 
+def test_runtime_grant_sql_reapplies_fine_grained_revokes_after_blanket_grant():
+    """Fail if blanket GRANT UPDATE ON ALL TABLES is left as the final grant state."""
+
+    statements = standalone.runtime_grant_sql(INSTANCE)
+    grant_indexes = [
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("GRANT ")
+        and "ON ALL TABLES IN SCHEMA public" in statement
+        and "UPDATE" in statement
+    ]
+    assert grant_indexes, "expected a blanket DML GRANT ON ALL TABLES"
+    grant_idx = grant_indexes[0]
+
+    def after_grant(fragment: str) -> bool:
+        return any(
+            fragment in statement for statement in statements[grant_idx + 1 :]
+        )
+
+    assert after_grant("REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_events")
+    assert after_grant(
+        "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.alembic_version"
+    )
+    assert after_grant(
+        "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE "
+        "public.practice_owner_reservations"
+    )
+    assert after_grant(
+        "GRANT UPDATE (consumed_at) ON TABLE public.practice_owner_reservations"
+    )
+    assert after_grant("GRANT SELECT ON TABLE public.alembic_version")
+
+    # Document the old broken order: blanket GRANT with no later audit/version revoke.
+    old_broken = (
+        f"REASSIGN OWNED BY {RUNTIME} TO {MIGRATOR}",
+        f"GRANT DELETE, INSERT, SELECT, UPDATE ON ALL TABLES IN SCHEMA public TO {RUNTIME}",
+        f"REVOKE CREATE ON SCHEMA public FROM {RUNTIME}",
+        f"REVOKE REFERENCES ON ALL TABLES IN SCHEMA public FROM {RUNTIME}",
+        f"REVOKE TRIGGER ON ALL TABLES IN SCHEMA public FROM {RUNTIME}",
+        f"REVOKE TRUNCATE ON ALL TABLES IN SCHEMA public FROM {RUNTIME}",
+    )
+    old_grant_idx = 1
+    assert not any(
+        "audit_events" in statement and "REVOKE UPDATE" in statement
+        for statement in old_broken[old_grant_idx + 1 :]
+    )
+    assert not any(
+        "alembic_version" in statement and "REVOKE" in statement and "UPDATE" in statement
+        for statement in old_broken[old_grant_idx + 1 :]
+    )
+
+
 def test_standalone_boundaries_accept_per_release_database_and_private_box_url():
     admin, runtime, migrator, runtime_role = standalone._validate_standalone_boundaries(
         _url(MIGRATOR), _url(RUNTIME), INSTANCE
@@ -133,6 +199,55 @@ def test_standalone_boundaries_accept_per_release_database_and_private_box_url()
             _url(RUNTIME, "cosmas_os"),
             INSTANCE,
         )
+
+
+def test_standalone_boundaries_accept_peer_socket_migrator_without_password():
+    peer = _peer_url()
+    parsed = make_url(peer)
+    assert standalone.is_peer_socket_migrator_url(parsed)
+    assert parsed.password is None
+    assert parsed.query.get("host") == "/var/run/postgresql"
+
+    admin, runtime, migrator, runtime_role = standalone._validate_standalone_boundaries(
+        peer, _url(RUNTIME), INSTANCE
+    )
+    assert migrator == MIGRATOR
+    assert runtime_role == RUNTIME
+    assert admin.database == runtime.database == DB
+    assert standalone.is_peer_socket_migrator_url(admin)
+    assert runtime.password is not None
+    assert admin.host != runtime.host or admin.query != runtime.query
+
+    # Peer migrator must not carry a password, and must not use a TCP password URL
+    # that only matches the runtime host when a socket peer is intended.
+    with pytest.raises(
+        standalone.StandaloneDatabaseError, match="peer migrator URL must omit the password"
+    ):
+        standalone._safe_standalone_migrator_url(
+            f"postgresql+psycopg://{MIGRATOR}:invented-peer-password-1234"
+            f"@/{DB}?host=/var/run/postgresql"
+        )
+
+    # TCP migrator still requires a password and matching host with runtime.
+    with pytest.raises(standalone.StandaloneDatabaseError):
+        standalone._validate_standalone_boundaries(
+            f"postgresql+psycopg://{MIGRATOR}:invented-standalone-password-1234@"
+            f"10.0.0.1:15432/{DB}",
+            _url(RUNTIME),
+            INSTANCE,
+        )
+
+
+def test_shipped_schema_head_reads_alembic_graph_not_hardcoded_constant():
+    head = standalone.shipped_schema_head(ROOT / "alembic.ini")
+    assert head == EXPECTED_SCHEMA_REVISION
+    source = Path(standalone.__file__).read_text()
+    assert "EXPECTED_SCHEMA_REVISION" not in source
+    assert "bb57e3d10c964" not in source
+    assert "aa46f2c09b853" not in source
+    assert "z35e1b98a742" not in source
+    assert "shipped_schema_head" in source
+    assert "_run_standalone_forward_migrations" in source
 
 
 def test_standalone_package_migrate_entrypoint_uses_derived_roles():

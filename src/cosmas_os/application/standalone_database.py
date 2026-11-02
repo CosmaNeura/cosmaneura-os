@@ -3,7 +3,9 @@
 Alembic runs as the per-release peer migrator role derived from the Box /
 instance identity (`cbpg_<short>`), never as the runtime login
 (`cosmabot_runtime_<short>`). After migrate, the runtime role receives
-table DML only.
+table DML only. The migrator may authenticate over a Unix-socket peer
+URL (socket directory host, no password); the runtime login stays on its
+password URL.
 """
 
 from __future__ import annotations
@@ -16,18 +18,19 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from alembic import command
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 
 from cosmas_os.application.database_preparation import (
     DatabasePreparationError,
+    _alembic_config,
     _apply_runtime_privileges,
     _ensure_unprivileged_role,
-    _run_forward_migrations,
     _safe_url,
     _verify_runtime_role,
 )
-from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 STANDALONE_DATABASE_CONTRACT = "cosmabot-standalone-database-preparation-v1"
 _LOCK_KEY = "cosmabot-standalone-database-preparation-v1"
@@ -37,6 +40,17 @@ _ROLE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,62}$")
 RUNTIME_TABLE_PRIVILEGES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"})
 RUNTIME_FORBIDDEN_TABLE_PRIVILEGES = frozenset(
     {"CREATE", "REFERENCES", "TRIGGER", "TRUNCATE"}
+)
+
+# Tables where the blanket DML grant must be narrowed again to match
+# database_preparation._apply_runtime_privileges.
+_RUNTIME_RESTRICTED_AFTER_GRANT = (
+    "REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_events FROM {runtime}",
+    "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE "
+    "public.practice_owner_reservations FROM {runtime}",
+    "GRANT UPDATE (consumed_at) ON TABLE public.practice_owner_reservations TO {runtime}",
+    "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.alembic_version FROM {runtime}",
+    "GRANT SELECT ON TABLE public.alembic_version TO {runtime}",
 )
 
 
@@ -96,6 +110,27 @@ def standalone_role_names(instance_id: str | UUID) -> tuple[str, str]:
     return migrator, runtime
 
 
+def shipped_schema_head(alembic_config_path: Path) -> str:
+    """Return the single Alembic head actually shipped with this tree/image."""
+
+    if not alembic_config_path.is_file():
+        raise StandaloneDatabaseError("Alembic configuration is unavailable")
+    config = _alembic_config_file(alembic_config_path)
+    script = ScriptDirectory.from_config(config)
+    heads = script.get_heads()
+    if len(heads) != 1 or not heads[0]:
+        raise StandaloneDatabaseError("migration graph does not have a single head")
+    return heads[0]
+
+
+def _alembic_config_file(config_path: Path):
+    from alembic.config import Config
+
+    config = Config(str(config_path))
+    config.attributes["configure_logger"] = False
+    return config
+
+
 def assert_standalone_migrate_roles(
     migration_url: str,
     runtime_url: str,
@@ -121,12 +156,20 @@ def assert_standalone_migrate_roles(
 
 
 def runtime_grant_sql(instance_id: str | UUID) -> tuple[str, ...]:
-    """Owner repair + DML-only runtime grants derived from the instance identity."""
+    """Owner repair + DML-only runtime grants derived from the instance identity.
+
+    The blanket table GRANT is followed by the same fine-grained revokes that
+    ``_apply_runtime_privileges`` applies, so UPDATE is not left on
+    ``audit_events`` / ``alembic_version``.
+    """
 
     if RUNTIME_TABLE_PRIVILEGES & RUNTIME_FORBIDDEN_TABLE_PRIVILEGES:
         raise StandaloneDatabaseError("runtime_grants_include_ddl")
     migrator, runtime = standalone_role_names(instance_id)
     privileges = ", ".join(sorted(RUNTIME_TABLE_PRIVILEGES))
+    narrowed = tuple(
+        statement.format(runtime=runtime) for statement in _RUNTIME_RESTRICTED_AFTER_GRANT
+    )
     return (
         f"REASSIGN OWNED BY {runtime} TO {migrator}",
         f"GRANT {privileges} ON ALL TABLES IN SCHEMA public TO {runtime}",
@@ -134,7 +177,52 @@ def runtime_grant_sql(instance_id: str | UUID) -> tuple[str, ...]:
         f"REVOKE REFERENCES ON ALL TABLES IN SCHEMA public FROM {runtime}",
         f"REVOKE TRIGGER ON ALL TABLES IN SCHEMA public FROM {runtime}",
         f"REVOKE TRUNCATE ON ALL TABLES IN SCHEMA public FROM {runtime}",
+        *narrowed,
     )
+
+
+def _socket_directory(url: URL) -> str | None:
+    """Return the Unix socket directory if this URL is a peer-socket login."""
+
+    candidate = url.query.get("host") if url.query else None
+    if isinstance(candidate, str) and candidate.startswith("/"):
+        return candidate
+    if isinstance(url.host, str) and url.host.startswith("/"):
+        return url.host
+    return None
+
+
+def is_peer_socket_migrator_url(url: URL) -> bool:
+    """True when the migrator URL is a passwordless Unix-socket peer login."""
+
+    return (
+        url.password is None
+        and _socket_directory(url) is not None
+        and bool(url.username)
+        and bool(url.database)
+    )
+
+
+def _safe_standalone_migrator_url(value: str) -> URL:
+    try:
+        parsed = make_url(value)
+    except Exception:
+        raise StandaloneDatabaseError("administrator database URL is invalid") from None
+    if parsed.drivername != "postgresql+psycopg":
+        raise StandaloneDatabaseError("administrator database URL must use PostgreSQL psycopg")
+    if not parsed.username or not parsed.database:
+        raise StandaloneDatabaseError("administrator database URL is incomplete")
+    if _socket_directory(parsed) is not None:
+        # Live pg_hba admits cbpg_* only as local peer. A socket URL must not
+        # carry a password, and must not fall through to the TCP password path.
+        if parsed.password is not None:
+            raise StandaloneDatabaseError("peer migrator URL must omit the password")
+        return parsed
+    # TCP / private-Box migrator still uses a password URL.
+    try:
+        return _safe_url(value, label="administrator database URL")
+    except DatabasePreparationError as exc:
+        raise StandaloneDatabaseError(str(exc)) from None
 
 
 def _validate_standalone_boundaries(
@@ -145,21 +233,11 @@ def _validate_standalone_boundaries(
     migrator, runtime_role = assert_standalone_migrate_roles(
         admin_url, runtime_url, instance_id
     )
+    admin = _safe_standalone_migrator_url(admin_url)
     try:
-        admin = _safe_url(admin_url, label="administrator database URL")
         runtime = _safe_url(runtime_url, label="runtime database URL")
     except DatabasePreparationError as exc:
         raise StandaloneDatabaseError(str(exc)) from None
-    if (
-        admin.host,
-        admin.port or 5432,
-        admin.database,
-    ) != (
-        runtime.host,
-        runtime.port or 5432,
-        runtime.database,
-    ):
-        raise StandaloneDatabaseError("database URLs do not target the same database")
     if admin.username != migrator or runtime.username != runtime_role:
         raise StandaloneDatabaseError("migrate_must_use_migration_user")
     if admin.username == runtime.username:
@@ -167,10 +245,35 @@ def _validate_standalone_boundaries(
     database = admin.database
     if database is None or not _DATABASE_NAME.fullmatch(database):
         raise StandaloneDatabaseError("standalone_database_name_required")
-    # Private Box / loopback URLs are accepted. verify-full is not required and
-    # must not be forced onto standalone staging.
-    if set(admin.query) != set(runtime.query):
+    if runtime.database != database:
         raise StandaloneDatabaseError("database URLs do not target the same database")
+
+    peer = is_peer_socket_migrator_url(admin)
+    if peer:
+        # Peer socket migrator authenticates locally without a password. The
+        # runtime login stays on its own TCP/private-Box password URL; hosts
+        # need not match, and query strings intentionally differ.
+        if admin.password is not None:
+            raise StandaloneDatabaseError("peer migrator URL must omit the password")
+        if runtime.password is None:
+            raise StandaloneDatabaseError("runtime database URL is incomplete")
+    else:
+        if (
+            admin.host,
+            admin.port or 5432,
+        ) != (
+            runtime.host,
+            runtime.port or 5432,
+        ):
+            raise StandaloneDatabaseError("database URLs do not target the same database")
+        if set(admin.query) != set(runtime.query):
+            raise StandaloneDatabaseError("database URLs do not target the same database")
+        if admin.password is None or runtime.password is None:
+            raise StandaloneDatabaseError("database URL is incomplete")
+        if admin.password == runtime.password:
+            raise StandaloneDatabaseError(
+                "runtime credential must differ from the administrator"
+            )
     return admin, runtime, migrator, runtime_role
 
 
@@ -183,6 +286,18 @@ def _repair_runtime_owned_objects(connection: Any, migrator: str, runtime: str) 
         connection.execute(
             text(f"REASSIGN OWNED BY {runtime} TO {migrator}")
         )
+
+
+def _run_standalone_forward_migrations(connection: Any, config_path: Path) -> str:
+    """Upgrade to the single head shipped in this tree; do not pin a constant."""
+
+    config = _alembic_config(connection, config_path)
+    script = ScriptDirectory.from_config(config)
+    heads = script.get_heads()
+    if len(heads) != 1 or not heads[0]:
+        raise StandaloneDatabaseError("migration graph does not have a single head")
+    command.upgrade(config, "head")
+    return heads[0]
 
 
 def prepare_standalone_database(
@@ -208,8 +323,7 @@ def prepare_standalone_database(
                 raise StandaloneDatabaseError("runtime_grants_include_ddl")
 
     config_path = alembic_config_path or Path(__file__).resolve().parents[3] / "alembic.ini"
-    if not config_path.is_file():
-        raise StandaloneDatabaseError("Alembic configuration is unavailable")
+    expected_head = shipped_schema_head(config_path)
 
     admin_engine = create_engine(admin_url, pool_pre_ping=True)
     try:
@@ -228,7 +342,13 @@ def prepare_standalone_database(
                     _repair_runtime_owned_objects(connection, migrator, runtime_role)
                     try:
                         _ensure_unprivileged_role(connection, runtime)
-                        _run_forward_migrations(connection, config_path)
+                        shipped_head = _run_standalone_forward_migrations(
+                            connection, config_path
+                        )
+                        if shipped_head != expected_head:
+                            raise StandaloneDatabaseError(
+                                "migration graph does not have a single head"
+                            )
                         _apply_runtime_privileges(connection, runtime)
                         for statement in runtime_grant_sql(instance_id):
                             connection.execute(text(statement))
@@ -247,7 +367,7 @@ def prepare_standalone_database(
         verification = _verify_runtime_role(runtime_url, runtime)
     except DatabasePreparationError as exc:
         raise StandaloneDatabaseError(str(exc)) from None
-    if verification["revision"] != EXPECTED_SCHEMA_REVISION:
+    if verification["revision"] != expected_head:
         raise StandaloneDatabaseError("schema is not at the expected head")
     if not verification["non_admin"] or not verification["ddl_denied"]:
         raise StandaloneDatabaseError("runtime role retained elevated privileges")
@@ -255,7 +375,7 @@ def prepare_standalone_database(
     return StandaloneDatabaseEvidence(
         contract=STANDALONE_DATABASE_CONTRACT,
         status="ready",
-        schema_revision=EXPECTED_SCHEMA_REVISION,
+        schema_revision=expected_head,
         schema_at_expected_head=True,
         runtime_role_non_admin=bool(verification["non_admin"]),
         runtime_ddl_denied=bool(verification["ddl_denied"]),
