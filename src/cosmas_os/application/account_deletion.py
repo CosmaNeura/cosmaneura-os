@@ -30,6 +30,8 @@ from cosmas_os.models import (
 )
 
 CONFIRM_PHRASE = "delete_my_account"
+# Stable client-facing detail when Clerk Backend delete cannot run (missing secret).
+NOT_CONFIGURED = "account deletion is not configured"
 
 
 class AccountDeletionError(DomainError):
@@ -161,7 +163,8 @@ def delete_own_account(
 
     clerk_subjects = sorted({b.subject for b in active_bindings if b.provider == "clerk"})
     if clerk is None and clerk_subjects:
-        raise AccountDeletionError("account deletion is temporarily unavailable")
+        # Fail closed before any local wipe or Clerk HTTP call.
+        raise AccountDeletionError(NOT_CONFIGURED)
 
     try:
         for binding in bindings:
