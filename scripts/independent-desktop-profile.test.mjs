@@ -8,7 +8,7 @@ const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
   publishableKey: 'pk_live_' + Buffer.from('identity.example.invalid$').toString('base64'),
   organizationId: 'org_invented_practice', audience: 'invented-cosmabot-api'};
 const info = {CFBundleIdentifier: 'com.cosmasos.beta.desktop', CFBundleShortVersionString: '0.1.143', CFBundleVersion: '1103'};
-const uploadOrigin = 'https://uploads.example.invalid';
+const uploadOrigin = identity.apiOrigin;
 function fixture(profile = 'independent-beta-v1') {
   const independent = profile === 'independent-beta-v1';
   const manifest = resolveBetaFeatureProfile({VITE_WORKSPACE_FEATURE_PROFILE: profile,

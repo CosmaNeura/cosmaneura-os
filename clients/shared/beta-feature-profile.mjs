@@ -145,7 +145,13 @@ function resolveProfile(input, checkPublishableKey) {
     }
     set(env, captureFlags[0], captureMode === 'browser_microphone' ? 'true' : 'false');
     set(env, captureFlags[1], captureMode === 'ios_native' ? 'true' : 'false');
+    // Staging test profile only: ciphertext PUTs go to CosmaBot's own API origin
+    // (S2S proxy to Core). Never Core web or Scribe blob — those need Cosmas CORS.
+    set(env, 'VITE_CAPTURE_UPLOAD_ORIGINS', hosted.apiOrigin);
     const uploadOrigins = uploads(env.VITE_CAPTURE_UPLOAD_ORIGINS);
+    if (uploadOrigins.length !== 1 || uploadOrigins[0] !== hosted.apiOrigin) {
+      fail('independent beta requires CosmaBot API origin as the sole capture upload origin');
+    }
     return {env: Object.freeze(env), manifest: {version: 1, profile: INDEPENDENT_BETA_FEATURE_PROFILE, ...hosted,
       ...(client === 'web' ? {organizationId: env.VITE_WORKSPACE_ORGANIZATION_ID} : {}),
       enabledFlags: [...standaloneFlags], disabledFlags: [...knownGates].filter(key => env[key] === 'false'),

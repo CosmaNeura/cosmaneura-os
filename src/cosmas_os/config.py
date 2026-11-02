@@ -197,6 +197,10 @@ class Settings(BaseSettings):
     core_capture_origin: str = ""
     core_capture_scope: str = ""
     core_capture_managed_identity_client_id: str = ""
+    # CosmaBot public API origin for ciphertext proxy URLs (independent-beta only).
+    # Must equal the client VITE_CAPTURE_UPLOAD_ORIGINS / hosted API origin — never
+    # a Core or Scribe blob host (browser→blob would need Cosmas CORS).
+    workspace_capture_proxy_origin: str = ""
     # Separate activation and caller configuration for Core's prepared artifact.
     workspace_session_prep_enabled: bool = False
     core_session_prep_scope: str = ""
@@ -715,6 +719,7 @@ class Settings(BaseSettings):
         core_capture_fields = {
             "core_capture_origin", "core_capture_scope",
             "core_capture_managed_identity_client_id", "core_web_origin",
+            "workspace_capture_proxy_origin",
         }
         empty_prefixes = ("core_", "azure_", "microsoft_connection_",
             "scheduling_", "managed_services_config_")
@@ -767,6 +772,14 @@ class Settings(BaseSettings):
             return ["Standalone Core capture requires the reviewed staging-app.cosmaneura.com origin"]
         if not self.workspace_capture_notes_enabled or not self.workspace_agent_tools_enabled:
             return ["Standalone Core capture requires capture notes and agent tools together"]
+        # Proxy origin is CosmaBot's own API — never Core web or Scribe blob.
+        proxy = self.workspace_capture_proxy_origin
+        proxy_host = (urlparse(proxy).hostname or "").lower()
+        if (not self._is_exact_https_origin(proxy)
+                or proxy.rstrip("/") == reviewed
+                or proxy_host.endswith(".blob.core.windows.net")
+                or proxy_host.endswith(".cosmaneura.com")):
+            return ["Standalone Core capture requires CosmaBot API proxy origin for uploads"]
         return []
 
     def _standalone_model_errors(self) -> list[str]:

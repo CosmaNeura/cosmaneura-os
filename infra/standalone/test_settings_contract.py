@@ -41,7 +41,7 @@ if(process.argv[2]==='features'){
     google:{client_id:'invented-client.apps.googleusercontent.com',callback_uri:input.api_origin+'/connections/google/callback',return_origin:input.web_origin},
     capture:{origin:'https://staging-app.cosmaneura.com',web_origin:'https://staging-app.cosmaneura.com',
       scope:'api://invented-core-audience/.default',managed_identity_client_id:'00000000-0000-4000-8000-0000000000aa',
-      upload_origins:['https://uploads.example.invalid']}};
+      upload_origins:[input.api_origin]}};
 }
 const files=render(input);console.log(JSON.stringify({environment:files['api-public.json'],contract:files['host-preparation.json']}));
 """
@@ -111,6 +111,8 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
                 self.assertTrue(settings.workspace_capture_available)
                 self.assertTrue(settings.workspace_capture_notes_enabled)
                 self.assertEqual(settings.core_capture_origin, "https://staging-app.cosmaneura.com")
+                self.assertEqual(settings.workspace_capture_proxy_origin, public["WORKSPACE_CAPTURE_PROXY_ORIGIN"])
+                self.assertTrue(settings.workspace_capture_proxy_origin.startswith("https://api."))
                 self.assertFalse(settings.workspace_routines_enabled)
 
     def test_beta_host_stays_standalone_synthetic(self):

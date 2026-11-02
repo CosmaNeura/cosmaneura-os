@@ -45,7 +45,8 @@ class StandaloneNativeProfile(unittest.TestCase):
         }
         independent = self.feature_profile == "independent-beta-v1"
         core_origin = "https://staging-app.cosmaneura.com" if independent else ""
-        uploads = ["https://uploads.example.invalid"] if independent else []
+        # Independent-beta: CosmaBot API origin is the sole capture upload origin.
+        uploads = [self.identity["apiOrigin"]] if independent else []
         result = subprocess.run([
             "node", "--input-type=module", "-e",
             "const m=await import(process.argv[1]);process.stdout.write(JSON.stringify(m.workspaceIdentityInputs("

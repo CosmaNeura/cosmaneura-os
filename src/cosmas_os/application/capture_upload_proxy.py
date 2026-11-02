@@ -1,0 +1,156 @@
+"""CosmaBot ciphertext upload proxy: browser → CosmaBot API → Core blob S2S.
+
+Core authorize_upload still issues the Scribe/blob SAS URL. CosmaBot never
+returns that URL to the browser (browser→blob would need Cosmas CORS). The
+browser PUTs only to CosmaBot's own API origin; CosmaBot streams to the stored
+target with httpx (no browser CORS). Synthetic audio/ciphertext only.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from urllib.parse import urlparse
+from uuid import UUID, uuid4
+
+import httpx
+from sqlalchemy.orm import Session
+
+from cosmas_os.application import real_patient_recording as rpr
+from cosmas_os.application import workspace as ws
+from cosmas_os.models import (
+    AppointmentObservation,
+    CaptureUploadProxy,
+    EncounterWorkspace,
+)
+from cosmas_os.ports.capture_protocol import UploadReceipt
+
+# Matches capture_protocol.Registration.ciphertext_size_bytes upper bound.
+MAX_CIPHERTEXT_BYTES = 327_680
+
+
+def _exact_https_origin(value: str) -> bool:
+    parsed = urlparse(value)
+    return (
+        parsed.scheme == "https"
+        and parsed.port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in ("", "/")
+        and parsed.params == ""
+        and parsed.query == ""
+        and parsed.fragment == ""
+        and bool(parsed.hostname)
+        and not any(c.isspace() for c in value)
+    )
+
+
+def mint_proxy_upload(
+    session: Session,
+    *,
+    receipt: UploadReceipt,
+    box_id: str,
+    workspace_id: str,
+    session_id: str,
+    principal_id: str,
+    proxy_origin: str,
+) -> UploadReceipt:
+    """Replace Core's blob upload_url with a CosmaBot API proxy URL."""
+    if not _exact_https_origin(proxy_origin):
+        raise ws.WorkspaceError("capture_connection_required", 503)
+    target = receipt.upload_url
+    parsed = urlparse(target)
+    if parsed.scheme != "https" or parsed.username or parsed.password:
+        raise ws.WorkspaceError("capture_request_unconfirmed", 503)
+    host = (parsed.hostname or "").lower()
+    # Never proxy back into AssemblyAI/Recall; Core must have issued blob/HTTPS.
+    if host == "assemblyai.com" or host.endswith(".assemblyai.com") or host == "recall.ai" or host.endswith(".recall.ai"):
+        raise ws.WorkspaceError("capture_request_unconfirmed", 503)
+    proxy_id = str(uuid4())
+    row = CaptureUploadProxy(
+        id=proxy_id,
+        box_id=box_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        object_id=str(receipt.object_id),
+        principal_id=principal_id,
+        authorization_receipt_id=str(receipt.authorization_receipt_id),
+        target_upload_url=target,
+        expires_at=receipt.expires_at,
+    )
+    session.add(row)
+    session.commit()
+    origin = proxy_origin.rstrip("/")
+    return receipt.model_copy(
+        update={
+            "upload_url": f"{origin}/workspaces/{workspace_id}/capture/ciphertexts/{proxy_id}",
+        }
+    )
+
+
+def _refuse_real_patient(session: Session, *, box_id: str, workspace_id: str, runtime) -> None:
+    workspace = session.get(EncounterWorkspace, workspace_id)
+    if workspace is None or str(workspace.box_id) != box_id or not workspace.appointment_id:
+        raise ws.WorkspaceError("capture_access_unavailable", 403)
+    appointment = session.get(AppointmentObservation, workspace.appointment_id)
+    if appointment is None:
+        raise ws.WorkspaceError(rpr.REFUSED, 403)
+    rpr.require_recording_start_allowed(
+        session, box_id=box_id, appointment=appointment, runtime=runtime
+    )
+
+
+def stream_ciphertext_to_core(
+    session: Session,
+    *,
+    box_id: str,
+    workspace_id: str,
+    principal_id: str,
+    proxy_id: str,
+    body: bytes,
+    runtime,
+    transport=None,
+) -> None:
+    """Authz + size + real-patient gate, then S2S PUT to the stored Core URL."""
+    if len(body) == 0 or len(body) > MAX_CIPHERTEXT_BYTES:
+        raise ws.WorkspaceError("invalid_capture_request", 422)
+    try:
+        UUID(proxy_id)
+    except ValueError as exc:
+        raise ws.WorkspaceError("capture_access_unavailable", 403) from exc
+    row = session.get(CaptureUploadProxy, proxy_id)
+    if (
+        row is None
+        or str(row.box_id) != box_id
+        or str(row.workspace_id) != workspace_id
+        or str(row.principal_id) != principal_id
+    ):
+        raise ws.WorkspaceError("capture_access_unavailable", 403)
+    now = datetime.now(UTC)
+    expires = row.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    if expires <= now:
+        raise ws.WorkspaceError("upload_authorization_expired", 409)
+    if row.consumed_at is not None:
+        raise ws.WorkspaceError("invalid_capture_request", 409)
+    _refuse_real_patient(session, box_id=box_id, workspace_id=workspace_id, runtime=runtime)
+
+    target = row.target_upload_url
+    headers = {"Content-Type": "application/octet-stream"}
+    host = (urlparse(target).hostname or "").lower()
+    if host.endswith(".blob.core.windows.net"):
+        headers["x-ms-blob-type"] = "BlockBlob"
+    try:
+        with httpx.Client(
+            transport=transport,
+            trust_env=False,
+            follow_redirects=False,
+            timeout=httpx.Timeout(30.0, connect=5.0),
+        ) as client:
+            response = client.put(target, content=body, headers=headers)
+    except httpx.HTTPError as exc:
+        raise ws.WorkspaceError("capture_request_unconfirmed", 503) from exc
+    if response.status_code != 201:
+        raise ws.WorkspaceError("capture_request_unconfirmed", 503)
+    row.consumed_at = now
+    session.commit()

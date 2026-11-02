@@ -67,7 +67,7 @@ class IndependentDesktopProfile(unittest.TestCase):
                "VITE_WORKSPACE_DATA_MODE": "synthetic", "VITE_WORKSPACE_HOSTED_API_ORIGIN": self.identity["apiOrigin"],
                "VITE_API_BASE": "app://cosmas/api", "VITE_WORKSPACE_WEB_ORIGIN": "",
                "VITE_COSMANEURA_WEB_ORIGIN": "https://staging-app.cosmaneura.com" if independent else "",
-               "VITE_CAPTURE_UPLOAD_ORIGINS": "https://uploads.example.invalid" if independent else "",
+               "VITE_CAPTURE_UPLOAD_ORIGINS": self.identity["apiOrigin"] if independent else "",
                "VITE_WORKSPACE_CAPTURE_MODE": "browser_microphone" if independent else "disabled",
                "VITE_CLERK_PUBLISHABLE_KEY": self.identity["publishableKey"]}
         output = subprocess.check_output(["node", "--input-type=module", "-e",
@@ -83,7 +83,7 @@ class IndependentDesktopProfile(unittest.TestCase):
     def arguments(self, output, extra=(), profile="independent-beta-v1"):
         capture = () if profile != "independent-beta-v1" else (
             "--cosmaneura-web-origin", "https://staging-app.cosmaneura.com",
-            "--capture-upload-origin", "https://uploads.example.invalid", "--microphone-capture")
+            "--capture-upload-origin", self.identity["apiOrigin"], "--microphone-capture")
         return ["prepare-desktop-synthetic.py", "--scribe-source", str(self.root / "unread-template-source"),
                 "--web-dist", str(self.web), "--output", str(output), "--native-auth-helper", str(self.helper),
                 "--installation-profile", "beta", "--hosted-api-origin", self.identity["apiOrigin"],
@@ -119,7 +119,7 @@ class IndependentDesktopProfile(unittest.TestCase):
         self.assertEqual(configuration["nativeIdentity"], self.identity)
         self.assertTrue(configuration["nativeCaptureEnabled"])
         self.assertEqual(configuration["cosmaneuraWebOrigin"], "https://staging-app.cosmaneura.com")
-        self.assertEqual(configuration["captureUploadOrigins"], ["https://uploads.example.invalid"])
+        self.assertEqual(configuration["captureUploadOrigins"], [self.identity["apiOrigin"]])
         package = self.root / "independent.app"
         with patch.object(sys, "argv", ["package-desktop-synthetic.py", "--electron-app", str(self.runtime),
                                         "--composed-app", str(app), "--output", str(package)]):

@@ -65,10 +65,11 @@ function betaFeatures(value){
     if(typeof capture.managed_identity_client_id!=='string'||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(capture.managed_identity_client_id))
       refuse('exact_core_capture_managed_identity_required');
-    if(!Array.isArray(capture.upload_origins)||!capture.upload_origins.length||capture.upload_origins.length>4||
-      new Set(capture.upload_origins).size!==capture.upload_origins.length||
-      !capture.upload_origins.every(exactHttpsOrigin))
-      refuse('exact_capture_upload_origins_required');
+    // Independent-beta staging: browser uploads only to CosmaBot API (S2S proxy).
+    // Never Scribe/Core blob — that would need Cosmas CORS/allowlist changes.
+    if(!Array.isArray(capture.upload_origins)||capture.upload_origins.length!==1||
+      capture.upload_origins[0]!==value.api_origin||!exactHttpsOrigin(capture.upload_origins[0]))
+      refuse('cosmabot_api_capture_upload_origin_required');
   }
   return {...features,profile:features.google?'independent-beta-v1':'standalone-practice-v1'};
 }
@@ -178,6 +179,7 @@ export function render(input){
     CORE_CAPTURE_ORIGIN:features.capture.origin,CORE_WEB_ORIGIN:features.capture.web_origin,
     CORE_CAPTURE_SCOPE:features.capture.scope,
     CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID:features.capture.managed_identity_client_id,
+    WORKSPACE_CAPTURE_PROXY_ORIGIN:value.api_origin,
   });
   const contract={schema:'cosmabot-standalone-host-preparation/v1',state:'PREPARATION_ONLY_STARTUP_HELD',
     instance_id:id,box_id:value.box_id,source_commit:value.source_commit,resource_scope:value.resource_scope,

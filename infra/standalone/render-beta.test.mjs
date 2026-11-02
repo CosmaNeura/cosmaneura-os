@@ -5,9 +5,12 @@ import {render} from './render.mjs';
 import {REVIEWED_CORE_CAPTURE_ORIGIN} from '../../clients/shared/beta-feature-profile.mjs';
 
 const sample=JSON.parse(await readFile(new URL('./invented-host-input.json',import.meta.url),'utf8'));
-const captureFixture={origin:REVIEWED_CORE_CAPTURE_ORIGIN,web_origin:REVIEWED_CORE_CAPTURE_ORIGIN,
-  scope:'api://invented-core-audience/.default',managed_identity_client_id:'00000000-0000-4000-8000-0000000000aa',
-  upload_origins:['https://uploads.example.invalid']};
+function captureFixtureFor(apiOrigin){
+  return {origin:REVIEWED_CORE_CAPTURE_ORIGIN,web_origin:REVIEWED_CORE_CAPTURE_ORIGIN,
+    scope:'api://invented-core-audience/.default',managed_identity_client_id:'00000000-0000-4000-8000-0000000000aa',
+    // Independent-beta: CosmaBot API origin only (S2S proxy). Never Scribe blob.
+    upload_origins:[apiOrigin]};
+}
 function candidate({model=true,google=true,owned=false,host='staging.cosmas.ai'}={}){
   const value=structuredClone(sample);
   if(owned){value.resource_scope='owned-cosmabot-vm-instance';value.web_origin=`https://${host}`;
@@ -17,7 +20,7 @@ function candidate({model=true,google=true,owned=false,host='staging.cosmas.ai'}
     endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'}:null,
     google:google?{client_id:'invented-client.apps.googleusercontent.com',
       callback_uri:value.api_origin+'/connections/google/callback',return_origin:value.web_origin}:null,
-    capture:google?structuredClone(captureFixture):null};
+    capture:google?captureFixtureFor(value.api_origin):null};
   return value;
 }
 
@@ -33,9 +36,11 @@ test('optional public features bind server, clients, private field names and exp
     if(google){
       assert.equal(env.CORE_CAPTURE_ORIGIN,REVIEWED_CORE_CAPTURE_ORIGIN);
       assert.equal(env.CORE_WEB_ORIGIN,REVIEWED_CORE_CAPTURE_ORIGIN);
-      assert.equal(env.CORE_CAPTURE_SCOPE,captureFixture.scope);
-      assert.equal(env.CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID,captureFixture.managed_identity_client_id);
+      assert.equal(env.CORE_CAPTURE_SCOPE,'api://invented-core-audience/.default');
+      assert.equal(env.CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID,'00000000-0000-4000-8000-0000000000aa');
+      assert.equal(env.WORKSPACE_CAPTURE_PROXY_ORIGIN,value.api_origin);
       assert.equal(contract.core_capture_permission.app_role,'AgentApi.Access');
+      assert.equal(files['clients/web-build-env.json'].VITE_CAPTURE_UPLOAD_ORIGINS,value.api_origin);
     }else{
       assert.equal(env.CORE_CAPTURE_ORIGIN,'');
       assert.equal(contract.core_capture_permission,undefined);
@@ -67,6 +72,8 @@ test('independent Core capture refuses wrong origin, scope, MI, uploads and non-
     v=>{v.beta_features.capture.upload_origins=[];},
     v=>{v.beta_features.capture.upload_origins=['https://uploads.example.invalid/path'];},
     v=>{v.beta_features.capture.upload_origins=['https://api.assemblyai.com'];},
+    v=>{v.beta_features.capture.upload_origins=['https://cosmaneurastaginguploads.blob.core.windows.net'];},
+    v=>{v.beta_features.capture.upload_origins=['https://staging-app.cosmaneura.com'];},
     v=>{v.beta_features.google=null;},
     v=>{v.beta_features.capture=null;},
     v=>{delete v.beta_features.capture;},
@@ -74,7 +81,7 @@ test('independent Core capture refuses wrong origin, scope, MI, uploads and non-
   for(const change of changes){const value=candidate({owned:true});change(value);assert.throws(()=>render(value));}
   // Capture without Google is refused even when capture payload looks valid.
   const standalone=candidate({google:false,owned:false});
-  standalone.beta_features.capture=structuredClone(captureFixture);
+  standalone.beta_features.capture=captureFixtureFor(standalone.api_origin);
   assert.throws(()=>render(standalone));
 });
 

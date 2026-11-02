@@ -44,7 +44,9 @@ def core_capture_values():
             "core_capture_origin": "https://staging-app.cosmaneura.com",
             "core_web_origin": "https://staging-app.cosmaneura.com",
             "core_capture_scope": "api://invented-core-audience/.default",
-            "core_capture_managed_identity_client_id": "00000000-0000-4000-8000-0000000000aa"}
+            "core_capture_managed_identity_client_id": "00000000-0000-4000-8000-0000000000aa",
+            # CosmaBot API origin only — never Scribe/Core blob (no Cosmas CORS).
+            "workspace_capture_proxy_origin": "https://api.invented-cosmabot.test"}
 
 
 @pytest.mark.parametrize("features", [model_values(), google_values(), model_values() | google_values(),
@@ -93,6 +95,9 @@ def test_model_incomplete_or_broadened_configuration_fails(clerk_standalone, cha
     {"core_connection_tenant_ref": "authority_tenant_01arz3ndektsv4rrffq69g5fav"},
     {"workspace_capture_corrections_enabled": True},
     {"workspace_session_prep_enabled": True},
+    {"workspace_capture_proxy_origin": "https://cosmaneurastaginguploads.blob.core.windows.net"},
+    {"workspace_capture_proxy_origin": "https://staging-app.cosmaneura.com"},
+    {"workspace_capture_proxy_origin": ""},
 ])
 def test_core_capture_incomplete_or_broadened_configuration_fails(clerk_standalone, change):
     runtime = clerk_standalone.runtime.model_copy(update=model_values() | google_values() | core_capture_values() | change)

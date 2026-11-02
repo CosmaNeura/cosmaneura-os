@@ -14,7 +14,9 @@ from sqlalchemy.engine import make_url
 
 ROOT = Path(__file__).resolve().parents[2]
 PREVIOUS = "z35e1b98a742"
-HEAD = "aa46f2c09b853"
+# Head includes real-patient gate (aa46) then capture upload proxy (bb57).
+HEAD = "bb57e3d10c964"
+REAL_PATIENT = "aa46f2c09b853"
 
 
 @pytest.fixture
@@ -62,7 +64,7 @@ def test_real_patient_recording_migration_up_and_down(migration_engine):
             )
         }
 
-    _migrate(migration_engine, HEAD)
+    _migrate(migration_engine, REAL_PATIENT)
     with migration_engine.begin() as connection:
         box_id = str(uuid4())
         connection.execute(
@@ -95,7 +97,14 @@ def test_real_patient_recording_migration_up_and_down(migration_engine):
         assert "synthetic" in patient_default
         assert "synthetic" in appointment_default
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert revision == HEAD
+        assert revision == REAL_PATIENT
+
+    _migrate(migration_engine, HEAD)
+    with migration_engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT to_regclass('public.capture_upload_proxies')"
+        )).scalar_one() == "capture_upload_proxies"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == HEAD
 
     _migrate(migration_engine, PREVIOUS, downgrade=True)
     with migration_engine.connect() as connection:
@@ -112,6 +121,9 @@ def test_real_patient_recording_migration_up_and_down(migration_engine):
         assert "real_patient_recording_enabled" not in columns
         assert "real_patient_recording_kill_engaged" not in columns
         assert "recording_class" not in columns
+        assert connection.execute(text(
+            "SELECT to_regclass('public.capture_upload_proxies')"
+        )).scalar_one() is None
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         assert revision == PREVIOUS
 

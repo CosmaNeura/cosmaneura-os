@@ -125,6 +125,27 @@ class CoreCaptureAccount(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class CaptureUploadProxy(Base):
+    """Server-side Core/Scribe upload URL; browser PUTs only to CosmaBot API."""
+
+    __tablename__ = "capture_upload_proxies"
+    __table_args__ = (
+        Index("ix_capture_upload_proxies_workspace_expires", "workspace_id", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("box_contexts.id"), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    session_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    object_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    principal_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    authorization_receipt_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    target_upload_url: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class SchedulingAccount(Base):
     """Reviewed private staff/practice correspondence; contains no credential."""
 

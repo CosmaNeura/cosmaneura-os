@@ -16,12 +16,12 @@ class IndependentAppleProfile(fixtures.StandaloneNativeProfile):
     def apple_options(self):
         return {**super().apple_options(),
                 "cosmaneura_web_origin": "https://staging-app.cosmaneura.com",
-                "capture_upload_origins": ("https://uploads.example.invalid",)}
+                "capture_upload_origins": (self.identity["apiOrigin"],)}
 
     def desktop_args(self, output, extra=()):
         return super().desktop_args(output, [
             "--cosmaneura-web-origin", "https://staging-app.cosmaneura.com",
-            "--capture-upload-origin", "https://uploads.example.invalid", "--microphone-capture", *extra])
+            "--capture-upload-origin", self.identity["apiOrigin"], "--microphone-capture", *extra])
 
     def test_helper_metadata_keeps_auth_and_disables_capture_and_composer_checks_it(self):
         # Independent-beta enables Core capture on the helper; plain standalone covers the disabled case.
@@ -61,7 +61,7 @@ class IndependentAppleProfile(fixtures.StandaloneNativeProfile):
         self.assertEqual(manifest["profile"], self.feature_profile)
         self.assertEqual(manifest["captureMode"], "ios_native")
         self.assertEqual(manifest["coreWebOrigin"], "https://staging-app.cosmaneura.com")
-        self.assertEqual(manifest["captureUploadOrigins"], ["https://uploads.example.invalid"])
+        self.assertEqual(manifest["captureUploadOrigins"], [self.identity["apiOrigin"]])
         self.assertEqual(fixtures.apple.source_access_group(identity["bundle"], None), "$(AppIdentifierPrefix)com.cosmasos.beta.ios")
         for google in ({}, {"google_connection_client_id": "invented.apps.googleusercontent.com",
                             "google_connection_callback_uri": self.identity["apiOrigin"] + "/connections/google/callback"}):
