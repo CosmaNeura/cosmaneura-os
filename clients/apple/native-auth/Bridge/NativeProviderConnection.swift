@@ -183,6 +183,8 @@ protocol ProviderNativeWire: Sendable {
         earlyCancellations.insert(id)
     }
 
+    var hasUnsettledOperations: Bool { !pending.isEmpty }
+
     func close() {
         closed = true
         for (_, operation) in pending { operation.task.cancel() }

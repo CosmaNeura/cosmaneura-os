@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type WorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
@@ -24,7 +25,7 @@ async function exchange<T>(identity:WorkspaceIdentity,seconds:number,maximum:num
   const cancel=()=>stop(reader);controller.signal.addEventListener('abort',cancel,{once:true});
   try{
     check();const prepared=await wait(prepare());check();
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    const base=workspaceApiBase(identity);
     if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
     let headers:Headers;if('mode'in identity)headers=await wait(workspaceAuthHeaders(identity,base).catch(()=>{throw new WorkspaceApiError(401);}));
     else headers=new Headers({'X-Box-Id':identity.boxId,'X-Actor-Principal-Id':identity.actorId});

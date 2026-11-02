@@ -1,7 +1,8 @@
 import {resolveHostedWorkspace} from "../../clients/shared/hosted-workspace-config.mjs";
+import {registeredNativeWorkspaceConfiguration} from './workspace-base';
 
 export function hostedWorkspaceConfiguration() {
-  return resolveHostedWorkspace(import.meta.env);
+  return registeredNativeWorkspaceConfiguration() ?? resolveHostedWorkspace(import.meta.env);
 }
 
 export function hostedWorkspaceRequested() {

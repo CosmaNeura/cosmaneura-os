@@ -266,7 +266,13 @@ def _request_clerk_verifier(origins: list[str]) -> ClerkTokenVerifier:
     return _clerk_verifier(native_origin) if native_origin else _clerk_verifier()
 
 
-def _runtime_admission_adapter() -> EnrollmentAdmissionAdapter:
+def _runtime_admission_adapter(origins: list[str] | None = None) -> EnrollmentAdmissionAdapter:
+    # This is the same configured transport selection used by the JWT verifier.
+    # An Origin header is not identity and never supplies an arbitrary party to
+    # enrollment. Default/browser requests retain their original admission wire.
+    origin = native_clerk_origin(settings, origins or [])
+    if origin == "capacitor://localhost" or origin == "app://cosmas":
+        return EnrollmentAdmissionAdapter(settings, native_origin=origin)
     return EnrollmentAdmissionAdapter(settings)
 
 
@@ -290,7 +296,7 @@ def _install_enrollment_commit_fence(request, session, authorization, box_header
             # authenticate_request bypasses the enrollment service for them.
             authenticate_request(current, selected, authorization=authorization, box_header=box_header,
                 actor_header=actor_header, verifier=_request_clerk_verifier(request.headers.getlist("origin")),
-                admission_adapter=_runtime_admission_adapter())
+                admission_adapter=_runtime_admission_adapter(request.headers.getlist("origin")))
         except AuthenticationFailed as exc:
             raise HTTPException(401, str(exc), headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"}) from exc
         except AccessDenied as exc:
@@ -319,7 +325,7 @@ def _identity(
             box_header=x_box_id,
             actor_header=x_actor_principal_id,
             verifier=verifier,
-            admission_adapter=_runtime_admission_adapter() if getattr(settings, "workspace_enrollment_managed", False) else None,
+            admission_adapter=_runtime_admission_adapter(request.headers.getlist("origin")) if getattr(settings, "workspace_enrollment_managed", False) else None,
         )
         request.state.enrollment_existing_user = bool(
             getattr(settings, "workspace_enrollment_managed", False)
@@ -2205,7 +2211,8 @@ from cosmas_os.api.practice_access_routes import register as register_practice_a
 
 register_practice_access(app, runtime=lambda: settings, verifier=_request_clerk_verifier,
                         session_factory=lambda: new_capture_session(SessionLocal),
-                        admission_adapter=lambda: _runtime_admission_adapter())
+                        admission_adapter=lambda: _runtime_admission_adapter(),
+                        native_admission_adapter=_runtime_admission_adapter)
 
 allowed_headers = ["X-Cosmas-Handoff-Review", "X-Cosmas-Practice-Access-Contract", "Authorization", "Content-Type", "X-Cosmas-Draft-Recovery", "X-Cosmas-Team-Contract", "X-Cosmas-Model-Contract", "X-Cosmas-Vendor-Contract", "X-Cosmas-Vendor-Setup-Contract", "X-Cosmas-Artifact-Write-Key", "X-Cosmas-Portal-Contract", "X-Cosmas-Portal-Work-Contract", "X-Cosmas-Finance-Contract", "X-Cosmas-Finance-Setup-Contract", "X-Cosmas-Membership-Contract", "X-Cosmas-Inbox-Contract", "X-Cosmas-Inbox-Handoff-Contract", "X-Cosmas-Routine-Contract"]
 allowed_headers.extend(["X-Cosmas-Research-Contract", "X-Cosmas-Scheduling-Login", "X-Cosmas-Microsoft-Connection", "X-Cosmas-Google-Connection", "X-Cosmas-Google-Messages", "X-Cosmas-Google-Calendar"])

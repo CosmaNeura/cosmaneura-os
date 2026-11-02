@@ -30,26 +30,25 @@ public enum NativeWorkspaceOrigin: String, Sendable {
     }
 }
 
-public struct NativeClerkConfiguration: Sendable, Equatable {
-    public static let nativeOrigin = "capacitor://localhost"
+public struct NativeClerkAccountConfiguration: Sendable, Equatable {
     public let publishableKey: String
     public let frontendOrigin: String
-    public let organizationID: String
     public let bundleIdentifier: String
     public let workspaceOrigin: NativeWorkspaceOrigin
     public let profile: NativeIdentityProfile
+    public let storageNamespace: String?
 
     public var callbackURL: String { bundleIdentifier + "://callback" }
-    // Preserve the previous instance's credentials without presenting them to
-    // the shared staging frontend during an explicit account transition.
+    // Exact legacy service names remain unchanged. Additional practice slots
+    // are isolated; public SDK reconfiguration still requires fresh sign-in.
     public var keychainService: String {
         let base = bundleIdentifier + ".clerk"
-        return profile == .operationalStaging ? base + "." + String(frontendOrigin.dropFirst(8)) : base
+        let realm = profile == .operationalStaging ? base + "." + String(frontendOrigin.dropFirst(8)) : base
+        return storageNamespace.map { realm + "." + $0 } ?? realm
     }
 
-    public init(publishableKey: String, frontendOrigin: String, organizationID: String,
-                bundleIdentifier: String, workspaceOrigin: NativeWorkspaceOrigin = .appleWebView,
-                profile: NativeIdentityProfile = .synthetic) throws {
+    public init(publishableKey: String, frontendOrigin: String, bundleIdentifier: String, workspaceOrigin: NativeWorkspaceOrigin = .appleWebView,
+                profile: NativeIdentityProfile = .synthetic, storageNamespace: String? = nil) throws {
         let prefix: String
         if profile == .simulatorStaging {
             if publishableKey.hasPrefix("pk_live_") {
@@ -63,7 +62,6 @@ public struct NativeClerkConfiguration: Sendable, Equatable {
             prefix = profile == .operationalBeta ? "pk_live_" : "pk_test_"
         }
         guard publishableKey.hasPrefix(prefix), publishableKey.utf8.count <= 1024,
-              organizationID.range(of: "^org_[A-Za-z0-9_]{1,251}$", options: .regularExpression) != nil,
               workspaceOrigin.accepts(bundleIdentifier: bundleIdentifier, profile: profile),
               let url = URLComponents(string: frontendOrigin), url.scheme == "https",
               let host = url.host, host == host.lowercased(), url.port == nil,
@@ -89,9 +87,12 @@ public struct NativeClerkConfiguration: Sendable, Equatable {
         encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
         guard let data = Data(base64Encoded: encoded),
               String(data: data, encoding: .utf8) == host + "$" else { throw NativeAuthError.unavailable }
+        guard storageNamespace == nil || storageNamespace?.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+            throw NativeAuthError.unavailable
+        }
+        self.storageNamespace = storageNamespace
         self.publishableKey = publishableKey
         self.frontendOrigin = frontendOrigin
-        self.organizationID = organizationID
         self.bundleIdentifier = bundleIdentifier
         self.workspaceOrigin = workspaceOrigin
         self.profile = profile
@@ -109,5 +110,38 @@ public struct NativeClerkConfiguration: Sendable, Equatable {
         // A browser Origin alongside that credential is rejected by the native
         // API (origin_authorization_headers_conflict). Preserve native headers;
         // workspace-origin and JWT checks remain at the OS transport boundary.
+    }
+}
+
+/// Fixed workspace organization plus the same exact native Clerk realm policy.
+/// Account-before-practice authentication uses NativeClerkAccountConfiguration
+/// directly and cannot manufacture a workspace identity with a placeholder Org.
+public struct NativeClerkConfiguration: Sendable, Equatable {
+    public static let nativeOrigin = "capacitor://localhost"
+    public let account: NativeClerkAccountConfiguration
+    public let organizationID: String
+    public var publishableKey: String { account.publishableKey }
+    public var frontendOrigin: String { account.frontendOrigin }
+    public var bundleIdentifier: String { account.bundleIdentifier }
+    public var workspaceOrigin: NativeWorkspaceOrigin { account.workspaceOrigin }
+    public var profile: NativeIdentityProfile { account.profile }
+    public var callbackURL: String { account.callbackURL }
+    public var keychainService: String { account.keychainService }
+    public var storageNamespace: String? { account.storageNamespace }
+
+    public init(publishableKey: String, frontendOrigin: String, organizationID: String,
+                bundleIdentifier: String, workspaceOrigin: NativeWorkspaceOrigin = .appleWebView,
+                profile: NativeIdentityProfile = .synthetic, storageNamespace: String? = nil) throws {
+        guard organizationID.range(of: "^org_[A-Za-z0-9_]{1,251}$", options: .regularExpression) != nil else {
+            throw NativeAuthError.unavailable
+        }
+        account = try NativeClerkAccountConfiguration(publishableKey: publishableKey,
+            frontendOrigin: frontendOrigin, bundleIdentifier: bundleIdentifier,
+            workspaceOrigin: workspaceOrigin, profile: profile, storageNamespace: storageNamespace)
+        self.organizationID = organizationID
+    }
+
+    public func prepareFrontendRequest(_ request: inout URLRequest) throws {
+        try account.prepareFrontendRequest(&request)
     }
 }

@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {parseIncomingBrief,type IncomingBriefSection} from './routine-inbox-contract';
 import { WORKSPACE_BUILD, WORKSPACE_AUTHENTICATED_BUILD, WorkspaceApiError, type AuthenticatedWorkspaceIdentity } from "./workspace-api";
@@ -123,7 +124,7 @@ export function parseWorkBrief(raw:unknown,id:string):WorkBrief {
 
 async function request(identity: AuthenticatedWorkspaceIdentity, bot: string, suffix: string, body?: RoutineSave, signal?: AbortSignal): Promise<unknown> {
   if (!ROUTINES_BUILD || !botId(bot)) invalid();
-  const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8000";
+  const base = workspaceApiBase(identity);
   const controller = new AbortController(), abort = () => controller.abort();
   const timer = setTimeout(abort,30000);
   signal?.addEventListener("abort",abort,{once:true}); if (signal?.aborted) abort();

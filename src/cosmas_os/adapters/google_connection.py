@@ -39,6 +39,13 @@ from cosmas_os.ports.google_calendar import (
     GoogleCalendarRead,
     GoogleCalendarWindow,
 )
+from cosmas_os.ports.google_callback_broker import (
+    GoogleRegistrationPort,
+    Receipt,
+    Registration,
+    Relay,
+    Scope,
+)
 from cosmas_os.ports.google_message import (
     GoogleMessageBinding,
     GoogleMessageRead,
@@ -55,6 +62,7 @@ MESSAGES_PATH = "/gmail/v1/users/me/messages"
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 MESSAGE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _EXPECTED_GOOGLE_GRANT: ContextVar[set[str] | None] = ContextVar("expected_google_grant", default=None)
+_GOOGLE_BROKER_RECEIPT: ContextVar[Receipt | None] = ContextVar("google_broker_receipt",default=None)
 
 
 class GooglePersonalConnection(MicrosoftPersonalConnection):
@@ -62,7 +70,7 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
     Credential = GoogleConnectionCredential
     provider = "google"
 
-    def __init__(self, settings, sessions, *, transport=None, now=lambda: datetime.now(UTC)):
+    def __init__(self, settings, sessions, *, transport=None, now=lambda: datetime.now(UTC), broker: GoogleRegistrationPort | None = None):
         self.settings, self.sessions, self.now = settings, sessions, now
         if (
             not settings.workspace_available
@@ -102,10 +110,19 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
         self.token_url = "https://oauth2.googleapis.com/token"
         self.config_digest = digest(canonical(self._configuration()))
         self._transport, self._closed = transport, False
+        self.broker_enabled = getattr(settings, "google_connection_broker_enabled", False)
+        self._broker: GoogleRegistrationPort | None = None
+        if self.broker_enabled:
+            from .google_callback_broker import HttpGoogleRegistrationPort
+            if (self.callback_uri != settings.google_connection_broker_origin + CALLBACK_PATH
+                    or settings.workspace_enrollment_api_origin != settings.google_connection_broker_origin
+                    or not settings.workspace_google_message_enabled or not settings.workspace_google_calendar_enabled):
+                raise ValueError("Explicit registered Google callback and read capabilities required")
+            self._broker = broker or HttpGoogleRegistrationPort(settings)
 
     def _configuration(self):
         s = self.settings
-        return [
+        value = [
             s.google_connection_client_id,
             s.google_connection_callback_uri,
             s.google_connection_return_origin,
@@ -116,6 +133,9 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             if s.google_connection_encryption_key
             else "",
         ]
+        if getattr(s, "google_connection_broker_enabled", False):
+            value.extend(["registered-google.v1", s.google_connection_broker_origin])
+        return value
 
     def status(self, identity, *, include_capabilities=False):
         return self._read_status(
@@ -166,18 +186,174 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
     def start_full_mail(self, identity):
         """A separate human action; never upgrades a pending metadata attempt."""
         self._full_mail_enabled()
+        if self.broker_enabled:
+            raise ws.WorkspaceError("google_registered_session_required", 403)
         return self._start(identity, full_mail=True)
 
     def start(self, identity):
+        if self.broker_enabled:
+            raise ws.WorkspaceError("google_registered_session_required", 403)
         return self._start(identity, full_mail=False)
 
-    def _start(self, identity, *, full_mail):
+    def start_registered(self, identity, authorization: str, native_origin: str | None, *, full_mail: bool):
+        from typing import Literal, cast
+
+        if not self.broker_enabled or self._broker is None or not authorization.startswith("Bearer "):
+            raise ws.WorkspaceError("google_registered_session_required", 403)
+        token = authorization[7:]
+        if not token or len(token) > 8192:
+            raise ws.WorkspaceError("google_registered_session_required", 403)
+        if native_origin not in {None, "capacitor://localhost", "app://cosmas"}:
+            raise ws.WorkspaceError("google_registered_session_required", 403)
+        session_id = identity.clerk_session_id
+        if not isinstance(session_id, str) or re.fullmatch(r"sess_[A-Za-z0-9_]{1,250}", session_id) is None:
+            raise ws.WorkspaceError("google_registered_session_required", 403)
+        if full_mail:
+            self._full_mail_enabled()
+        canceled_receipts: list[Receipt] = []
+        try:
+            result = self._start(identity, full_mail=full_mail, broker_session_id=session_id,
+                                 canceled_receipts=canceled_receipts)
+        finally:
+            self._cancel_registered(canceled_receipts)
+        with self._session() as session:
+            account, _, binding = self._account(session, identity=identity)
+            attempt = session.scalar(select(self.Attempt).where(self.Attempt.account_id == account.id,
+                self.Attempt.status == "pending").with_for_update())
+            if attempt is None:
+                raise ws.WorkspaceError("google_connection_changed", 409)
+            private = self._open(attempt.sealed, "attempt", account.id, binding, attempt.id)
+            request = Registration(practice_id=self.settings.workspace_enrollment_practice_id,
+                box_id=account.box_id, organization_id=account.organization_id, issuer=account.issuer, subject=account.subject,
+                attempt_id=attempt.id, state_sha256=attempt.state_digest, binding_sha256=binding,
+                config_sha256=self.config_digest, pkce_sha256=digest(private["verifier"]),
+                source_commit=self.settings.workspace_release_source_commit, image_sha256=self.settings.workspace_release_image_sha256,
+                client_id=self.client_id, callback_uri=self.callback_uri, grant="full-mail-read" if full_mail else "metadata-calendar",
+                native_origin=cast(Literal["capacitor://localhost", "app://cosmas"] | None, native_origin),
+                expires_at=int(attempt.expires_at.timestamp()), issued_at=int(self.now().timestamp()),
+                nonce=str(uuid4()), token_sha256=digest(token))
+            account_id = account.id
+        receipt = self._broker.register(request, token)
+        if (receipt.session_id != session_id
+                or any(getattr(receipt, name) != getattr(request, name) for name in Scope.model_fields)):
+            raise ws.WorkspaceError("google_connection_changed", 409)
+        with self._session() as session:
+            account, _, current = self._account(session, identity=identity)
+            attempt = session.get(self.Attempt, request.attempt_id)
+            if (account.id != account_id or current != binding or attempt is None or attempt.status != "pending"
+                    or attempt.expires_at <= self.now() or attempt.state_digest != request.state_sha256):
+                raise ws.WorkspaceError("google_connection_changed", 409)
+            private = self._open(attempt.sealed, "attempt", account.id, binding, attempt.id)
+            if (private.get("broker_session_id") != session_id or digest(private["verifier"]) != request.pkce_sha256
+                    or (private.get("full_mail") is True) != full_mail):
+                raise ws.WorkspaceError("google_connection_changed", 409)
+            private["broker"] = receipt.model_dump()
+            attempt.sealed = self._seal(private, "attempt", account.id, binding, attempt.id)
+            session.commit()
+        return result
+
+    def disconnect_registered(self, identity):
+        receipts = []
+        with self._session() as session:
+            account, _, binding = self._account(session, identity=identity)
+            for attempt in session.scalars(select(self.Attempt).where(self.Attempt.account_id == account.id,
+                    self.Attempt.status.in_(["pending", "exchanging"]))):
+                private = self._open(attempt.sealed, "attempt", account.id, binding, attempt.id)
+                if private.get("broker"):
+                    receipts.append(Receipt.model_validate(private["broker"]))
+        result = super().disconnect(identity)
+        # Local cancellation is authoritative even if the broker reply is lost.
+        self._cancel_registered(receipts)
+        return result
+
+    def _cancel_registered(self, receipts: list[Receipt]):
+        for receipt in receipts:
+            try:
+                if self._broker:
+                    self._broker.cancel(receipt)
+            except Exception:
+                pass
+
+    def complete_registered(self, relay: Relay):
+        from cosmas_os.ports.google_callback_broker import Outcome, callback_digest
+
+        if not self.broker_enabled or self._broker is None:
+            raise ws.WorkspaceError("google_connection_unavailable", 404)
+        state = relay.state.get_secret_value()
+        code = relay.code.get_secret_value() if relay.code else None
+        receipt = Receipt.model_validate({name: getattr(relay, name) for name in Receipt.model_fields
+            if name != "contract_version"})
+        if (receipt.client_id != self.client_id or receipt.callback_uri != self.callback_uri
+                or receipt.config_sha256 != self.config_digest or receipt.expires_at <= int(self.now().timestamp())
+                or receipt.practice_id != self.settings.workspace_enrollment_practice_id
+                or receipt.source_commit != self.settings.workspace_release_source_commit
+                or receipt.image_sha256 != self.settings.workspace_release_image_sha256):
+            raise ws.WorkspaceError("google_connection_changed", 409)
+        with self._session() as session:
+            attempt = session.get(self.Attempt, relay.attempt_id)
+            if attempt is None or attempt.state_digest != digest(state) or attempt.state_digest != relay.state_sha256:
+                raise ws.WorkspaceError("google_connection_changed", 409)
+            account, _, binding = self._account(session, account_id=attempt.account_id)
+            if (binding != receipt.binding_sha256 or account.box_id != receipt.box_id
+                    or account.organization_id != receipt.organization_id or account.issuer != receipt.issuer
+                    or account.subject != receipt.subject or attempt.expires_at <= self.now()):
+                raise ws.WorkspaceError("google_connection_changed", 409)
+            phase = attempt.status
+            if phase == "pending":
+                private = self._open(attempt.sealed, "attempt", account.id, binding, attempt.id)
+                if (private.get("broker") != receipt.model_dump() or private.get("broker_session_id") != receipt.session_id
+                        or digest(private["verifier"]) != receipt.pkce_sha256):
+                    raise ws.WorkspaceError("google_connection_changed", 409)
+        if phase == "ready":
+            outcome = "complete"
+        elif phase == "exchanging":
+            outcome = "pending"
+        elif phase == "failed":
+            outcome = "declined" if relay.denied else "failed"
+        else:
+            marker = _GOOGLE_BROKER_RECEIPT.set(receipt)
+            try:
+                complete = self.callback(state, code, relay.denied)
+            finally:
+                _GOOGLE_BROKER_RECEIPT.reset(marker)
+            outcome = "complete" if complete else "declined" if relay.denied else "failed"
+            if not complete:
+                with self._session() as session:
+                    current = session.get(self.Attempt, relay.attempt_id)
+                    if current and current.status == "exchanging":
+                        outcome = "pending"
+        return Outcome(broker_id=receipt.broker_id, nonce=relay.nonce,
+            callback_sha256=callback_digest(state, code, relay.denied), outcome=outcome)
+
+    def _claim_current(self, account_id, selected, binding, *, attempt_id=None, refresh_id=None):
+        super()._claim_current(account_id,selected,binding,attempt_id=attempt_id,refresh_id=refresh_id)
+        self._check_registered_receipt()
+
+    def _check_registered_receipt(self):
+        receipt = _GOOGLE_BROKER_RECEIPT.get()
+        if receipt is not None:
+            if not self.broker_enabled or self._broker is None:
+                raise ws.WorkspaceError("google_connection_changed",409)
+            self._broker.check(receipt)
+
+    def _start(self, identity, *, full_mail, broker_session_id: str | None = None,
+               canceled_receipts: list[Receipt] | None = None):
         # Select the pending consent type under the same owner/account lock as creation.
         with self._session() as session:
             account, selected, binding = self._account(session, identity=identity)
             now = self.now()
             attempt = session.scalar(select(self.Attempt).where(self.Attempt.account_id == account.id,
                 self.Attempt.status.in_(["pending", "exchanging"])).with_for_update())
+            if attempt and broker_session_id is not None and attempt.binding_digest == binding:
+                private = self._open(attempt.sealed, "attempt", account.id, binding, attempt.id)
+                if private.get("broker_session_id") != broker_session_id:
+                    if private.get("broker") and canceled_receipts is not None:
+                        canceled_receipts.append(Receipt.model_validate(private["broker"]))
+                    # A new verified SID gets a fresh state/verifier immediately;
+                    # already linked credentials remain under their existing custody.
+                    attempt.status, attempt.sealed = "failed", None
+                    session.flush()
+                    attempt = None
             if attempt and (attempt.expires_at <= now or attempt.binding_digest != binding):
                 attempt.status, attempt.sealed = "failed", None
                 session.flush()
@@ -192,6 +368,8 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
                 attempt = self.Attempt(id=str(uuid4()), account_id=account.id, binding_digest=binding,
                     status="pending", created_at=now, expires_at=now + timedelta(minutes=10))
                 private: dict[str, Any] = {"state": secrets.token_urlsafe(32), "verifier": secrets.token_urlsafe(48)}
+                if broker_session_id is not None:
+                    private["broker_session_id"] = broker_session_id
                 if full_mail:
                     private["full_mail"] = True
                 attempt.state_digest = digest(private["state"])
@@ -481,6 +659,9 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
         email = self._text(me.get("email"), 320)
         if not email or "@" not in email:
             raise ValueError("Google email unavailable")
+        # Recheck the live initiating session/member after provider I/O and before
+        # the existing local current-binding commit fence stores credentials.
+        self._check_registered_receipt()
         return {
             "token": token,
             "refresh": refresh,
@@ -806,3 +987,6 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
 
     def close(self):
         self._closed = True
+        close = getattr(self._broker, "close", None)
+        if close:
+            close()

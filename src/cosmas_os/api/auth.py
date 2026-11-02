@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hmac
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Event, Lock, Thread
 from time import monotonic
 from typing import Any, Protocol
@@ -37,6 +37,9 @@ class RequestIdentity:
     auth_mode: str
     organization_id: str | None = None
     external_identity_id: str | None = None
+    # Private verified session authority for registered OAuth attempts. Existing
+    # identity comparisons and nonbroker operations retain their prior meaning.
+    clerk_session_id: str | None = field(default=None, compare=False, repr=False)
 
 
 class TokenVerifier(Protocol):
@@ -423,4 +426,5 @@ def authenticate_request(
         auth_mode="clerk_jwt",
         organization_id=organization_id,
         external_identity_id=binding.id,
+        clerk_session_id=claims.get("sid") if isinstance(claims.get("sid"), str) else None,
     )

@@ -6,6 +6,8 @@ import { parseNativeAuthState, parseNativeToken, type NativeAuthState } from "./
 import { accessPending } from "./practice-access-test-fixture";
 import {teamFixture} from "./team-setup-test-fixture";
 import { REQUIRED_WORKSPACE_CONTRACTS } from "./workspace-protocol";
+import type {NativePracticeConnectionPlugin} from '../../clients/capture/src/native/practice-connection-plugin';
+import {enrollmentConfig} from './enrollment-test-fixture';
 
 const first: NativeAuthState = { phase: "ready", revision: "00000000-0000-4000-8000-000000000001",
   identity: { userId: "user_first", sessionId: "sess_first", organizationId: "org_test" } };
@@ -35,6 +37,15 @@ function harness(initial = first) {
   return { plugin, set: (state: NativeAuthState) => { current = state; },
     emit: (value: unknown) => { for (const listener of listeners) listener(value); }, listeners };
 }
+function practiceHarness(available:boolean):NativePracticeConnectionPlugin {
+  return {capabilities:vi.fn(async()=>({contract_version:'cosmabot.native-practice-connection.v1',available,enrollment_available:available})),
+    accountStatus:vi.fn(async()=>({phase:'signedOut',revision:signedOut.revision,identity:null})),beginAccountSignIn:vi.fn(async()=>{throw new Error('Not started');}),
+    accountToken:vi.fn(async()=>{throw new Error('Not signed in');}),enrollmentRequest:vi.fn(async({operation})=>{
+      if(operation!=='config')throw new Error('Unexpected enrollment operation');return {status:200,body:enrollmentConfig()};}),
+    openCheckout:vi.fn(async()=>{}),openEnrollmentDestination:vi.fn(async()=>{}),activatePracticeOrganization:vi.fn(async()=>{throw new Error('Not started');}),
+    activateRegisteredPractice:vi.fn(async()=>{throw new Error('Not started');}),returnToBeta:vi.fn(async()=>{}),signOut:vi.fn(async()=>{}),
+    addListener:vi.fn(async()=>({remove:async()=>{}}))};
+}
 
 describe("native workspace session", () => {
   let container: HTMLDivElement;
@@ -60,6 +71,24 @@ describe("native workspace session", () => {
     const button = [...container.querySelectorAll("button")].find(item => item.textContent?.startsWith(label));
     expect(button, label).toBeDefined(); await act(async () => button!.click());
   }
+  it('keeps beta account controls unchanged when a registered practice plugin has no complete host',async()=>{
+    const native=harness(),practice=practiceHarness(false);
+    await act(async()=>root.render(<NativeAuthenticatedWorkspace plugin={native.plugin} available practicePlugin={practice} practiceConnectionAvailable/>));
+    await click('Team settings');expect(container.textContent).toContain('Log out');expect(container.textContent).not.toContain('Connect practice');
+    expect(practice.accountStatus).not.toHaveBeenCalled();expect(practice.enrollmentRequest).not.toHaveBeenCalled();
+    expect(practice.beginAccountSignIn).not.toHaveBeenCalled();expect(native.plugin.signIn).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.every(([url])=>!String(url).includes('/enrollment/'))).toBe(true);
+  });
+  it('opens setup only by explicit intent and cannot revive an old frontend identity after returning without native sign-in',async()=>{
+    const native=harness(),practice=practiceHarness(true),owners:(()=>boolean)[]=[];
+    await act(async()=>root.render(<NativeAuthenticatedWorkspace plugin={native.plugin} available practicePlugin={practice} practiceConnectionAvailable
+      createIdentity={(_state,isCurrent)=>{owners.push(isCurrent);return {mode:'clerk_jwt',getToken:async()=>token};}}/>));
+    const old=owners.at(-1)!;expect(old()).toBe(true);expect(practice.accountStatus).not.toHaveBeenCalled();
+    await click('Team settings');await click('Connect practice');expect(container.textContent).toContain('Connect a practice');
+    expect(old()).toBe(false);expect(practice.beginAccountSignIn).not.toHaveBeenCalled();
+    await click('Return to existing workspace');expect(owners.at(-1)!()).toBe(true);expect(old()).toBe(false);
+    expect(native.plugin.signIn).not.toHaveBeenCalled();expect(native.plugin.signOut).not.toHaveBeenCalled();
+  });
   it("logs out from Settings through the native owner and closes access before remote completion", async () => {
     const native=harness(),finished=deferred<void>();
     native.plugin.signOut.mockImplementationOnce(()=>finished.promise);

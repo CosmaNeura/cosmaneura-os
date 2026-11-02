@@ -12,14 +12,19 @@ import Security
     @TaskLocal private static var interactiveBlock: KeychainAccessBlock?
 
     public init(bundleIdentifier: String, profile: NativeIdentityProfile = .synthetic,
-                allowsAuthenticationUI: Bool = true) throws {
+                allowsAuthenticationUI: Bool = true, profileNamespace: String? = nil) throws {
         guard NativeWorkspaceOrigin.appleWebView.accepts(bundleIdentifier: bundleIdentifier, profile: profile) ||
               NativeWorkspaceOrigin.desktopApp.accepts(bundleIdentifier: bundleIdentifier, profile: profile) else {
             throw NativeAuthError.storageUnavailable
         }
+        guard profileNamespace == nil || profileNamespace?.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
+            throw NativeAuthError.storageUnavailable
+        }
+        // No migration or wildcard read: default users keep their existing fence.
+        let service = bundleIdentifier + ".workspace-auth" + (profileNamespace.map { "." + $0 } ?? "")
         query = [
             kSecClass: kSecClassGenericPassword,
-            kSecAttrService: bundleIdentifier + ".workspace-auth",
+            kSecAttrService: service,
             kSecAttrAccount: "local-access-block-v1",
         ]
         self.allowsAuthenticationUI = allowsAuthenticationUI

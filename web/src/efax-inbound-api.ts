@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {WorkspaceApiError,WORKSPACE_BUILD,WORKSPACE_AUTHENTICATED_BUILD,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
 import {workspaceFetch} from './workspace-protocol';
@@ -105,7 +106,7 @@ async function request(identity:AuthenticatedWorkspaceIdentity,path:string,body:
  const abort=()=>c.abort(),interrupted=new Promise<never>((_,reject)=>c.signal.addEventListener('abort',()=>{stop(reader??response?.body);reject(new WorkspaceApiError(503,'efax_inbound_unconfirmed'));},{once:true}));void interrupted.catch(()=>{});
  const wait=<T,>(p:Promise<T>)=>Promise.race([p,interrupted]);const timer=setTimeout(abort,45000);signal?.addEventListener('abort',abort,{once:true});
  const check=()=>{if(performance.now()>=deadline)c.abort();if(c.signal.aborted)throw new WorkspaceApiError(503,'efax_inbound_unconfirmed');assertCurrentDesktopSession(identity);if(identity.mode==='clerk_jwt'&&identity.nativeSession&&!identity.nativeSession.isCurrent())throw new WorkspaceApiError(401);};
- try{if(signal?.aborted)abort();check();const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';if(base.includes('?')||base.includes('#')||!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
+ try{if(signal?.aborted)abort();check();const base=workspaceApiBase(identity);if(base.includes('?')||base.includes('#')||!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
   const headers=await wait(workspaceAuthHeaders(identity,base));check();headers.set('X-Cosmas-EFax-Inbound','1');headers.set('Accept',binary?'application/pdf':'application/json');if(body!==undefined)headers.set('Content-Type','application/json');
   const url=base+path;response=await wait(workspaceFetch(identity,url,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),signal:c.signal,credentials:'omit',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'}).then(r=>{if(c.signal.aborted){stop(r.body);throw new WorkspaceApiError(503);}return r;}));check();
   if(!response)return bad();

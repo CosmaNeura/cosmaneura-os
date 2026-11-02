@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {workspaceAuthHeaders,assertCurrentDesktopSession} from './workspace-auth-headers';
@@ -23,7 +24,7 @@ async function request<T>(identity:AuthenticatedWorkspaceIdentity,path:string,bo
  const check=()=>{if(performance.now()>=deadline)abort();controller.signal.throwIfAborted();assertCurrentDesktopSession(identity);if(identity.mode==='clerk_jwt'&&identity.nativeSession&&!identity.nativeSession.isCurrent())throw new WorkspaceApiError(401);};
  const timer=setTimeout(abort,RESEARCH_DEADLINE_MS);signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
  try{
-  check();const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+  check();const base=workspaceApiBase(identity);
   if(base.includes('?')||base.includes('#')||!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
   const encoded=body===undefined?undefined:JSON.stringify(body);if(encoded!==undefined&&new TextEncoder().encode(encoded).byteLength>RESEARCH_REQUEST_BYTES)throw new WorkspaceApiError(422);
   const headers=await wait(workspaceAuthHeaders(identity,base).catch(()=>{throw new WorkspaceApiError(401);}));check();headers.set('X-Cosmas-Research-Contract','1');headers.set('Accept','application/json');headers.set('Content-Type','application/json');

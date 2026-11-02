@@ -1,4 +1,5 @@
 import {WorkspaceApiError,type WorkspaceIdentity} from './workspace-api';
+import {assertRegisteredWorkspaceRequest} from './workspace-base';
 import {hostedWorkspaceRequested} from './hosted-workspace';
 import {observeWorkspaceEnrollment,workspaceEnrollmentRevision,workspaceEnrollmentHold} from './workspace-enrollment-state';
 
@@ -74,6 +75,8 @@ async function fetchWorkspace(url:string,init:RequestInit):Promise<Response> {
 
 /** Protocol pauses retain local editing and recording Stop; enrollment holds have a separate scope. */
 export async function workspaceFetch(identity:WorkspaceIdentity|undefined,url:string,init:RequestInit,compatibility=false):Promise<Response> {
+  const nativeCurrent=()=>{if(identity){try{assertRegisteredWorkspaceRequest(identity,url);}catch{throw new WorkspaceApiError(401);}}};
+  nativeCurrent();
   const enrollmentRevision=identity?workspaceEnrollmentRevision(identity):0;
   const enrollment=(response:Response)=>{const denied=observeWorkspaceEnrollment(identity,response);
     if(denied){cancel(response);throw denied;}
@@ -81,7 +84,11 @@ export async function workspaceFetch(identity:WorkspaceIdentity|undefined,url:st
     return response;
   };
   // Ordinary native responses retain their caller-owned session/deadline fences.
-  if(!hostedWorkspaceRequested())return enrollment(await fetchWorkspace(url,init));
+  if(!hostedWorkspaceRequested()){
+    const response=await fetchWorkspace(url,init);
+    try{nativeCurrent();}catch(error){cancel(response);throw error;}
+    return enrollment(response);
+  }
   if(!identity || !('mode' in identity) || !currentIdentity(identity))throw new WorkspaceApiError(401);
   const mismatch=compatibility?updateRequired:workPaused;
   if(!compatibility)requireWorkspaceProtocol(identity);
@@ -89,6 +96,7 @@ export async function workspaceFetch(identity:WorkspaceIdentity|undefined,url:st
   if(new Headers(init.headers).get(WORKSPACE_PROTOCOL_HEADER)!=='1'){block(identity);throw mismatch();}
   init.signal?.throwIfAborted();
   const response=await fetchWorkspace(url,init);
+  try{nativeCurrent();}catch(error){cancel(response);throw error;}
   if(init.signal?.aborted || !currentIdentity(identity)){cancel(response);throw new WorkspaceApiError(401);}
   enrollment(response);
   // An upstream outage may return a proxy error without application headers.

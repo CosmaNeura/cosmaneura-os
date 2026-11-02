@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession, workspaceAuthHeaders} from './workspace-auth-headers';
@@ -28,7 +29,7 @@ export function validGoogleSchedulingUrl(value:unknown):value is string {
 
 export async function requestSchedulingSession<T>(identity:AuthenticatedWorkspaceIdentity, command:object, validate:(value:unknown)=>T|Promise<T>, signal?:AbortSignal):Promise<T>{
   if(!SCHEDULING_LOGIN_BUILD)throw new WorkspaceApiError(404);
-  const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+  const base=workspaceApiBase(identity);
   const controller=new AbortController();const abort=()=>controller.abort();
   let rejectAbort:()=>void=()=>undefined;
   const interrupted=new Promise<never>((_,reject)=>{rejectAbort=()=>reject(new WorkspaceApiError(503));});

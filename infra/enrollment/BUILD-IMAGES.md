@@ -179,3 +179,58 @@ Root then uses the existing operator-only `queue` and `collect` commands with
 `--kind database-job` or `--kind private-clock`. Collection binds the successful
 job image to its original application receipt hash and measured base digest.
 Changing that receipt after preparation prevents queue/collection.
+
+## Allocated-practice preparation image
+
+The optional `--kind allocated-workspace-job` uses those same
+`prepare-job`, `queue`, and `collect` paths. It consumes the verified successful
+API-image receipt from the **same exact source commit**. Its sole build argument
+is that receipt's measured `APP_IMAGE` digest. It does not accept a tag,
+unscanned image, different source, or private-clock fix as authority.
+
+```bash
+python infra/enrollment/build-images.py prepare-job \
+  --source /path/to/canonical-checkout --commit FULL_APP_SOURCE_COMMIT \
+  --app-source-commit FULL_APP_SOURCE_COMMIT \
+  --app-image-receipt /protected/successful-api-image-receipt.json \
+  --foundation /protected/foundation.json --kind allocated-workspace-job \
+  --secret-file /protected/clerk.env --secret-file /protected/stripe.env \
+  --secret-file /protected/runtime-database.url \
+  --output /protected/new-allocated-workspace-job-image
+```
+
+Only the unchanged `infra/enrollment/allocated-workspace/Dockerfile.job` and
+`job.py`, minimal root ignore policy, and generated public task enter the
+context. The helper checks the inherited application's required runtime module
+bytes against the selected Git commit, including its schema revision. Image
+validation checks UID10001, those exact bytes, the existing Box namespace,
+schema, and the actual `migrate` and `reserve` command entrypoints. Both must
+fail closed with no configuration or database/vendor credentials, before any
+database or provider work. This job has no database-job `DATABASE`, `LOGINS`,
+`bootstrap`, or `check` contract; the helper does not borrow those constants.
+
+Validation still precedes the unchanged CI-pinned Trivy scan, and scan still
+precedes push. Queueing preserves the original intent-before-send and unknown
+outcome fence: retain an unresolved intent and reconcile the existing owned
+run; never delete the intent and automatically submit a duplicate. Collection
+requires the measured successful run and matching owned registry digest and
+retains the original application receipt hash/base image.
+
+Use the existing operator commands with `--kind allocated-workspace-job`:
+
+```bash
+python infra/enrollment/build-images.py queue \
+  --prepared /protected/new-allocated-workspace-job-image \
+  --kind allocated-workspace-job
+python infra/enrollment/build-images.py collect \
+  --prepared /protected/new-allocated-workspace-job-image \
+  --kind allocated-workspace-job \
+  --receipt /protected/allocated-workspace-job-observation.json
+```
+
+A successful image receipt keeps `allocated_workspace_job_qualified`,
+`workspace_ready`, `deployed`, and `hosted_journey_qualified` false. Publishing
+code is separate from running an actual per-Box migration/reservation with its
+protected scoped inputs, checking its stored receipts, or granting a workspace.
+This image does not host the separate private allocation loop or add its
+Azure/OpenTofu/Git tooling; that host remains a separate deployment requirement.

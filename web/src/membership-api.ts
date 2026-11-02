@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type WorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
@@ -20,7 +21,7 @@ async function transport<T>(identity:WorkspaceIdentity,scope:Scope|{workspace_id
  const wait=<V,>(v:Promise<V>)=>Promise.race([v,interrupted]);const timer=setTimeout(abort,15000);signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
  try{
   check();if('owner_id'in scope){validateMembership('Scope',scope);if(!('mode'in identity)&&(identity.boxId!==scope.box_id||identity.actorId!==scope.owner_id))throw new WorkspaceApiError(403);}else if(!vendorUuid(scope.workspace_id))throw new MembershipContractError();
-  const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
+  const base=workspaceApiBase(identity);if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
   const headers='mode'in identity?await wait(workspaceAuthHeaders(identity,base).catch(()=>{throw new WorkspaceApiError(401);})):new Headers({'X-Box-Id':identity.boxId,'X-Actor-Principal-Id':identity.actorId});
   check();headers.set('X-Cosmas-Membership-Contract','1');headers.set('Accept','application/json');headers.set('Content-Type','application/json');
   const read:Read=async(path,maximum,body)=>{

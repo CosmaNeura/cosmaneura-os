@@ -34,6 +34,9 @@ import Foundation
         }
     }
 
+    /// Native owners may retire a session independently of a renderer waiter.
+    public func cancel() { abandon() }
+
     private func abandon() {
         abandoned = true
         guard !completed, continuation != nil else { return }

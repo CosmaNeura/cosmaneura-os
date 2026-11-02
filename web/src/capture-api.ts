@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {validScribeSourceRequest,MAX_SCRIBE_SOURCE_REQUEST_BYTES} from '../../clients/desktop/scribe-source-requests.mjs';
 import { WorkspaceCaptureBff } from "../../clients/capture/src/bff/workspace-client";
@@ -55,7 +56,7 @@ export const captureFailureObservation=(error:unknown)=>error instanceof BffResp
 export async function request(workspaceId: string, action: "admission" | "operations" | "notes" | "prep" | "existing" | "source-packets",
   identity: AuthenticatedWorkspaceIdentity, body: unknown, signal?: AbortSignal,
   maxBytes = 131072, timeoutMs = 30000): Promise<unknown> {
-  const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8000";
+  const base = workspaceApiBase(identity);
   if (!UUID.test(workspaceId)) {
     throw new BffResponseError(401, "capture_access_unavailable", null);
   }

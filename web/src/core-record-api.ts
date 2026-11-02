@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {workspaceAuthHeaders, assertCurrentDesktopSession} from './workspace-auth-headers';
@@ -28,7 +29,7 @@ async function location(identity:AuthenticatedWorkspaceIdentity,workspace:string
   signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   try {
     check();
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    const base=workspaceApiBase(identity);
     if(base.includes('?')||base.includes('#')||!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
     const headers=await wait(workspaceAuthHeaders(identity,base).catch(()=>{throw new WorkspaceApiError(401);}));
     check();headers.set('X-Cosmas-Record-Contract','1');headers.set('Accept','application/json');

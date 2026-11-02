@@ -143,6 +143,8 @@ class Settings(BaseSettings):
     google_connection_callback_uri: str = ""
     google_connection_return_origin: str = ""
     google_connection_encryption_key: SecretStr | None = None
+    google_connection_broker_enabled: bool = False
+    google_connection_broker_origin: str = ""
     workspace_microsoft_connection_enabled: bool = False
     microsoft_connection_tenant_id: str = ""
     microsoft_connection_client_id: str = ""

@@ -1,6 +1,6 @@
 import { ENROLLMENT_CONTRACT, EnrollmentError, validateEnrollmentCheckout, validateEnrollmentConfig, validateEnrollmentDocument,
   validateEnrollmentInvitation, validateEnrollmentPractices, validateEnrollmentQuote, validateEnrollmentReceipt, validateEnrollmentStatus,
-  type AgreementInput, type PracticeInput, type ProfileInput } from './enrollment-contract';
+  type AgreementInput, type EnrollmentConfig, type EnrollmentStatus, type PracticeInput, type ProfileInput } from './enrollment-contract';
 
 export type EnrollmentIdentity = { getToken: (options: { skipCache: true }) => Promise<string | null>; isCurrent: () => boolean };
 async function verifiedDocument<T extends {html:string;sha256:string}>(value:T):Promise<T> {
@@ -72,30 +72,37 @@ async function request<T>(base: string, path: string, validate: (value: unknown)
   finally { clearTimeout(timer); signal?.removeEventListener('abort',abort); controller.abort(); }
 }
 
-export function createEnrollmentApi(base: string) {
+export type EnrollmentRequest = <T>(path:string,validate:(value:unknown)=>T,
+  identity?:EnrollmentIdentity,body?:object,key?:string,signal?:AbortSignal,method?:string)=>Promise<T>;
+
+/** Parsers and document hashes are identical for browser and owned native transports. */
+export function enrollmentApiForOwnedTransport(request:EnrollmentRequest) {
   return {
-    config: (signal?:AbortSignal) => request(base,'/config',validateEnrollmentConfig,undefined,undefined,undefined,signal),
-    status: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/status',validateEnrollmentStatus,id,undefined,undefined,signal),
-    practices: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/practices',validateEnrollmentPractices,id,undefined,undefined,signal),
-    selectPractice: (id:EnrollmentIdentity,body:{expected_revision:number;practice_id:string},key:string,signal?:AbortSignal) => request(base,'/select-practice',validateEnrollmentStatus,id,body,key,signal),
-    profile: (id:EnrollmentIdentity,body:ProfileInput,key:string,signal?:AbortSignal) => request(base,'/profile',validateEnrollmentStatus,id,body,key,signal,'PUT'),
-    practice: (id:EnrollmentIdentity,body:PracticeInput,key:string,signal?:AbortSignal) => request(base,'/practice',validateEnrollmentStatus,id,body,key,signal,'PUT'),
-    join: (id:EnrollmentIdentity,body:{expected_revision:number;token:string},key:string,signal?:AbortSignal) => request(base,'/join',validateEnrollmentStatus,id,body,key,signal),
-    document: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/baa/current',validateEnrollmentDocument,id,undefined,undefined,signal).then(verifiedDocument),
-    accept: (id:EnrollmentIdentity,body:AgreementInput,key:string,signal?:AbortSignal) => request(base,'/baa/accept',validateEnrollmentStatus,id,body,key,signal),
-    receipt: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/baa/receipt',validateEnrollmentReceipt,id,undefined,undefined,signal).then(async value=>{
+    config: (signal?:AbortSignal) => request('/config',validateEnrollmentConfig,undefined,undefined,undefined,signal),
+    status: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/status',validateEnrollmentStatus,id,undefined,undefined,signal),
+    practices: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/practices',validateEnrollmentPractices,id,undefined,undefined,signal),
+    selectPractice: (id:EnrollmentIdentity,body:{expected_revision:number;practice_id:string},key:string,signal?:AbortSignal) => request('/select-practice',validateEnrollmentStatus,id,body,key,signal),
+    profile: (id:EnrollmentIdentity,body:ProfileInput,key:string,signal?:AbortSignal) => request('/profile',validateEnrollmentStatus,id,body,key,signal,'PUT'),
+    practice: (id:EnrollmentIdentity,body:PracticeInput,key:string,signal?:AbortSignal) => request('/practice',validateEnrollmentStatus,id,body,key,signal,'PUT'),
+    join: (id:EnrollmentIdentity,body:{expected_revision:number;token:string},key:string,signal?:AbortSignal) => request('/join',validateEnrollmentStatus,id,body,key,signal),
+    document: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/baa/current',validateEnrollmentDocument,id,undefined,undefined,signal).then(verifiedDocument),
+    accept: (id:EnrollmentIdentity,body:AgreementInput,key:string,signal?:AbortSignal) => request('/baa/accept',validateEnrollmentStatus,id,body,key,signal),
+    receipt: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/baa/receipt',validateEnrollmentReceipt,id,undefined,undefined,signal).then(async value=>{
       await verifiedDocument(value.document);return value;
     }),
-    quote: (id:EnrollmentIdentity,signal?:AbortSignal) => request(base,'/quote',validateEnrollmentQuote,id,undefined,undefined,signal),
-    checkout: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request(base,'/checkout',validateEnrollmentCheckout,id,body,key,signal),
-    recover: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request(base,'/recover',validateEnrollmentStatus,id,body,key,signal),
-    confirmWorkspace: (id:EnrollmentIdentity,body:{expected_revision:number;workspace_token:string},key:string,signal?:AbortSignal) => request(base,'/workspace/confirm',validateEnrollmentStatus,id,body,key,signal),
-    invitation: (id:EnrollmentIdentity,body:{expected_revision:number;email:string;role:'admin'|'staff';can_sign:boolean},key:string,signal?:AbortSignal) => request(base,'/invitations',validateEnrollmentInvitation,id,body,key,signal),
-    portal: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request(base,'/portal',value => {
+    quote: (id:EnrollmentIdentity,signal?:AbortSignal) => request('/quote',validateEnrollmentQuote,id,undefined,undefined,signal),
+    checkout: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request('/checkout',validateEnrollmentCheckout,id,body,key,signal),
+    recover: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request('/recover',validateEnrollmentStatus,id,body,key,signal),
+    confirmWorkspace: (id:EnrollmentIdentity,body:{expected_revision:number;workspace_token:string},key:string,signal?:AbortSignal) => request('/workspace/confirm',validateEnrollmentStatus,id,body,key,signal),
+    invitation: (id:EnrollmentIdentity,body:{expected_revision:number;email:string;role:'admin'|'staff';can_sign:boolean},key:string,signal?:AbortSignal) => request('/invitations',validateEnrollmentInvitation,id,body,key,signal),
+    portal: (id:EnrollmentIdentity,body:{expected_revision:number},key:string,signal?:AbortSignal) => request('/portal',value => {
       if (!value || typeof value !== 'object' || !('url' in value) || typeof value.url !== 'string') throw new EnrollmentError(502);
       return {url:value.url};
     },id,body,key,signal),
   };
+}
+export function createEnrollmentApi(base:string) {
+  return enrollmentApiForOwnedTransport((...args)=>request(base,...args));
 }
 export type EnrollmentApi = ReturnType<typeof createEnrollmentApi>;
 export function stripeDestination(value: string, portal = false): string {
@@ -105,8 +112,25 @@ export function stripeDestination(value: string, portal = false): string {
     return url.href;
   } catch { throw new EnrollmentError(502, 'enrollment_destination_invalid'); }
 }
-export function workspaceDestination(value: string, page = window.location.href, approved:readonly string[] = []): string {
+type RegisteredWorkspaceDestination = {config:EnrollmentConfig;current:EnrollmentStatus;ready:EnrollmentStatus};
+const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Additional server-managed staging scope; reviewed exact legacy origins keep their existing behavior. */
+export function workspaceDestination(value: string, page = window.location.href, approved:readonly string[] = [],
+  registered?:RegisteredWorkspaceDestination): string {
   try { const url = new URL(value,page), own = new URL(page);
+    const policy=registered?.config.workspace_origin_policy??'exact';
+    if(!['exact','synthetic-practice-uuid-staging-v1'].includes(policy))throw new Error();
+    const uuidHost=url.hostname.endsWith('.staging.cosmas.ai')&&canonicalUuid.test(url.hostname.slice(0,-'.staging.cosmas.ai'.length));
+    if(registered&&policy==='synthetic-practice-uuid-staging-v1'&&uuidHost){
+      const {config}=registered,current=validateEnrollmentStatus(registered.current),ready=validateEnrollmentStatus(registered.ready);
+      const practice=ready.practice?.id,org=ready.workspace.organization_id,box=ready.workspace.box_id;
+      if(!config.enabled||!config.auth_configured||config.data_mode!=='synthetic'||current.stage!=='ready'||ready.stage!=='ready'||
+        current.workspace.status!=='ready'||ready.workspace.status!=='ready'||!practice||!canonicalUuid.test(practice)||
+        current.practice?.id!==practice||!org||!/^org_[A-Za-z0-9_]{1,251}$/.test(org)||current.workspace.organization_id!==org||
+        !box||!canonicalUuid.test(box)||current.workspace.box_id!==box||ready.workspace.url!==value||
+        value!==`https://${practice}.staging.cosmas.ai/chief`)throw new Error();
+      return value;
+    }
     if (url.username || url.password || url.hash || !(url.origin === own.origin || approved.includes(url.origin)) ||
         !(url.protocol === 'https:' || import.meta.env.DEV && url.protocol === 'http:' && url.origin === own.origin)) throw new Error();
     return url.href;

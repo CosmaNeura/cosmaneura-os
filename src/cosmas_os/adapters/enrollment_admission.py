@@ -49,8 +49,9 @@ class RuntimeAdmissionError(Exception):
 
 
 class EnrollmentAdmissionAdapter:
-    def __init__(self, runtime: Settings, *, client: httpx.Client | None = None, session=None):
-        self.runtime, self.client, self.session = runtime, client, session
+    def __init__(self, runtime: Settings, *, client: httpx.Client | None = None, session=None,
+                 native_origin: Literal["capacitor://localhost", "app://cosmas"] | None = None):
+        self.runtime, self.client, self.session, self.native_origin = runtime, client, session, native_origin
 
     def authorize(self, token: str, subject: str, *, purpose: Literal["workspace", "qualification", "worker"] = "workspace",
                   operation_id: str | None = None, approval_sha256: str | None = None) -> dict:
@@ -61,6 +62,14 @@ class EnrollmentAdmissionAdapter:
         if (not getattr(runtime, "workspace_enrollment_managed", False) or not isinstance(runtime, Settings)
                 or runtime.workspace_enrollment_configuration_errors()):
             raise RuntimeAdmissionError(ADMISSION_UNAVAILABLE, 503)
+        if self.native_origin is not None and (purpose == "worker"
+                or runtime.cosmas_env != "early_adopter_beta" or runtime.auth_mode != "clerk_jwt"
+                or not runtime.workspace_enabled or not runtime.workspace_authenticated_enabled
+                or not runtime.workspace_hosted_enabled or self.native_origin not in runtime.allowed_origins
+                or self.native_origin not in runtime.authorized_parties
+                or not (runtime.workspace_apple_hosted_transport_enabled if self.native_origin == "capacitor://localhost"
+                        else runtime.workspace_desktop_hosted_transport_enabled)):
+            raise RuntimeAdmissionError(ADMISSION_UNAVAILABLE, 503)
         secret = runtime.workspace_enrollment_admission_secret
         assert secret
         key = secret.get_secret_value()
@@ -70,6 +79,8 @@ class EnrollmentAdmissionAdapter:
                 issuer=runtime.clerk_issuer or "", subject=subject, purpose=purpose, nonce=str(uuid4()),
                 issued_at=int(time.time()), token_sha256=hashlib.sha256(token.encode()).hexdigest(),
                 operation_id=operation_id, approval_sha256=approval_sha256)
+            if self.native_origin is not None:
+                request = request.model_copy(update={"native_origin": self.native_origin})
         except (ValueError, TypeError):
             raise RuntimeAdmissionError(ADMISSION_UNAVAILABLE, 503) from None
         raw = encode(request.model_dump())

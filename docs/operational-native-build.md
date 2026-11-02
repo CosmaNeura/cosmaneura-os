@@ -1,5 +1,79 @@
 # Operational native build inputs
 
+## Reproducible owned iPhone candidate
+
+Use `scripts/prepare-owned-iphone-candidate.py` on a Mac for the current owned
+project and renderer workflow. It uses the committed `clients/apple` and
+`clients/capture` sources with the frozen app scaffold; no external source
+checkout or private chat operator is needed. Commit the reviewed source first,
+keep the Git tree clean, and use the already installed Python environment,
+Node 24, and locked renderer dependencies. The build subprocesses cannot use
+the network and do not install dependencies.
+
+Supply the retained public client input directory containing
+`apple-identity.json` and `apple-build-env.json`, plus either the original
+CosmaBot IPA or its public `Info.plist`. The identity, original bundle, source
+access group, and Google client/callback must agree exactly. The operator reads
+only the IPA's app Info; it retains those public fields without copying old
+versions or other app settings. Partial Google settings are refused. Output
+must be a new directory outside the repository and input directories.
+
+```sh
+.venv/bin/python scripts/prepare-owned-iphone-candidate.py \
+  --inputs /absolute/path/to/reviewed-public-client-inputs \
+  --retained-ipa /absolute/path/to/original-CosmaBot.ipa \
+  --node /absolute/path/to/existing-node-24/bin/node \
+  --output /absolute/path/to/new-owned-iphone-candidate
+```
+
+Use `--retained-info /absolute/path/to/original-public-Info.plist` instead of
+`--retained-ipa` when retaining public Info separately. The default builds only
+the Apple renderer; `--include-desktop-renderer` also requires the matching
+`desktop-identity.json` and `desktop-build-env.json`. The current entry preserves
+the scaffold's disabled native capture and accepts renderer capture modes
+`disabled` or `synthetic`; it does not configure a native microphone workflow.
+
+The default **omits `CosmasNativePracticeConnection`** and preserves the existing
+Beta identity and navigation. To prepare the separately reviewed native
+practice-connection candidate, additionally supply
+`--native-practice-config /absolute/path/to/reviewed-public-native-practice.json`.
+That file contains the exact Info dictionary: `enabled` boolean,
+`accountOrigin`, `realm`, `apiOrigins`, and optional `registeredPracticeOrigins`
+and `googleConnection`.
+The realm contains only `publishableKey`, `frontendOrigin`, `audience`, `profile`,
+and `keychainNamespace`. The profile is `operational-staging-v1`, the audience
+is empty, the `pk_test_` public key encodes its exact Development
+`.clerk.accounts.dev` frontend, and the reviewed stable namespace is 64 lowercase
+hexadecimal characters. No credential or server secret belongs in this file.
+Callbacks and the native request origin derive from the unchanged bundle.
+
+The optional `googleConnection` is exactly `{ "clientID": "reviewed.apps.googleusercontent.com",
+"callbackURI": "<accountOrigin>/connections/google/callback" }`, using the
+separately reviewed account-service Google broker. Omit the whole pair until
+that broker is configured; empty, partial, extra or different-origin values are
+refused. This enables only the existing trusted-click Google consent opener for
+an admitted practice in that exact account realm. Its metadata/calendar and
+separately consented read-only message-body scopes keep their existing checks.
+It does not borrow Beta's callback, enable scheduling/Microsoft/clinical
+navigation, or qualify any provider connection merely by building the app.
+
+The origin policy defaults to `exact`, requiring 1–32 distinct exact HTTPS API
+origins. Explicit `synthetic-practice-uuid-staging-v1` permits the native host's
+server-registered UUID staging policy and may use an empty exact-origin list.
+No wildcard, arbitrary profile URL, or automatic enrollment enable is accepted.
+A disabled dictionary still requires its complete schema; omission is the
+default. Existing public build inputs are consumed as supplied, without dotenv
+or ambient `VITE_*` settings.
+
+The output contains `iphone-project`, `iphone-configured-candidate`, renderer
+assets, private execution logs, `candidate-inventory.json`, and
+`preparation-receipt.json`. The receipt binds the actual Git commit/tree and
+clean status, unchanged input hashes, exact owned source/destination bytes,
+tooling, and runtime configuration. A failed attempt retains `.incomplete`;
+retry with a fresh output. Success prepares project inputs and assets only.
+Native compilation, signing, installation, publication, deployment, and actual
+device/provider acceptance remain separate gates.
+
 > Current ownership/checkpoint: [source index](COSMABOT_SOURCE_OF_TRUTH.md),
 > [recorded release ledger](COSMABOT_RELEASE_STATE_20261030.md), and
 > [recovered iPhone baseline](../apps/capture/README.md). The inputs below

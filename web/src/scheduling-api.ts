@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import type { AuthenticatedWorkspaceIdentity, CaptureBotSelection } from "./workspace-api";
 import { WORKSPACE_AUTHENTICATED_BUILD, WORKSPACE_BUILD, WorkspaceApiError } from "./workspace-api";
@@ -44,7 +45,7 @@ export async function readAvailability(workspace: string, identity: Authenticate
       !Number.isFinite(instant(window.starts_at)) || !Number.isFinite(instant(window.ends_at)) ||
       instant(window.ends_at) <= instant(window.starts_at) ||
       instant(window.ends_at) - instant(window.starts_at) > 31 * 86400000) unavailable();
-  const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8000";
+  const base = workspaceApiBase(identity);
   const controller = new AbortController(), deadline = Date.now() + 30000;
   const abort = () => controller.abort();
   const check = () => {

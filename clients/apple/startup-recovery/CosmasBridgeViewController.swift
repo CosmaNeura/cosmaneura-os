@@ -5,6 +5,9 @@ import CosmaneuraIOSPCMCapacitor
 #if canImport(CosmasWorkspaceAuthPlugin)
 import CosmasWorkspaceAuthPlugin
 #endif
+#if canImport(CosmasNativeAuth)
+import CosmasNativeAuth
+#endif
 
 /// Keeps Capacitor's policy, authentication, and navigation handling intact.
 /// Terminal failures are consumed: Capacitor 8.5.0 reloads on process death and
@@ -73,6 +76,11 @@ import CosmasWorkspaceAuthPlugin
     private var speechPlugin: CosmasPrivateSpeechPlugin?
     #endif
     private(set) var startedNavigation = false
+    private var selectedDocumentAssets: WorkspaceRegisteredDocumentAssets?
+    #if canImport(CosmasNativeAuth)
+    private var registeredPracticeSnapshot: NativePracticeActiveWorkspaceSnapshot?
+    private var accountEntry = false
+    #endif
 
     init(generation: String) {
         workspaceGeneration = generation
@@ -82,15 +90,49 @@ import CosmasWorkspaceAuthPlugin
 
     required init?(coder: NSCoder) { fatalError("Use the native workspace container") }
 
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        #if canImport(CosmasWorkspaceAuthPlugin)
+        // Registration is not activation. The retained beta graph remains the
+        // default; no account service or alternative issuer is contacted here.
+        // The plugin advertises availability=false until native startup installs
+        // a complete pinned account/enrollment/runtime/navigation host.
+        bridge?.registerPluginInstance(CosmasNativePracticeConnectionPlugin())
+        #endif
+    }
+
     override func instanceDescriptor() -> InstanceDescriptor {
         // Capacitor 8.5.0 otherwise installs a scroll delegate that disables
         // the pinch recognizer when zooming begins. Keep WebKit's zoom behavior.
         let descriptor = super.instanceDescriptor()
         descriptor.zoomingEnabled = true
+        // InstanceDescriptor's documented appLocation affects local assets,
+        // not the fixed capacitor://localhost origin or native API authority.
+        if let selectedDocumentAssets { descriptor.appLocation = selectedDocumentAssets.location }
         return descriptor
     }
 
-    private func installLifecycle(on webView: WKWebView) {
+    #if canImport(CosmasNativeAuth)
+    /// Typed native admission only, before construction/loading of this document.
+    func prepareRegisteredPractice(_ snapshot: NativePracticeActiveWorkspaceSnapshot) throws {
+        guard !isViewLoaded, !startedNavigation, registeredPracticeSnapshot == nil,
+              !accountEntry else { throw NativePracticeProfileError.sessionChanged }
+        try snapshot.validateCurrentBinding()
+        guard let native = snapshot.bootstrap.rendererProfile["nativeIdentity"] as? [String: Any],
+              let api = native["apiOrigin"] as? String else { throw NativePracticeProfileError.invalidBinding }
+        selectedDocumentAssets = try WorkspaceRegisteredDocumentAssets(apiOrigin: api)
+        try snapshot.validateCurrentBinding()
+        registeredPracticeSnapshot = snapshot
+    }
+    func prepareAccountEntry() throws {
+        guard !isViewLoaded, !startedNavigation, registeredPracticeSnapshot == nil else {
+            throw NativePracticeProfileError.sessionChanged
+        }
+        accountEntry = true
+    }
+    #endif
+
+    private func installLifecycle(on webView: WKWebView) throws {
         // Capacitor replaces the configuration's content controller while building
         // the WebView, so install on the finished instance before loadWebView.
         let content = webView.configuration.userContentController
@@ -100,6 +142,25 @@ import CosmasWorkspaceAuthPlugin
         let source = "Object.defineProperty(window, '__cosmasWorkspaceGeneration', {value: '\(workspaceGeneration)', writable: false, configurable: false});"
         content.addUserScript(WKUserScript(
             source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        #if canImport(CosmasNativeAuth)
+        if accountEntry {
+            // Resumes only a transition the native host already owns. This
+            // presentation snapshot grants no account, Org or workspace access.
+            let entry = "Object.defineProperty(window,'__cosmasNativePracticeEntry',{value:Object.freeze({contract_version:'cosmabot.native-practice-entry.v1',entry:'account'}),writable:false,configurable:false});"
+            content.addUserScript(WKUserScript(source: entry, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+        if let snapshot = registeredPracticeSnapshot {
+            try snapshot.validateCurrentBinding()
+            let data = try JSONSerialization.data(withJSONObject: snapshot.payload, options: [.sortedKeys, .withoutEscapingSlashes])
+            guard let encoded = String(data: data, encoding: .utf8) else { throw NativePracticeProfileError.invalidBinding }
+            // Freeze every nested public field before any renderer code executes.
+            // No token, arbitrary URL, local-storage flag or JS installer exists.
+            let script = """
+            (()=>{const freeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};Object.defineProperty(window,'__cosmasRegisteredWorkspace',{value:freeze(\(encoded)),writable:false,configurable:false});})();
+            """
+            content.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+        #endif
     }
 
     override func viewDidLoad() {
@@ -129,7 +190,8 @@ import CosmasWorkspaceAuthPlugin
         let proxy = WorkspaceNavigationDelegate(downstream: downstream) { [weak self] in self?.onFailure?() }
         navigationProxy = proxy
         webView.navigationDelegate = proxy
-        installLifecycle(on: webView)
+        do { try installLifecycle(on: webView) }
+        catch { quarantine(); onFailure?(); return }
         startedNavigation = true
         super.viewDidLoad()
     }
@@ -224,6 +286,23 @@ import CosmasWorkspaceAuthPlugin
         webView?.isHidden = true
         // Stop future bridge messages as well as document input. Durable stores remain intact.
         webView?.configuration.userContentController.removeAllScriptMessageHandlers()
+        selectedDocumentAssets = nil
+    }
+
+    /// Account setup retires clinical native resources but keeps its explicit
+    /// EnrollmentEntry document interactive. Only final replacement quarantines.
+    func stopForPracticeConnection() async throws -> Bool {
+        guard startedNavigation, let capturePlugin else { return false }
+        #if canImport(CosmasWorkspaceAuthPlugin)
+        guard let authPlugin else { return false }
+        speechPlugin?.fenceForRendererLoss()
+        try await authPlugin.closeForRendererLoss(
+            stopCapture: { try await capturePlugin.fenceAndStopForRendererLoss() },
+            captureIsIdle: { IOSPCMCapacitorPlugin.confirmProcessCaptureIdle() })
+        return IOSPCMCapacitorPlugin.confirmProcessCaptureIdle()
+        #else
+        return false
+        #endif
     }
 
     /// Retains both old plugins until physical and configured-owner closure finish.
@@ -246,4 +325,38 @@ import CosmasWorkspaceAuthPlugin
         #endif
         return IOSPCMCapacitorPlugin.confirmProcessCaptureIdle()
     }
+}
+
+/// Fresh app-private static assets for one admitted renderer. No patient data,
+/// credential or renderer-provided URL enters this directory. The bundle is
+/// read-only; default Beta and explicit account-only setup use it unchanged.
+private final class WorkspaceRegisteredDocumentAssets {
+    let location: URL
+    init(apiOrigin: String) throws {
+        let manager = FileManager.default
+        guard let resources = Bundle.main.resourceURL else { throw WorkspaceRegisteredDocumentPolicy.Invalid.document }
+        let bundled = resources.appendingPathComponent("public", isDirectory: true)
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+        guard let files = manager.enumerator(at: bundled, includingPropertiesForKeys: keys) else {
+            throw WorkspaceRegisteredDocumentPolicy.Invalid.document
+        }
+        var count = 0, bytes = 0
+        for case let file as URL in files {
+            let value = try file.resourceValues(forKeys: Set(keys))
+            count += 1; bytes += value.fileSize ?? 0
+            guard count <= 4096, bytes <= 134_217_728, value.isSymbolicLink != true,
+                  value.isDirectory == true || value.isRegularFile == true else {
+                throw WorkspaceRegisteredDocumentPolicy.Invalid.document
+            }
+        }
+        let source = try String(contentsOf: bundled.appendingPathComponent("index.html"), encoding: .utf8)
+        let selected = try WorkspaceRegisteredDocumentPolicy.selectedHTML(source, apiOrigin: apiOrigin)
+        let destination = manager.temporaryDirectory.appendingPathComponent("cosmas-native-document-" + UUID().uuidString, isDirectory: true)
+        do {
+            try manager.copyItem(at: bundled, to: destination)
+            try selected.write(to: destination.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+        } catch { try? manager.removeItem(at: destination); throw error }
+        location = destination
+    }
+    deinit { try? FileManager.default.removeItem(at: location) }
 }

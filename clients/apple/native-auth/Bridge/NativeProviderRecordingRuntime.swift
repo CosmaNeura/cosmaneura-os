@@ -16,10 +16,12 @@ import Foundation
   private var observer: (@MainActor (NativeAuthState) -> Void)?
 
   init(auth: NativeWorkspaceAuth,
+       onAuthChange: @escaping @MainActor (NativeAuthState) -> Void = { _ in },
        makeResources: @escaping @MainActor (NativeWorkspaceAuth) throws -> Resources) {
     self.auth = auth; self.makeResources = makeResources
     auth.onChange = { [weak self] state in
       guard let self else { return }
+      onAuthChange(state)
       self.retainedResources?.connection.authChanged(state)
             self.recording.authChanged(state)
             NativePrivateRecordingGate.authChanged(state)
@@ -63,6 +65,16 @@ import Foundation
 
   func requireNativeAvailable() throws {
     guard rendererOwner == nil else { throw ProviderNativeError.unavailable }
+  }
+
+  var isIdleForPracticeSwitch: Bool {
+    rendererOwner == nil && !rendererBusy && !recording.hasRetainedRecording &&
+      !auth.hasUnsettledOperations && !(retainedResources?.connection.hasUnsettledOperations ?? false)
+  }
+
+  func retireForPracticeSwitch() {
+    auth.retire()
+    retainedResources?.connection.close()
   }
 
   func confirmRendererReplacement() throws {

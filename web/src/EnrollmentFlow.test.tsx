@@ -73,6 +73,39 @@ it('shows pending activation with no trial dates or unconfirmed Chief access',as
   expect(button('Open Chief')).toBeUndefined();expect(button('Continue securely with Stripe')).toBeUndefined();
   expect(host.textContent).toContain('First chargeNot started');
 });
+it('keeps the browser Chief handoff closed for a UUID practice outside its exact configured origins',async()=>{
+  current=enrollmentStatus('ready',5);current.workspace.url='https://20000000-0000-4000-8000-000000000001.staging.cosmas.ai/chief';
+  const openWorkspace=vi.fn();await act(async()=>root.render(<EnrollmentFlow api={api} identity={id}
+    config={enrollmentConfig()} navigate={navigate} openWorkspace={openWorkspace}/>));
+  await click('Open Chief');expect(openWorkspace).not.toHaveBeenCalled();expect(navigate).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('The result could not be confirmed. Check saved progress before trying again.');
+});
+it('opens the newly allocated browser practice in Chief only after a fresh authenticated ready response',async()=>{
+  current=enrollmentStatus('ready',5);current.workspace.url=`https://${current.practice!.id}.staging.cosmas.ai/chief`;
+  vi.mocked(api.status).mockRestore();const token=vi.spyOn(id,'getToken');
+  const requests=vi.fn(async(_url:RequestInfo|URL,_options?:RequestInit)=>new Response(JSON.stringify(current),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}));
+  vi.stubGlobal('fetch',requests);const openWorkspace=vi.fn();
+  const config={...enrollmentConfig(),workspace_origin_policy:'synthetic-practice-uuid-staging-v1' as const};
+  await act(async()=>root.render(<EnrollmentFlow api={api} identity={id} config={config} navigate={navigate} openWorkspace={openWorkspace}/>));
+  current={...current,revision:6};await click('Open Chief');
+  expect(requests).toHaveBeenCalledTimes(2);expect(token).toHaveBeenCalledTimes(2);expect(token).toHaveBeenLastCalledWith({skipCache:true});
+  const [url,options]=requests.mock.calls[1];
+  expect(url).toBe('http://127.0.0.1:8910/enrollment/v1/status');
+  expect(options).toMatchObject({cache:'no-store',credentials:'omit',redirect:'error'});
+  expect(new Headers(options?.headers).get('Authorization')).toBe('Bearer invented.token');
+  expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({revision:6}),current.workspace.url);
+  expect(navigate).not.toHaveBeenCalled();expect(localStorage.length).toBe(0);expect(sessionStorage.length).toBe(0);
+});
+it.each(['practice','organization','box','inactive policy'])('holds the allocated browser Chief handoff when %s changes',async change=>{
+  current=enrollmentStatus('ready',5);current.workspace.url=`https://${current.practice!.id}.staging.cosmas.ai/chief`;
+  const openWorkspace=vi.fn(),config={...enrollmentConfig(),workspace_origin_policy:change==='inactive policy'?'exact' as const:'synthetic-practice-uuid-staging-v1' as const};
+  await act(async()=>root.render(<EnrollmentFlow api={api} identity={id} config={config} navigate={navigate} openWorkspace={openWorkspace}/>));
+  if(change==='practice'){current={...current,practice:{...current.practice!,id:'20000000-0000-4000-8000-000000000001'},workspace:{...current.workspace,url:'https://20000000-0000-4000-8000-000000000001.staging.cosmas.ai/chief'}};}
+  if(change==='organization')current={...current,workspace:{...current.workspace,organization_id:'org_other'}};
+  if(change==='box')current={...current,workspace:{...current.workspace,box_id:'20000000-0000-4000-8000-000000000003'}};
+  await click('Open Chief');expect(openWorkspace).not.toHaveBeenCalled();expect(navigate).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('The result could not be confirmed. Check saved progress before trying again.');
+});
 it('lets the accepted owner continue prebilling setup through the existing confirmation POST while keeping card and Chief held',async()=>{
   current=enrollmentStatus('activation_pending',3);current.workspace={status:'provisioning',url:null,organization_id:'org_invented',box_id:'10000000-0000-4000-8000-000000000003'};
   current.practice!.role='staff';const config={...enrollmentConfig(),billing_configured:false};

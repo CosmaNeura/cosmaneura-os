@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import type {AuthenticatedWorkspaceIdentity, CaptureBotSelection} from "./workspace-api";
 import {WORKSPACE_AUTHENTICATED_BUILD, WORKSPACE_BUILD, WorkspaceApiError} from "./workspace-api";
@@ -104,7 +105,7 @@ function catalog(value: unknown, workspace: string): AppointmentCatalog {
 async function request(workspace: string, identity: AuthenticatedWorkspaceIdentity, suffix: string,
   body?: unknown, signal?: AbortSignal): Promise<unknown> {
   if (!APPOINTMENTS_BUILD || !uuid(workspace)) invalid();
-  const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8000";
+  const base = workspaceApiBase(identity);
   const controller = new AbortController(), abort = () => controller.abort();
   const timer = setTimeout(abort, 30000);
   signal?.addEventListener("abort", abort, {once: true}); if (signal?.aborted) abort();

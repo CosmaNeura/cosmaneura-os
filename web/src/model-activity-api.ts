@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type WorkspaceIdentity,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
@@ -50,7 +51,7 @@ async function read(identity:WorkspaceIdentity,context:AiActivityContext,view:Ac
       checkDeadline();
     };
     check();
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    const base=workspaceApiBase(identity);
     if(base.includes('?')||base.includes('#')||!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503,'activity_unavailable');
     const current=await wait(accountIdentityApi.read(account,controller.signal));check();
     if(current.box_id!==scope.box_id||current.actor_id!==scope.owner_id||current.recovery_scope!==scope.recovery_scope)throw new WorkspaceApiError(403);

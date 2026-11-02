@@ -1,5 +1,6 @@
 export const ENROLLMENT_CONTRACT = 'enrollment.v1' as const;
 export const ENROLLMENT_WORKSPACE_NAME_MAX = 120;
+export type EnrollmentWorkspaceOriginPolicy = 'exact' | 'synthetic-practice-uuid-staging-v1';
 /** Existing public company contact, verified against the marketing source. */
 export const ENROLLMENT_CONTACT = 'mailto:john@cosmaneura.com?subject=CosmaBot%20practice%20setup';
 export const BAA = {
@@ -13,7 +14,8 @@ export type EnrollmentConfig = {
   data_mode: 'disabled' | 'synthetic' | 'production'; auth_configured: boolean;
   clerk_publishable_key: string | null; auth_methods: ('google' | 'microsoft' | 'password')[];
   billing_configured: boolean; activation_available: boolean; production_qualified: boolean;
-  blockers: string[]; allowed_workspace_origins: string[]; baa: typeof BAA;
+  blockers: string[]; allowed_workspace_origins: string[];
+  workspace_origin_policy?: EnrollmentWorkspaceOriginPolicy; baa: typeof BAA;
   pricing: { currency: 'usd'; interval: 'month'; first_human_cents: 30000;
     additional_human_cents: 10000; max_self_serve_humans: 10; trial_days: 14; seat_policy: string };
 };
@@ -81,6 +83,7 @@ function documentIdentity(value: Record<string, unknown>) {
 }
 export function validateEnrollmentConfig(value: unknown): EnrollmentConfig {
   const v = object(value), pricing = object(v.pricing), baa = object(v.baa);
+  const workspacePolicy = v.workspace_origin_policy === undefined ? 'exact' : v.workspace_origin_policy;
   documentIdentity(baa);
   if (v.contract_version !== ENROLLMENT_CONTRACT || !['disabled','synthetic','production'].includes(String(v.data_mode)) ||
       baa.pdf_url !== BAA.pdf_url || pricing.currency !== 'usd' || pricing.interval !== 'month' ||
@@ -88,10 +91,13 @@ export function validateEnrollmentConfig(value: unknown): EnrollmentConfig {
       pricing.max_self_serve_humans !== 10 || pricing.trial_days !== 14 ||
       !Array.isArray(v.auth_methods) || v.auth_methods.length !== 3 ||
       !['google','microsoft','password'].every(method => (v.auth_methods as unknown[]).includes(method)) ||
-      !Array.isArray(v.blockers) || v.blockers.length > 30 || !Array.isArray(v.allowed_workspace_origins) || v.allowed_workspace_origins.length>20) return invalid();
+      !Array.isArray(v.blockers) || v.blockers.length > 30 || !Array.isArray(v.allowed_workspace_origins) || v.allowed_workspace_origins.length>20 ||
+      typeof workspacePolicy !== 'string' || !['exact','synthetic-practice-uuid-staging-v1'].includes(workspacePolicy) ||
+      workspacePolicy === 'synthetic-practice-uuid-staging-v1' && v.data_mode !== 'synthetic') return invalid();
   const config = { ...v, enabled: bool(v.enabled), auth_configured: bool(v.auth_configured),
     billing_configured: bool(v.billing_configured), activation_available: bool(v.activation_available),
     production_qualified: bool(v.production_qualified), clerk_publishable_key: nullableText(v.clerk_publishable_key, 1024),
+    workspace_origin_policy: workspacePolicy as EnrollmentWorkspaceOriginPolicy,
     blockers: v.blockers.map(item => text(item)), allowed_workspace_origins:v.allowed_workspace_origins.map(item=>{
       const origin=text(item,2048);try{const url=new URL(origin);if(url.origin!==origin||url.protocol!=='https:')return invalid();}catch{return invalid();}return origin;
     }),pricing: { ...pricing, seat_policy: text(pricing.seat_policy, 1000) },

@@ -39,7 +39,9 @@ def test_lifecycle_calendar_custody_uses_caller_session_and_restores_reader_afte
     calls = []
 
     class Connection:
-        def __init__(self, settings, sessions):
+        def __init__(self, settings, sessions, *, broker=None, transport=None):
+            assert broker is None
+            assert transport is None
             self.closed = False
         def calendar_binding(self, identity, *, session):
             calls.append((identity, session))

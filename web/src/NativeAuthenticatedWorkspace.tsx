@@ -1,4 +1,7 @@
 import {WorkspaceCompatibilityGate} from './WorkspaceCompatibilityGate';
+import {NativeEnrollmentEntry} from './NativeEnrollmentEntry';
+import {NativePracticeConnection,nativePracticeConnectionAvailable,type NativePracticeConnectionPlugin} from '../../clients/capture/src/native/practice-connection-plugin';
+import {nativeEnrollmentCapabilities,nativeAccountEntryRequested} from './native-enrollment';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {hostedWorkspaceRequested} from './hosted-workspace';
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -11,25 +14,40 @@ import {nativeSceneSignal,notifyNativeWorkspaceForeground} from './native-worksp
 
 type Session = {
   plugin: WorkspaceAuthPlugin; active: boolean; epoch: number; pending: boolean;
+  identityEpoch:number;
   current: NativeAuthState | null; refresh: () => Promise<void>;
   foreground:boolean; lastAction:"signIn"|"signOut"|null;
 };
 
-export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available = nativeWorkspaceAuthAvailable(), createIdentity }: {
+export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available = nativeWorkspaceAuthAvailable(), createIdentity,
+  practicePlugin=NativePracticeConnection,practiceConnectionAvailable=nativePracticeConnectionAvailable() }: {
   plugin?: WorkspaceAuthPlugin; available?: boolean;
+  practicePlugin?:NativePracticeConnectionPlugin;practiceConnectionAvailable?:boolean;
   createIdentity?: (state: NativeAuthState, isCurrent: () => boolean) => AuthenticatedWorkspaceIdentity;
 }) {
   const [state, setState] = useState<NativeAuthState | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [connectingPractice,setConnectingPractice]=useState(()=>nativeAccountEntryRequested(practiceConnectionAvailable));
+  const [practiceCanConnect,setPracticeCanConnect]=useState(false);
   const session = useRef<Session | null>(null);
   const currentIdentity=useRef<AuthenticatedWorkspaceIdentity|null>(null);
+  useLayoutEffect(()=>{
+    let active=true;setPracticeCanConnect(false);
+    // A native-only capability read never calls the enrollment service. Missing
+    // complete host ports preserve the existing beta account controls exactly.
+    if(practiceConnectionAvailable)void practicePlugin.capabilities().then(value=>{
+      if(active)setPracticeCanConnect(nativeEnrollmentCapabilities(value));
+    }).catch(()=>{if(active)setPracticeCanConnect(false);});
+    return()=>{active=false;};
+  },[practicePlugin,practiceConnectionAvailable]);
   const identity = useMemo(() => {
     if (state?.phase !== "ready" || !state.identity) return null;
     const scope = session.current;
     const expected = state;
+    const identityEpoch=scope?.identityEpoch;
     const stillCurrent = () => Boolean(scope?.active && !scope.pending && session.current === scope &&
-      scope.current && sameNativeState(scope.current, expected));
+      scope.identityEpoch===identityEpoch&&scope.current && sameNativeState(scope.current, expected));
     async function getToken(_options: { skipCache: true }) {
       try {
         if (!stillCurrent()) throw new Error();
@@ -39,7 +57,8 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
       } catch { throw new Error("Native session unavailable"); }
     }
     return createIdentity ? createIdentity(expected, stillCurrent) : { mode: "clerk_jwt" as const, getToken,
-      nativeSession: {revision:expected.revision,isCurrent:stillCurrent} };
+      nativeSession: {revision:expected.revision,isCurrent:stillCurrent,
+        userId:expected.identity!.userId,sessionId:expected.identity!.sessionId,organizationId:expected.identity!.organizationId} };
   }, [state, plugin, createIdentity]);
   currentIdentity.current=identity;
   useLayoutEffect(()=>{
@@ -50,7 +69,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   },[identity]);
 
   useLayoutEffect(() => {
-    const scope: Session = { plugin, active: true, epoch: 0, pending: false, current: null, refresh: async () => {},foreground:true,lastAction:null };
+    const scope: Session = { plugin, active: true, epoch: 0, identityEpoch:0,pending: false, current: null, refresh: async () => {},foreground:true,lastAction:null };
     session.current = scope;
     setState(null); setFailed(false); setBusy(false);
     let remove: (() => Promise<void>) | undefined;
@@ -155,13 +174,25 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     }
   }
 
+  function connectPractice(){
+    const owner=session.current;if(!owner?.active||owner.pending||!practiceCanConnect)return;
+    // Explicitly fence the old renderer before any account/issuer transition.
+    owner.pending=true;owner.epoch++;owner.identityEpoch++;owner.current=null;setState(null);setConnectingPractice(true);
+  }
+  function returnFromPractice(){
+    const owner=session.current;setConnectingPractice(false);
+    if(owner?.active){owner.pending=false;void owner.refresh();}
+  }
+  if(connectingPractice)return <NativeEnrollmentEntry plugin={practicePlugin} available={practiceConnectionAvailable} onReturn={returnFromPractice}/>;
+
   if (!available || state?.phase === "disabled") return <StatusScreen title="Sign-in isn't available in this build"
     detail="Use the approved test build to sign in to your workspace." />;
   if (busy || state?.phase === "signingIn") return <StatusScreen title="Updating your secure session"
     detail="Complete or cancel the sign-in window to return to Cosmas." role="status" />;
 
   if (state?.phase === "ready" && identity) {
-    const controls=<button className="button secondary" onClick={() => void act("signOut")}>Log out</button>;
+    const controls=<><button className="button secondary" onClick={() => void act("signOut")}>Log out</button>
+      {practiceCanConnect&&<button className="button secondary" onClick={connectPractice}>Connect practice</button>}</>;
     return hostedWorkspaceRequested()
       ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate key={state.revision} identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
       : <EncounterWorkspace key={state.revision} authenticated={identity} accountControls={controls}/>;
@@ -184,5 +215,6 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     <button className="button" onClick={() => void act(pending && !signInRecovery ? "signOut" : "signIn")}>
       {signInRecovery ? "Try signing in again" : pending ? "Retry sign-out" : "Sign in"}
     </button>
+    {!pending&&practiceCanConnect&&<button className="button secondary" onClick={connectPractice}>Connect practice</button>}
   </StatusScreen>;
 }

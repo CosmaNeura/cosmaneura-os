@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type BotRole} from './workspace-api';
@@ -31,7 +32,7 @@ function validateRead(value:unknown):ConversationRead {
   return value as ConversationRead;
 }
 async function request(identity:AuthenticatedWorkspaceIdentity,path:string,signal?:AbortSignal,body?:ReadMarkerCommand):Promise<unknown>{
-  const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+  const base=workspaceApiBase(identity);
   const controller=new AbortController(),cancel=()=>controller.abort(),timer=setTimeout(cancel,15000);
   signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();
   let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;

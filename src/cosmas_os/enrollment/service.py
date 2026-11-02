@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import re
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
@@ -45,7 +47,19 @@ from .models import (
 )
 from .period_time import PeriodTime
 from .stripe import EVENT_TYPES, hosted_url
-from .workspace import WorkspaceConfirmationRequest, WorkspaceConfirmer
+from .workspace import (
+    NativeOrigin,
+    NativeWorkspaceAuthority,
+    NativeWorkspaceConfirmationRequest,
+    NativeWorkspaceConfirmationResult,
+    NativeWorkspaceProof,
+    NativeWorkspaceScope,
+    ProductionWorkspaceConfirmer,
+    WorkspaceAllocationSchedulerPort,
+    WorkspaceConfirmationRequest,
+    WorkspaceConfirmer,
+    native_proof_record,
+)
 
 _BAA_V23_ARCHIVE = Path(__file__).with_name("assets") / "baa_v2.3.html"
 
@@ -56,11 +70,15 @@ def identifier() -> str:
 
 class EnrollmentService:
     def __init__(self, sessions: sessionmaker, settings: EnrollmentSettings, commerce: CommercePort,
-                 *, period_time: PeriodTime | None = None):
+                 *, period_time: PeriodTime | None = None,
+                 native_workspace_authority: NativeWorkspaceAuthority | None = None,
+                 workspace_allocation_scheduler: WorkspaceAllocationSchedulerPort | None = None):
         self.sessions, self.settings, self.commerce = sessions, settings, commerce
         if period_time is not None and settings.data_mode != "synthetic":
             raise ValueError("Synthetic period time cannot be installed in production enrollment")
         self._period_time = period_time
+        self.native_workspace_authority = native_workspace_authority
+        self.workspace_allocation_scheduler = workspace_allocation_scheduler
 
     def _period_now(self) -> datetime:
         if self._period_time is not None and self.settings.data_mode != "synthetic":
@@ -213,13 +231,131 @@ class EnrollmentService:
                     self._refresh_subscription(session, practice)
             return self._view(session, account)
 
+    def _native_scope(self, practice: Practice, native_origin: NativeOrigin) -> NativeWorkspaceScope:
+        if not self.settings.native_origin_enabled(native_origin):
+            raise EnrollmentError("native_identity_unavailable", "Native practice access is unavailable.", 503)
+        if not all((practice.box_id, practice.organization_id, practice.workspace_api_origin,
+                    practice.workspace_url, practice.source_commit, practice.image_sha256)):
+            raise EnrollmentError("native_workspace_unqualified", "This practice is not available in the native app yet.", 503)
+        scope = NativeWorkspaceScope(practice.id, practice.box_id or "", practice.organization_id or "",
+            practice.workspace_api_origin or "", practice.workspace_url or "", practice.source_commit or "",
+            practice.image_sha256 or "", self.settings.clerk_issuer, native_origin)
+        web = urlparse(scope.workspace_url)
+        if not self.settings.registered_workspace_origin("https://" + web.netloc, practice.id):
+            raise EnrollmentError("native_workspace_unqualified", "This practice is not available in the native app yet.", 503)
+        return scope
+
+    def _native_proof(self, scope: NativeWorkspaceScope) -> NativeWorkspaceProof:
+        if self.native_workspace_authority is None:
+            raise EnrollmentError("native_workspace_unqualified", "This practice is not available in the native app yet.", 503)
+        proof = self.native_workspace_authority.require(scope)
+        if not isinstance(proof, NativeWorkspaceProof) or proof.scope != scope:
+            raise EnrollmentError("native_workspace_proof_invalid", "Native practice qualification could not be confirmed.", 503)
+        return proof
+
+    def require_native_workspace(self, identity: HumanIdentity, native_origin: NativeOrigin) -> NativeWorkspaceProof:
+        """Native acquisition waits for measured client access; recovery stays available."""
+        with self.sessions.begin() as session:
+            account = session.scalar(select(Account).where(Account.issuer == identity.issuer,
+                Account.subject == identity.subject).with_for_update())
+            if account is None or identity.issuer != self.settings.clerk_issuer:
+                raise EnrollmentError("practice_required", "Create or join your practice first.", 403)
+            practice, _ = self._practice(session, account)
+            return self._native_proof(self._native_scope(practice, native_origin))
+
+    def native_workspace_profile(self, identity: HumanIdentity, *, native_origin: NativeOrigin,
+                                 client: Literal["apple", "desktop"], nonce: str,
+                                 verify_membership: Callable[[str], HumanIdentity],
+                                 expected_revision: int | None = None) -> dict[str, Any]:
+        """Return only host-qualified public configuration, never account authority.
+
+        Existing beta startup does not call this opt-in new-practice endpoint.
+        Browser workspace readiness cannot establish native transport qualification.
+        """
+        if (identity.issuer != self.settings.clerk_issuer or not identity.session_id
+                or native_origin != ("capacitor://localhost" if client == "apple" else "app://cosmas")):
+            raise EnrollmentError("native_identity_invalid", "Sign in to the selected native account again.", 401)
+        try:
+            if str(UUID(nonce)) != nonce:
+                raise ValueError
+        except ValueError:
+            raise EnrollmentError("native_profile_invalid", "Start a new native practice connection.", 422) from None
+        with self.sessions.begin() as session:
+            # Read-only discovery never creates an account or selects a practice.
+            account = session.scalar(select(Account).where(Account.issuer == identity.issuer,
+                Account.subject == identity.subject).with_for_update())
+            if account is None:
+                raise EnrollmentError("practice_required", "Create or join your practice first.", 403)
+            practice, member = self._practice(session, account)
+            if expected_revision is not None and expected_revision != account.revision + practice.revision:
+                raise EnrollmentError("revision_conflict", "Your selected practice changed. Check saved progress.")
+            if not self._acceptance(session, practice):
+                raise EnrollmentError("agreement_required", "Finish your saved practice setup first.", 403)
+            used = session.scalar(select(func.count()).select_from(Membership).where(Membership.practice_id == practice.id)) or 0
+            reserved = session.scalar(select(func.count()).select_from(Invitation).where(Invitation.practice_id == practice.id,
+                Invitation.used_by.is_(None), Invitation.expires_at > now_utc())) or 0
+            if used + reserved > practice.human_seats or practice.human_seats > 10:
+                raise EnrollmentError("seat_registry_invalid", "Your practice seats could not be confirmed.", 403)
+            if (practice.workspace_status != "ready" or not member.workspace_ready
+                    or any(not re.fullmatch(r"[a-f0-9]{64}", value or "") for value in
+                           (practice.workspace_proof_sha256, member.workspace_proof_sha256))):
+                raise EnrollmentError("workspace_preparation_pending", "Finish your saved practice account confirmation first.")
+            current = now_utc()
+            if (not practice.billing_verified_at or utc(practice.billing_verified_at) <= current - timedelta(minutes=5)
+                    or practice.subscription_status == "trialing" and practice.trial_ends_at and utc(practice.trial_ends_at) <= self._period_now()
+                    or practice.subscription_status == "active" and practice.paid_period_ends_at and utc(practice.paid_period_ends_at) <= self._period_now()):
+                self._refresh_subscription(session, practice)
+            if not self._entitled(practice):
+                raise EnrollmentError("billing_required", "Check your saved practice billing status before connecting.", 403)
+            live = verify_membership(practice.organization_id or "")
+            if live.issuer != identity.issuer or live.subject != identity.subject:
+                raise EnrollmentError("runtime_scope_denied", "This account is no longer a practice member.", 403)
+            scope = self._native_scope(practice, native_origin)
+            measured = self._native_proof(scope)
+            issuer = urlparse(scope.issuer)
+            key = self.settings.clerk_publishable_key
+            prefix = "pk_live_" if self.settings.data_mode == "production" else "pk_test_"
+            try:
+                encoded = key.removeprefix(prefix).replace("-", "+").replace("_", "/")
+                encoded += "=" * (-len(encoded) % 4)
+                if (not key.startswith(prefix) or scope.issuer != "https://" + issuer.netloc
+                        or base64.b64decode(encoded, validate=True).decode() != str(issuer.hostname) + "$"):
+                    raise ValueError
+            except (ValueError, UnicodeError):
+                raise EnrollmentError("native_identity_unavailable", "Native identity configuration could not be confirmed.", 503) from None
+            profile = "operational-staging-v1" if self.settings.data_mode == "synthetic" else "operational-beta-v1"
+            if profile == "operational-staging-v1" and not str(issuer.hostname).endswith(".clerk.accounts.dev"):
+                raise EnrollmentError("native_identity_unavailable", "Native identity configuration could not be confirmed.", 503)
+            end = practice.trial_ends_at if practice.subscription_status == "trialing" else practice.paid_period_ends_at
+            assert end and practice.billing_verified_at
+            wall = now_utc()
+            expires = min(wall.timestamp() + MAX_AGE_SECONDS,
+                wall.timestamp() + (utc(end) - self._period_now()).total_seconds(),
+                (utc(practice.billing_verified_at) + timedelta(minutes=5)).timestamp())
+            if int(expires) <= int(wall.timestamp()):
+                raise EnrollmentError("billing_required", "Check your saved practice billing status before connecting.", 403)
+            return {"contract_version": "cosmas-native-workspace-profile.v1", "client": client,
+                "nonce": nonce, "native_origin": native_origin,
+                "data_mode": "synthetic" if self.settings.data_mode == "synthetic" else "authorized_beta",
+                "nativeIdentity": {"version": 1, "profile": profile, "client": client,
+                    "apiOrigin": scope.workspace_api_origin, "publishableKey": key,
+                    "frontendOrigin": scope.issuer, "organizationId": scope.organization_id,
+                    "audience": self.settings.clerk_audience},
+                "session": {"issuer": identity.issuer, "subject": identity.subject, "session_id": identity.session_id},
+                "practice": {"practice_id": practice.id, "box_id": scope.box_id},
+                "workspace": {"url": scope.workspace_url, "source_commit": scope.source_commit,
+                    "image_sha256": scope.image_sha256, "workspace_proof_sha256": practice.workspace_proof_sha256,
+                    "member_proof_sha256": member.workspace_proof_sha256,
+                    "native_qualification_sha256": measured.qualification_sha256},
+                "issued_at": int(wall.timestamp()), "expires_at": int(expires)}
+
     def runtime_authorized_parties(self, request: AdmissionRequest) -> list[str]:
         with self.sessions() as session:
             practice = session.scalar(select(Practice).where(Practice.id == request.practice_id,
                 Practice.box_id == request.box_id, Practice.organization_id == request.organization_id))
             url = urlparse(practice.workspace_url or "") if practice else None
             origin = url.scheme + "://" + url.netloc if url else ""
-            if not origin or origin not in self.settings.allowed_workspace_origins:
+            if not origin or practice is None or not self.settings.registered_workspace_origin(origin, practice.id):
                 raise EnrollmentError("runtime_scope_denied", "This workspace is not registered.", 403)
             # Bootstrap is signed by the central onboarding browser before it can
             # navigate to this Box. Only the bounded setup proof admits that origin.
@@ -239,6 +375,10 @@ class EnrollmentService:
             expires = now_utc().timestamp() + MAX_AGE_SECONDS
             actor_valid = identity is not None and identity.issuer == request.issuer and identity.subject == request.subject
             if practice and member and actor_valid and request.issuer == self.settings.clerk_issuer:
+                if request.native_origin is not None:
+                    scope = self._native_scope(practice, request.native_origin)
+                    if request.purpose != "qualification":
+                        self._native_proof(scope)
                 used = session.scalar(select(func.count()).select_from(Membership).where(Membership.practice_id == practice.id)) or 0
                 reserved = session.scalar(select(func.count()).select_from(Invitation).where(Invitation.practice_id == practice.id,
                     Invitation.used_by.is_(None), Invitation.expires_at > now_utc())) or 0
@@ -412,8 +552,27 @@ class EnrollmentService:
                     doc_id=BAA_DOC_ID, version=BAA_VERSION, sha256=BAA_SHA256, accepted_at=now_utc()))
                 practice.revision += 1
                 session.flush()
+            if (self.workspace_allocation_scheduler is not None and member.role == "owner"
+                    and practice.owner_id == account.id):
+                # Agreement and stable allocation intent commit atomically.
+                # This borrowed transaction performs no hosting operation.
+                self.workspace_allocation_scheduler.request(identity, session=session)
             return self._view(session, account)
-        return self._run(identity, key, "accept", payload, action)
+        result = self._run(identity, key, "accept", payload, action)
+        if self.workspace_allocation_scheduler is not None:
+            # Only durable agreement acceptance queues owner intent. Retrying
+            # the same accepted command repairs a lost queue reply; signing by
+            # an authorized staff member retains its original behavior.
+            with self.sessions() as session:
+                account = session.scalar(select(Account).where(Account.issuer == identity.issuer,
+                    Account.subject == identity.subject))
+                practice = session.get(Practice, account.active_practice_id) if account and account.active_practice_id else None
+                member = session.scalar(select(Membership).where(Membership.practice_id == practice.id,
+                    Membership.account_id == account.id, Membership.active.is_(True))) if practice and account else None
+                owner = bool(practice and account and member and member.role == "owner" and practice.owner_id == account.id)
+            if owner:
+                self.workspace_allocation_scheduler.request(identity)
+        return result
 
     def receipt(self, identity: HumanIdentity) -> dict[str, Any]:
         with self.sessions.begin() as session:
@@ -499,12 +658,15 @@ class EnrollmentService:
         if (status not in {"provisioning", "ready", "failed"} or not organization_id.startswith("org_")
                 or len(proof_sha256) != 64 or any(c not in "0123456789abcdef" for c in proof_sha256)
                 or origin.scheme != "https" or origin.username or origin.password or origin.fragment
-                or f"https://{origin.netloc}" not in self.settings.allowed_workspace_origins):
+                or (not self.settings.workspace_allocation_enabled
+                    and f"https://{origin.netloc}" not in self.settings.allowed_workspace_origins)):
             raise EnrollmentError("workspace_proof_invalid", "Workspace qualification evidence is invalid.")
         with self.sessions.begin() as session:
             practice = session.scalar(select(Practice).where(Practice.id == practice_id).with_for_update())
             if not practice:
                 raise EnrollmentError("practice_missing", "Practice not found.", 404)
+            if not self.settings.registered_workspace_origin(f"https://{origin.netloc}", practice.id):
+                raise EnrollmentError("workspace_proof_invalid", "Workspace qualification evidence is invalid.")
             if practice.box_id and (practice.box_id != box_id or practice.organization_id != organization_id):
                 raise EnrollmentError("workspace_binding_immutable", "The practice workspace identity cannot be replaced.")
             if status == "ready" and not self._acceptance(session, practice):
@@ -533,9 +695,12 @@ class EnrollmentService:
             practice.revision += 1
 
     def confirm_workspace(self, identity: HumanIdentity, key: str, expected_revision: int,
-                          workspace_token: str, confirmer: WorkspaceConfirmer) -> dict[str, Any]:
+                          workspace_token: str, confirmer: WorkspaceConfirmer,
+                          *, native_origin: NativeOrigin | None = None) -> dict[str, Any]:
         payload = {"expected_revision": expected_revision,
                    "workspace_token_sha256": hashlib.sha256(workspace_token.encode()).hexdigest()}
+        if native_origin is not None:
+            payload["native_origin"] = native_origin
         def prepare(session, account):
             practice, member = self._practice(session, account)
             if not self._acceptance(session, practice):
@@ -543,20 +708,37 @@ class EnrollmentService:
             if not all([practice.box_id, practice.organization_id, practice.workspace_url, practice.workspace_api_origin,
                         practice.source_commit, practice.image_sha256]):
                 raise EnrollmentError("workspace_preparation_pending", "Your workspace is being prepared. Check progress shortly.")
+            if native_origin is not None:
+                self._native_scope(practice, native_origin)
             scope = WorkspaceConfirmationRequest(practice_id=practice.id, box_id=practice.box_id or "",
                 organization_id=practice.organization_id or "", workspace_api_origin=practice.workspace_api_origin or "",
                 workspace_url=practice.workspace_url or "", source_commit=practice.source_commit or "", image_sha256=practice.image_sha256 or "",
-                issuer=identity.issuer, subject=identity.subject, email=identity.email, display_name=account.display_name, role=member.role)
-            return {"scope": asdict(scope), "completed": False}
+                issuer=identity.issuer, subject=identity.subject, email=identity.email, display_name=account.display_name,
+                role=member.role)
+            if native_origin is not None:
+                scope = NativeWorkspaceConfirmationRequest(**asdict(scope), native_origin=native_origin)
+            serialized = asdict(scope)
+            return {"scope": serialized, "completed": False}
         prepared = self._run(identity, key, "workspace_confirm", payload, prepare)
         if prepared.get("completed"):
             return self.status(identity)
-        request = WorkspaceConfirmationRequest(**prepared["scope"])
+        request = (NativeWorkspaceConfirmationRequest(**prepared["scope"]) if native_origin is not None
+                   else WorkspaceConfirmationRequest(**prepared["scope"]))
         # The root port may create only registry-authorized Clerk membership and
         # measure real runtime scope. It receives the token in memory, never DB.
         result = confirmer.confirm(request, workspace_token)
         if result.proof_sha256 is not None and (len(result.proof_sha256) != 64 or any(c not in "0123456789abcdef" for c in result.proof_sha256)):
             raise EnrollmentError("workspace_proof_invalid", "Workspace confirmation evidence is invalid.", 503)
+        native_proof = None
+        if native_origin is not None and result.proof_sha256 is not None:
+            if (not isinstance(confirmer, ProductionWorkspaceConfirmer)
+                    or not isinstance(result, NativeWorkspaceConfirmationResult)
+                    or not isinstance(result.native_proof, NativeWorkspaceProof)):
+                raise EnrollmentError("native_workspace_proof_invalid", "Native confirmation did not measure this workspace.", 503)
+            native_proof = result.native_proof
+            measured = native_proof.measurement["response"]["body"]
+            if measured["subject"] != identity.subject or measured["session_id"] != identity.session_id:
+                raise EnrollmentError("native_workspace_proof_invalid", "Native confirmation belongs to a different account session.", 503)
         with self.sessions.begin() as session:
             account = self._account(session, identity)
             practice, member = self._practice(session, account)
@@ -565,6 +747,9 @@ class EnrollmentService:
                     request.practice_id, request.box_id, request.organization_id, request.workspace_api_origin,
                     request.workspace_url, request.source_commit, request.image_sha256, request.role):
                 raise EnrollmentError("workspace_binding_changed", "Your selected workspace changed. Check progress and reconfirm.")
+            if native_origin is not None and native_proof is not None:
+                if native_proof.scope != self._native_scope(practice, native_origin):
+                    raise EnrollmentError("native_workspace_proof_invalid", "Native confirmation measured a different workspace release.", 503)
             if result.proof_sha256:
                 if member.role == "owner":
                     practice.workspace_status, practice.workspace_proof_sha256 = "ready", result.proof_sha256
@@ -575,6 +760,8 @@ class EnrollmentService:
             command = session.scalar(select(Command).where(Command.account_id == account.id, Command.key == key).with_for_update())
             assert command
             command.response = {**prepared, "completed": result.proof_sha256 is not None}
+            if native_proof is not None:
+                command.response = {**command.response, "native_qualification": native_proof_record(native_proof)}
             state = self._view(session, account)
             if result.proof_sha256 is None:
                 state["action_required"] = "Your practice membership is prepared. Refresh your account, select the practice and confirm again."

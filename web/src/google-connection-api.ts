@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {PERSONAL_CONNECTION_DEADLINE_MS} from './connection-operation-health';
 import {workspaceFetch} from './workspace-protocol';
 import {googleNavigationConfig,validGoogleNavigationUrl} from '../../clients/desktop/google-navigation.mjs';
@@ -50,7 +51,7 @@ export function validateGoogleResponse(value:unknown,action:GoogleAction):Google
 
 export async function googleConnectionRequest(identity:AuthenticatedWorkspaceIdentity, action:GoogleAction, signal?:AbortSignal):Promise<GoogleStatus|GoogleStart|GoogleView|{state:'disconnected'}>{
   if(!GOOGLE_CONNECTION_BUILD)throw new WorkspaceApiError(404);
-  const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+  const base=workspaceApiBase(identity);
   const controller=new AbortController();const abort=()=>controller.abort();
   let rejectAbort:()=>void=()=>undefined;
   const interrupted=new Promise<never>((_,reject)=>{rejectAbort=()=>reject(new WorkspaceApiError(503));});

@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
@@ -6,7 +7,7 @@ import {validShareSavedNoteInput,verifyClinicalNoteShareReceipt,type ShareSavedN
 
 async function request(identity:AuthenticatedWorkspaceIdentity,workspaceId:string,body:ShareSavedNoteInput,resolve:boolean) {
   if(!validShareSavedNoteInput(body)||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(workspaceId))throw new WorkspaceApiError(422);
-  const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+  const base=workspaceApiBase(identity);
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);
   let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
   const interrupted=new Promise<never>((_,reject)=>controller.signal.addEventListener('abort',()=>reject(new WorkspaceApiError(503)),{once:true}));

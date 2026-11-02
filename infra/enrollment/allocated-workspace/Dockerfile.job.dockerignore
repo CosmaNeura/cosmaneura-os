@@ -1,0 +1,10 @@
+*
+!infra/
+!infra/enrollment/
+!infra/enrollment/allocated-workspace/
+!infra/enrollment/allocated-workspace/Dockerfile.job
+!infra/enrollment/allocated-workspace/job.py
+**/__pycache__
+**/*.py[cod]
+**/.env*
+**/*.log

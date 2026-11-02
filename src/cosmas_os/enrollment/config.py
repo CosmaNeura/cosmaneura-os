@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from typing import Literal
 from urllib.parse import urlparse
+from uuid import UUID
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,6 +43,11 @@ class EnrollmentSettings(BaseSettings):
     # never an alternative audience or a replacement for session/party checks.
     clerk_audience: str = Field(default="", strict=True, max_length=255)
     clerk_authorized_parties: list[str] = []
+    # Explicit native account path only. Browser session verification is unchanged.
+    native_account_enabled: bool = False
+    native_authorized_origins: list[str] = []
+    # Private operator input containing measured native transports, never a token.
+    native_workspace_proof_file: str = ""
     # The selected instance must actually have these methods configured by its operator.
     clerk_methods_verified: bool = False
     stripe_integration_enabled: bool = False
@@ -57,9 +64,46 @@ class EnrollmentSettings(BaseSettings):
     activation_available: bool = False
     production_qualified: bool = False
     provisioning_enabled: bool = False
+    workspace_allocation_enabled: bool = False
     invitation_secret: SecretStr = SecretStr("")
     # Central master only. Each Box receives a derived immutable-scope key.
     runtime_admission_secret: SecretStr = SecretStr("")
+    google_callback_broker_enabled: bool = False
+    google_callback_broker_origin: str = ""
+    google_callback_client_id: str = ""
+
+    def google_broker_errors(self) -> list[str]:
+        if not self.google_callback_broker_enabled:
+            return []
+        if (not self.enabled or self.data_mode != "synthetic" or not self.workspace_allocation_enabled
+                or self.google_callback_broker_origin != "https://enrollment-api.staging.cosmas.ai"
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", self.google_callback_client_id)
+                or len(self.runtime_admission_secret.get_secret_value()) < 32):
+            return ["Google callback routing requires the explicit isolated staging broker and per-Box custody."]
+        return []
+
+    def native_origin_enabled(self, origin: str) -> bool:
+        values = self.native_authorized_origins
+        return bool(self.native_account_enabled and values and len(set(values)) == len(values)
+                    and all(v in {"capacitor://localhost", "app://cosmas"} for v in values)
+                    and origin in values)
+
+    def registered_workspace_origin(self, origin: str, practice_id: str) -> bool:
+        """Validate a stored practice destination, never arbitrary browser input.
+
+        The additional staging namespace is enabled only with the private
+        allocation workflow. Existing reviewed destinations remain exact.
+        """
+        if origin in self.allowed_workspace_origins:
+            return True
+        if not self.workspace_allocation_enabled or self.data_mode != "synthetic":
+            return False
+        try:
+            if str(UUID(practice_id)) != practice_id:
+                return False
+        except (ValueError, TypeError):
+            return False
+        return origin == "https://" + practice_id + ".staging.cosmas.ai"
 
     def auth_errors(self) -> list[str]:
         errors: list[str] = []
@@ -110,6 +154,8 @@ class EnrollmentSettings(BaseSettings):
         errors = self.auth_errors()
         if not self.enabled or self.data_mode == "disabled":
             errors.append("Customer enrollment is disabled.")
+        if self.workspace_allocation_enabled and not self.provisioning_enabled:
+            errors.append("Workspace allocation requires the configured private provisioner.")
         db = self.database_url.get_secret_value()
         if not db:
             errors.append("Configure the independent durable enrollment database.")
@@ -141,6 +187,9 @@ class EnrollmentSettings(BaseSettings):
             "blockers": blockers, "billing_blockers": billing_errors + ([] if stripe_verified else ["Stripe catalog and portal have not been verified."]),
             "provisioning_enabled": self.provisioning_enabled,
             "allowed_workspace_origins": self.allowed_workspace_origins,
+            "workspace_origin_policy": ("synthetic-practice-uuid-staging-v1"
+                                        if self.workspace_allocation_enabled and self.data_mode == "synthetic"
+                                        else "exact"),
             "baa": {"doc_id": BAA_DOC_ID, "version": BAA_VERSION, "sha256": BAA_SHA256, "pdf_url": BAA_PDF_URL},
             "pricing": {"currency": "usd", "interval": "month", "first_human_cents": FIRST_HUMAN_CENTS,
                         "additional_human_cents": ADDITIONAL_HUMAN_CENTS, "max_self_serve_humans": MAX_HUMANS,

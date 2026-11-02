@@ -117,7 +117,9 @@ def test_standalone_lifecycle_constructs_only_optional_google_without_workers(cl
     calls = []
 
     class Google:
-        def __init__(self, selected, _sessions):
+        def __init__(self, selected, _sessions, *, broker=None, transport=None):
+            assert broker is None
+            assert transport is None
             assert selected is runtime
             calls.append("google_created")
 

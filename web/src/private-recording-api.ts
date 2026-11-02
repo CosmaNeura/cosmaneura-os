@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {workspaceAuthHeaders,assertCurrentDesktopSession} from './workspace-auth-headers';
 import {permittedWorkspaceApi} from './workspace-origin';
@@ -126,7 +127,7 @@ async function request(identity:AuthenticatedWorkspaceIdentity,path:string,body:
   const wait=<T,>(v:Promise<T>)=>Promise.race([v,interrupted]);
   const check=()=>{controller.signal.throwIfAborted();assertCurrentDesktopSession(identity);if(identity.mode==='clerk_jwt'&&identity.nativeSession&&!identity.nativeSession.isCurrent())throw new WorkspaceApiError(401);};
   try {
-    check();const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    check();const base=workspaceApiBase(identity);
     need(permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href));
     const encoded=body===undefined?undefined:vendorCanonical(body);need(encoded===undefined||new TextEncoder().encode(encoded).length<=4096);
     const headers=await wait(workspaceAuthHeaders(identity,base));check();headers.set('X-Cosmas-Private-Recording','1');

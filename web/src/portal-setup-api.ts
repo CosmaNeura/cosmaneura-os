@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError,type WorkspaceIdentity} from './workspace-api';
 import {workspaceAuthHeaders,assertCurrentDesktopSession} from './workspace-auth-headers';
@@ -13,7 +14,7 @@ async function exchange<T>(identity:WorkspaceIdentity,path:string,verify:(v:unkn
   const current=()=>{controller.signal.throwIfAborted();if('mode'in identity)assertCurrentDesktopSession(identity);};
   let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
   try{
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    const base=workspaceApiBase(identity);
     if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
     current();const headers='mode'in identity?await wait(workspaceAuthHeaders(identity,base)):new Headers({'X-Box-Id':identity.boxId,'X-Actor-Principal-Id':identity.actorId});current();
     headers.set('X-Cosmas-Portal-Contract','1');headers.set('Content-Type','application/json');headers.set('Accept','application/json');

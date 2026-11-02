@@ -24,6 +24,11 @@ from .models import Account, Membership, Practice
 from .service import EnrollmentService
 from .stripe import StripeCommerce
 from .workspace import (
+    NativeOrigin,
+    NativeWorkspaceConfirmationRequest,
+    NativeWorkspaceConfirmationResult,
+    NativeWorkspaceProof,
+    NativeWorkspaceScope,
     ProductionWorkspaceConfirmer,
     WorkspaceConfirmationRequest,
     WorkspaceConfirmationResult,
@@ -163,7 +168,8 @@ class EnrollmentProvisioner:
         app = urlparse(workspace_url)
         api = urlparse(api_origin)
         app_origin = f"https://{app.netloc}"
-        if (app_origin not in self.service.settings.allowed_workspace_origins
+        if ((not self.service.settings.workspace_allocation_enabled
+                and app_origin not in self.service.settings.allowed_workspace_origins)
                 or app.scheme != "https" or app.username or app.password or app.query or app.fragment
                 or api.scheme != "https" or api.username or api.password or api.port or api.path not in ("", "/")
                 or api.query or api.fragment or api.hostname != paired_api(app.hostname)):
@@ -172,6 +178,8 @@ class EnrollmentProvisioner:
             practice = session.scalar(select(Practice).where(Practice.id == practice_id).with_for_update())
             if not practice or not self.service._acceptance(session, practice):
                 raise EnrollmentError("agreement_required", "Accept the practice agreement before provisioning.")
+            if not self.service.settings.registered_workspace_origin(app_origin, practice.id):
+                raise EnrollmentError("provisioning_destination_invalid", "Use the admitted workspace and its paired API origin.")
             if practice.human_seats > 10:
                 raise EnrollmentError("negotiated_quote_required", "This practice requires its negotiated activation contract.")
             owner = session.get(Account, practice.owner_id)
@@ -202,7 +210,8 @@ class EnrollmentProvisioner:
             return plan
 
     def qualify_member(self, plan: WorkspacePlan, *, subject: str, bearer: str,
-                       client: httpx.Client | None = None, persist: bool = True) -> dict[str, Any]:
+                       client: httpx.Client | None = None, persist: bool = True,
+                       native_origin: NativeOrigin | None = None) -> dict[str, Any]:
         """Measure a separately deployed runtime with this human's signed token.
 
         Unverified claims below only prevent sending a token to the wrong Box.
@@ -211,6 +220,8 @@ class EnrollmentProvisioner:
         """
         if self.saved_plan(plan.practice_id) != plan:
             raise EnrollmentError("provisioning_binding_conflict", "The selected workspace plan does not match its saved release.")
+        if native_origin is not None and not self.service.settings.native_origin_enabled(native_origin):
+            raise EnrollmentError("native_identity_unavailable", "Native practice confirmation is unavailable.", 503)
         with self.service.sessions.begin() as session:
             practice = session.get(Practice, plan.practice_id)
             account = session.scalar(select(Account).where(Account.issuer == plan.issuer, Account.subject == subject))
@@ -225,7 +236,7 @@ class EnrollmentProvisioner:
             setup_names = (account.display_name, practice.display_name) if role == "owner" else None
         app = urlparse(plan.workspace_url)
         api = urlparse(plan.api_origin)
-        if (f"https://{app.netloc}" not in self.service.settings.allowed_workspace_origins
+        if (not self.service.settings.registered_workspace_origin(f"https://{app.netloc}", plan.practice_id)
                 or api.scheme != "https" or api.username or api.password or api.port
                 or api.path not in ("", "/") or api.query or api.fragment
                 or api.hostname != paired_api(app.hostname)):
@@ -240,10 +251,19 @@ class EnrollmentProvisioner:
             self.clerk.membership(plan.organization_id, subject, "org:admin" if role == "owner" else "org:member")
             probe = client or httpx.Client(timeout=httpx.Timeout(15, connect=5), follow_redirects=False)
             observations = {}
+            native_proof = None
             headers = {"Authorization": "Bearer " + bearer, "X-Cosmas-Practice-Access-Contract": "1",
                        "X-Cosmas-Draft-Recovery": "2", "X-Cosmas-Workspace-Protocol": "1", "Accept": "application/json"}
-            qualification_path = "/practice-access/enrollment-qualification"
-            for path in ("/health", "/ready", qualification_path):
+            if native_origin is not None:
+                headers["Origin"] = native_origin
+                if not isinstance(claims.get("sid"), str) or not claims["sid"]:
+                    raise ValueError("native session required")
+            qualification_path = ("/practice-access/enrollment-qualification" if native_origin is None
+                                  else "/practice-access/native-qualification")
+            registration_path = "/practice-access/enrollment-qualification" if native_origin is not None and role == "member" else None
+            paths = ("/health", "/ready", registration_path, qualification_path) if registration_path else ("/health", "/ready", qualification_path)
+            for path in paths:
+                assert path is not None
                 if path == qualification_path and setup_names is not None:
                     self._complete_owner_setup(plan, setup_names, probe, headers)
                 response = probe.get(plan.api_origin + path, headers=headers)
@@ -251,7 +271,7 @@ class EnrollmentProvisioner:
                 value = response.json()
                 if not isinstance(value, dict):
                     raise ValueError("invalid response")
-                if path == qualification_path:
+                if path == qualification_path or path == registration_path:
                     if ("no-store" not in response.headers.get("cache-control", "") or value.get("contract_version") != 1
                             or response.headers.get("x-cosmas-workspace-protocol") != "1"
                             or value.get("state") != "connected" or value.get("role") != role):
@@ -261,13 +281,29 @@ class EnrollmentProvisioner:
                                 "image_sha256": plan.image_sha256}
                     if any(value.get(field) != selected for field, selected in expected.items()):
                         raise ValueError("runtime binding or release mismatch")
-                    if value.get("enrollment_admission") != {
-                        "contract_version": "cosmas-enrollment-admission.v1", "enforced": True,
-                        "practice_id": plan.practice_id, "purpose": "qualification",
-                    }:
-                        raise ValueError("runtime enrollment admission not enforced")
+                    if native_origin is None or path == registration_path:
+                        if value.get("enrollment_admission") != {
+                            "contract_version": "cosmas-enrollment-admission.v1", "enforced": True,
+                            "practice_id": plan.practice_id, "purpose": "qualification",
+                        }:
+                            raise ValueError("runtime enrollment admission not enforced")
+                    elif value.get("native_origin") != native_origin or value.get("session_id") != claims["sid"]:
+                        raise ValueError("native transport or session not qualified")
                     if value.get("initial_setup_complete") is not True:
                         raise ValueError("runtime first-use setup not complete")
+                    if native_origin is not None and path == qualification_path:
+                        scope = NativeWorkspaceScope(plan.practice_id, plan.box_id, plan.organization_id,
+                            plan.api_origin, plan.workspace_url, plan.source_commit, plan.image_sha256, plan.issuer,
+                            native_origin)
+                        native_proof = NativeWorkspaceProof.from_measurement(scope, {
+                            "contract_version": "cosmas-native-workspace-measurement.v1",
+                            "request": {"method": "GET", "url": plan.api_origin + qualification_path,
+                                        "native_origin": native_origin},
+                            "response": {"status_code": response.status_code,
+                                         "headers": {"cache-control": response.headers["cache-control"],
+                                                     "x-cosmas-workspace-protocol": response.headers["x-cosmas-workspace-protocol"]},
+                                         "body": value},
+                        })
                 elif value.get("status") != ("ready" if path == "/ready" else "ok"):
                     raise ValueError("runtime unavailable")
                 observations[path] = value
@@ -276,6 +312,9 @@ class EnrollmentProvisioner:
         receipt = {"contract": "cosmas-enrollment-workspace-proof.v1", "plan": asdict(plan),
                    "member_subject": subject, "role": role, "observations": observations,
                    "checked_at": now_utc().isoformat()}
+        if native_origin is not None:
+            receipt["native_origin"] = native_origin
+            receipt["native_session_id"] = claims["sid"]
         proof = canonical_hash(receipt)
         if persist and role == "owner":
             self.service.record_workspace(plan.practice_id, box_id=plan.box_id, organization_id=plan.organization_id,
@@ -283,6 +322,8 @@ class EnrollmentProvisioner:
         elif persist:
             self.service.record_membership_ready(plan.practice_id, issuer=plan.issuer, subject=subject,
                                                  organization_id=plan.organization_id, proof_sha256=proof)
+        if native_origin is not None:
+            return {"receipt": receipt, "sha256": proof, "native_proof": native_proof}
         return {"receipt": receipt, "sha256": proof}
 
     @staticmethod
@@ -325,6 +366,8 @@ class EnrollmentProvisioner:
 
 
 class BoundWorkspaceConfirmer(ProductionWorkspaceConfirmer):
+    native_origin_supported = True
+
     def __init__(self, service: EnrollmentService, clerk: ClerkProvisioningPort):
         self.provisioner = EnrollmentProvisioner(service, clerk)
 
@@ -344,11 +387,25 @@ class BoundWorkspaceConfirmer(ProductionWorkspaceConfirmer):
             org = claims.get("org_id") or (claims.get("o") or {}).get("id")
         except Exception as exc:
             raise EnrollmentError("provisioning_member_invalid", "Sign in again to confirm this practice account.", 401) from exc
+        native_origin = request.native_origin if isinstance(request, NativeWorkspaceConfirmationRequest) else None
+        if native_origin is not None:
+            compact = claims.get("o")
+            values = [value for value in (claims.get("org_id"), compact.get("id") if isinstance(compact, dict) else None)
+                      if isinstance(value, str) and value]
+            if values and (len(set(values)) != 1 or values[0] != plan.organization_id):
+                raise EnrollmentError("provisioning_member_invalid", "Select the registered native practice account.", 403)
         if org != plan.organization_id:
-            return WorkspaceConfirmationResult(proof_sha256=None)
+            return (NativeWorkspaceConfirmationResult(proof_sha256=None, native_proof=None)
+                    if native_origin is not None else WorkspaceConfirmationResult(proof_sha256=None))
         # The service owns the command transaction and final registry update.
         # Measurements may not open a nested write transaction on the same row.
-        result = self.provisioner.qualify_member(plan, subject=request.subject, bearer=workspace_token, persist=False)
+        if native_origin is None:
+            result = self.provisioner.qualify_member(plan, subject=request.subject, bearer=workspace_token, persist=False)
+        else:
+            result = self.provisioner.qualify_member(plan, subject=request.subject, bearer=workspace_token,
+                persist=False, native_origin=native_origin)
+        if native_origin is not None:
+            return NativeWorkspaceConfirmationResult(proof_sha256=result["sha256"], native_proof=result["native_proof"])
         return WorkspaceConfirmationResult(proof_sha256=result["sha256"])
 
 

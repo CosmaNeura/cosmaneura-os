@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WORKSPACE_BUILD,WORKSPACE_AUTHENTICATED_BUILD,WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession, workspaceAuthHeaders} from './workspace-auth-headers';
@@ -55,7 +56,7 @@ export async function readConnectionCatalog(identity:AuthenticatedWorkspaceIdent
   const cancel=(body:{cancel:()=>Promise<unknown>}|null|undefined)=>{try{void body?.cancel().catch(()=>{});}catch{/* already closed */}};
   try{
     if(signal.aborted)abort();check();
-    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    const base=workspaceApiBase(identity);
     const headers=await wait(workspaceAuthHeaders(identity,base));check();
     headers.set('X-Cosmas-Connection-Contract',String(version));headers.set('Accept','application/json');
     response=await wait(workspaceFetch(identity,base+'/connections/catalog',{method:'GET',headers,signal:controller.signal,

@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {WORKSPACE_AUTHENTICATED_BUILD, WORKSPACE_BUILD, WorkspaceApiError, type AuthenticatedWorkspaceIdentity, type PracticeWorkItem} from "./workspace-api";
 import {assertCurrentDesktopSession, workspaceAuthHeaders} from "./workspace-auth-headers";
@@ -42,7 +43,7 @@ function result(v:unknown,ticket?:string):PrepWorkResult {
 async function request(workspace: string, identity: AuthenticatedWorkspaceIdentity, suffix: string,
   body?: unknown, signal?: AbortSignal): Promise<unknown> {
   if (!PREP_WORK_BUILD || !prepUuid(workspace)) invalid();
-  const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8000";
+  const base = workspaceApiBase(identity);
   const controller = new AbortController(), abort = () => controller.abort();
   const timer = setTimeout(abort, 30000);
   signal?.addEventListener("abort", abort, {once: true}); if (signal?.aborted) abort();

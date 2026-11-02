@@ -113,7 +113,7 @@ def existing_beta(practice_case, monkeypatch):
         monkeypatch.setattr(api, "settings", c.config)
         monkeypatch.setattr(api, "SessionLocal", c.factory)
         monkeypatch.setattr(api, "_clerk_verifier", lambda *_args: checked)
-        monkeypatch.setattr(api, "_runtime_admission_adapter", lambda: adapter)
+        monkeypatch.setattr(api, "_runtime_admission_adapter", lambda origins=None: adapter)
         for module in (provider_team, conversation, handoffs):
             monkeypatch.setattr(module, "runtime_settings", c.config)
 

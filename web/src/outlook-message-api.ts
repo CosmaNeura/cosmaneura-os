@@ -1,3 +1,4 @@
+import {workspaceApiBase} from './workspace-base';
 import {workspaceFetch} from './workspace-protocol';
 import {permittedWorkspaceApi} from './workspace-origin';
 import {workspaceAuthHeaders,assertCurrentDesktopSession} from './workspace-auth-headers';
@@ -80,7 +81,7 @@ export const outlookReviewProvesNoCommit=(error:unknown)=>error instanceof Outlo
 type Request=OutlookMessageListRequest|OutlookMessageReadRequest|OutlookMessageReviewRequest|{action:'status'}|{action:'inspect';read_id:string}|{action:'resolve';idempotency_key:string;kind:'list'|'message'};
 async function send<T>(identity:AuthenticatedWorkspaceIdentity,path:string,body:Request,validate:(value:unknown)=>Promise<T>,signal?:AbortSignal,large=false):Promise<T> {
   if(!OUTLOOK_MESSAGE_BUILD)throw new WorkspaceApiError(404);
-  const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+  const base=workspaceApiBase(identity);
   if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
   const encoded=JSON.stringify(Object.freeze({...body}));if(new TextEncoder().encode(encoded).length>8192)throw new WorkspaceApiError(422);
   const controller=new AbortController(),abort=()=>controller.abort();let rejectAbort:()=>void=()=>{};
