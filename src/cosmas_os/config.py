@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     baa_evidence_ref: str | None = None
     human_deploy_evidence_ref: str | None = None
     phi_authorization_ref: str | None = None
+    # Process env must stay false. Real-patient recording is a Box DB switch only
+    # and takes effect solely when clinic/BAA/PHI refs are present (T-REL-6).
+    real_patient_recording_enabled: bool = False
 
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)
@@ -502,9 +505,14 @@ class Settings(BaseSettings):
     def runtime_configuration_errors(self) -> list[str]:
         """Return configuration faults without exposing configured values."""
 
-        if self.cosmas_env in STANDALONE_ENVS:
-            return self._standalone_configuration_errors()
         errors: list[str] = []
+        if self.real_patient_recording_enabled:
+            errors.append(
+                "REAL_PATIENT_RECORDING_ENABLED must remain false in process "
+                "configuration; enable only via Box after clinic, BAA and PHI refs"
+            )
+        if self.cosmas_env in STANDALONE_ENVS:
+            return errors + self._standalone_configuration_errors()
         errors.extend(self.workspace_enrollment_configuration_errors())
         if (self.standalone_instance_id or self.standalone_root or self.standalone_jwks_path
                 or self.standalone_clerk_issuer_allowlist or self.standalone_model_origin_allowlist):

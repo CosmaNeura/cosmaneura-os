@@ -41,6 +41,7 @@ const SAFE_CODES = new Set(["capture_access_unavailable", "capture_consent_requi
   "capture_request_conflict", "upload_authorization_expired", "capture_in_progress", "capture_session_changed",
   "capture_context_changed", "capture_connection_required", "core_capture_access_unavailable",
   "capture_note_conflict", "capture_source_unavailable", "capture_notes_unavailable", "capture_notebook_changed", "capture_saved_recording_changed",
+  "real_patient_recording_refused",
   "bot_paused", "team_revision_conflict", "bot_source_unavailable", "scribe_source_changed",
   "scribe_source_packet_too_large", "scribe_source_already_saved", "workspace_revision_conflict", "workspace_history_limit", "idempotency_conflict"]);
 const CORE_FAILURE_CODES=new Set(["core_capture_identity_unavailable","core_capture_context_invalid","core_capture_receipt_invalid","core_capture_request_unconfirmed"]);
