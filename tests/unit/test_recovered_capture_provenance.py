@@ -21,7 +21,7 @@ FROZEN_CAPTURE_PROVENANCE_SHA256 = "f1d73c9e7fd9515d7dd16b676f78d1cacd420a63d9f7
 # unlisted counterpart retains its original recorded SHA assertion below.
 REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "5067448784d2410cd38798a516eb2bca0667442c0e776f2eb1d71f6f197cafe1",
-    "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "bbd8277d2b7727103c0fd612a818e341964ac4f3f20fbc951448e0b1aaa77462",
+    "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "2533a5c011d12173635937a607b46a1f827c3d015fab5862261f49da31214492",
     "clients/apple/startup-recovery/WorkspaceRecoveryState.swift": "c07f68af3d311b75890108c4fc5c04b5e38eeeda11cb0047f25424a04531cfd1",
     "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift": "c5f315aa8d19334cab8f364e0748b88fc0b4642e3904b57ea8fd1da395ac659e",
     "clients/apple/native-auth/Bridge/NativeProviderConnection.swift": "61b1c30c279a940f3ffab824a74fe21aba01cdc053d63ed59530b9d12bde2ce9",
@@ -98,7 +98,6 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
             raise AssertionError(equivalent["status"])
     assert reviewed_current == set(REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256)
     assert differed == [
-        "ios/App/App/CosmasWorkspaceViewController.swift",
         "native-plugins/cosmas-native-auth/Package.swift",
         "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
         "native-plugins/native-recording-pcm/Package.swift",
