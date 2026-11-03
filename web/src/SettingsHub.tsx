@@ -208,7 +208,13 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
   const nativeConnectionDirectory=!!nativePresentation&&!!connectionIdentity;
   const discoveryOnly=(value:ConnectionSummary)=>['Ready to connect','Needs setup','Practice setup required','Coming soon','Not checked'].includes(value.label);
   const directoryCards=nativeConnectionDirectory
-    ?catalog&&!checking&&!catalogError?connectionCards.filter(item=>!discoveryOnly(summary(item.id))):[]
+    ?current&&!current.denied?connectionCards.filter(item=>{
+      // Keep an existing service reachable while its check is pending or failed;
+      // the badge still distinguishes current status from this owner's history.
+      const check=current.checks[item.id];
+      const value=current.busy||catalogError||check?.busy?check?.last:summary(item.id);
+      return !!value&&!discoveryOnly(value);
+    }):[]
     :connectionCards;
   return <section ref={section} className="settings-hub" hidden={!open} aria-label={presentingTask?undefined:'Settings'} data-editor-task={presentingGoogleTask?'google':presentingReceivedFaxTask?'efax':undefined}>
     <nav className="settings-hub-nav" aria-label="Settings navigation" hidden={presentingTask}>

@@ -144,7 +144,7 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
   // Hide before effects run, including changes observed by the connection directory.
   const visible=!nativeForeground.suspended&&!needsCheck&&data?.owner===identity&&data.scope===connectionReadScope(identity,'microsoft')?data:null,
     status=visible?.status,start=visible?.start,view=visible?.views[service];
-  const manual=(action:MicrosoftAction)=>{returnCheck.cancel();if(action==='mail'||action==='calendar')setService(action);void run(action);};
+  const manual=(action:MicrosoftAction)=>{if((action==='start'||action==='disconnect')&&messageWorkLocked)return;returnCheck.cancel();if(action==='mail'||action==='calendar')setService(action);void run(action);};
   const cancelRead=()=>{
     const active=operation.current;if(!active||active.action==='start'||active.action==='disconnect')return;
     returnCheck.cancel();epoch.current++;pending.current?.abort();pending.current=null;operation.current=null;
@@ -172,7 +172,7 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
     return()=>clearTimeout(timer);
   },[opening]);
   const begin=(event:{preventDefault:()=>void})=>{
-    if(busy||opening||!start||owner.current!==identity||Date.parse(start.expires_at)<=Date.now()||native&&!native.isCurrent()){event.preventDefault();return;}
+    if(busy||opening||messageWorkLocked||!start||owner.current!==identity||Date.parse(start.expires_at)<=Date.now()||native&&!native.isCurrent()){event.preventDefault();return;}
     returnCheck.begin();
     if(native){navigationPending.current=requestId;setOpening(true);}
   };
@@ -192,11 +192,11 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
       {status.account&&<><h3>{status.account.label}</h3><p>{status.account.email}</p></>}
       <p role="status">{status.state==='connected'?'Microsoft connected.':status.state==='completing_sign_in'?'Completing Microsoft sign-in…':status.state==='sign_in_pending'?'Microsoft sign-in is ready to continue.':'Connect your Microsoft account to continue.'}</p>
     </div>}
-    {(!status||status.state!=='completing_sign_in'&&status.state!=='connected')&&!start&&<button className="team-primary" disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>manual('start')}>Connect with Microsoft</button>}
-    {start&&<p>{native?<button type="button" className="team-primary" disabled={blocked||!nativeReady}
-      data-microsoft-connection={blocked?undefined:JSON.stringify({schemaVersion:1,requestId,expectedRevision:native.revision,href:start.authorization_url})}
+    {(!status||status.state!=='completing_sign_in'&&status.state!=='connected')&&!start&&<button className="team-primary" disabled={blocked||messageWorkLocked||!nativeReady||unavailableFor===identity} onClick={()=>manual('start')}>Connect with Microsoft</button>}
+    {start&&<p>{native?<button type="button" className="team-primary" disabled={blocked||messageWorkLocked||!nativeReady}
+      data-microsoft-connection={blocked||messageWorkLocked?undefined:JSON.stringify({schemaVersion:1,requestId,expectedRevision:native.revision,href:start.authorization_url})}
       onClick={begin}>{opening?'Opening Microsoft…':'Continue with Microsoft'}</button>:
-      <a className="team-primary microsoft-continue" href={start.authorization_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={begin} onAuxClick={begin}>Continue with Microsoft</a>}</p>}
+      <a className="team-primary microsoft-continue" href={blocked||messageWorkLocked?undefined:start.authorization_url} aria-disabled={blocked||messageWorkLocked||undefined} tabIndex={blocked||messageWorkLocked?-1:undefined} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={begin} onAuxClick={begin}>Continue with Microsoft</a>}</p>}
     {!nativeReady&&<p>Microsoft connection is unavailable in this app build. Ask your practice administrator for the configured beta build.</p>}
     {status?.state==='connected'&&<>
       <div className="microsoft-service-tabs" role="group" aria-label="Choose Microsoft service">
@@ -208,7 +208,7 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
         calendarAction={<button className={service==='calendar'?'team-primary':undefined} disabled={blocked} onClick={()=>manual('calendar')}>{visible?.views.calendar?'Refresh calendar':'View next 7 days'}</button>}/>
       {!view&&<p className="microsoft-results-hint">{service==='mail'?'Read recent email to see up to 25 inbox headers.':'View the next 7 days to see event titles and times.'}</p>}
     </>}
-    {(start||status&&status.state!=='connected'&&status.state!=='sign_in_required')&&<button disabled={blocked} onClick={()=>manual('disconnect')}>Cancel Microsoft connection</button>}
+    {(start||status&&status.state!=='connected'&&status.state!=='sign_in_required')&&<button disabled={blocked||messageWorkLocked} onClick={()=>manual('disconnect')}>Cancel Microsoft connection</button>}
     {view&&<section aria-label={view.kind==='mail'?'Recent Outlook email':'Upcoming Outlook events'}>
       <h3>{view.kind==='mail'?'Recent email':'Next 7 days'}</h3><p>{view.kind==='mail'?'Email headers':'Calendar summaries'} · Last loaded {when(view.observed_at)}</p>
       {view.items.length===0&&<p>{view.kind==='mail'?'Your inbox has no messages.':'No events in the next 7 days.'}</p>}

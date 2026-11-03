@@ -5,13 +5,14 @@ import {SettingsHub} from './SettingsHub';
 import {readConnectionCatalog} from './connection-catalog-api';
 import {readConnectionSummary} from './connection-summary';
 import {readinessFixture} from './connection-readiness-fixture';
+import {WorkspaceApiError} from './workspace-api';
 vi.mock('./connection-catalog-api',async original=>({...await original<typeof import('./connection-catalog-api')>(),readConnectionCatalog:vi.fn()}));
 vi.mock('./connection-summary',async original=>({...await original<typeof import('./connection-summary')>(),readConnectionSummary:vi.fn()}));
 let host:HTMLDivElement,root:Root;
 const identity={mode:'clerk_jwt' as const,getToken:async()=>null};
 const buttons=()=>[...host.querySelectorAll<HTMLButtonElement>('button')].filter(b=>!b.closest('[hidden]'));
 async function click(name:string){const b=buttons().find(b=>b.textContent?.includes(name));expect(b,`Visible ${name}`).toBeTruthy();expect(b!.disabled).toBe(false);await act(async()=>b!.click());}
-beforeEach(()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);host=document.createElement('div');document.body.append(host);root=createRoot(host);vi.mocked(readConnectionCatalog).mockResolvedValue(readinessFixture());vi.mocked(readConnectionSummary).mockResolvedValue({label:'Needs setup',reason:'Sign in to connect this invented account.',action:'Connect account',tone:'attention'});});
+beforeEach(()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);host=document.createElement('div');document.body.append(host);root=createRoot(host);vi.mocked(readConnectionCatalog).mockReset().mockResolvedValue(readinessFixture());vi.mocked(readConnectionSummary).mockReset().mockResolvedValue({label:'Needs setup',reason:'Sign in to connect this invented account.',action:'Connect account',tone:'attention'});});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.clearAllMocks();vi.unstubAllGlobals();});
 it('offers four named record paths only after choosing Add connection, without reading or mounting a provider',async()=>{
  const opened=vi.fn(),mounted=vi.fn();function Editor(){useEffect(()=>{mounted();},[]);return <input aria-label="Retained provider draft" defaultValue="Invented draft"/>;}
@@ -112,4 +113,41 @@ it('keeps the native directory compact while the catalog retains setup-only serv
  expect(directory.querySelectorAll('details')).toHaveLength(0);expect(directory.textContent).toContain('Choose your records system');
  await click('Add connection');const catalog=host.querySelector('[aria-label="Add connection catalog"]')!;
  expect(catalog.textContent).toContain('Microsoft email & calendar');expect(catalog.textContent).toContain('Messaging & fax');expect(catalog.textContent).toContain('Elation');
+});
+
+it('keeps a saved native connection reachable through refresh and a transient catalog failure',async()=>{
+ const catalog=readinessFixture({google:'user_connectable'});
+ const connected={label:'Connected',reason:'invented@example.test',action:'Open Google',tone:'neutral' as const,checkedAt:Date.now()};
+ vi.mocked(readConnectionCatalog).mockResolvedValue(catalog);vi.mocked(readConnectionSummary).mockResolvedValue(connected);
+ await act(async()=>root.render(<SettingsHub open nativePresentation="messages" initialScreen="connections" connectionIdentity={identity} google={<button>Actual Google editor</button>} team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
+ const savedRow=()=>buttons().find(b=>b.textContent?.includes('Google email & calendar'));
+ expect(savedRow()?.textContent).toContain('Connected');
+ let finishCatalog!:(value:typeof catalog)=>void,finishAccount!:(value:typeof connected)=>void;
+ vi.mocked(readConnectionCatalog).mockImplementationOnce(()=>new Promise(resolve=>{finishCatalog=resolve;}));
+ vi.mocked(readConnectionSummary).mockImplementationOnce(()=>new Promise(resolve=>{finishAccount=resolve;}));
+ await click('Refresh connections');expect(savedRow()?.disabled).toBe(false);expect(savedRow()?.textContent).toContain('Last confirmed: Connected');
+ await act(async()=>finishCatalog(catalog));expect(savedRow()?.disabled).toBe(false);expect(savedRow()?.textContent).toContain('Last confirmed: Connected');
+ await act(async()=>finishAccount(connected));expect(savedRow()?.textContent).toContain('Connected');
+ vi.mocked(readConnectionCatalog).mockRejectedValueOnce(new WorkspaceApiError(502));
+ await click('Refresh connections');expect(savedRow()?.disabled).toBe(false);expect(savedRow()?.textContent).toContain('Needs attention');expect(savedRow()?.textContent).toContain('Last confirmed: Connected');
+ await click('Google email & calendar');expect(buttons().some(b=>b.textContent==='Actual Google editor')).toBe(true);
+});
+
+it.each([401,403])('removes saved native connection rows when catalog access is denied with %s',async status=>{
+ const lost=vi.fn();vi.mocked(readConnectionSummary).mockResolvedValue({label:'Connected',reason:'invented@example.test',action:'Open Google',tone:'neutral'});
+ await act(async()=>root.render(<SettingsHub open nativePresentation="messages" initialScreen="connections" connectionIdentity={identity} onConnectionAccessLost={lost} google={<button>Actual Google editor</button>} team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
+ expect(host.querySelector('[data-native-directory]')?.textContent).toContain('Google email & calendar');
+ await click('Google email & calendar');expect(buttons().some(b=>b.textContent==='Actual Google editor')).toBe(true);await click('All connections');
+ const error=new WorkspaceApiError(status);vi.mocked(readConnectionCatalog).mockRejectedValueOnce(error);await click('Refresh connections');
+ expect(host.querySelector('[data-native-directory]')?.textContent).not.toContain('Google email & calendar');expect(buttons().some(b=>b.textContent==='Actual Google editor')).toBe(false);expect(lost).toHaveBeenCalledWith(error);
+});
+
+it('does not carry saved native connection rows into a different authenticated account',async()=>{
+ vi.mocked(readConnectionSummary).mockResolvedValue({label:'Connected',reason:'invented@example.test',action:'Open Google',tone:'neutral'});
+ const render=(who:typeof identity)=>act(async()=>root.render(<SettingsHub open nativePresentation="messages" initialScreen="connections" connectionIdentity={who} google={<p>Google editor</p>} team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
+ await render(identity);expect(host.querySelector('[data-native-directory]')?.textContent).toContain('Google email & calendar');
+ let finishOld!:(value:ReturnType<typeof readinessFixture>)=>void;vi.mocked(readConnectionCatalog).mockImplementationOnce(()=>new Promise(resolve=>{finishOld=resolve;}));await click('Refresh connections');
+ vi.mocked(readConnectionCatalog).mockImplementationOnce(()=>new Promise(()=>{}));await render({...identity});
+ expect(host.querySelector('[data-native-directory]')?.textContent).not.toContain('Google email & calendar');expect(host.querySelector('[data-native-directory]')?.textContent).not.toContain('Last confirmed');
+ await act(async()=>finishOld(readinessFixture()));expect(host.querySelector('[data-native-directory]')?.textContent).not.toContain('Google email & calendar');expect(host.querySelector('[data-native-directory]')?.textContent).not.toContain('Last confirmed');
 });
