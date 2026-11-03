@@ -119,7 +119,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
       else if(pending.current){setUncertain(true);}
     }}finally{if(request.current===controller){request.current=null;backgroundRequest.current=false;if(!background&&live())setBusy(false);}controller.abort();}
   },[identity,stopProgressCheck]);
-  const readSavedProgress=useCallback((background:boolean)=>void run(async signal=>{const [next,freshConfig]=await Promise.all([api.status(identity,signal),readConfig(signal)]);if(signal.aborted)throw new DOMException('Progress check canceled','AbortError');const available=await api.practices(identity,signal);if(available.active_practice_id!==(next.practice?.id??null))throw new EnrollmentError(409);return {next,available,freshConfig};},({next,available,freshConfig})=>{accept(next);setLiveConfig(freshConfig);setConfigChecked(true);setPractices(available);setChosenPractice(next.practice?.id??'');setErrors({});setCheckedPending(true);if(pending.current?.replayable===false){pending.current=null;setUncertain(false);}},background),[run,api,identity,accept,readConfig]);
+  const readSavedProgress=useCallback((background:boolean)=>void run(async signal=>{const next=await api.status(identity,signal);if(signal.aborted||!identity.isCurrent())throw new DOMException('Progress check canceled','AbortError');const freshConfig=await readConfig(signal);if(signal.aborted)throw new DOMException('Progress check canceled','AbortError');const available=await api.practices(identity,signal);if(available.active_practice_id!==(next.practice?.id??null))throw new EnrollmentError(409);return {next,available,freshConfig};},({next,available,freshConfig})=>{accept(next);setLiveConfig(freshConfig);setConfigChecked(true);setPractices(available);setChosenPractice(next.practice?.id??'');setErrors({});setCheckedPending(true);if(pending.current?.replayable===false){pending.current=null;setUncertain(false);}},background),[run,api,identity,accept,readConfig]);
   const check=useCallback(()=>readSavedProgress(false),[readSavedProgress]);
   useEffect(()=>{
     mounted.current=true;check();
@@ -209,7 +209,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
   const switchPractice=()=>{if(!status||!chosenPractice||chosenPractice===status.practice?.id||!practices?.practices.some(item=>item.id===chosenPractice))return;
     const body={expected_revision:status.revision,practice_id:chosenPractice};mutation(async(key,signal)=>({enrollment:await api.selectPractice(identity,body,key,signal)}));};
   const recover=()=>{if(!status||busy)return;const practiceId=status.practice?.id??null;
-    mutation(async(key,signal)=>{const [saved,freshConfig]=await Promise.all([api.status(identity,signal),readConfig(signal)]);if((saved.practice?.id??null)!==practiceId)throw new EnrollmentError(409);
+    mutation(async(key,signal)=>{const saved=await api.status(identity,signal);if(signal.aborted||!identity.isCurrent())throw new DOMException('Progress check canceled','AbortError');const freshConfig=await readConfig(signal);if((saved.practice?.id??null)!==practiceId)throw new EnrollmentError(409);
       return {enrollment:await api.recover(identity,{expected_revision:saved.revision},key,signal),config:freshConfig};});};
   const checkout=()=>{if(!status?.quote?.self_serve)return;
     const resuming=status.stage==='finishing_setup'&&status.billing.status==='pending';

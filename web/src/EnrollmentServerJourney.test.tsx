@@ -56,7 +56,7 @@ it.skipIf(!base)('runs signed account, legal practice, denied staff signer, pend
   await wait(()=>expect(ownerHost.textContent).toContain('Your trial clock has not started'));
   const accepted=await api.status(ownerId);expect(accepted.billing.trial_ends_at).toBeNull();expect(accepted.stage).toBe('activation_pending');
   await click(ownerHost,'View agreement receipt');await wait(()=>expect(ownerHost.textContent).toContain('Agreement acceptance receipt'));
-  await lab('/lab/qualify',{practice_id:accepted.practice!.id});await click(ownerHost,'Check setup and payment');await click(ownerHost,'Continue securely with Stripe');
+  await lab('/lab/qualify',{practice_id:accepted.practice!.id});await click(ownerHost,'Check progress');await click(ownerHost,'Continue securely with Stripe');
   await wait(()=>expect(navigations).toHaveLength(1));const firstCheckout=navigations[0];expect(firstCheckout).toContain('https://checkout.stripe.com/');
   // Browser cancellation abandons hosted Checkout; reopening recovers the same server/provider attempt.
   await act(async()=>ownerRoot.unmount());roots=roots.filter(root=>root!==ownerRoot);ownerRoot=createRoot(ownerHost);roots.push(ownerRoot);await act(ownerFlow);

@@ -96,6 +96,21 @@ it('shows pending activation with no trial dates or unconfirmed Chief access',as
   expect(button('Open Chief')).toBeUndefined();expect(button('Continue securely with Stripe')).toBeUndefined();
   expect(host.textContent).toContain('First chargeNot started');
 });
+it('waits for saved status before reading configuration in progress and explicit recovery',async()=>{
+  current=enrollmentStatus('activation_pending',3);current.workspace.status='failed';
+  let initial!:(value:EnrollmentStatus)=>void;
+  vi.mocked(api.status).mockImplementationOnce(()=>new Promise<EnrollmentStatus>(resolve=>{initial=resolve;}));
+  const recover=vi.spyOn(api,'recover').mockImplementation(async()=>structuredClone(current));
+  await render();expect(api.config).not.toHaveBeenCalled();expect(api.practices).not.toHaveBeenCalled();
+  await act(async()=>initial(structuredClone(current)));
+  expect(api.config).toHaveBeenCalledOnce();expect(api.practices).toHaveBeenCalledOnce();
+  let saved!:(value:EnrollmentStatus)=>void;
+  vi.mocked(api.status).mockImplementationOnce(()=>new Promise<EnrollmentStatus>(resolve=>{saved=resolve;}));
+  await click('Check setup and payment');expect(api.config).toHaveBeenCalledOnce();expect(recover).not.toHaveBeenCalled();
+  await act(async()=>saved(structuredClone(current)));
+  expect(api.config).toHaveBeenCalledTimes(2);expect(recover).toHaveBeenCalledOnce();
+  expect(current.workspace.status).toBe('failed');expect(button('Open Chief')).toBeUndefined();expect(navigate).not.toHaveBeenCalled();
+});
 it('explains saved workspace preparation and refreshes into payment without repeating completed steps',async()=>{
   vi.useFakeTimers();vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');
   current=enrollmentStatus('activation_pending',3);current.workspace.status='provisioning';
