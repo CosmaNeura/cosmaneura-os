@@ -1308,7 +1308,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     modelEnabled={team.llm.enabled&&!bot.blocked_capabilities?.includes('model_answer')} sourceAllowed={bot.include_notebook||bot.include_evidence}
     hasSavedContext={chiefSavedContext} notesDirty={note!==latestNote} hasQuestion={!!thought.trim()}
     visitSummary={bot?.role==='chief'?ChiefOpenVisit.summary(workspace):''}
-    canDelegate={!bot.blocked_capabilities?.includes('private_draft_handoff')} onChoose={prepareChiefQuestion}/>;
+    canDelegate={!bot.blocked_capabilities?.includes('private_draft_handoff')} onChoose={prepareChiefQuestion}
+    onOpenNotebook={bot.include_notebook?()=>showConversationTask('Notebook'):undefined}/>;
   const modelRecovery=<>
       {localModelPending&&!busy&&<section className="team-recovery" aria-label="Unconfirmed model request"><p>{inlineModelRecovery?'Chief hasn’t confirmed this message yet. Check its status before retrying.':'The retained request is unconfirmed. Check its saved result; checking never starts another model call.'}</p>
         {localModelPending.type==='ask'&&localModelPending.body.research_analysis&&<details className="research-model-selection"><summary>Retained selected-source request</summary><p>{localModelPending.body.content}</p><p>Only this exact question and saved public-source selection belong to this key.</p><ul>{localModelPending.body.research_analysis.entries.map(anchor=><li key={anchor.entry_id}>Saved packet revision {anchor.entry_revision} · {anchor.entry_id}<small>Lookup {anchor.run_id} · save proof {anchor.save_request_sha256}</small></li>)}</ul></details>}
