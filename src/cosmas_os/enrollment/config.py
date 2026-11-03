@@ -176,14 +176,17 @@ class EnrollmentSettings(BaseSettings):
             blockers.append("Signed enrollment identity verification is unavailable.")
         billing_errors = self.billing_errors()
         billing = not billing_errors and stripe_verified
+        checkout_ready = bool(self.activation_available and self.provisioning_enabled
+                              and billing and not blockers)
         return {
             "contract_version": CONTRACT, "enabled": not blockers, "data_mode": self.data_mode,
             "auth_configured": not self.auth_errors() and auth_ready,
             "clerk_publishable_key": self.clerk_publishable_key or None,
             "auth_methods": ["google", "microsoft", "password"],
             "billing_configured": billing, "production_qualified": self.production_qualified,
-            "activation_available": bool(self.activation_available and self.provisioning_enabled
-                                         and billing and self.stripe_acquisition_enabled and not blockers),
+            "activation_available": checkout_ready and self.stripe_acquisition_enabled,
+            # Existing frozen attempts retain recovery while new acquisition is closed.
+            "checkout_recovery_available": checkout_ready,
             "blockers": blockers, "billing_blockers": billing_errors + ([] if stripe_verified else ["Stripe catalog and portal have not been verified."]),
             "provisioning_enabled": self.provisioning_enabled,
             "allowed_workspace_origins": self.allowed_workspace_origins,

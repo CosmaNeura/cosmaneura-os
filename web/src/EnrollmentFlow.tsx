@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { EnrollmentError, BAA, ENROLLMENT_CONTACT, ENROLLMENT_WORKSPACE_NAME_MAX, type EnrollmentConfig, type EnrollmentDocument, type EnrollmentInvitation,
+import { EnrollmentError, BAA, ENROLLMENT_CONTACT, ENROLLMENT_WORKSPACE_NAME_MAX, validateEnrollmentConfig, type EnrollmentConfig, type EnrollmentDocument, type EnrollmentInvitation,
   type EnrollmentPractices,type EnrollmentReceipt, type EnrollmentStage, type EnrollmentStatus, type PracticeInput } from './enrollment-contract';
 import { stripeDestination, workspaceDestination, type EnrollmentApi, type EnrollmentIdentity } from './enrollment-api';
 import { dollars, EnrollmentPricing, initialSeatSelection, selectionForSeats, type SeatSelection } from './EnrollmentPricing';
@@ -8,10 +8,11 @@ import './enrollment.css';
 type PracticeDraft = { legal_name:string;display_name:string;address_line1:string;address_line2:string;city:string;
   region:string;postal_code:string;administrative_email:string };
 type Operation = { key:string;revision:number;replayable?:boolean;run:(key:string,signal:AbortSignal)=>Promise<OperationResult> };
-type OperationResult = { enrollment:EnrollmentStatus;available?:EnrollmentPractices;url?:string|null;invitation?:EnrollmentInvitation;invitationPurpose?:'team'|'signer';joined?:boolean };
+type OperationResult = { enrollment:EnrollmentStatus;available?:EnrollmentPractices;config?:EnrollmentConfig;url?:string|null;invitation?:EnrollmentInvitation;invitationPurpose?:'team'|'signer';joined?:boolean };
 type Errors = Record<string,string>;
 const emptyPractice:PracticeDraft = {legal_name:'',display_name:'',address_line1:'',address_line2:'',city:'',region:'',postal_code:'',administrative_email:''};
 const steps = ['Account','Practice','Agreement','Trial','Chief'];
+const workspacePreparationNotice = 'Your workspace is being prepared. Your trial has not been activated.';
 function stageIndex(stage:EnrollmentStage) { return stage==='account'?0:stage==='practice'?1:stage==='agreement'?2:stage==='ready'?4:3; }
 const formatDate = (date:string|null) => date ? new Intl.DateTimeFormat('en-US',{dateStyle:'long'}).format(new Date(date)) : 'Not started';
 const validEmail = (value:string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && value.length<=320;
@@ -23,6 +24,9 @@ function failure(error:unknown):string {
     if (error.code==='enrollment_trial_already_received') return 'This practice already received its trial. Manage the saved subscription or contact us.';
     if (error.code==='enrollment_document_changed') return 'The agreement changed. Reload the agreement and review it before accepting.';
     if (error.code==='enrollment_agreement_eligibility') return 'This agreement requires a HIPAA covered entity. Contact us for the appropriate agreement.';
+    if (error.code==='enrollment_activation_unavailable') return 'Trial activation is not available yet. Your completed steps are saved. Check progress to try again.';
+    if (error.code==='enrollment_configuration_changed') return 'The account configuration could not be confirmed. Your completed steps are saved. Check progress or contact us.';
+    if (error.code==='enrollment_workspace_preparation_pending') return 'Your workspace is still being prepared. Your completed steps are saved. Check progress before continuing.';
     if (error.status===401 || error.status===403) return 'Your account cannot access this enrollment. Sign in again or contact the practice owner.';
     if (error.status===409) return 'Your saved setup changed. Check progress before continuing.';
     if (error.status===422) return 'Review the information and required confirmations before continuing.';
@@ -69,7 +73,9 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
   const [teamOpen,setTeamOpen]=useState(false),[teamEmail,setTeamEmail]=useState(''),[teamRole,setTeamRole]=useState<'admin'|'staff'>('staff'),[teamCanSign,setTeamCanSign]=useState(false);
   const [review,setReview]=useState<'account'|'practice'|null>(null),[uncertain,setUncertain]=useState(false);
   const [practices,setPractices]=useState<EnrollmentPractices|null>(null),[chosenPractice,setChosenPractice]=useState('');
+  const [liveConfig,setLiveConfig]=useState(config),[configChecked,setConfigChecked]=useState(true);
   const stageHeading=useRef<HTMLHeadingElement|null>(null),pending=useRef<Operation|null>(null),request=useRef<AbortController|null>(null),mounted=useRef(false),currentStatus=useRef(status);currentStatus.current=status;
+  const backgroundRequest=useRef(false);
   const [checkedPending,setCheckedPending]=useState(false),documentRequested=useRef(false),inviteReviewed=useRef(false);
   const accept=useCallback((next:EnrollmentStatus)=>{
     const previous=currentStatus.current;
@@ -82,9 +88,23 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
       setPractice({legal_name,display_name,address_line1,address_line2,city,region,postal_code,administrative_email});setSeats(selectionForSeats(next.practice.human_seats));setCovered(true);}
     if (pending.current && (!samePractice||next.revision!==pending.current.revision)) {pending.current=null;setUncertain(false);}
   },[initialName]);
-  const run=useCallback(async<T,>(work:(signal:AbortSignal)=>Promise<T>,consume:(value:T)=>void)=>{
-    if(request.current || !mounted.current || !identity.isCurrent()) return;
-    const controller=new AbortController();request.current=controller;setBusy(true);setMessage('');
+  const stopProgressCheck=useCallback(()=>{
+    if(backgroundRequest.current){request.current?.abort();request.current=null;backgroundRequest.current=false;}
+  },[]);
+  const readConfig=useCallback(async(signal:AbortSignal)=>{
+    try{
+      const next=validateEnrollmentConfig(await api.config(signal));
+      if(next.clerk_publishable_key!==config.clerk_publishable_key||next.data_mode!==config.data_mode||
+        (next.workspace_origin_policy??'exact')!==(config.workspace_origin_policy??'exact')||
+        [...next.allowed_workspace_origins].sort().join('\n')!==[...config.allowed_workspace_origins].sort().join('\n'))throw new EnrollmentError(503,'enrollment_configuration_changed');
+      return next;
+    }catch(error){if(!signal.aborted&&mounted.current&&identity.isCurrent())setConfigChecked(false);throw error;}
+  },[api,config,identity]);
+  const run=useCallback(async<T,>(work:(signal:AbortSignal)=>Promise<T>,consume:(value:T)=>void,background=false)=>{
+    if(!mounted.current || !identity.isCurrent()) return;
+    if(request.current){if(background||!backgroundRequest.current)return;stopProgressCheck();}
+    const controller=new AbortController();request.current=controller;backgroundRequest.current=background;
+    if(!background){setBusy(true);setMessage('');}
     const live=()=>mounted.current&&identity.isCurrent()&&!controller.signal.aborted;
     try{const value=await work(controller.signal);if(live())consume(value);}
     catch(error){if(live()){
@@ -95,11 +115,12 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
         setDocument(null);documentRequested.current=false;setReceipt(null);setInvitation(null);setInviteToken('');setSignerEmail('');setNeedsSigner(false);
         setCovered(false);setAuthority(false);setAccepted(false);setSeats({plan:'solo',humanSeats:1});pending.current=null;setUncertain(false);
         setTeamOpen(false);setTeamEmail('');setTeamCanSign(false);
-      }else if(error instanceof EnrollmentError&&(error.status===422||['enrollment_human_seat_limit','enrollment_trial_already_received','enrollment_agreement_eligibility','enrollment_document_changed'].includes(error.code))){pending.current=null;setUncertain(false);}
+      }else if(error instanceof EnrollmentError&&(error.status===422||['enrollment_human_seat_limit','enrollment_trial_already_received','enrollment_agreement_eligibility','enrollment_document_changed','enrollment_activation_unavailable','enrollment_configuration_changed','enrollment_workspace_preparation_pending'].includes(error.code))){pending.current=null;setUncertain(false);}
       else if(pending.current){setUncertain(true);}
-    }}finally{if(request.current===controller){request.current=null;if(live())setBusy(false);}}
-  },[identity]);
-  const check=useCallback(()=>void run(async signal=>{const next=await api.status(identity,signal);const available=await api.practices(identity,signal);if(available.active_practice_id!==(next.practice?.id??null))throw new EnrollmentError(409);return {next,available};},({next,available})=>{accept(next);setPractices(available);setChosenPractice(next.practice?.id??'');setErrors({});setCheckedPending(true);if(pending.current?.replayable===false){pending.current=null;setUncertain(false);}}),[run,api,identity,accept]);
+    }}finally{if(request.current===controller){request.current=null;backgroundRequest.current=false;if(!background&&live())setBusy(false);}controller.abort();}
+  },[identity,stopProgressCheck]);
+  const readSavedProgress=useCallback((background:boolean)=>void run(async signal=>{const [next,freshConfig]=await Promise.all([api.status(identity,signal),readConfig(signal)]);if(signal.aborted)throw new DOMException('Progress check canceled','AbortError');const available=await api.practices(identity,signal);if(available.active_practice_id!==(next.practice?.id??null))throw new EnrollmentError(409);return {next,available,freshConfig};},({next,available,freshConfig})=>{accept(next);setLiveConfig(freshConfig);setConfigChecked(true);setPractices(available);setChosenPractice(next.practice?.id??'');setErrors({});setCheckedPending(true);if(pending.current?.replayable===false){pending.current=null;setUncertain(false);}},background),[run,api,identity,accept,readConfig]);
+  const check=useCallback(()=>readSavedProgress(false),[readSavedProgress]);
   useEffect(()=>{
     mounted.current=true;check();
     if(new URLSearchParams(window.location.search).has('invite')){const url=new URL(window.location.href);url.searchParams.delete('invite');window.history.replaceState(null,'',url.pathname+url.search+url.hash);}
@@ -107,6 +128,21 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
   },[check]);
   useEffect(()=>{if(!status?.profile?.display_name){if(!name&&initialName)setName(initialName);if(!practice.administrative_email&&initialEmail)setPractice(previous=>({...previous,administrative_email:initialEmail}));}},[initialName,initialEmail,status?.profile,name,practice.administrative_email]);
   const stage=review??status?.stage;
+  const activationAvailable=configChecked&&liveConfig.enabled&&liveConfig.auth_configured&&liveConfig.billing_configured&&liveConfig.activation_available;
+  const checkoutRecoveryAvailable=configChecked&&liveConfig.enabled&&liveConfig.auth_configured&&liveConfig.billing_configured&&liveConfig.checkout_recovery_available===true;
+  const preparingWorkspace=stage==='activation_pending'&&!!status?.agreement?.accepted&&status.billing.status==='none'
+    &&['pending','provisioning'].includes(status.workspace.status)&&(!status.action_required||status.action_required===workspacePreparationNotice);
+  const waitingForActivation=stage==='payment'&&!!status?.agreement?.accepted&&status.billing.status==='none'
+    &&status.workspace.status==='ready'&&!status.action_required&&!activationAvailable;
+  useEffect(()=>{
+    if(!(preparingWorkspace||waitingForActivation)||busy||uncertain||message||review||chosenPractice!==(status?.practice?.id??''))return;
+    // Read saved progress only. User actions take priority; never replay setup or billing automatically.
+    const refresh=()=>{if(window.document.visibilityState==='visible'&&mounted.current&&identity.isCurrent()&&!request.current&&!pending.current)readSavedProgress(true);};
+    const visibility=()=>{if(window.document.visibilityState==='visible')refresh();else stopProgressCheck();};
+    const interval=window.setInterval(refresh,15_000);
+    window.document.addEventListener('visibilitychange',visibility);
+    return()=>{window.clearInterval(interval);window.document.removeEventListener('visibilitychange',visibility);stopProgressCheck();};
+  },[preparingWorkspace,waitingForActivation,busy,uncertain,message,review,chosenPractice,readSavedProgress,identity,stopProgressCheck,status?.practice?.id]);
   useEffect(()=>{
     if(!stage)return;
     const heading=stageHeading.current;
@@ -126,6 +162,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
     void run(async signal=>{const result=await operation.run(operation.key,signal);
       const latest=await api.status(identity,signal),available=await api.practices(identity,signal);if(available.active_practice_id!==(latest.practice?.id??null))throw new EnrollmentError(409);return {...result,enrollment:latest,available};},result=>{
       accept(result.enrollment);pending.current=null;setUncertain(false);setReview(null);
+      if(result.config){setLiveConfig(result.config);setConfigChecked(true);}
       if(result.available){setPractices(result.available);setChosenPractice(result.enrollment.practice?.id??'');}
       if(result.joined)setInviteToken('');
       if(result.invitation){setInvitation(result.invitation);setMessage(result.invitationPurpose==='team'?'The invitation is saved. Share this link with your teammate.':'Your progress is saved. Share this invitation with the authorized representative.');}
@@ -172,14 +209,22 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
   const switchPractice=()=>{if(!status||!chosenPractice||chosenPractice===status.practice?.id||!practices?.practices.some(item=>item.id===chosenPractice))return;
     const body={expected_revision:status.revision,practice_id:chosenPractice};mutation(async(key,signal)=>({enrollment:await api.selectPractice(identity,body,key,signal)}));};
   const recover=()=>{if(!status||busy)return;const practiceId=status.practice?.id??null;
-    mutation(async(key,signal)=>{const saved=await api.status(identity,signal);if((saved.practice?.id??null)!==practiceId)throw new EnrollmentError(409);
-      return {enrollment:await api.recover(identity,{expected_revision:saved.revision},key,signal)};});};
-  const checkout=()=>{if(!status?.quote?.self_serve||!config.billing_configured)return;const body={expected_revision:status.revision};
-    mutation(async(key,signal)=>{const value=await api.checkout(identity,body,key,signal);return {enrollment:value.enrollment,url:value.status==='open'?value.url:null};});};
+    mutation(async(key,signal)=>{const [saved,freshConfig]=await Promise.all([api.status(identity,signal),readConfig(signal)]);if((saved.practice?.id??null)!==practiceId)throw new EnrollmentError(409);
+      return {enrollment:await api.recover(identity,{expected_revision:saved.revision},key,signal),config:freshConfig};});};
+  const checkout=()=>{if(!status?.quote?.self_serve)return;
+    const resuming=status.stage==='finishing_setup'&&status.billing.status==='pending';
+    if(!(resuming?checkoutRecoveryAvailable:activationAvailable))return;const body={expected_revision:status.revision};
+    mutation(async(key,signal)=>{
+      let fresh:EnrollmentConfig;try{fresh=await readConfig(signal);}catch(error){if(error instanceof EnrollmentError&&[401,403].includes(error.status))throw error;throw new EnrollmentError(503,'enrollment_activation_unavailable');}
+      if(signal.aborted||!identity.isCurrent())throw new EnrollmentError(401);
+      setLiveConfig(fresh);setConfigChecked(true);
+      if(!fresh.enabled||!fresh.auth_configured||!fresh.billing_configured||!(resuming?fresh.checkout_recovery_available===true:fresh.activation_available))throw new EnrollmentError(503,'enrollment_activation_unavailable');
+      const value=await api.checkout(identity,body,key,signal);return {enrollment:value.enrollment,url:value.status==='open'?value.url:null};});};
   const showReceipt=()=>void run(signal=>api.receipt(identity,signal),setReceipt);
   const confirmWorkspace=()=>{if(!status||!prepareWorkspaceToken||busy)return;const practiceId=status.practice?.id??null;
     submit({key:crypto.randomUUID(),revision:status.revision,replayable:false,run:async(key,signal)=>{
       const saved=await api.status(identity,signal);if((saved.practice?.id??null)!==practiceId||!saved.workspace.organization_id)throw new EnrollmentError(409);
+      if(!saved.workspace.confirmation_available)throw new EnrollmentError(503,'enrollment_workspace_preparation_pending');
       const token=await prepareWorkspaceToken(saved,signal);if(!token||signal.aborted||!identity.isCurrent())throw new EnrollmentError(401);
       let confirmed=await api.confirmWorkspace(identity,{expected_revision:saved.revision,workspace_token:token},key,signal);
       if(confirmed.stage!=='ready'&&confirmed.action_required==='Your practice membership is prepared. Refresh your account, select the practice and confirm again.'){
@@ -265,24 +310,26 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
               {status.billing.status==='trialing'&&<><dt>Trial ends</dt><dd>{formatDate(status.billing.trial_ends_at)}</dd></>}
               <dt>Invoices and payments</dt><dd>Review current invoices, payment amounts and dates in the Stripe billing portal.</dd></>}
         </dl>:<p>{status.practice?.human_seats} human users. Your negotiated recurring price must be agreed before checkout.</p>}
-        {stage==='activation_pending'&&<p role="status">Your workspace is being prepared. Your trial clock has not started. We will ask for a card through Stripe when activation is available.</p>}
+        {stage==='activation_pending'&&<p role="status">{preparingWorkspace?'Your practice details and signed agreement are saved. Your workspace is being prepared. Your trial clock has not started.':status.workspace.status==='failed'?'Your completed steps are saved, but workspace preparation could not finish. Your trial clock has not started. Check setup or contact us for help.':'Your workspace is being prepared. Your trial clock has not started. We will ask for a card through Stripe when activation is available.'}</p>}
+        {preparingWorkspace&&<p className="enrollment-hint">{message||uncertain?'Use Check progress to reconnect.':'This page checks progress automatically.'} You can return later; your completed steps are saved.</p>}
         {stage==='finishing_setup'&&<p role="status">We are confirming payment setup and your workspace. A checkout return alone does not confirm access. Your saved attempt will be recovered when you check.</p>}
         {stage==='negotiated'&&<p role="status">Your enrollment is saved for a negotiated quote. No unpriced subscription or trial has started. <a href="mailto:john@cosmaneura.com?subject=CosmaBot%20larger-practice%20pricing">Contact us about your practice price</a>.</p>}
         {stage==='canceled'&&<p>Your subscription is canceled. Manage your saved billing details or contact us; another trial is not created automatically.</p>}
-        {stage==='payment'&&newTrial&&<><p>A card is required. Stripe handles card entry and verification. Your first subscription charge follows the confirmed 14-day trial unless you cancel before it ends.</p><p className="enrollment-hint">The hosted checkout confirms the final tax treatment and billing terms before you agree. No card details are saved in this browser.</p></>}
+        {stage==='payment'&&newTrial&&activationAvailable&&<><p>A card is required. Stripe handles card entry and verification. Your first subscription charge follows the confirmed 14-day trial unless you cancel before it ends.</p><p className="enrollment-hint">The hosted checkout confirms the final tax treatment and billing terms before you agree. No card details are saved in this browser.</p></>}
+        {(stage==='payment'&&!activationAvailable||stage==='finishing_setup'&&status.billing.status==='pending'&&!checkoutRecoveryAvailable)&&newTrial&&<p role="status">Trial activation is not available yet. Your completed steps are saved. Check progress to see when you can continue.</p>}
         {stage==='payment_action_required'&&<p>Use your saved billing account to review payment details. Check setup after completing any required payment action. Your original trial dates are preserved.</p>}
         {stage==='ready'&&<><p role="status">Your practice, agreement and subscription are confirmed. Open Chief to begin a supported practice task.</p>{status.billing.cancel_at_period_end&&<p>Cancellation is scheduled. Review its effective date in the billing portal.</p>}</>}
-        {status.action_required&&<p className="enrollment-hint">An additional setup action is required. Check progress or contact your practice owner.</p>}
+        {status.action_required&&!preparingWorkspace&&<p className="enrollment-hint">An additional setup action is required. Check progress or contact your practice owner.</p>}
         <div className="enrollment-actions">
           {stage==='ready'&&<button className="primary" onClick={chief} disabled={formDisabled}>Open Chief</button>}
           {stage==='ready'&&ownsPractice&&<button onClick={()=>{setTeamOpen(value=>!value);setInvitation(null);}} disabled={formDisabled}>Invite a teammate</button>}
-          {stage==='payment'&&newTrial&&ownsPractice&&status.quote?.self_serve&&<button className="primary" onClick={checkout} disabled={formDisabled||!config.billing_configured}>Continue securely with Stripe</button>}
-          {stage==='finishing_setup'&&ownsPractice&&status.billing.status==='pending'&&<button className="primary" onClick={checkout} disabled={formDisabled||!config.billing_configured}>Resume secure checkout</button>}
-          {stage!=='ready'&&status.workspace.organization_id&&status.agreement?.accepted&&(ownerSetupPending||['trialing','active'].includes(status.billing.status))&&prepareWorkspaceToken&&<button className="primary" onClick={confirmWorkspace} disabled={formDisabled}>{ownerSetupPending?'Continue setup':'Confirm practice account'}</button>}
-          <button onClick={ownsPractice?recover:check} disabled={formDisabled}>{ownsPractice?'Check setup and payment':'Check saved progress'}</button>
+          {stage==='payment'&&newTrial&&ownsPractice&&status.quote?.self_serve&&<button className="primary" onClick={checkout} disabled={formDisabled||!activationAvailable}>Continue securely with Stripe</button>}
+          {stage==='finishing_setup'&&ownsPractice&&status.billing.status==='pending'&&<button className="primary" onClick={checkout} disabled={formDisabled||!checkoutRecoveryAvailable}>Resume secure checkout</button>}
+          {stage!=='ready'&&status.workspace.confirmation_available&&status.workspace.organization_id&&status.agreement?.accepted&&(ownerSetupPending||['trialing','active'].includes(status.billing.status))&&prepareWorkspaceToken&&<button className="primary" onClick={confirmWorkspace} disabled={formDisabled}>{ownerSetupPending?'Continue setup':'Confirm practice account'}</button>}
+          <button onClick={preparingWorkspace||waitingForActivation?check:ownsPractice?recover:check} disabled={formDisabled}>{preparingWorkspace||waitingForActivation?'Check progress':ownsPractice?'Check setup and payment':'Check saved progress'}</button>
           {status.agreement?.accepted&&<button onClick={showReceipt} disabled={formDisabled}>View agreement receipt</button>}
           {['ready','payment_action_required','canceled'].includes(stage??'')&&ownsPractice&&status.billing.status!=='none'&&<button onClick={portal} disabled={formDisabled}>Manage billing or cancel</button>}
-          <button onClick={()=>setReview('practice')} disabled={formDisabled}>Review practice</button>
+          <button onClick={()=>{stopProgressCheck();setReview('practice');}} disabled={formDisabled}>Review practice</button>
         </div>
         {stage==='ready'&&ownsPractice&&teamOpen&&<section className="enrollment-receipt" aria-label="Invite a teammate"><h2>Invite a teammate</h2><p>Every human needs a purchased seat, including office staff. Pending invitations reserve a seat. This joins the existing practice agreement and subscription.</p>
           <form className="enrollment-form" onSubmit={inviteTeammate} noValidate><Field name="team_email" label="Teammate’s email" type="email" value={teamEmail} onChange={setTeamEmail} error={errors.team_email} disabled={formDisabled}/>

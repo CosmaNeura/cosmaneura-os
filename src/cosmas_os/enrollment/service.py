@@ -153,13 +153,19 @@ class EnrollmentService:
         return bool(practice.subscription_status == "active" and practice.paid_period_ends_at
                     and utc(practice.paid_period_ends_at) > self._period_now())
 
+    @staticmethod
+    def _workspace_binding_complete(practice: Practice) -> bool:
+        return all((practice.box_id, practice.organization_id, practice.workspace_url,
+                    practice.workspace_api_origin, practice.source_commit, practice.image_sha256))
+
     def _view(self, session: Session, account: Account) -> dict[str, Any]:
         result: dict[str, Any] = {"contract_version": CONTRACT, "revision": account.revision,
             "stage": "account", "profile": {"display_name": account.display_name, "title": account.title, "email": account.email},
             "practice": None, "agreement": None, "quote": None,
             "billing": {"status": "none", "trial_ends_at": None, "first_charge_at": None,
                         "cancel_at_period_end": False, "payment_action_required": False},
-            "workspace": {"status": "pending", "url": None, "organization_id": None, "box_id": None},
+            "workspace": {"status": "pending", "url": None, "organization_id": None, "box_id": None,
+                          "confirmation_available": False},
             "action_required": None}
         if not account.active_practice_id:
             if account.display_name and account.revision > 0:
@@ -183,8 +189,16 @@ class EnrollmentService:
         result["billing"] = {"status": status, "trial_ends_at": iso(practice.trial_ends_at),
                              "first_charge_at": iso(practice.trial_ends_at), "cancel_at_period_end": practice.cancel_at_period_end,
                              "payment_action_required": action}
+        owner_prebilling = (member.role == "owner" and account.id == practice.owner_id
+                            and status in {"none", "pending"} and practice.trial_ends_at is None)
+        # This only advertises an explicit confirmation attempt. It grants no
+        # admission and keeps private routing hidden until entitled ready access.
+        confirmation_available = bool(acceptance and self._workspace_binding_complete(practice)
+            and practice.workspace_status != "failed"
+            and (owner_prebilling or practice.workspace_status == "ready" and self._entitled(practice)))
         result["workspace"] = {"status": practice.workspace_status, "url": None,
-                               "organization_id": practice.organization_id, "box_id": practice.box_id}
+                               "organization_id": practice.organization_id, "box_id": practice.box_id,
+                               "confirmation_available": confirmation_available}
         if not acceptance:
             result["stage"] = "agreement"
             if not practice.covered_entity:
@@ -705,8 +719,7 @@ class EnrollmentService:
             practice, member = self._practice(session, account)
             if not self._acceptance(session, practice):
                 raise EnrollmentError("agreement_required", "Accept the practice agreement before confirming access.")
-            if not all([practice.box_id, practice.organization_id, practice.workspace_url, practice.workspace_api_origin,
-                        practice.source_commit, practice.image_sha256]):
+            if not self._workspace_binding_complete(practice):
                 raise EnrollmentError("workspace_preparation_pending", "Your workspace is being prepared. Check progress shortly.")
             if native_origin is not None:
                 self._native_scope(practice, native_origin)

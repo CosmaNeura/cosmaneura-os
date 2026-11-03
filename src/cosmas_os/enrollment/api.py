@@ -330,6 +330,7 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
         value["workspace_confirmation_configured"] = bool(workspace_confirmer and
             getattr(workspace_confirmer, "native_origin_supported", False) is True and native_workspace_authority is not None)
         value["activation_available"] = bool(value["activation_available"] and value["workspace_confirmation_configured"])
+        value["checkout_recovery_available"] = bool(value["checkout_recovery_available"] and value["workspace_confirmation_configured"])
         return {**value, "native_account": {"issuer": settings.clerk_issuer, "audience": settings.clerk_audience,
                 "session_policy": settings.clerk_session_policy, "native_origin": origins[0]}}
 
@@ -339,6 +340,7 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
         value["workspace_confirmation_configured"] = workspace_confirmer is not None
         if workspace_confirmer is None:
             value["activation_available"] = False
+            value["checkout_recovery_available"] = False
         return value
 
     @app.get("/enrollment/v1/status")

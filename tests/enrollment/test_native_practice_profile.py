@@ -412,6 +412,31 @@ def test_native_enrollment_operations_use_real_body_validators_and_registered_st
         json={"expected_revision": current_revision, "display_name": "Blocked Native", "title": "Owner"}).status_code == 503
 
 
+@pytest.mark.parametrize("hold", ["open", "acquisition", "activation", "catalog", "confirmer", "native_confirmer"])
+def test_checkout_recovery_config_shares_public_and_native_readiness_except_acquisition(native_case, monkeypatch, hold):
+    c = native_case
+    c.settings.provisioning_enabled = True
+    c.settings.stripe_acquisition_enabled = hold != "acquisition"
+    c.settings.activation_available = hold != "activation"
+    if hold == "catalog":
+        def unavailable():
+            raise EnrollmentError("stripe_unavailable", "Synthetic catalog is unavailable.", 503)
+        monkeypatch.setattr(c.service.commerce, "validate_configuration", unavailable)
+    if hold == "confirmer":
+        monkeypatch.setattr("cosmas_os.enrollment.provisioning.create_workspace_confirmer", lambda *_: None)
+    if hold == "native_confirmer":
+        monkeypatch.setattr(BoundWorkspaceConfirmer, "native_origin_supported", False)
+    app = create_app(c.settings, engine=c.factory.kw["bind"], verifier=c.verifier,
+        commerce=c.service.commerce, native_workspace_authority=c.authority)
+    with TestClient(app) as client:
+        public = client.get("/enrollment/v1/config").json()
+        native = client.get("/enrollment/v1/native/config", headers={"Origin": APPLE}).json()
+    assert public["checkout_recovery_available"] is (hold in {"open", "acquisition", "native_confirmer"})
+    assert public["activation_available"] is (hold in {"open", "native_confirmer"})
+    assert native["checkout_recovery_available"] is (hold in {"open", "acquisition"})
+    assert native["activation_available"] is (hold == "open")
+
+
 def test_browser_confirmation_dataclass_remains_exact_original_shape(native_case):
     c = native_case
     request = WorkspaceConfirmationRequest(c.practice_id, c.box_id, c.org, c.scope().workspace_api_origin,
