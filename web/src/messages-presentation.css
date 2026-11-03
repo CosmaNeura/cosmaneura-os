@@ -176,3 +176,7 @@
     }
   }
 }
+
+/* The source picker shares the message row; no extra panel takes chat space. */
+.team-workspace[data-presentation=messages] .team-composer-wrap .team-composer{grid-template-columns:44px minmax(0,1fr) 44px}
+.team-workspace[data-presentation=messages] .team-composer .messages-add-source{width:44px;height:44px;min-height:44px;padding:0;margin:0;border:0;border-radius:50%;background:transparent;color:var(--cb-tint);font-size:26px;line-height:1}
