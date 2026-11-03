@@ -117,7 +117,7 @@ export function render(input){
   const root=ownedVm?parent+'/app':`/var/lib/cosmabot-standalone/${id}`,postgres=ownedVm?parent+'/postgres':`/var/lib/cosmabot-postgres/${id}`;
   const config=ownedVm?parent+'/config':`/etc/cosmabot-standalone/${id}`,release=ownedVm?parent+'/release':`/opt/cosmabot-standalone/${id}`,proxyRoot=ownedVm?parent+'/proxy':`/var/lib/cosmabot-https/${id}`;
   const apiUser=`cosmabot-api-${short}`,pgUser=`cosmabot-pg-${short}`,proxyUser=`cosmabot-web-${short}`;
-  const dbName=`cosmabot_standalone_${id.replaceAll('-','')}`,dbRole=`cosmabot_runtime_${short}`;
+  const dbName=`cosmabot_standalone_${id.replaceAll('-','')}`,dbRole=`cosmabot_runtime_${short}`,migrationRole=`cbpg_${short}`;
   const files=workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,coreWebOrigin:'',captureUploadOrigins:[],
     dataMode:'synthetic',featureProfile:features.profile});
   const parties=[value.web_origin,'app://cosmas','capacitor://localhost'].join(',');
@@ -148,15 +148,19 @@ export function render(input){
     live_readiness:{requires_identity_policy:'audience',qualified:false},
     resource_identity:{host_name:`cosmabot-standalone-${short}`,api_user:apiUser,postgres_user:pgUser,proxy_user:proxyUser,standalone_root:root,
       postgres_root:postgres,proxy_root:proxyRoot,configuration_root:config,release_root:release,
-      database:dbName,database_role:dbRole,database_marker:`cosmabot-standalone:${id}`,
+      database:dbName,database_role:dbRole,database_migration_role:migrationRole,
+      database_marker:`cosmabot-standalone:${id}`,
       file_marker:{source:'instance.json',destination:root+'/instance.json',owner:apiUser,mode:'0600'}},
     database:{host:'127.0.0.1',port:value.ports.postgres,name:dbName,role:dbRole,
+      migration_role:migrationRole,
+      migrate_entrypoint:'infra/standalone/package/migrate.py',
       pre_migrated_required:true,schema_revision:value.artifacts.schema_revision,
       superuser:false,create_database:false,create_role:false,replication:false,bypass_rls:false,
       schema_create:false,database_create:false,temporary:false,
       migration_credential_available_to_api:false,initialization_service:false,
       startup_guard:'Existing backend validates exact owned database marker, runtime role and schema before readiness.',
-      transport:'Dedicated host loopback only; no remote PostgreSQL URL or TLS-query contract is introduced.'},
+      transport:'Dedicated host loopback only; no remote PostgreSQL URL or TLS-query contract is introduced.',
+      migrate_roles:'Peer migrator and runtime roles are derived from instance_id (cbpg_<short>, cosmabot_runtime_<short>); never hard-coded.'},
     private_environment:{file:config+'/api-private.env',expected_owner:'root',mode:'0600',values_in_package:false,
       exact_names:['DATABASE_URL','HUMAN_DEPLOY_EVIDENCE_REF'],
       database_url_structure:`postgresql+psycopg://${dbRole}:<external password>@127.0.0.1:${value.ports.postgres}/${dbName}`},
@@ -239,7 +243,7 @@ export function render(input){
     'api-public.env':Object.entries(environment).map(([key,item])=>`${key}=${JSON.stringify(item)}`).join('\n')+'\n',
     'network-requirements.json':firewall,'https.review.conf':proxy,
     'postgresql.review.conf':`# Use only an existing owned PostgreSQL16 data directory. Never initdb here.\n# TCP loopback only; no system PostgreSQL socket or lock directory is shared.\n# Administrative access needs a separate reviewed maintenance procedure.\nlisten_addresses = '127.0.0.1'\nunix_socket_directories = ''\nport = ${value.ports.postgres}\npassword_encryption = 'scram-sha-256'\n`,
-    'pg_hba.review.conf':`# Runtime role only; migration/admin access must be a separate reviewed local procedure.\nhost ${dbName} ${dbRole} 127.0.0.1/32 scram-sha-256\nhost all all 0.0.0.0/0 reject\nhost all all ::0/0 reject\n`,
+    'pg_hba.review.conf':`# Runtime role plus peer migrator; API never receives the migrator credential.\nhost ${dbName} ${dbRole} 127.0.0.1/32 scram-sha-256\nhost ${dbName} ${migrationRole} 127.0.0.1/32 scram-sha-256\nhost all all 0.0.0.0/0 reject\nhost all all ::0/0 reject\n`,
     'cosmabot-api.review.service':service({name:'CosmaBot standalone API',user:apiUser,root,config,release,writePaths:[root],environment:true,
       intended:`${release}/api/bin/uvicorn cosmas_os.api.app:app --host 127.0.0.1 --port ${value.ports.api} --workers 1`}),
     'cosmabot-postgres.review.service':service({name:'CosmaBot owned PostgreSQL',user:pgUser,root,config,release,writePaths:[postgres],

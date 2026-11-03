@@ -258,6 +258,50 @@ def prepare_beta_database_cmd(
     typer.echo(evidence.sanitized_json())
 
 
+@app.command("prepare-standalone-database")
+def prepare_standalone_database_cmd(
+    confirm_forward_only: bool = typer.Option(False, "--confirm-forward-only"),
+) -> None:
+    """Migrate CosmaBot standalone as the derived peer migrator; DML-only runtime."""
+
+    from cosmas_os.application.standalone_database import (
+        STANDALONE_DATABASE_CONTRACT,
+        prepare_standalone_database,
+    )
+
+    if not confirm_forward_only:
+        raise typer.BadParameter("--confirm-forward-only is required")
+    if os.environ.get("COSMAS_ENV") not in {
+        "standalone_clerk_synthetic",
+        "standalone_synthetic",
+    }:
+        typer.echo(
+            json.dumps(
+                {"contract": STANDALONE_DATABASE_CONTRACT, "status": "failed"},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            err=True,
+        )
+        raise typer.Exit(1)
+    admin_url = os.environ.get("DATABASE_ADMIN_URL", "")
+    runtime_url = os.environ.get("DATABASE_URL", "")
+    instance_id = os.environ.get("STANDALONE_INSTANCE_ID", "")
+    try:
+        evidence = prepare_standalone_database(admin_url, runtime_url, instance_id)
+    except Exception:  # noqa: BLE001 - never reflect driver errors or URLs to job logs
+        typer.echo(
+            json.dumps(
+                {"contract": STANDALONE_DATABASE_CONTRACT, "status": "failed"},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            err=True,
+        )
+        raise typer.Exit(1) from None
+    typer.echo(evidence.sanitized_json())
+
+
 @app.command("verify-beta-runtime")
 def verify_beta_runtime_cmd(
     confirm_synthetic_only: bool = typer.Option(False, "--confirm-synthetic-only"),
