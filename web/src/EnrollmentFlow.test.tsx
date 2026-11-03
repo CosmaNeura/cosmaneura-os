@@ -25,6 +25,27 @@ it('saves account and legal practice with every human seat counted at the approv
   expect(host.textContent).toContain('Review and sign for Invented Legal Practice');expect(host.querySelector('iframe')?.getAttribute('sandbox')).toBe('');
   expect(localStorage.length).toBe(0);expect(sessionStorage.length).toBe(0);
 });
+it('reveals and focuses the agreement step after the practice form without stealing focus during signer edits',async()=>{
+  const previous=Object.getOwnPropertyDescriptor(HTMLElement.prototype,'scrollIntoView'),scroll=vi.fn();
+  Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value:scroll});
+  try{
+    current=enrollmentStatus('practice',1);
+    vi.spyOn(api,'practice').mockImplementation(async()=>{current=enrollmentStatus('agreement',2);return current;});
+    await render();
+    for(const [field,value]of Object.entries({legal_name:'Invented Legal Practice',address_line1:'123 Invented Street',city:'Invented City',region:'NY',postal_code:'10001',administrative_email:'office@example.invalid'}))await fill(field,value);
+    await check('covered');scroll.mockClear();await click('Save and continue');
+    const heading=host.querySelector('h1')!;
+    expect(heading.textContent).toBe('Review and sign for Invented Legal Practice');
+    expect(document.activeElement).toBe(heading);expect(heading.tabIndex).toBe(-1);
+    expect(scroll).toHaveBeenCalledOnce();expect(scroll).toHaveBeenCalledWith({block:'start',behavior:'auto'});
+    const signer=host.querySelector<HTMLInputElement>('#enrollment-signature_title')!;signer.focus();
+    await fill('signature_title','Practice owner');
+    expect(document.activeElement).toBe(signer);expect(signer.value).toBe('Practice owner');expect(scroll).toHaveBeenCalledOnce();
+  }finally{
+    if(previous)Object.defineProperty(HTMLElement.prototype,'scrollIntoView',previous);
+    else delete (HTMLElement.prototype as unknown as {scrollIntoView?:unknown}).scrollIntoView;
+  }
+});
 it('keeps an overlong provider name editable and saves only a valid 120-character workspace name',async()=>{
   current.profile={display_name:'N'.repeat(121),title:'',email:'owner@example.invalid'};
   const save=vi.spyOn(api,'profile').mockImplementation(async(_identity,body)=>{current={...enrollmentStatus('practice',1),profile:{...enrollmentStatus('practice',1).profile!,display_name:body.display_name}};return current;});

@@ -69,7 +69,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
   const [teamOpen,setTeamOpen]=useState(false),[teamEmail,setTeamEmail]=useState(''),[teamRole,setTeamRole]=useState<'admin'|'staff'>('staff'),[teamCanSign,setTeamCanSign]=useState(false);
   const [review,setReview]=useState<'account'|'practice'|null>(null),[uncertain,setUncertain]=useState(false);
   const [practices,setPractices]=useState<EnrollmentPractices|null>(null),[chosenPractice,setChosenPractice]=useState('');
-  const pending=useRef<Operation|null>(null),request=useRef<AbortController|null>(null),mounted=useRef(false),currentStatus=useRef(status);currentStatus.current=status;
+  const stageHeading=useRef<HTMLHeadingElement|null>(null),pending=useRef<Operation|null>(null),request=useRef<AbortController|null>(null),mounted=useRef(false),currentStatus=useRef(status);currentStatus.current=status;
   const [checkedPending,setCheckedPending]=useState(false),documentRequested=useRef(false),inviteReviewed=useRef(false);
   const accept=useCallback((next:EnrollmentStatus)=>{
     const previous=currentStatus.current;
@@ -107,6 +107,13 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
   },[check]);
   useEffect(()=>{if(!status?.profile?.display_name){if(!name&&initialName)setName(initialName);if(!practice.administrative_email&&initialEmail)setPractice(previous=>({...previous,administrative_email:initialEmail}));}},[initialName,initialEmail,status?.profile,name,practice.administrative_email]);
   const stage=review??status?.stage;
+  useEffect(()=>{
+    if(!stage)return;
+    const heading=stageHeading.current;
+    // Announce and reveal a new step without moving focus during field edits or refreshes.
+    heading?.focus({preventScroll:true});
+    heading?.scrollIntoView?.({block:'start',behavior:'auto'});
+  },[stage]);
   useEffect(()=>{if(status&&status.stage!=='account'&&status.profile?.display_name&&inviteToken&&!inviteReviewed.current){inviteReviewed.current=true;setReview('practice');setChoice('join');}},[status,inviteToken]);
   useEffect(()=>{
     if(stage!=='agreement'||document||busy||documentRequested.current)return;
@@ -205,8 +212,8 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
       {message&&<div className="enrollment-error" role="alert">{message}{errorSummary}</div>}
       {uncertain&&<div className="enrollment-status" role="status"><p>Your submission may be saved. Check progress before retrying.</p>
         <div className="enrollment-actions"><button onClick={check} disabled={busy}>Check saved progress</button>{pending.current?.replayable!==false&&<button onClick={retry} disabled={busy||!pending.current||!checkedPending}>Retry the same submission</button>}</div></div>}
-      {!status?<><h1>{busy?'Loading saved setup…':'Continue your setup'}</h1><p>Sign-in and saved progress are checked before any practice or payment is created.</p><button onClick={check} disabled={busy}>Check saved progress</button></>:
-      stage==='account'?<><p className="enrollment-eyebrow">Your account</p><h1>Welcome to CosmaBot</h1><p>Confirm your name to continue.</p>
+      {!status?<><h1 ref={stageHeading} tabIndex={-1}>{busy?'Loading saved setup…':'Continue your setup'}</h1><p>Sign-in and saved progress are checked before any practice or payment is created.</p><button onClick={check} disabled={busy}>Check saved progress</button></>:
+      stage==='account'?<><p className="enrollment-eyebrow">Your account</p><h1 ref={stageHeading} tabIndex={-1}>Welcome to CosmaBot</h1><p>Confirm your name to continue.</p>
         <form className="enrollment-form" onSubmit={saveProfile} noValidate>
           <Field name="name" label="Your name" value={name} onChange={setName} error={errors.name} autoComplete="name" disabled={formDisabled}/>
           <p className="enrollment-hint">Use up to 120 characters for your name.</p>
@@ -214,8 +221,8 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
           <p className="enrollment-hint">Verified email: {status.profile?.email||initialEmail||'Provided by your signed-in account'}</p>
           <div className="enrollment-actions"><button className="primary" disabled={formDisabled}>Save and continue</button>{review&&<button type="button" onClick={()=>setReview(null)}>Back to saved setup</button>}</div>
         </form></>:
-      stage==='practice'&&review&&status.agreement?.accepted&&choice!=='join'?<><h1>Practice details</h1><dl className="enrollment-summary"><dt>Legal practice</dt><dd>{status.practice?.legal_name}</dd><dt>Address</dt><dd>{status.practice?.address_line1}, {status.practice?.city}, {status.practice?.region} {status.practice?.postal_code}</dd><dt>Human users</dt><dd>{status.practice?.human_seats}</dd></dl><p>The accepted agreement and subscription stay bound to this practice. Changes require a separate reviewed update.</p><button onClick={()=>setReview(null)}>Back to saved setup</button></>:
-      stage==='practice'?<><p className="enrollment-eyebrow">Your practice</p><h1>{choice==='join'?'Join your practice':'Set up your practice'}</h1>
+      stage==='practice'&&review&&status.agreement?.accepted&&choice!=='join'?<><h1 ref={stageHeading} tabIndex={-1}>Practice details</h1><dl className="enrollment-summary"><dt>Legal practice</dt><dd>{status.practice?.legal_name}</dd><dt>Address</dt><dd>{status.practice?.address_line1}, {status.practice?.city}, {status.practice?.region} {status.practice?.postal_code}</dd><dt>Human users</dt><dd>{status.practice?.human_seats}</dd></dl><p>The accepted agreement and subscription stay bound to this practice. Changes require a separate reviewed update.</p><button onClick={()=>setReview(null)}>Back to saved setup</button></>:
+      stage==='practice'?<><p className="enrollment-eyebrow">Your practice</p><h1 ref={stageHeading} tabIndex={-1}>{choice==='join'?'Join your practice':'Set up your practice'}</h1>
         <div className="enrollment-actions"><button aria-pressed={choice==='create'} onClick={()=>setChoice('create')} disabled={formDisabled}>Create a practice</button><button aria-pressed={choice==='join'} onClick={()=>setChoice('join')} disabled={formDisabled}>Join with an invitation</button></div>
         {choice==='join'?<form className="enrollment-form" onSubmit={join} noValidate><p>Join the practice’s existing agreement and subscription. Joining does not create another trial.</p>
           <Field name="invite" label="Invitation code" value={inviteToken} onChange={setInviteToken} error={errors.invite} autoComplete="off" disabled={formDisabled}/>
@@ -237,7 +244,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
           <p className="enrollment-hint">If this does not describe your practice, <a href={ENROLLMENT_CONTACT}>contact us for the appropriate agreement</a>.</p>
           <div className="enrollment-actions"><button className="primary" disabled={formDisabled}>{seats.plan==='negotiated'?'Save and request negotiated pricing':'Save and continue'}</button><button type="button" onClick={()=>setReview('account')} disabled={formDisabled}>Back</button></div>
         </form>}</>:
-      stage==='agreement'?<><p className="enrollment-eyebrow">Practice agreement</p><h1>Review and sign for {status.practice?.legal_name}</h1>
+      stage==='agreement'?<><p className="enrollment-eyebrow">Practice agreement</p><h1 ref={stageHeading} tabIndex={-1}>Review and sign for {status.practice?.legal_name}</h1>
         <p>Cosmaneura Inc. is the business associate. This agreement covers the subscribed services; it does not connect an EHR or authorize an outside account.</p>
         {document?<AgreementDocument document={document}/>:<><p role="status">{busy?'Loading the full agreement…':'The agreement is unavailable.'}</p><button disabled={busy} onClick={()=>void run(signal=>api.document(identity,signal),setDocument)}>Reload agreement</button></>}
         {needsSigner||status.practice?.can_sign===false?<><h2>Use an authorized representative</h2><p>An authorized representative must sign for this practice. Your completed steps are saved. The practice owner can invite someone authorized to bind the practice. An invitation reserves a purchased human seat.</p>
@@ -251,7 +258,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
             <label className="enrollment-check" htmlFor="enrollment-accepted"><input id="enrollment-accepted" type="checkbox" checked={accepted} disabled={formDisabled} aria-invalid={errors.accepted?true:undefined} onChange={e=>setAccepted(e.target.checked)}/>I have read and accept the full Customer Business Associate Agreement v2.3.</label>
             <div className="enrollment-actions"><button className="primary" disabled={formDisabled||!document}>Accept agreement</button><button type="button" onClick={()=>setNeedsSigner(true)} disabled={formDisabled}>I need an authorized representative</button><button type="button" onClick={()=>setReview('practice')} disabled={formDisabled}>Back</button></div>
           </form>}</>:
-      <><p className="enrollment-eyebrow">{stage==='ready'?'Your practice is ready':'Your trial'}</p><h1>{stage==='ready'?'Welcome to '+status.practice?.display_name:stage==='negotiated'?'Let’s agree your practice price':stage==='activation_pending'?'Your setup is saved':stage==='finishing_setup'?'Finishing setup':stage==='canceled'?'Continue when you’re ready':stage==='payment_action_required'?'Review your payment setup':'Start your 14-day free trial'}</h1>
+      <><p className="enrollment-eyebrow">{stage==='ready'?'Your practice is ready':'Your trial'}</p><h1 ref={stageHeading} tabIndex={-1}>{stage==='ready'?'Welcome to '+status.practice?.display_name:stage==='negotiated'?'Let’s agree your practice price':stage==='activation_pending'?'Your setup is saved':stage==='finishing_setup'?'Finishing setup':stage==='canceled'?'Continue when you’re ready':stage==='payment_action_required'?'Review your payment setup':'Start your 14-day free trial'}</h1>
         {status.quote?.self_serve?<dl className="enrollment-summary"><dt>Human users</dt><dd>{status.quote.human_seats}, including the owner and staff</dd><dt>Monthly total</dt><dd>{dollars(status.quote.monthly_total_cents!)}/month (USD)</dd>
           {newTrial?<><dt>Due today</dt><dd>$0</dd><dt>Trial duration</dt><dd>14 days of usable access</dd><dt>First charge</dt><dd>{formatDate(status.billing.first_charge_at)}</dd></>:
             <><dt>Billing status</dt><dd>{status.billing.status==='trialing'?'Free trial':status.billing.status==='active'?'Active subscription':status.billing.status==='canceled'?'Canceled':'Payment review needed'}</dd>
