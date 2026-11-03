@@ -90,7 +90,7 @@ def test_scene_policy_is_in_generated_app_and_swift_test_target():
     source_inventory = composer.split("RECOVERY_SOURCES =", 1)[1].split("def digest", 1)[0]
     assert '"WorkspaceSceneSignalState.swift"' in source_inventory
     package = (NATIVE / "Package.swift").read_text()
-    assert 'sources: ["WorkspaceRecoveryState.swift", "WorkspaceSceneSignalState.swift"]' in package
+    assert 'sources: ["WorkspaceRecoveryState.swift", "WorkspaceSceneSignalState.swift", "SyntheticDemoFixtureGate.swift"]' in package
     scene = (NATIVE / "SceneDelegate.swift").read_text()
     assert "sceneDidBecomeActive" in scene and "setSceneActive(true)" in scene
     assert "sceneWillResignActive" in scene and "setSceneActive(false)" in scene

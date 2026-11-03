@@ -50,6 +50,19 @@ import CosmasNativeAuth
         super.viewDidLoad()
         overrideUserInterfaceStyle = .light
         view.backgroundColor = .systemBackground
+        // Debug synthetic Simulator only: local invented demo rows (no network,
+        // no sign-in). Compiled out of Release/TestFlight (DEBUG condition only).
+        #if DEBUG
+        if CosmasSyntheticDemoSurface.isEnabled {
+            let surface = CosmasSyntheticDemoSurface()
+            addChild(surface)
+            surface.view.frame = view.bounds
+            surface.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.addSubview(surface.view)
+            surface.didMove(toParent: self)
+            return
+        }
+        #endif
         buildPanel()
         buildKeyboardDismissal()
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)),
@@ -550,3 +563,157 @@ import CosmasNativeAuth
         #endif
     }
 }
+
+#if DEBUG
+/// Debug + `com.cosmasos.synthetic` only. Local invented Chief rows and visit
+/// timer — no network, no secrets, no sign-in. Entire type is compiled out of
+/// Release so TestFlight/production binaries cannot reach it.
+@MainActor final class CosmasSyntheticDemoSurface: UIViewController {
+    /// Optional XCUITest opt-in; Debug synthetic also enables without it.
+    static let launchArgument = "-COSMAS_UI_TEST_FIXTURES"
+
+    static var isEnabled: Bool {
+        Bundle.main.bundleIdentifier == "com.cosmasos.synthetic"
+    }
+
+    /// Proof hook for unit tests: this type exists only under DEBUG.
+    static let isCompiledIntoThisBinary = true
+
+    private let elapsedLabel = UILabel()
+    private let startButton = UIButton(type: .system)
+    private let stopButton = UIButton(type: .system)
+    private let chiefList = UIStackView()
+    private var visitTimer: Timer?
+    private var startedAt: TimeInterval?
+    private var frozenElapsed: TimeInterval = 0
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemBackground
+        view.accessibilityIdentifier = "cosmas.uiTest.surface"
+
+        let title = UILabel()
+        title.text = "Synthetic demo"
+        title.font = .preferredFont(forTextStyle: .title2)
+        title.adjustsFontForContentSizeCategory = true
+
+        elapsedLabel.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
+        elapsedLabel.text = format(0)
+        elapsedLabel.accessibilityIdentifier = "cosmas.visit.timer.elapsed"
+        // Visible text is the a11y label so XCUITest can assert elapsed time.
+        elapsedLabel.isAccessibilityElement = true
+
+        startButton.setTitle("Start visit timer", for: .normal)
+        startButton.accessibilityIdentifier = "cosmas.visit.timer.start"
+        startButton.addTarget(self, action: #selector(startTimer), for: .touchUpInside)
+        stopButton.setTitle("Stop visit timer", for: .normal)
+        stopButton.accessibilityIdentifier = "cosmas.visit.timer.stop"
+        stopButton.isEnabled = false
+        stopButton.addTarget(self, action: #selector(stopTimer), for: .touchUpInside)
+        for button in [startButton, stopButton] {
+            button.titleLabel?.font = .preferredFont(forTextStyle: .headline)
+            button.titleLabel?.adjustsFontForContentSizeCategory = true
+            button.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
+        }
+
+        let chiefHeading = UILabel()
+        chiefHeading.text = "Chief"
+        chiefHeading.font = .preferredFont(forTextStyle: .headline)
+        chiefHeading.adjustsFontForContentSizeCategory = true
+        chiefHeading.accessibilityIdentifier = "cosmas.messages.chief.group"
+
+        chiefList.axis = .vertical
+        chiefList.spacing = 8
+        chiefList.accessibilityIdentifier = "cosmas.messages.chief.list"
+        // Invented patient-chat engagements under the Chief group.
+        for label in ["Invented sleep notebook", "Invented annual visit"] {
+            chiefList.addArrangedSubview(makeChiefRow(context: label))
+        }
+
+        let stack = UIStackView(arrangedSubviews: [
+            title, elapsedLabel, startButton, stopButton, chiefHeading, chiefList,
+        ])
+        stack.axis = .vertical
+        stack.spacing = 16
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 32),
+        ])
+    }
+
+    private func makeChiefRow(context: String) -> UIView {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.spacing = 12
+        row.alignment = .center
+        row.accessibilityIdentifier = "cosmas.messages.chief.row"
+
+        let icon = UIImageView(image: UIImage(systemName: "person.crop.circle.fill"))
+        icon.tintColor = .systemGreen
+        icon.accessibilityIdentifier = "cosmas.messages.chief.icon"
+        icon.accessibilityLabel = "Chief of Staff"
+        icon.isAccessibilityElement = true
+        icon.widthAnchor.constraint(equalToConstant: 36).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 36).isActive = true
+
+        let text = UILabel()
+        text.text = context
+        text.font = .preferredFont(forTextStyle: .body)
+        text.adjustsFontForContentSizeCategory = true
+        text.numberOfLines = 0
+
+        // Exactly one Chief icon per row — no duplicate name badge beside it.
+        row.addArrangedSubview(icon)
+        row.addArrangedSubview(text)
+        return row
+    }
+
+    @objc private func startTimer() {
+        guard startedAt == nil else { return }
+        frozenElapsed = 0
+        startedAt = ProcessInfo.processInfo.systemUptime
+        startButton.isEnabled = false
+        stopButton.isEnabled = true
+        visitTimer?.invalidate()
+        visitTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.renderElapsed() }
+        }
+        renderElapsed()
+    }
+
+    @objc private func stopTimer() {
+        guard let startedAt else { return }
+        frozenElapsed = ProcessInfo.processInfo.systemUptime - startedAt
+        self.startedAt = nil
+        visitTimer?.invalidate()
+        visitTimer = nil
+        startButton.isEnabled = true
+        stopButton.isEnabled = false
+        elapsedLabel.text = format(frozenElapsed)
+    }
+
+    private func renderElapsed() {
+        guard let startedAt else { return }
+        elapsedLabel.text = format(ProcessInfo.processInfo.systemUptime - startedAt)
+    }
+
+    private func format(_ value: TimeInterval) -> String {
+        let total = max(0, Int(value))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    deinit {
+        visitTimer?.invalidate()
+    }
+}
+#else
+/// Release/TestFlight: demo surface is not compiled in. Keep a named hook so
+/// source audits and tests can prove the Debug-only gate without shipping UI.
+enum CosmasSyntheticDemoSurface {
+    static let isCompiledIntoThisBinary = false
+    static var isEnabled: Bool { false }
+}
+#endif
