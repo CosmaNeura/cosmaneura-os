@@ -324,18 +324,21 @@ resource "azurerm_role_assignment" "runtime_pull" {
   for_each             = local.practices
   scope                = local.f.container_registry_id
   role_definition_name = "AcrPull"
+  principal_type       = "ServicePrincipal"
   principal_id         = azurerm_user_assigned_identity.runtime[each.key].principal_id
 }
 resource "azurerm_role_assignment" "web_pull" {
   for_each             = local.practices
   scope                = local.f.container_registry_id
   role_definition_name = "AcrPull"
+  principal_type       = "ServicePrincipal"
   principal_id         = azurerm_user_assigned_identity.web[each.key].principal_id
 }
 resource "azurerm_role_assignment" "runtime_blob" {
   for_each             = local.practices
   scope                = azurerm_storage_container.box[each.key].id
   role_definition_name = "Storage Blob Data Contributor"
+  principal_type       = "ServicePrincipal"
   principal_id         = azurerm_user_assigned_identity.runtime[each.key].principal_id
 }
 locals {
@@ -357,6 +360,7 @@ resource "azurerm_role_assignment" "runtime_secret" {
   for_each             = local.runtime_grants
   scope                = "${azurerm_key_vault.box[each.value.practice].id}/secrets/${each.value.name}"
   role_definition_name = "Key Vault Secrets User"
+  principal_type       = "ServicePrincipal"
   principal_id         = azurerm_user_assigned_identity.runtime[each.value.practice].principal_id
 }
 resource "azurerm_container_app" "runtime" {
@@ -531,10 +535,12 @@ output "domain_verification" {
 resource "azurerm_role_assignment" "allocator_secrets" {
   scope                = azurerm_key_vault.box["box"].id
   role_definition_name = "Key Vault Secrets Officer"
+  principal_type       = "ServicePrincipal"
   principal_id         = local.d.allocator_object_id
 }
 resource "azurerm_role_assignment" "allocator_receipts" {
   scope                = azurerm_storage_container.receipts["box"].id
   role_definition_name = "Storage Blob Data Reader"
+  principal_type       = "ServicePrincipal"
   principal_id         = local.d.allocator_object_id
 }

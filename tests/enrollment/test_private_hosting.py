@@ -3,6 +3,7 @@ import base64
 import importlib.util
 import io
 import json
+import re
 import shlex
 import subprocess
 import tarfile
@@ -688,3 +689,20 @@ def test_unavailable_protected_key_cannot_seed_or_activate_model(hosted, tmp_pat
         backend._seed(state, "invented-master")
     assert "WORKSPACE_LLM_API_KEY" not in state["deployment"]["practice"]["secret_references"]
     assert state["deployment"]["deploy_workloads"] is False
+
+
+def test_all_allocated_role_requests_declare_service_principals_for_constrained_delegation():
+    source = Path(__file__).resolve().parents[2]
+    module = (source / "infra/enrollment/allocated-workspace/main.tf").read_text()
+    assignments = re.findall(r'resource "azurerm_role_assignment" "[a-z_]+" \{(.*?)^\}', module, re.M | re.S)
+    assert assignments
+    allowed_roles = {"AcrPull", "Storage Blob Data Contributor", "Storage Blob Data Reader",
+                     "Key Vault Secrets User", "Key Vault Secrets Officer"}
+    for assignment in assignments:
+        role = re.search(r'role_definition_name\s*=\s*"([^"]+)"', assignment)
+        principal_type = re.search(r'principal_type\s*=\s*"([^"]+)"', assignment)
+        principal = re.search(r'principal_id\s*=\s*([^\n]+)', assignment)
+        assert role and role[1] in allowed_roles
+        assert principal_type and principal_type[1] == "ServicePrincipal"
+        assert principal and (principal[1].startswith("azurerm_user_assigned_identity.")
+                              or principal[1] == "local.d.allocator_object_id")
