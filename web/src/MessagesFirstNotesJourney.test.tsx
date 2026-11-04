@@ -2,7 +2,7 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {waitMessagesJourney as wait,MESSAGES_JOURNEY_TEST_TIMEOUT_MS} from './messages-journey-wait';
-vi.hoisted(()=>{for(const key of ['VITE_MESSAGES_ENABLED','VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED'])vi.stubEnv(key,'true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');});
+vi.hoisted(()=>{for(const key of ['VITE_MESSAGES_ENABLED','VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED'])vi.stubEnv(key,'true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_FEATURE_PROFILE','independent-beta-v1');});
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {identity,installFixtures} from '../ux-acceptance/fixtures';
 import {memoryDraftStorage} from './draft-test-fixture';
@@ -23,10 +23,9 @@ beforeEach(async()=>{
  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();history.replaceState(null,'','/');});
-it('takes a new Chief conversation from first notes to an editable task while retaining the unsent message',async()=>{
+it('takes an independent beta user directly from New message to first notes and an editable Chief task while retaining the unsent message',async()=>{
  const ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append'),create=vi.spyOn(workspaceApi,'createPrivateDraft');
- await click('New message');const chief=()=>host.querySelector<HTMLButtonElement>('.messages-bot-choices button:nth-child(1)');
- await wait(()=>expect(chief()?.textContent).toContain('Chief of Staff'));await act(async()=>chief()!.click());
+ await click('New message');expect(host.querySelector('.messages-bot-choices')).toBeNull();expect(create).not.toHaveBeenCalled();expect(ask).not.toHaveBeenCalled();
  const start=()=>host.querySelector<HTMLButtonElement>('.practice-quick-start button[type="submit"]');await wait(()=>expect(start()?.disabled).toBe(false));await act(async()=>start()!.click());
  await wait(()=>expect(question()?.disabled).toBe(false));await wait(()=>expect(button('Add notes')).toBeTruthy());expect(create).toHaveBeenCalledOnce();
  const composer=question(),workspaceId=create.mock.results[0].value.then((result:Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>)=>result.workspace.id);
