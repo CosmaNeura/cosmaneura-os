@@ -81,7 +81,7 @@ async function openCase(round:string,persona='physician'){
  await wait(()=>expect(button('Check calendar access').disabled).toBe(false));noteBefore=noteIdentity(packet.workspace);return packet;
 }
 async function readForReview(eventId='invented-timed'){
- await click('Check calendar access');await click('Load next 7 days');await wait(()=>expect(host.querySelector<HTMLButtonElement>(`[data-calendar-event="${eventId}"]`)?.disabled).toBe(false));
+ await click('Check calendar access');await click('Load next 7 days');await click('Next 7 days');await wait(()=>expect(host.querySelector<HTMLButtonElement>(`[data-calendar-event="${eventId}"]`)?.disabled).toBe(false));
  await act(async()=>host.querySelector<HTMLButtonElement>(`[data-calendar-event="${eventId}"]`)!.click());await click('Use current visit');
  for(const input of host.querySelectorAll<HTMLInputElement>('.google-calendar-checks input'))await act(async()=>input.click());
 }
