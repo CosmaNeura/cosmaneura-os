@@ -6,7 +6,7 @@ import './native-ready-practices.css';
 import {hasUnsavedWork,useUnsavedWorkPresent} from './unsaved-work';
 
 type SavedPractices={status:EnrollmentStatus;memberships:EnrollmentPractices};
-type Selection={id:string;revision:number;key:string};
+type Selection={id:string;originalId:string|null;revision:number;key:string};
 type Owner={active:boolean;pending:boolean;controller:AbortController|null;selection:Selection|null};
 
 /** Discovery uses server membership. Only the native host can admit a workspace. */
@@ -43,10 +43,15 @@ export function NativeReadyPractices({api,identity,onOpenCurrent,onOpenSelected,
   function refresh(){void run(async signal=>{
     const next=await read(signal),pending=owner.current?.selection;
     if(pending){
-      if(next.memberships.active_practice_id===pending.id&&next.status.stage==='ready'&&next.status.revision>pending.revision){
+      // Registry revisions combine account and selected-practice counters, so
+      // a saved switch can have an equal or lower total. Fresh target binding
+      // resolves the choice; opening still requires a separate explicit action.
+      if(next.memberships.active_practice_id===pending.id&&next.status.practice?.id===pending.id&&next.status.stage==='ready'&&
+        next.status.workspace.status==='ready'&&next.memberships.practices.some(practice=>practice.id===pending.id&&practice.workspace_status==='ready')){
         owner.current!.selection=null;setUncertain(false);setCheckedPending(false);setChosen(pending.id);
-      }else if(next.status.revision===pending.revision){setCheckedPending(true);setUncertain(true);}
-      else{owner.current!.selection=null;setUncertain(false);setChosen(next.memberships.active_practice_id??'');
+      }else if(next.memberships.active_practice_id===pending.originalId&&(next.status.practice?.id??null)===pending.originalId&&
+        next.status.revision===pending.revision){setCheckedPending(true);setUncertain(true);}
+      else{owner.current!.selection=null;setUncertain(false);setCheckedPending(false);setChosen(next.memberships.active_practice_id??'');
         setFailed('Your current practice changed. Choose a practice again before opening Chief.');}
     }else setChosen(next.memberships.active_practice_id??'');
     if(current())setSaved(next);
@@ -74,7 +79,7 @@ export function NativeReadyPractices({api,identity,onOpenCurrent,onOpenSelected,
     if(onOpenSelected){
       if(!ready.some(practice=>practice.id===chosen))return;
       if(chosen!==saved.memberships.active_practice_id){
-        const selection={id:chosen,revision:saved.status.revision,key:crypto.randomUUID()};owner.current!.selection=selection;
+        const selection={id:chosen,originalId:saved.memberships.active_practice_id,revision:saved.status.revision,key:crypto.randomUUID()};owner.current!.selection=selection;
         void run(signal=>applySelection(selection,signal));return;
       }
     }else if(!canOpen)return;

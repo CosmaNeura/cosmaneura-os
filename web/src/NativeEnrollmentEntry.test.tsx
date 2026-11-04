@@ -110,28 +110,32 @@ it('starts the existing new-practice flow only through its separate explicit act
   await click('Create a new practice');expect(host.querySelector('#enrollment-name')).not.toBeNull();
   expect(owner.plugin.activateRegisteredPractice).not.toHaveBeenCalled();
 });
-function namedPracticePort(interrupt:false|'before-save'|'after-save'=false){
-  const owner=port(account),first=nativePracticeFixture(),practiceId='20000000-0000-4000-8000-000000000002';
+type PracticeRevisions={account:number;originalPractice:number;selectedPractice:number};
+function namedPracticePort(interrupt:false|'before-save'|'after-save'=false,revisions:PracticeRevisions={account:4,originalPractice:3,selectedPractice:3}){
+  const owner=port(account),first=nativePracticeFixture(),practiceId='20000000-0000-4000-8000-000000000002',otherPracticeId='20000000-0000-4000-8000-000000000004';
   const second={...first,profile:{...first.profile,practice:{practice_id:practiceId,box_id:'20000000-0000-4000-8000-000000000003'},
     nativeIdentity:{...first.profile.nativeIdentity,organizationId:'org_second',apiOrigin:`https://api.${practiceId}.staging.cosmas.ai`},
     workspace:{...first.profile.workspace,url:`https://${practiceId}.staging.cosmas.ai/chief`}}};
-  let saved=enrollmentStatus('ready',7);saved.practice!.id=first.profile.practice.practice_id;
+  const originalRevision=revisions.account+revisions.originalPractice,selectedRevision=revisions.account+1+revisions.selectedPractice;
+  let saved=enrollmentStatus('ready',originalRevision),otherCurrent=false;saved.practice!.id=first.profile.practice.practice_id;
   saved.workspace={status:'ready',url:first.profile.workspace.url,organization_id:first.profile.nativeIdentity.organizationId,box_id:first.profile.practice.box_id};
   owner.plugin.selectedPracticeCapabilities=vi.fn(async()=>({contract_version:'cosmabot.native-selected-practice.v1',available:true}));
   owner.plugin.activateSelectedPractice=vi.fn(async()=>second);
   vi.mocked(owner.plugin.enrollmentRequest).mockImplementation(async input=>{
     if(input.operation==='selectPractice'){
-      expect(input.body).toEqual({expected_revision:7,practice_id:practiceId});expect(input.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+      expect(input.body).toEqual({expected_revision:originalRevision,practice_id:practiceId});expect(input.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
       if(interrupt==='before-save'){interrupt=false;throw new Error('Synthetic uncertain transport');}
-      saved={...saved,revision:8,practice:{...saved.practice!,id:practiceId},workspace:{status:'ready',url:second.profile.workspace.url,
+      saved={...saved,revision:selectedRevision,practice:{...saved.practice!,id:practiceId},workspace:{status:'ready',url:second.profile.workspace.url,
         organization_id:second.profile.nativeIdentity.organizationId,box_id:second.profile.practice.box_id}};
       if(interrupt==='after-save'){interrupt=false;throw new Error('Synthetic reply lost after save');}
     }
     return {status:200,body:input.operation==='config'?enrollmentConfig():input.operation==='practices'?{active_practice_id:saved.practice!.id,
       practices:[{id:first.profile.practice.practice_id,legal_name:'Invented First',display_name:'Invented First',role:'owner',workspace_status:'ready'},
-        {id:practiceId,legal_name:'Invented Second',display_name:'Invented Second',role:'staff',workspace_status:'ready'}]}:structuredClone(saved)};
+        {id:practiceId,legal_name:'Invented Second',display_name:'Invented Second',role:'staff',workspace_status:'ready'},
+        ...(otherCurrent?[{id:otherPracticeId,legal_name:'Invented Other',display_name:'Invented Other',role:'staff',workspace_status:'ready'}]:[])]}:structuredClone(saved)};
   });
-  return {...owner,practiceId};
+  return {...owner,practiceId,changeCurrentAtSameRevision:()=>{otherCurrent=true;saved={...saved,practice:{...saved.practice!,id:otherPracticeId},
+    workspace:{...saved.workspace,organization_id:'org_other',box_id:'20000000-0000-4000-8000-000000000005'}};}};
 }
 it('opens an explicitly chosen ready practice through the bound native operation without agreement or billing requests',async()=>{
   const owner=namedPracticePort();await act(async()=>root.render(<NativeEnrollmentEntry plugin={owner.plugin} available readyPractices onReturn={vi.fn()}/>));
@@ -153,13 +157,31 @@ it('keeps uncertain selection locked and retries only the same checked request a
   expect(selections).toHaveLength(2);expect(selections[0]).toEqual(selections[1]);
   expect(owner.plugin.activateSelectedPractice).toHaveBeenCalledOnce();expect(returned).not.toHaveBeenCalled();
 });
-it('recovers a saved choice after a lost reply without selecting twice or automatically opening the practice',async()=>{
-  const owner=namedPracticePort('after-save');await act(async()=>root.render(<NativeEnrollmentEntry plugin={owner.plugin} available readyPractices onReturn={vi.fn()}/>));
+it.each([
+  {change:'higher',account:4,originalPractice:3,selectedPractice:3,selectedRevision:8},
+  {change:'equal',account:4,originalPractice:10,selectedPractice:9,selectedRevision:14},
+  {change:'lower',account:4,originalPractice:10,selectedPractice:5,selectedRevision:10},
+])('recovers a saved choice with a $change composite revision after a lost reply without selecting twice or opening automatically',async({selectedRevision,...revisions})=>{
+  const owner=namedPracticePort('after-save',revisions);await act(async()=>root.render(<NativeEnrollmentEntry plugin={owner.plugin} available readyPractices onReturn={vi.fn()}/>));
   await click('Invented Second');await click('Open selected practice');await click('Check saved choice');
   expect(owner.plugin.activateSelectedPractice).not.toHaveBeenCalled();expect(host.textContent).not.toContain('Retry saved choice');
+  expect(host.textContent).not.toContain('Your current practice changed');expect(host.textContent).not.toContain('Your practice choice may be saved');
   expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Return to original beta workspace')?.disabled).toBe(false);
-  await click('Open Chief');expect(owner.plugin.activateSelectedPractice).toHaveBeenCalledWith({expectedRevision:revision,expectedPracticeId:owner.practiceId,expectedRegistryRevision:8});
+  const open=[...host.querySelectorAll('button')].find(button=>button.textContent==='Open Chief');expect(open?.disabled).toBe(false);
   expect(vi.mocked(owner.plugin.enrollmentRequest).mock.calls.filter(([input])=>input.operation==='selectPractice')).toHaveLength(1);
+  await click('Open Chief');expect(owner.plugin.activateSelectedPractice).toHaveBeenCalledWith({expectedRevision:revision,expectedPracticeId:owner.practiceId,expectedRegistryRevision:selectedRevision});
+  expect(vi.mocked(owner.plugin.enrollmentRequest).mock.calls.filter(([input])=>input.operation==='selectPractice')).toHaveLength(1);
+});
+it('requires a fresh choice when another current practice has the pending choice’s expected composite revision',async()=>{
+  const owner=namedPracticePort('before-save');await act(async()=>root.render(<NativeEnrollmentEntry plugin={owner.plugin} available readyPractices onReturn={vi.fn()}/>));
+  await click('Invented Second');await click('Open selected practice');owner.changeCurrentAtSameRevision();await click('Check saved choice');
+  expect(host.textContent).toContain('Your current practice changed');expect(host.textContent).not.toContain('Retry saved choice');
+  expect(owner.plugin.activateSelectedPractice).not.toHaveBeenCalled();
+  expect(vi.mocked(owner.plugin.enrollmentRequest).mock.calls.filter(([input])=>input.operation==='selectPractice')).toHaveLength(1);
+  await click('Invented Second');await click('Open selected practice');
+  const selections=vi.mocked(owner.plugin.enrollmentRequest).mock.calls.map(([input])=>input).filter(input=>input.operation==='selectPractice');
+  expect(selections).toHaveLength(2);expect(selections[0].idempotencyKey).not.toBe(selections[1].idempotencyKey);
+  expect(owner.plugin.activateSelectedPractice).toHaveBeenCalledOnce();
 });
 it('does not select or open another practice while an existing editor or request fence is active',async()=>{
   const owner=namedPracticePort();function WorkFence({pending}:{pending:boolean}){useUnsavedWork(pending);return null;}
