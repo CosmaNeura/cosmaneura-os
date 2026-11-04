@@ -97,9 +97,11 @@ consent and actual Google grant verification remain separate from allocation.
 5. Qualify the actual Azure CLI commands and provider/API contracts in this
    foundation. OpenTofu 1.12.5 and the locked AzureRM 4.81.0 module validate
    locally. Read-only Azure provider metadata confirms Microsoft.App jobs,
-   container apps and managed environments support `2025-07-01`. Microsoft.Cache
-   does not support that version, so the Redis request uses its supported stable
-   `2024-11-01` version. Actual request-body/response compatibility, the Key Vault
+   container apps and managed environments support `2025-07-01`. The Redis
+   Enterprise database ListKeys request uses its documented stable `2024-10-01`
+   contract; `2024-11-01` belongs to classic Redis, not this database resource.
+   See the [official Enterprise API specification](https://github.com/Azure/azure-rest-api-specs/blob/main/specification/redisenterprise/resource-manager/Microsoft.Cache/RedisEnterprise/stable/2024-10-01/redisenterprise.json).
+   Actual request-body/response compatibility, the Key Vault
    `2024-11-01` call, DNS, private connectivity, jobs, RBAC propagation and managed
    TLS still require a real held staging acceptance run.
 

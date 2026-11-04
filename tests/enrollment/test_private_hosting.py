@@ -5,6 +5,7 @@ import io
 import json
 import re
 import shlex
+import stat
 import subprocess
 import tarfile
 from dataclasses import replace
@@ -30,6 +31,7 @@ from cosmas_os.enrollment.domain import (
 )
 from cosmas_os.enrollment.hosting import (
     GOOGLE_SECRET_NAMES,
+    MODEL_SECRET_NAMES,
     REVIEWED_MODEL,
     SECRET_NAMES,
     HostingConfiguration,
@@ -434,8 +436,108 @@ def test_redis_uses_supported_stable_provider_version_before_secret_preparation(
     with pytest.raises(RuntimeError, match="provider operation pending"):
         backend._seed(state, "invented-master-" + "0" * 64)
     assert len(calls) == 1
-    assert calls[0][calls[0].index("--url") + 1].endswith("/databases/default/listKeys?api-version=2024-11-01")
+    assert calls[0] == ["az", "rest", "--method", "post", "--url",
+        "https://management.azure.com" + state["resources"]["redis_id"] + "/databases/default/listKeys?api-version=2024-10-01",
+        "--output", "json"]
     assert not (backend.directory / "seed-parameters.json").exists()
+
+
+@pytest.mark.parametrize("lost_reference", [False, True])
+def test_seed_enterprise_contract_and_all_secret_tracking_names_recover_without_exposure(hosted, tmp_path, capsys, lost_reference):
+    optional = google_host(hosted, tmp_path)
+    value = json.loads(json.dumps(optional.config.value))
+    model_key = tmp_path / "invented-seed-model-key"
+    model_key.write_text("invented-seed-model-key-only")
+    model_key.chmod(0o600)
+    value["model"] = {**REVIEWED_MODEL, "api_key_file": str(model_key)}
+    config = HostingConfiguration(value)
+    allocator = OpenTofuWorkspaceAllocator(hosted.service, config)
+    deployment = allocator._deployment(hosted.plan, hosted.operation)
+    backend = allocator.backend
+    state = backend._open(deployment)
+    refs = state["deployment"]["practice"]["secret_references"]
+    vault = "kvca" + hosted.plan.practice_id.replace("-", "")[:20]
+    state["resources"] = {
+        "redis_id": hosted.scope + "Microsoft.Cache/redisEnterprise/invented-seed",
+        "redis_hostname": "invented-seed.redis.azure.net",
+        "postgres_fqdn": "psql-cbaw-" + hosted.plan.practice_id.replace("-", "") + ".postgres.database.azure.com",
+        "key_vault_id": hosted.scope + "Microsoft.KeyVault/vaults/" + vault,
+    }
+    backend._write("admin-password", b"invented-seed-admin-only")
+    backend._write("runtime-password", b"invented-seed-runtime-only")
+    all_names = {**SECRET_NAMES, **GOOGLE_SECRET_NAMES, **MODEL_SECRET_NAMES}
+    writes, calls, reply_lost = [], [], False
+
+    def cli(arguments, **kwargs):
+        nonlocal reply_lost
+        calls.append(arguments)
+        if arguments[:2] == ["az", "rest"]:
+            expected = "https://management.azure.com" + state["resources"]["redis_id"] + "/databases/default/listKeys?api-version=2024-10-01"
+            assert arguments == ["az", "rest", "--method", "post", "--url", expected, "--output", "json"]
+            body = canonical({"primaryKey": "invented-seed-redis-only", "secondaryKey": "invented-unused-secondary"})
+        elif arguments[:4] == ["az", "deployment", "group", "create"]:
+            name = arguments[arguments.index("--name") + 1]
+            # The synthetic provider rejects the real ARM limit rather than
+            # accepting an invalid command and mirroring the name helper.
+            if not re.fullmatch(r"[A-Za-z0-9_.()-]{1,64}", name):
+                raise subprocess.CalledProcessError(1, arguments)
+            parameter_file = backend.directory / "seed-parameters.json"
+            assert stat.S_IMODE(parameter_file.stat().st_mode) == 0o600
+            assert arguments[arguments.index("--parameters") + 1] == "@" + str(parameter_file)
+            assert arguments[arguments.index("--output") + 1] == "none"
+            parameters = json.loads(parameter_file.read_text())
+            assert parameters["vaultName"]["value"] == vault
+            secret = parameters["secretName"]["value"]
+            assert secret in all_names.values() and parameters["secretValue"]["value"]
+            writes.append((secret, name))
+            body = b""
+        else:
+            assert arguments[:3] == ["az", "resource", "show"]
+            secret = arguments[arguments.index("--ids") + 1].rsplit("/", 1)[1]
+            if lost_reference and secret == "enrollment-admission-key" and not reply_lost:
+                reply_lost = True
+                raise subprocess.CalledProcessError(1, arguments, stderr=b"invented private provider material")
+            body = ("https://" + vault + ".vault.azure.net/secrets/" + secret + "/" + "2" * 32).encode()
+        return subprocess.CompletedProcess(arguments, 0, stdout=body, stderr=b"")
+
+    backend.run = cli
+    master = "invented-seed-master-" + "0" * 64
+    if lost_reference:
+        with pytest.raises(RuntimeError, match="^private allocation provider operation pending$"):
+            backend._seed(state, master)
+        assert set(refs) == {"REDIS_URL"}
+        saved = backend._open(allocator._deployment(hosted.plan, hosted.operation))
+        assert saved["deployment"]["practice"]["secret_references"] == refs
+        state = saved
+        refs = state["deployment"]["practice"]["secret_references"]
+    backend._seed(state, master)
+    assert writes[0] == ("redis-url", "allocation-" + hosted.operation + "-redis-url")
+    assert set(refs) == set(all_names)
+    tracking = {secret: name for secret, name in writes}
+    assert len(tracking) == len(set(tracking.values())) == 8
+    for secret, name in writes:
+        assert tracking[secret] == name
+        original = "allocation-" + hosted.operation + "-" + secret
+        if len(original) <= 64:
+            assert name == original
+        else:
+            assert re.fullmatch(r"allocation-[a-f0-9]{40}", name)
+    if lost_reference:
+        retried = [name for secret, name in writes if secret == "enrollment-admission-key"]
+        assert len(retried) == 2 and retried[0] == retried[1]
+        assert sum(secret == "redis-url" for secret, _ in writes) == 1
+    before = list(calls)
+    optional.secret.unlink()
+    model_key.unlink()
+    (backend.directory / "admin-password").unlink()
+    (backend.directory / "runtime-password").unlink()
+    backend._seed(state, master)
+    assert calls == before and not (backend.directory / "seed-parameters.json").exists()
+    journal = (backend.directory / "operation.json").read_text()
+    captured = capsys.readouterr()
+    for private in ("invented-seed-redis-only", "invented-seed-model-key-only", "invented-seed-admin-only",
+                    "invented-seed-runtime-only", "invented private provider material"):
+        assert private not in journal + captured.out + captured.err
 
 
 def test_per_box_job_binding_uses_canonical_allocated_host_and_rejects_central_database(hosted):

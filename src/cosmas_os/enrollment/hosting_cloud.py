@@ -224,7 +224,7 @@ class AzureAllocationBackend:
             return
         values = {}
         if not set(SECRET_NAMES) <= set(references):
-            keys = self._json(["az", "rest", "--method", "post", "--url", "https://management.azure.com" + resources["redis_id"] + "/databases/default/listKeys?api-version=2024-11-01", "--output", "json"])
+            keys = self._json(["az", "rest", "--method", "post", "--url", "https://management.azure.com" + resources["redis_id"] + "/databases/default/listKeys?api-version=2024-10-01", "--output", "json"])
             redis_key = keys.get("primaryKey")
             if not isinstance(redis_key, str) or not redis_key:
                 raise ValueError("private Box Redis credential unavailable")
@@ -256,8 +256,14 @@ class AzureAllocationBackend:
                 continue
             secret = secret_names[name]
             self._write("seed-parameters.json", canonical({"vaultName": {"value": vault}, "secretName": {"value": secret}, "secretValue": {"value": value}}))
+            deployment_name = "allocation-" + d["operation_id"] + "-" + secret
+            if len(deployment_name) > 64:
+                # Hash only the public operation ID and fixed secret name.
+                deployment_name = "allocation-" + hashlib.sha256(
+                    (d["operation_id"] + ":" + secret).encode("ascii")
+                ).hexdigest()[:40]
             self._command(["az", "deployment", "group", "create", "--subscription", self.config.foundation["subscription_id"],
-                "--resource-group", self.config.foundation["resource_group_name"], "--name", "allocation-" + d["operation_id"] + "-" + secret,
+                "--resource-group", self.config.foundation["resource_group_name"], "--name", deployment_name,
                 "--template-file", str(template), "--parameters", "@" + str(self.directory / "seed-parameters.json"), "--output", "none"])
             reference = self._command(["az", "resource", "show", "--ids", resources["key_vault_id"] + "/secrets/" + secret,
                 "--api-version", "2024-11-01", "--query", "properties.secretUriWithVersion", "--output", "tsv"]).decode().strip()
