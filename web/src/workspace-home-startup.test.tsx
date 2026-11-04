@@ -108,7 +108,7 @@ it('enables Start when recovery is ready and does not wait for a slow visit list
   let releaseVisits!:(value:never[])=>void;
   vi.spyOn(workspaceApi,'catalog').mockImplementation(()=>new Promise(resolve=>{releaseVisits=resolve;}));
   vi.spyOn(workspaceApi,'privateDraftSummaries').mockResolvedValue({contract_version:2,drafts:[],has_more:false});
-  const props={identity,team,locked:false,onUseTeam:vi.fn(),onSettings:vi.fn(),onVisits:vi.fn(),onConnections:vi.fn(),onPracticeWork:vi.fn(),onOpened:vi.fn(),onAccessLost:vi.fn(),onBusyChange:vi.fn()};
+  const props={identity,team,locked:false,onUseTeam:vi.fn(),onSettings:vi.fn(),onVisits:vi.fn(),onConnections:vi.fn(),onPracticeWork:vi.fn(),onOpened:vi.fn(),onAccessLost:vi.fn(),onBusyChange:vi.fn(),scheduleConnected:true};
   const started=performance.now();
   await act(async()=>root.render(<PracticeHome {...props} recovery={null}/>));
   expect(workspaceApi.catalog).toHaveBeenCalledOnce();

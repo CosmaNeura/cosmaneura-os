@@ -107,3 +107,12 @@ it.each([false,true])('keeps the independent beta focused on Chief when model re
   expect(host.textContent).not.toContain('recording');
   await act(async()=>choices[0].click());expect(choose).toHaveBeenCalledExactlyOnceWith('chief');
 });
+it('lists each assistant with a plain one-line description',async()=>{
+  const {ASSISTANT_DESCRIPTIONS}=await import('./assistant-copy');
+  const team=teamFixture(),choose=vi.fn();
+  team.configuration.bots.push({role:'research',name:'Research',enabled:true,response_style:'brief',include_notebook:false,include_evidence:false});
+  await act(async()=>root.render(<NewMessagePicker team={team} locked={false} onChoose={choose} onClose={()=>{}}/>));
+  expect(host.textContent).toContain(ASSISTANT_DESCRIPTIONS.chief);
+  expect(host.textContent).toContain(ASSISTANT_DESCRIPTIONS.scribe);
+  expect(host.textContent).toContain(ASSISTANT_DESCRIPTIONS.research);
+});

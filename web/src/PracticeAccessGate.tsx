@@ -144,7 +144,7 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
   if(showSetup)return <main className="practice-access-gate practice-quick-setup">
     <nav aria-label="Account and organization">{accountControls}</nav>
     <p className="practice-setup-kicker">YOUR PRACTICE · QUICK SETUP</p><h1>Let's get you ready.</h1>
-    <p>Confirm your practice. Your provider team and first private note are next.</p>
+    <p>Confirm your practice. Your AI assistants and first private note are next.</p>
     {error&&<p role="alert">{error}</p>}
     <div className="practice-setup-fields">
       <label htmlFor={practiceNameId}>Practice name<input id={practiceNameId} name="practice-name" autoComplete="organization" maxLength={120} value={practiceName} disabled={busy||uncertain||setupCommand.current!==null} onChange={event=>setPracticeName(event.target.value)}/></label>

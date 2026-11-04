@@ -125,6 +125,7 @@ import { WorkspaceApiError, botAddress, type AppendInput,
 import "./encounter-workspace.css";
 import "./messages-presentation.css";
 import {showDemoLabels} from './demo-labels';
+import {assistantDescription} from './assistant-copy';
 
 
 const MembershipAnalysisPanel=deferredWorkspacePanel(()=>import('./MembershipAnalysisPanel').then(module=>module.MembershipAnalysisPanel),'Membership review');
@@ -440,7 +441,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function closeDraftJournal(){session.recovery.close();}
   useEffect(() => {
     const previousTitle = document.title;
-    document.title = "CosmasOS · Provider Team";
+    document.title = "CosmasOS · AI assistants";
     return () => { ehrOpeningIntent.current++;ehrOpeningCleanup.current?.();session.invalidate(); activityNavigation.current?.abort(); closeDraftJournal(); document.title = previousTitle; };
   }, []);
   useEffect(() => {
@@ -1560,19 +1561,20 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         {authenticated&&CONNECTION_ONBOARDING_BUILD&&<button className="team-nav-item team-nav-secondary" disabled={viewNavigationLocked||busy||!!pending} onClick={()=>void openSettings('connections')}>Connections</button>}
         {hasWorkspaceIdentity&&<button className={`team-nav-item ${settingsOpen&&!practiceOpen?'active':''}`} aria-current={settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked} onClick={()=>void openSettings()}><WorkspaceNavIcon page="settings"/>Settings</button>}
       </nav>
-      <div className="team-roster-heading"><p className="team-sidebar-label">PROVIDER TEAM</p>
-        {team && <button className="team-icon-button" disabled={connectionNavigationLocked || busy || !!pending && pending.type !== "team"} onClick={() => void openSettings()} aria-label="Configure Provider Team">⚙</button>}</div>
-      <nav aria-label="Provider Team" className="team-roster">{team?.members.map(member => {
+      <div className="team-roster-heading"><p className="team-sidebar-label">AI ASSISTANTS</p>
+        {team && <button className="team-icon-button" disabled={connectionNavigationLocked || busy || !!pending && pending.type !== "team"} onClick={() => void openSettings()} aria-label="Configure AI assistants">⚙</button>}</div>
+      <nav aria-label="AI assistants" className="team-roster">{team?.members.map(member => {
         const address = botAddress(member);
         const config = team.configuration.bots.find(b => botAddress(b) === address)!;
         const privateScribe=member.role==='scribe'&&CAPTURE_WORKSPACE_BUILD&&!!authenticated&&config.enabled&&!config.retired&&!!team.revision;
+        const blurb=config.retired ? "Retired · history kept" : !team.revision ? "Set up your assistants" : !config.enabled ? "Paused" : config.blocked_capabilities?.includes("model_answer") ? "AI answers blocked" : assistantDescription(member.role, config.job_focus || member.description);
         return <button key={address} disabled={connectionNavigationLocked||!workspace&&!privateScribe||privateScribe&&workspace?.private_draft?.state==='unlinked'&&practicePage==='notebook'&&(locked||captureNavigationLocked||captureDraftLocked)} aria-pressed={selected === address} onClick={() => leaveTeamSettings(() => {
           if(privateScribe&&workspace?.private_draft?.state==='unlinked'&&practicePage==='notebook'){startNotebookRecording();return;}
           if(privateScribe&&(!workspace||practicePage==='home')){setSettingsOpen(false);setPracticeOpen(false);setPracticePage('home');setPrivateRecordingRequest(value=>value+1);return;}
           if(session.presentation.enabled&&workspace&&authenticated){void openConversation(workspace.id,address);return;}
           setPracticeOpen(false); setSelectedResult(null); setSelected(address); setSettingsOpen(false);setPracticePage("notebook"); setMobilePanel(member.role === "scribe" ? "Notebook" : "Conversation"); if (member.role === "scribe") setPanel("Notebook"); })}>
           <BotAvatar role={member.role} /><span><strong>{config.name}</strong>
-            <small><i className={config.enabled && team.revision ? "ready" : "paused"} />{config.retired ? "Retired · history kept" : !team.revision ? "Set up your team" : !config.enabled ? "Paused" : config.blocked_capabilities?.includes("model_answer") ? "AI answers blocked" : "On"}</small></span>
+            <small><i className={config.enabled && team.revision ? "ready" : "paused"} />{blurb}</small></span>
         </button>;
       })}</nav>
       <div className="team-sidebar-bottom"><p><span className="team-local-dot" />{authenticated ? "Signed-in workspace" : "Local workspace"}</p><small>{showDemoLabels()?'Invented data · private to you':'Private to you'}</small></div>

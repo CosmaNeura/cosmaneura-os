@@ -13,6 +13,7 @@ import type {FaxInboundPanelProps} from './FaxInboundPanel';
 import {EFaxInboundMount} from './EFaxInboundMount';
 import type {EFaxInboundPanelProps} from './EFaxInboundPanel';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
+import {showComingSoonConnections} from './assistant-copy';
 
 type Screen = 'home' | 'connections' | 'provider' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google' | 'ehr';
 export type PracticeRecordProvider = 'atlas_md' | 'elation' | 'tebra' | 'athena';
@@ -315,7 +316,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
           </details>}{item.id==='messaging'&&onOpenMessagingWork&&<div className="connection-task-action"><button className="team-primary" disabled={navigationLocked||messagingWorkBlocked||!canOpenFax} onClick={()=>{if(canOpenFax&&!navigationLocked&&!messagingWorkBlocked)onOpenMessagingWork();}}>{messagingWorkLabel}</button><small>Prepare and review a draft. Delivery is checked for each fax.</small></div>}</div>;})}</div>
         </section>;
       })}
-      {!nativeConnectionDirectory&&(['practice_setup','coming_soon'] as const).map(kind=>{
+      {!nativeConnectionDirectory&&(['practice_setup','coming_soon'] as const).filter(kind=>kind!=='coming_soon'||showComingSoonConnections()).map(kind=>{
         const cards=connectionCards.filter(item=>catalog?.readiness?.[item.id]?.state===kind&&(kind==='coming_soon'||guidedConnections&&!catalog?.[item.id]));
         return cards.length>0&&<section key={kind} className="connection-group" aria-label={kind==='coming_soon'?'Coming soon':'Managed by your practice'}>
           <h2>{kind==='coming_soon'?'Coming soon':'Managed by your practice'}</h2>{cards.map(item=><article key={item.id} className="connection-card-box">
