@@ -9,6 +9,7 @@ import {outlookMessageApi,outlookReviewProvesNoCommit,type OutlookMessageStatus,
 import {emptyOutlookMessageRecovery,validateOutlookMessageRecovery,type OutlookMessagePending,type OutlookMessageRecoveryAccess,
   type OutlookMessageRecoveryScope,type OutlookMessageRecoveryRecord,type OutlookMessageVisit,type OutlookMessageSaved} from './outlook-message-recovery';
 import './outlook-message.css';
+import {EmailWorkHeader,type EmailWorkStep} from './EmailWorkHeader';
 
 export type OutlookMessagePanelProps={identity:AuthenticatedWorkspaceIdentity;scope:OutlookMessageRecoveryScope;recovery:OutlookMessageRecoveryAccess|null;
   workspace:OutlookMessageVisit|null;locked?:boolean;recoveryLocked?:boolean;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;
@@ -148,8 +149,11 @@ export function OutlookMessagePanel({identity,scope,recovery,workspace,locked=fa
   const stopWaiting=()=>{if(!busy)return;controller.current?.abort();};
   const choose=(id:string)=>{if(blocked)return;void run(async(gen)=>{await persist({...latest.current,selected_message_id:id,message:null,selected_visit:null,saved:null},gen);setReviewed(false);});};
   const selectVisit=()=>{if(blocked||!sourceAllowed||!workspace||!message||message.status!=='complete')return;void run(async(gen)=>{await persist({...latest.current,selected_visit:structuredClone(workspace)},gen);setReviewed(false);});};
-  return <section className="outlook-message-panel" aria-label="Work with Outlook">
-    <h3 tabIndex={-1}>Work with email</h3><p>Read one message, confirm its visit, then make it available for Chief’s work.</p>
+  const visitConfirmed=!!workspace&&!!record.selected_visit&&same(workspace,record.selected_visit);
+  const workStep:EmailWorkStep=!message||message.status!=='complete'||!sourceAllowed?'read':record.saved?
+    workspace?.id===record.saved.workspace_id?'draft':'visit':visitConfirmed?'review':'visit';
+  return <section className="outlook-message-panel email-work" aria-label="Work with Outlook">
+    <EmailWorkHeader provider="Outlook" step={workStep}/>
     <p className="outlook-message-notice">Choose one Outlook message to review for this visit. Attachments and messages that cannot be read completely must be reviewed in Outlook. Nothing is sent from this screen.</p>
     {nativeForeground.suspended&&<p role="status">Email contents are hidden while the app is inactive. Your private saved work is retained.</p>}
     {!recovery&&<p role="alert">Private saved-work storage is required. Email work is unavailable.</p>}
@@ -160,6 +164,7 @@ export function OutlookMessagePanel({identity,scope,recovery,workspace,locked=fa
     {(busy||dispatching)&&<div role="status"><p>Waiting for the current email operation…</p><p>This request has a 50-second limit.</p><button onClick={stopWaiting}>Stop waiting</button></div>}
     {error&&owned&&<p role={pending?'status':'alert'}>{error}</p>}
     {owned&&ready&&<>
+      <div className="email-work-access">
       <button className={!status?"team-primary":undefined} disabled={pending?nativeForeground.suspended||!owned||!ready||busy||dispatching||!!offer||(recoveryLocked??locked)||connectionBusy:blocked} onClick={()=>void run(async(gen,signal)=>{
         const value=await outlookMessageApi.status(identity,signal);if(!valid(gen))return;setStatus(value);
         if(value.state!=='connected'){setSourceStale(true);setSourceWithheld(true);setReviewed(false);return;}
@@ -173,12 +178,18 @@ export function OutlookMessagePanel({identity,scope,recovery,workspace,locked=fa
       {(sourceWithheld||connectionChanged||projectedSourceUnavailable)&&<p role="alert">Saved email contents are withheld until account access and this source are checked. The private recovery record is retained.</p>}
       {record.saved?.source_withheld&&<p role="status">The exact email source save is confirmed. Its contents are unavailable; check access and review current email before asking Chief for new work.</p>}
       {status&&!status.full_mail_read&&<button disabled={nativeForeground.suspended||busy||dispatching||(recoveryLocked??locked)||connectionBusy||!onConnectMicrosoft} onClick={onConnectMicrosoft}>Connect Microsoft for email</button>}
+      </div>
+      <div className="email-work-reader" data-email-open={!!message}>
+      <aside className="email-work-inbox" aria-label="Outlook inbox selection">
       <button className={!record.list?"team-primary":undefined} disabled={blocked||status?.state!=='connected'} onClick={list}>{record.list?'Refresh email list':'Select email'}</button>
       {showSource&&record.list&&<div className="outlook-message-list"><p>Headers from {record.list.observation!.account.email} · Loaded {when(record.list.observation!.observed_at)}</p>
         {record.list.observation!.items.length===0&&<p>No messages were returned in this bounded inbox check.</p>}
         <ul>{record.list.observation!.items.map(item=><li key={item.id}><button disabled={blocked} aria-pressed={record.selected_message_id===item.id} onClick={()=>choose(item.id)}>
           <strong>{item.subject||'(No subject)'}</strong><span>{item.sender||'Sender unavailable'} · {when(item.received_at)}</span>{!item.is_read&&<small>Unread in Outlook</small>}</button></li>)}</ul>
         {record.list.observation!.more&&<p>This is a bounded list. More messages are available in Outlook.</p>}</div>}
+      </aside>
+      <div className="email-work-message">
+      {!record.selected_message_id&&!message&&<p className="email-work-empty">Select an email to read its full message.</p>}
       {showSource&&record.selected_message_id&&!message&&<><p>Selected: {record.list?.observation!.items.find(i=>i.id===record.selected_message_id)?.subject||'(No subject)'}</p>
         {status?.full_mail_read!==true&&<p>Connect Microsoft before reading the selected message.</p>}
         <button className="team-primary" disabled={blocked||status?.full_mail_read!==true} onClick={read}>Read full email</button></>}
@@ -187,20 +198,30 @@ export function OutlookMessagePanel({identity,scope,recovery,workspace,locked=fa
         {message.status==='complete'?<pre aria-label="Complete selected email">{message.content}</pre>:<p role="alert">{reasons[message.reason!]}</p>}
         {message.status==='needs_human'&&<p>This incomplete message cannot be handed to Chief as a complete source.</p>}
         {message.status==='complete'&&!record.saved&&<>
+          <div className="email-work-visit"><span className="email-work-eyebrow">Choose visit</span>
           <p>Current visit: <strong>{workspace?.label??'No visit selected'}</strong>. Date of birth is optional.</p>
-          {!workspace&&onChooseVisit&&<button disabled={blocked} onClick={onChooseVisit}>Choose a visit</button>}
-          {!sourceAllowed&&<p>Check email access and this saved source before using it for the current visit.</p>}
+          <div className="email-work-action-row">
+          {onChooseVisit&&<button disabled={blocked} onClick={onChooseVisit}>{workspace?'Choose another visit':'Choose a visit'}</button>}
           {workspace&&<button disabled={blocked||!sourceAllowed} onClick={selectVisit}>Use for current visit</button>}
+          </div>
+          {!sourceAllowed&&<p>Check email access and this saved source before using it for the current visit.</p>}
           {record.selected_visit&&<p role="status">{workspace&&same(workspace,record.selected_visit)?`Visit confirmed: ${record.selected_visit.label}`:'The visit changed. Confirm the current visit again before saving.'}</p>}
+          </div>
+          <div className="email-work-review"><span className="email-work-eyebrow">Review</span>
           <label className="outlook-message-check"><input type="checkbox" disabled={blocked||!workspace||!record.selected_visit||!same(workspace,record.selected_visit)||!sourceAllowed}
             checked={reviewed} onChange={e=>setReviewed(e.target.checked)}/>I reviewed the message shown above, checked that it belongs to this visit, and will check these outside details before relying on them.</label>
           <button className="team-primary" disabled={blocked||!reviewed||!workspace||!record.selected_visit||!same(workspace,record.selected_visit)||!sourceAllowed} onClick={review}>Save reviewed email for this visit</button>
           <p>Saving adds a separate source. It does not replace the clinical note or ask Chief to act.</p>
+          </div>
         </>}
-        {record.saved&&<div role="status"><p>Email source saved for this visit. The clinical note remains separate.</p>
-          {onAskChief&&<><button className="team-primary" disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!)}>Prepare Chief draft</button>
-            <button disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!,'reply')}>Draft a reply</button></>}</div>}
+        {record.saved&&<div className="email-work-reply" role="status"><span className="email-work-eyebrow">Draft reply</span>
+          <p>{workspace?.id===record.saved.workspace_id?'Email source saved for this visit. The clinical note remains separate.':`This email is saved for ${record.selected_visit?.label??'the reviewed visit'}. Choose that visit to prepare a draft.`}</p>
+          {workspace?.id!==record.saved.workspace_id&&onChooseVisit&&<button disabled={blocked} onClick={onChooseVisit}>Choose a visit</button>}
+          {onAskChief&&<div className="email-work-action-row"><button className="team-primary" disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!,'reply')}>Draft a reply</button>
+            <button disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!)}>Prepare Chief draft</button></div>}</div>}
       </article>}
+      </div>
+      </div>
       {sourceStale&&<div role="alert"><p>Confirm the current visit and review a fresh email source before new work.</p>{onRefreshVisit&&<button disabled={busy||dispatching||!!pending||(recoveryLocked??locked)} onClick={()=>void run(async()=>{await onRefreshVisit();setSourceStale(false);})}>Refresh current visit</button>}</div>}
       {pending&&<div className="outlook-message-recovery"><h4>Saved request needs a confirmed result</h4><p>{pending.kind==='review'?'This source save may already be recorded. Retry uses the same visit, message and key.':'Check the saved result without repeating the Outlook read.'}</p>
         <button className="team-primary" disabled={busy||dispatching||(recoveryLocked??locked)} onClick={recover}>{pending.kind==='review'?'Retry exact source save':'Check saved email result'}</button>
