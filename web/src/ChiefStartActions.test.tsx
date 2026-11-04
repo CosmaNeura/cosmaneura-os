@@ -21,6 +21,22 @@ describe('Chief first-use controls',()=>{
     expect(container.querySelectorAll('button')).toHaveLength(2);expect(container.querySelector('details')).toBeNull();expect(choose).not.toHaveBeenCalled();
     await act(async()=>container.querySelector('button')!.click());expect(choose).toHaveBeenCalledExactlyOnceWith(CHIEF_STARTERS[0].prompt);
   });
+  it('makes an empty Chief conversation actionable without creating or replacing a request',async()=>{
+    const choose=vi.fn(),open=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} minimal hasSavedContext={false} hasQuestion onChoose={choose} onOpenNotebook={open}/>));
+    const buttons=[...container.querySelectorAll('button')];expect(buttons.map(button=>button.textContent)).toEqual(['Add notes']);
+    expect(container.textContent).toContain('Your message draft stays here.');expect(open).not.toHaveBeenCalled();expect(choose).not.toHaveBeenCalled();
+    await act(async()=>buttons[0].click());expect(open).toHaveBeenCalledOnce();expect(choose).not.toHaveBeenCalled();
+    await act(async()=>root.render(<ChiefStartActions {...ready} minimal onChoose={choose} onOpenNotebook={open}/>));
+    expect([...container.querySelectorAll('button')].map(button=>button.textContent)).toEqual(CHIEF_STARTERS.slice(0,2).map(task=>task.label));
+  });
+  it('keeps the notebook shortcut blocked while navigation is locked',async()=>{
+    const open=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} minimal locked hasSavedContext={false} onChoose={vi.fn()} onOpenNotebook={open}/>));
+    const button=container.querySelector('button')!;expect(button.disabled).toBe(true);await act(async()=>button.click());expect(open).not.toHaveBeenCalled();
+  });
+  it.each([{modelEnabled:false},{sourceAllowed:false}])('retains unavailable-context guidance for %j instead of offering a misleading next step',async change=>{
+    const open=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} {...change} minimal hasSavedContext={false} onChoose={vi.fn()} onOpenNotebook={open}/>));
+    expect(container.textContent).not.toContain('Add notes');expect([...container.querySelectorAll('button')].every(button=>button.disabled)).toBe(true);expect(open).not.toHaveBeenCalled();
+  });
   it.each([{modelEnabled:false},{sourceAllowed:false},{hasSavedContext:false},{notesDirty:true},{hasQuestion:true},{locked:true}])('keeps requests gated by %j',async(change)=>{
     const choose=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} {...change} onChoose={choose}/>));
     for(const button of container.querySelectorAll('button')){expect(button.disabled).toBe(true);await act(async()=>button.click());}

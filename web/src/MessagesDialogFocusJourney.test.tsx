@@ -37,6 +37,25 @@ it.each([['conversation','close'],['message','close'],['conversation','escape'],
  expect(document.activeElement).toBe(opener);expect(focus).not.toHaveBeenCalled();await wait(()=>expect(scroll.scrollTop).toBe(3423));expect(input.value).toBe('Keep my native Chief draft and reading position.');
 });
 
+it('opens notes and sources directly beside the native message field and closes to the same draft and reading position',async()=>{
+ await draft();const scroll=reader(),input=composer(),focus=vi.spyOn(input,'focus'),ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append');
+ const opener=button('Add notes or sources');expect(opener.closest('.team-composer')).not.toBeNull();await click('Add notes or sources');
+ expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(1);expect(host.querySelector('.workspace-dialog h2')?.textContent).toBe('Notes and sources');
+ expect(button('Notebook')).toBeTruthy();expect(button('Saved sources')).toBeTruthy();
+ await click('Close conversation details');expect(document.activeElement).toBe(opener);expect(input.value).toBe('Keep my native Chief draft and reading position.');
+ await wait(()=>expect(scroll.scrollTop).toBe(3423));expect(focus).not.toHaveBeenCalled();expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();
+ await click('Details');expect(host.querySelector('.workspace-dialog h2')?.textContent).toBe('Conversation details');
+});
+
+it('uses the direct source picker to open the existing notebook task without sending the Chief draft',async()=>{
+ await draft();const ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append');
+ await click('Add notes or sources');await click('Notebook');
+ await wait(()=>expect(document.activeElement).toBe(host.querySelector('.messages-thread-header h1')));expect(document.activeElement?.textContent).toBe('Notes');
+ expect(host.querySelector('[role="dialog"]')).toBeNull();expect(composer().value).toBe('Keep my native Chief draft and reading position.');
+ await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(composer()));
+ expect(composer().value).toBe('Keep my native Chief draft and reading position.');expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();
+});
+
 it('opens a cited source from Message details and returns to the surviving invoking control',async()=>{
  const session=observed.session!,workspace=session.getSnapshot().workspace!,source=workspace.entries.find(entry=>entry.kind==='synthetic_source')!;
  await act(async()=>session.setWorkspace({...workspace,entries:workspace.entries.map(entry=>entry.reply?.role==='chief'?{...entry,reply:{...entry.reply,citations:[{entry_id:source.id,revision:source.revision,label:'Invented saved input',kind:source.kind}]}}:entry)}));
