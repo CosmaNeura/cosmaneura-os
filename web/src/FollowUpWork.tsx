@@ -4,6 +4,7 @@ import { EditorRecoveryNotice, editorData, editorDraft, useEditorRecovery } from
 import { DraftStoreError } from "./draft-store";
 import type { FollowUp, FollowUpOperation, Workspace } from "./workspace-api";
 import { hostedWorkspaceRequested } from "./hosted-workspace";
+import {showDemoLabels} from './demo-labels';
 
 function isoDate(value: string) {
   const parts = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
@@ -63,7 +64,7 @@ export function FollowUpWork({ workspace, locked: parentLocked, onSave, onReview
   return <section aria-label="Encounter follow-ups" className="team-follow-ups">
     <h2>Follow-ups</h2>
     <p className="team-fine">{rehearsal
-      ? "Turn a reviewed plan into work with an owner, due date and result. Delivery currently runs only in the local synthetic rehearsal."
+      ? `Turn a reviewed plan into work with an owner, due date and result.${showDemoLabels()?" Delivery currently runs only in the local synthetic rehearsal.":""}`
       : "Use Messages and referrals below to prepare a follow-up from your reviewed note, choose a connected recipient, and review and approve delivery."}</p>
     <EditorRecoveryNotice recovery={recovery} label="Follow-up proposal" onRestore={async draft => {
       const data = draft.data; editorData(data, "body,due,outcome,baseNoteId,submitted");
@@ -87,7 +88,7 @@ export function FollowUpWork({ workspace, locked: parentLocked, onSave, onReview
     {rehearsal && (!note?.review || note.sources_changed ? <p>Review the current note and its sources before proposing work. <button className="team-subtle" onClick={onReview}>Open note review</button></p> :
       <details className="team-follow-up-create"><summary>Propose a follow-up</summary>
         <form onSubmit={e => { e.preventDefault(); void propose(); }}>
-          <p className="team-fine">Based on reviewed note version {note.version}. Owner: you. Target: {workspace.label} · local synthetic destination.</p>
+          <p className="team-fine">Based on reviewed note version {note.version}. Owner: you. Target: {workspace.label}{showDemoLabels()?" · local synthetic destination":""}.</p>
           {note.core_source && <p className="team-fine">The saved Core note and recording must still match this reviewed version before the proposal is accepted.</p>}
           <label>Follow-up message<textarea rows={4} maxLength={4000} disabled={locked} value={body} onChange={e => { setBody(e.target.value); setShare(false); setSubmitted(null); }} /></label>
           <label>Due date<input type="text" inputMode="numeric" placeholder="MM/DD/YYYY" maxLength={10}
@@ -159,7 +160,7 @@ function FollowUpCard({ item, workspaceId, label, locked: parentLocked, readOnly
       }}>Use this text for the current result</button>}
       <button disabled={locked} onClick={() => void recovery.commit(null).then(() => {setEvidence("");setResultChecked(false);}).catch(() => {})}>Discard earlier result draft</button>
     </aside>}
-    <p className="team-fine">Responsible: {responsible ? "you" : "a practice colleague · see Practice work"} · Due {dueDate.toLocaleDateString()}{overdue ? " · Overdue" : ""}<br />Target: {label} · local synthetic destination</p>
+    <p className="team-fine">Responsible: {responsible ? "you" : "a practice colleague · see Practice work"} · Due {dueDate.toLocaleDateString()}{overdue ? " · Overdue" : ""}<br />Target: {label}{showDemoLabels()?" · local synthetic destination":""}</p>
     {item.source_changed && <p className="team-note-notice">The source note or evidence changed. {awaiting && !readOnly ? "Dismiss this proposal and create a new one from the current reviewed note." : "This record keeps the earlier note version as its source."}</p>}
     {awaiting && !readOnly && <div className="team-follow-up-actions">
       {item.core_check_required && <p className="team-fine">Core will be checked again before approval and local delivery. Changed or unavailable notes leave delivery pending.</p>}

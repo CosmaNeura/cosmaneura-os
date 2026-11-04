@@ -35,6 +35,9 @@ mock_provider "azurerm" {
   mock_resource "azurerm_user_assigned_identity" {
     defaults = { "id" : "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-enrollment-staging-mock1234/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-db", "principal_id" : "00000000-0000-4000-8000-000000000099" }
   }
+  mock_resource "azurerm_monitor_action_group" {
+    defaults = { "id" : "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-enrollment-staging-mock1234/providers/Microsoft.Insights/actionGroups/ag" }
+  }
 }
 variables {
   subscription_id            = "00000000-0000-4000-8000-000000000001"
@@ -148,4 +151,30 @@ run "reject_small_network" {
   command = plan
   variables { vnet_address_prefix = "10.248.0.0/24" }
   expect_failures = [var.vnet_address_prefix]
+}
+run "alerts_off_without_contact" {
+  command = plan
+  assert {
+    condition     = length(azurerm_monitor_action_group.practice_health) == 0 && length(azurerm_monitor_metric_alert.container_apps) == 0 && length(azurerm_monitor_metric_alert.postgres) == 0
+    error_message = "Alerts must stay off until a human contact address is configured."
+  }
+}
+run "alerts_cover_every_practice_workspace" {
+  command = plan
+  variables {
+    alert_contact_email = "operations@example.invalid"
+  }
+  assert {
+    condition = (length(azurerm_monitor_action_group.practice_health) == 1 &&
+      toset(keys(azurerm_monitor_metric_alert.container_apps)) == toset(["server-errors", "restarts", "slow"]) &&
+      azurerm_monitor_metric_alert.container_apps["server-errors"].scopes == toset([azurerm_resource_group.enrollment.id]) &&
+      azurerm_monitor_metric_alert.container_apps["server-errors"].target_resource_type == "Microsoft.App/containerApps" &&
+      azurerm_monitor_metric_alert.container_apps["server-errors"].criteria[0].metric_name == "Requests" &&
+      one(azurerm_monitor_metric_alert.container_apps["server-errors"].criteria[0].dimension).values == tolist(["5xx"]) &&
+      length(azurerm_monitor_metric_alert.container_apps["restarts"].criteria[0].dimension) == 0 &&
+      azurerm_monitor_metric_alert.container_apps["slow"].criteria[0].metric_name == "ResponseTime" &&
+      toset(keys(azurerm_monitor_metric_alert.postgres)) == toset(["cpu", "storage"]) &&
+    azurerm_monitor_metric_alert.postgres["storage"].target_resource_type == "Microsoft.DBforPostgreSQL/flexibleServers")
+    error_message = "Alerts must cover every container app and database in the practice resource group."
+  }
 }
