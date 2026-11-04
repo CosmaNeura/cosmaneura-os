@@ -215,7 +215,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   },[authenticated,receivedFaxScope]);
   const [outlookCalendarOpen,setOutlookCalendarOpen]=useState(false),[outlookCalendarVisited,setOutlookCalendarVisited]=useState(false);
   const [outlookMessageOpen,setOutlookMessageOpen]=useState(false),[outlookMessageVisited,setOutlookMessageVisited]=useState(false);
-  const [outlookReturn,setOutlookReturn]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;origin:'conversation'|'sources';label:string;target:HTMLElement|null}|null>(null);
+  const [outlookReturn,setOutlookReturn]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;address:string;origin:'conversation'|'sources';label:string;target:HTMLElement|null;scroll:number|null;documentScroll:{element:Element;top:number;left:number}|null}|null>(null);
   const microsoftVisitSelection=useRef<false|'message'|'calendar'>(false),outlookOpening=useRef(0);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false),[googleCalendarVisited,setGoogleCalendarVisited]=useState(false);
   const googleVisitSelection=useRef<'message'|'calendar'|false>(false);
@@ -1215,18 +1215,60 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     const removeNative=owner.mode==='clerk_jwt'&&owner.nativeSession?subscribeNativeWorkspaceForeground(owner,()=>{},invalidate):undefined;
     try{
       if(!await session.conversations.retain(host)||!current())return;await host.authorize();if(!current()||host.blocked())return;
-      setOutlookReturn({identity:owner,generation:currentGeneration,workspaceId:view.workspace.id,origin,label:origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`,target});
+      const scroll=mobileChatFrame.scrollRef.current?.scrollTop??null,element=document.scrollingElement,documentScroll=element?{element,top:element.scrollTop,left:element.scrollLeft}:null;
+      if(origin==='conversation'&&scroll!==null)mobileChatFrame.restoreReadingPosition(scroll);
+      setOutlookReturn({identity:owner,generation:currentGeneration,workspaceId:view.workspace.id,address:view.selected,origin,label:origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`,target,scroll,documentScroll});
       show();setSettingsEntry('microsoft');setSettingsOpen(true);setConversationDetails(false);setMessagesTask(null);setPhoneChatToolsOpen(false);
     }catch(cause){if(current())failure(cause);}finally{removeNative?.();document.removeEventListener('click',invalidate,true);document.removeEventListener('keydown',escape,true);}
   }
   function closeOutlookWork(){
     if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
-    const returned=outlookReturn,intent=++outlookOpening.current;setOutlookMessageOpen(false);setOutlookCalendarOpen(false);setOutlookReturn(null);
-    if(!returned||returned.identity!==authenticated||returned.generation!==generation.current||returned.workspaceId!==workspace?.id)return;
+    const returned=outlookReturn,intent=++outlookOpening.current,focusAtClose=document.activeElement;setOutlookMessageOpen(false);setOutlookCalendarOpen(false);setOutlookReturn(null);
+    if(!returned||returned.identity!==authenticated||returned.generation!==generation.current||returned.workspaceId!==workspace?.id||returned.address!==selected)return;
     setSettingsOpen(false);if(returned.origin==='sources'){setPanel('Sources');setMobilePanel('Sources');}
-    requestAnimationFrame(()=>{if(outlookOpening.current!==intent||previousIdentity.current!==returned.identity||generation.current!==returned.generation||session.getSnapshot().settingsOpen)return;
-      const target=returned.target?.isConnected&&!returned.target.closest('[hidden]')?returned.target:workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header > button:last-child');
-      if(target&&!target.closest('[hidden]'))target.focus({preventScroll:true});});
+    const view=session.getSnapshot(),route=session.navigation.sequence.current;
+    const frame=mobileChatFrame.scrollRef.current,documentFrame=document.scrollingElement;
+    const framePosition=frame?{top:frame.scrollTop,left:frame.scrollLeft}:null,documentPosition=documentFrame?{top:documentFrame.scrollTop,left:documentFrame.scrollLeft}:null,documentResetExpected=phoneLayout();
+    const near=(actual:number,expected:number)=>Math.abs(actual-expected)<=1;
+    const topWithin=(element:Element,top:number)=>Math.max(0,Math.min(top,element.scrollHeight-element.clientHeight));
+    const leftWithin=(element:Element,left:number)=>Math.max(0,Math.min(left,element.scrollWidth-element.clientWidth));
+    const scrollingPositionCurrent=(afterLayout=false)=>{
+      if(mobileChatFrame.scrollRef.current!==frame||document.scrollingElement!==documentFrame)return false;
+      // Queued pre-layout events can still report the close position. The
+      // deferred frame must observe the retained lifetime's settled restore.
+      if(frame&&framePosition&&frame.clientHeight>0){
+        const expectedTop=returned.origin==='conversation'&&returned.scroll!==null&&session.presentation.enabled?returned.scroll:framePosition.top;
+        const knownTop=near(frame.scrollTop,topWithin(frame,expectedTop))||!afterLayout&&near(frame.scrollTop,topWithin(frame,framePosition.top));
+        if(!knownTop||!near(frame.scrollLeft,leftWithin(frame,framePosition.left)))return false;
+      }
+      // The existing phone page layout explicitly resets document scroll to 0.
+      if(documentFrame&&documentPosition){
+        const unchanged=near(documentFrame.scrollTop,topWithin(documentFrame,documentPosition.top))&&near(documentFrame.scrollLeft,leftWithin(documentFrame,documentPosition.left));
+        const knownPosition=documentResetExpected?near(documentFrame.scrollTop,0)&&near(documentFrame.scrollLeft,0):unchanged;
+        if(!knownPosition&&(afterLayout||!unchanged))return false;
+      }
+      return true;
+    };
+    let restorationCancelled=false;
+    const cancelRestoration=()=>{restorationCancelled=true;cleanupRestoration();};
+    const scrolled=(event:Event)=>{if((event.target===frame||event.target===documentFrame||event.target===document)&&!scrollingPositionCurrent())cancelRestoration();};
+    const scrollingKey=(event:KeyboardEvent)=>{
+      if(event.altKey||event.ctrlKey||event.metaKey||!['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key)||
+        event.target instanceof HTMLElement&&(event.target.closest('input,textarea,select,[contenteditable=true]')||event.key===' '&&event.target.closest('button,a')))return;
+      cancelRestoration();
+    };
+    function cleanupRestoration(){document.removeEventListener('wheel',cancelRestoration,true);document.removeEventListener('touchmove',cancelRestoration,true);document.removeEventListener('keydown',scrollingKey,true);document.removeEventListener('pointerdown',cancelRestoration,true);document.removeEventListener('scroll',scrolled,true);}
+    document.addEventListener('wheel',cancelRestoration,{capture:true,passive:true});document.addEventListener('touchmove',cancelRestoration,{capture:true,passive:true});document.addEventListener('keydown',scrollingKey,true);document.addEventListener('pointerdown',cancelRestoration,{capture:true,passive:true});document.addEventListener('scroll',scrolled,{capture:true,passive:true});
+    requestAnimationFrame(()=>{try{
+      const now=session.getSnapshot();
+      if(restorationCancelled||!scrollingPositionCurrent(true)||session.navigation.sequence.current!==route||outlookOpening.current!==intent||previousIdentity.current!==returned.identity||generation.current!==returned.generation||now.workspace?.id!==returned.workspaceId||now.selected!==returned.address||(['settingsOpen','settingsEntry','practicePage','practiceOpen','panel','mobilePanel'] as const).some(key=>now[key]!==view[key]))return;
+      if(document.activeElement!==focusAtClose&&document.activeElement!==document.body&&!document.activeElement?.closest('[hidden]'))return;
+      if(returned.scroll!==null){if(returned.origin==='conversation')mobileChatFrame.restoreReadingPosition(returned.scroll);else if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=returned.scroll;}
+      const target=returned.target?.isConnected&&!returned.target.closest('[hidden]')&&!returned.target.matches(':disabled')?returned.target:workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header > button:last-child');
+      if(target&&!target.closest('[hidden]'))target.focus({preventScroll:true});
+      const saved=returned.documentScroll;if(saved?.element.isConnected&&saved.element===document.scrollingElement){saved.element.scrollTop=Math.max(0,Math.min(saved.top,saved.element.scrollHeight-saved.element.clientHeight));saved.element.scrollLeft=Math.max(0,Math.min(saved.left,saved.element.scrollWidth-saved.element.clientWidth));}
+    }finally{cleanupRestoration();}
+    });
   }
   const ehrReturnFocus=useRef<{element:HTMLElement|null;scroll:number|null}|null>(null);
   async function openAthenaTask(origin:'conversation'|'connections'){
