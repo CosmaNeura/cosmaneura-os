@@ -17,12 +17,15 @@ const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
 const options = {webOrigin: 'https://workspace.example.invalid', coreWebOrigin: 'https://core.example.invalid',
   captureUploadOrigins: ['https://uploads.example.invalid']};
 
-async function fixture(t, client = 'desktop', dataMode = 'authorized_beta', nativeFeatureProfile = 'operational-beta-v1') {
+async function fixture(t, client = 'desktop', dataMode = 'authorized_beta', nativeFeatureProfile = 'operational-beta-v1', microsoftConnectionEnabled = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'cosmas-native-renderer-')));
   t.after(() => rm(root, {recursive: true, force: true}));
   const inputs = join(root, 'clients'), output = join(root, 'renderer');
   await mkdir(inputs);
-  const files = structuredClone(workspaceIdentityInputs(identity, {...options, dataMode, nativeFeatureProfile}));
+  const selected = ['standalone-practice-v1','independent-beta-v1'].includes(nativeFeatureProfile)
+    ? {...options,coreWebOrigin:'',captureUploadOrigins:[],nativeFeatureProfile:'operational-beta-v1',featureProfile:nativeFeatureProfile}
+    : {...options,nativeFeatureProfile};
+  const files = structuredClone(workspaceIdentityInputs(identity, {...selected, dataMode, microsoftConnectionEnabled}));
   for (const [name, value] of Object.entries(files)) await writeFile(join(inputs, name), JSON.stringify(value));
   return {root, inputs, output, client, files};
 }
@@ -35,6 +38,21 @@ for (const client of ['desktop','apple']) test(`${client} explicitly builds the 
   assert.equal(result.profile.captureMode,'disabled');
   assert.equal(result.profile.dataMode,'synthetic');
   assert.deepEqual(result.profile.enabledFlags,['VITE_AI_ACTIVITY_ENABLED','VITE_WORKSPACE_ROUTINES_ENABLED']);
+});
+
+for (const client of ['desktop','apple']) test(`${client} retains independently selected Microsoft connection and sources during compilation`,async t=>{
+  const f=await fixture(t,client,'synthetic','independent-beta-v1',true);
+  const env=f.files[client+'-build-env.json'];
+  const result=await buildNativeRenderer(f,{build:async config=>{
+    assert.equal(process.env.VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED,'true');
+    assert.equal(process.env.VITE_MICROSOFT_MESSAGE_ENABLED,'true');
+    await emit(config,env);
+  }});
+  assert.equal(result.profile.profile,'independent-beta-v1');
+  assert.equal(result.profile.enabledFlags.includes('VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED'),true);
+  assert.equal(result.profile.enabledFlags.includes('VITE_MICROSOFT_MESSAGE_ENABLED'),true);
+  assert.equal(result.profile.enabledFlags.includes('VITE_WORKSPACE_SCHEDULING_ENABLED'),false);
+  assert.equal(Object.keys(process.env).some(key=>key.startsWith('VITE_')),false);
 });
 
 async function emit(config, env, change = {}) {
