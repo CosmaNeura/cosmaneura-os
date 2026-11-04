@@ -3,6 +3,7 @@ import {NativeEnrollmentEntry} from './NativeEnrollmentEntry';
 import {NativePracticeConnection,nativePracticeConnectionAvailable,type NativePracticeConnectionPlugin} from '../../clients/capture/src/native/practice-connection-plugin';
 import {nativeEnrollmentCapabilities,nativeAccountEntryRequested} from './native-enrollment';
 import {PracticeAccessGate} from './PracticeAccessGate';
+import {NativeAccountControls} from './NativeAccountControls';
 import {hostedWorkspaceRequested} from './hosted-workspace';
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceAuth, nativeWorkspaceAuthAvailable, type WorkspaceAuthPlugin } from "../../clients/capture/src/native/workspace-auth-plugin";
@@ -35,7 +36,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   useLayoutEffect(()=>{
     let active=true;setPracticeCanConnect(false);
     // A native-only capability read never calls the enrollment service. Missing
-    // complete host ports preserve the existing beta account controls exactly.
+    // complete host ports never offer a practice-enrollment action.
     if(practiceConnectionAvailable)void practicePlugin.capabilities().then(value=>{
       if(active)setPracticeCanConnect(nativeEnrollmentCapabilities(value));
     }).catch(()=>{if(active)setPracticeCanConnect(false);});
@@ -191,10 +192,12 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     detail="Complete or cancel the sign-in window to return to Cosmas." role="status" />;
 
   if (state?.phase === "ready" && identity) {
-    const controls=<><button className="button secondary" onClick={() => void act("signOut")}>Log out</button>
-      {practiceCanConnect&&<button className="button secondary" onClick={connectPractice}>Connect practice</button>}</>;
+    const controls=<NativeAccountControls key={state.revision} onSignOut={()=>void act("signOut")}
+      onConnectPractice={practiceCanConnect?connectPractice:undefined}/>;
     return hostedWorkspaceRequested()
-      ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate key={state.revision} identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
+      ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate key={state.revision} identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity}
+          accountControls={<NativeAccountControls key={state.revision} displayName={access.displayName} practiceName={access.practiceName}
+            onSignOut={()=>void act("signOut")} onConnectPractice={practiceCanConnect?connectPractice:undefined}/>} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
       : <EncounterWorkspace key={state.revision} authenticated={identity} accountControls={controls}/>;
   }
   if (state?.phase === "unavailable" || failed) return <StatusScreen title="Sign-in needs attention"
