@@ -654,3 +654,53 @@ variable "private_endpoint_subnet_prefixes" {
   description = "Dedicated private endpoint subnet CIDRs."
   default     = ["10.42.2.32/27"]
 }
+
+variable "alert_api_5xx_per_5m" {
+  type        = number
+  description = "API server-error (5xx) responses in 5 minutes that trigger an alert."
+  default     = 10
+  validation {
+    condition     = var.alert_api_5xx_per_5m >= 1
+    error_message = "alert_api_5xx_per_5m must be at least 1."
+  }
+}
+
+variable "alert_api_response_ms" {
+  type        = number
+  description = "Average API response time in milliseconds, over 15 minutes, that triggers an alert."
+  default     = 3000
+  validation {
+    condition     = var.alert_api_response_ms >= 100
+    error_message = "alert_api_response_ms must be at least 100."
+  }
+}
+
+variable "alert_restarts_per_15m" {
+  type        = number
+  description = "Container restarts in 15 minutes (per app) that trigger a crash-loop alert."
+  default     = 3
+  validation {
+    condition     = var.alert_restarts_per_15m >= 1
+    error_message = "alert_restarts_per_15m must be at least 1."
+  }
+}
+
+variable "alert_postgres_cpu_percent" {
+  type        = number
+  description = "Average PostgreSQL CPU percent over 15 minutes that triggers an alert."
+  default     = 85
+  validation {
+    condition     = var.alert_postgres_cpu_percent > 0 && var.alert_postgres_cpu_percent <= 100
+    error_message = "alert_postgres_cpu_percent must be between 1 and 100."
+  }
+}
+
+variable "alert_postgres_storage_percent" {
+  type        = number
+  description = "PostgreSQL storage percent used that triggers an alert."
+  default     = 80
+  validation {
+    condition     = var.alert_postgres_storage_percent > 0 && var.alert_postgres_storage_percent <= 100
+    error_message = "alert_postgres_storage_percent must be between 1 and 100."
+  }
+}

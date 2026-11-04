@@ -102,3 +102,65 @@ variable "release_operator_object_id" {
     error_message = "Use the reviewed release operator object UUID."
   }
 }
+
+variable "alert_contact_email" {
+  type        = string
+  description = "Human-owned address for practice workspace health alerts. Null leaves alerts off."
+  sensitive   = true
+  default     = null
+  nullable    = true
+  validation {
+    condition     = var.alert_contact_email == null || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.alert_contact_email))
+    error_message = "alert_contact_email must be null or one valid email address."
+  }
+}
+
+variable "alert_5xx_per_5m" {
+  type        = number
+  description = "Server-error (5xx) responses per app in 5 minutes that trigger an alert."
+  default     = 10
+  validation {
+    condition     = var.alert_5xx_per_5m >= 1
+    error_message = "alert_5xx_per_5m must be at least 1."
+  }
+}
+
+variable "alert_response_ms" {
+  type        = number
+  description = "Average response time per app in milliseconds, over 15 minutes, that triggers an alert."
+  default     = 3000
+  validation {
+    condition     = var.alert_response_ms >= 100
+    error_message = "alert_response_ms must be at least 100."
+  }
+}
+
+variable "alert_restarts_per_15m" {
+  type        = number
+  description = "Container restarts per app in 15 minutes that trigger a crash-loop alert."
+  default     = 3
+  validation {
+    condition     = var.alert_restarts_per_15m >= 1
+    error_message = "alert_restarts_per_15m must be at least 1."
+  }
+}
+
+variable "alert_postgres_cpu_percent" {
+  type        = number
+  description = "Average PostgreSQL CPU percent over 15 minutes that triggers an alert."
+  default     = 85
+  validation {
+    condition     = var.alert_postgres_cpu_percent > 0 && var.alert_postgres_cpu_percent <= 100
+    error_message = "alert_postgres_cpu_percent must be between 1 and 100."
+  }
+}
+
+variable "alert_postgres_storage_percent" {
+  type        = number
+  description = "PostgreSQL storage percent used that triggers an alert."
+  default     = 80
+  validation {
+    condition     = var.alert_postgres_storage_percent > 0 && var.alert_postgres_storage_percent <= 100
+    error_message = "alert_postgres_storage_percent must be between 1 and 100."
+  }
+}

@@ -738,6 +738,27 @@ run "workloads_create_digest_pinned_https_web_host" {
     )
     error_message = "Workload release must create PHI-safe API and worker replica alerts using the common schema and the human-owned Action Group."
   }
+
+  assert {
+    condition = (
+      length(azurerm_monitor_metric_alert.api_server_errors) == 1 &&
+      azurerm_monitor_metric_alert.api_server_errors[0].criteria[0].metric_name == "Requests" &&
+      azurerm_monitor_metric_alert.api_server_errors[0].criteria[0].aggregation == "Total" &&
+      azurerm_monitor_metric_alert.api_server_errors[0].criteria[0].threshold == 10 &&
+      one(azurerm_monitor_metric_alert.api_server_errors[0].criteria[0].dimension).name == "statusCodeCategory" &&
+      one(azurerm_monitor_metric_alert.api_server_errors[0].criteria[0].dimension).values == tolist(["5xx"]) &&
+      length(azurerm_monitor_metric_alert.api_slow_responses) == 1 &&
+      azurerm_monitor_metric_alert.api_slow_responses[0].criteria[0].metric_name == "ResponseTime" &&
+      azurerm_monitor_metric_alert.api_slow_responses[0].criteria[0].threshold == 3000 &&
+      toset(keys(azurerm_monitor_metric_alert.workload_restarts)) == toset(["api", "worker"]) &&
+      azurerm_monitor_metric_alert.workload_restarts["worker"].scopes == toset([azurerm_container_app.worker[0].id]) &&
+      azurerm_monitor_metric_alert.workload_restarts["api"].criteria[0].metric_name == "RestartCount" &&
+      toset(keys(azurerm_monitor_metric_alert.postgres_pressure)) == toset(["cpu", "storage"]) &&
+      azurerm_monitor_metric_alert.postgres_pressure["storage"].criteria[0].metric_name == "storage_percent" &&
+      azurerm_monitor_metric_alert.postgres_pressure["cpu"].scopes == toset([azurerm_postgresql_flexible_server.beta.id])
+    )
+    error_message = "Workload release must create PHI-safe 5xx, latency, restart and database-pressure alerts on the human-owned Action Group."
+  }
 }
 
 run "workloads_create_custom_domain_only_after_dns_gate" {
