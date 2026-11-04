@@ -11,6 +11,7 @@ import {emptyGoogleMessageRecovery,validateGoogleMessageRecovery,type GoogleMess
 import {ConnectorSignInBackup} from './ConnectorSignInBackup';
 import {EmailWorkHeader,type EmailWorkStep} from './EmailWorkHeader';
 import {EmailInboxFilter,filterLoadedEmail} from './EmailInboxFilter';
+import {SourceWorkReader} from './SourceWorkReader';
 import './google-message.css';
 
 export type GoogleMessagePanelProps={identity:AuthenticatedWorkspaceIdentity;scope:GoogleMessageRecoveryScope;recovery:GoogleMessageRecoveryAccess|null;
@@ -181,8 +182,9 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
       {status&&status.state==='connected'&&!status.full_mail_read&&<button disabled={blocked||!onRequestFullMailAccess} onClick={onRequestFullMailAccess}>Add full email access</button>}
       {status&&status.state!=='connected'&&<ConnectorSignInBackup name="Gmail"/>}
       </div>
-      <div className="email-work-reader" data-email-open={!!message}>
-      <aside className="email-work-inbox" aria-label="Gmail inbox selection">
+      <SourceWorkReader className="email-work-reader" chooserClassName="email-work-inbox" contentClassName="email-work-message"
+        chooserLabel="Gmail inbox selection" selectedLabel="Selected email" selection={message?{key:record.message!.read_id,label:message.subject||'(No subject)'}:null}
+        changeLabel="Choose another email" returnLabel="Back to selected email" disabled={blocked} chooser={<>
       <button className={!record.list?'team-primary':undefined} disabled={blocked||status?.state!=='connected'} onClick={list}>{record.list?'Refresh email list':'Select email'}</button>
       {showSource&&record.list&&<div className="google-message-list"><p>Headers from {record.list.observation!.account.email} · Loaded {when(record.list.observation!.observed_at)}</p>
         <EmailInboxFilter query={inboxQuery} onQueryChange={setInboxQuery} unreadOnly={unreadOnly} onUnreadChange={setUnreadOnly}
@@ -192,8 +194,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
           <strong>{item.subject||'(No subject)'}</strong><span>{item.sender||'Sender unavailable'} · {when(item.received_at)}</span>{!item.is_read&&<small>Unread in Gmail</small>}
           {selectedOutside?.id===item.id&&<small>Selected email · outside filters</small>}</button></li>)}</ul>
         {record.list.observation!.more&&<p>This is a bounded list. More messages are available in Gmail.</p>}</div>}
-      </aside>
-      <div className="email-work-message">
+      </>}>
       {!record.selected_message_id&&!message&&<p className="email-work-empty">Select an email to read its full message.</p>}
       {showSource&&record.selected_message_id&&!message&&<><p>Selected: {record.list?.observation!.items.find(i=>i.id===record.selected_message_id)?.subject||'(No subject)'}</p>
         {status?.full_mail_read!==true&&<p>Add full email access before reading the selected message.</p>}
@@ -225,8 +226,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
           {onAskChief&&<div className="email-work-action-row"><button className="team-primary" disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!,'reply')}>Draft a reply</button>
             <button disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!)}>Prepare Chief draft</button></div>}</div>}
       </article>}
-      </div>
-      </div>
+      </SourceWorkReader>
       {sourceStale&&<div role="alert"><p>Confirm the current visit and review a fresh email source before new work.</p>{onRefreshVisit&&<button disabled={busy||!!pending||(recoveryLocked??locked)} onClick={()=>void run(async()=>{await onRefreshVisit();setSourceStale(false);})}>Refresh current visit</button>}</div>}
       {pending&&<div className="google-message-recovery"><h4>Saved request needs a confirmed result</h4><p>{pending.kind==='review'?'This source save may already be recorded. Retry uses the same visit, message and key.':'Check the saved result without repeating the Google read.'}</p>
         <button disabled={busy||dispatching||!taskActive||(recoveryLocked??locked)} onClick={recover}>{pending.kind==='review'?'Retry exact source save':'Check saved email result'}</button>
