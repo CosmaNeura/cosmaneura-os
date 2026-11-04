@@ -44,4 +44,12 @@ it('takes a new Chief conversation from first notes to an editable task while re
  if(!tasks().open)await act(async()=>tasks().querySelector('summary')!.click());await click('Plan follow-up and research');
  await wait(()=>expect(question().disabled).toBe(false));expect(question()).toBe(composer);expect(composer.value).toBe(CHIEF_STARTERS[3].prompt);expect(composer.closest('[hidden]')).toBeNull();expect(ask).not.toHaveBeenCalled();expect(append).toHaveBeenCalledOnce();
  await type(composer,'');await click('Organize saved notes');expect(composer.value).toBe(CHIEF_STARTERS[0].prompt);expect(ask).not.toHaveBeenCalled();expect(append).toHaveBeenCalledOnce();expect(create).toHaveBeenCalledOnce();
+ for(const label of ['Draft a visit note','Draft patient instructions']){
+  await type(composer,'');await click('Details');await click('Prepare a Chief task');
+  if(!tasks().open)await act(async()=>tasks().querySelector('summary')!.click());await click(label);
+  await wait(()=>expect(question().disabled).toBe(false));expect(question()).toBe(composer);expect(composer.closest('[hidden]')).toBeNull();
+  expect(composer.value).toContain(label==='Draft a visit note'?'Subjective, Objective, Assessment and Plan':'plain-language patient instructions');
+  expect(composer.value).toContain('My directions: ');await type(composer,composer.value+'Use the invented sleep-diary note; keep medication details missing.');
+  expect(composer.value).toContain('keep medication details missing.');expect(ask).not.toHaveBeenCalled();expect(append).toHaveBeenCalledOnce();expect(create).toHaveBeenCalledOnce();
+ }
 });
