@@ -12,7 +12,7 @@ export type GoogleMessageMountProps={identity:AuthenticatedWorkspaceIdentity;wor
   currentSources?:Array<{entry_id:string;state:'current'|'unavailable'}>;
   onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;onAuthenticationLost:(cause:unknown)=>void;
   onRequestFullMailAccess?:()=>void;fullMailAccessBusy?:boolean;onChooseVisit?:()=>void;
-  taskActive?:boolean;isTaskCurrent?:()=>boolean;onAskChief?:(source:GoogleMessageSaved)=>void;onRefreshVisit?:()=>Promise<void>;enabled?:boolean};
+  taskActive?:boolean;isTaskCurrent?:()=>boolean;onAskChief?:(source:GoogleMessageSaved,intent?:'reply')=>void;onRefreshVisit?:()=>Promise<void>;enabled?:boolean};
 const address=accountEditorAddress('google-messages');
 export function GoogleMessageMount({identity,enabled=GOOGLE_MESSAGE_BUILD,...props}:GoogleMessageMountProps){
   const context=useContext(AccountRecoveryContext),scope=context?.recoveryScope;

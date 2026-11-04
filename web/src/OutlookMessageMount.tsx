@@ -12,7 +12,7 @@ export type OutlookMessageMountProps={identity:AuthenticatedWorkspaceIdentity;wo
   currentSources?:Array<{entry_id:string;state:'current'|'unavailable'}>;
   onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;onAuthenticationLost:(cause:unknown)=>void;
   onConnectMicrosoft?:()=>void;connectionBusy?:boolean;onChooseVisit?:()=>void;
-  onAskChief?:(source:OutlookMessageSaved)=>void;onRefreshVisit:()=>Promise<void>;enabled?:boolean};
+  onAskChief?:(source:OutlookMessageSaved,intent?:'reply')=>void;onRefreshVisit:()=>Promise<void>;enabled?:boolean};
 const address=accountEditorAddress('outlook-messages');
 export function OutlookMessageMount({identity,enabled=OUTLOOK_MESSAGE_BUILD,...props}:OutlookMessageMountProps){
   const context=useContext(AccountRecoveryContext),scope=context?.recoveryScope;

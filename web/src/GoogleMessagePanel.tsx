@@ -15,7 +15,7 @@ export type GoogleMessagePanelProps={identity:AuthenticatedWorkspaceIdentity;sco
   workspace:GoogleMessageVisit|null;locked?:boolean;recoveryLocked?:boolean;onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;
   currentSources?:Array<{entry_id:string;state:'current'|'unavailable'}>;
   onAuthenticationLost:(cause:unknown)=>void;onRequestFullMailAccess?:()=>void;fullMailAccessBusy?:boolean;
-  taskActive?:boolean;isTaskCurrent?:()=>boolean;onChooseVisit?:()=>void;onAskChief?:(source:GoogleMessageSaved)=>void;onRefreshVisit?:()=>Promise<void>};
+  taskActive?:boolean;isTaskCurrent?:()=>boolean;onChooseVisit?:()=>void;onAskChief?:(source:GoogleMessageSaved,intent?:'reply')=>void;onRefreshVisit?:()=>Promise<void>};
 const reasons={attachment:'This email contains an attachment. Review the whole message in Gmail before using it for work.',
   html_only:'This email has no supported plain text. Review it in Gmail.',unsupported_mime:'This email format needs a person to review it in Gmail.',
   oversize:'This email exceeds the supported size. Review the whole message in Gmail.',ambiguous:'This message has conflicting contents. Review it in Gmail.',
@@ -193,7 +193,8 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
           <p>Saving adds a separate source. It does not replace the clinical note or ask Chief to act.</p>
         </>}
         {record.saved&&<div role="status"><p>Email source saved for this visit. The clinical note remains separate.</p>
-          {onAskChief&&<button disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!)}>Prepare Chief draft</button>}</div>}
+          {onAskChief&&<><button disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!)}>Prepare Chief draft</button>
+            <button disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!,'reply')}>Draft a reply</button></>}</div>}
       </article>}
       {sourceStale&&<div role="alert"><p>Confirm the current visit and review a fresh email source before new work.</p>{onRefreshVisit&&<button disabled={busy||!!pending||(recoveryLocked??locked)} onClick={()=>void run(async()=>{await onRefreshVisit();setSourceStale(false);})}>Refresh current visit</button>}</div>}
       {pending&&<div className="google-message-recovery"><h4>Saved request needs a confirmed result</h4><p>{pending.kind==='review'?'This source save may already be recorded. Retry uses the same visit, message and key.':'Check the saved result without repeating the Google read.'}</p>

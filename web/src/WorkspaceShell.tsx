@@ -1112,8 +1112,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function sourceContext(ownSource?:'efax'|'fax'):import('./session/sources').SourceContext{const viewLocked=sourceViewNavigationLocked(ownSource);return {authenticated,locked,connectionNavigationLocked:!!privateRecordingEntry||privateRecordingBusy||viewLocked,captureNavigationLocked,captureDraftLocked,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,schedulingPatientBusy,accountAccess,failure,conversationHost:conversationHost(false,ownSource),focusQuestion:()=>setQuestionFocus(value=>value+1)};}
   function receiveGoogleSource(latest:Workspace){return session.sources.receive(latest);}
   function refreshGoogleVisit(){return session.sources.refresh(sourceContext());}
-  function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){return session.sources.prepareGoogle(sourceContext(),source,kind);}
-  function prepareMicrosoftChief(source:OutlookMessageSaved){return session.sources.prepareMicrosoft(sourceContext(),source);}
+  function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message',intent?:'reply'){return session.sources.prepareGoogle(sourceContext(),source,kind,intent);}
+  function prepareMicrosoftChief(source:OutlookMessageSaved,intent?:'reply'){return session.sources.prepareMicrosoft(sourceContext(),source,intent);}
   function prepareResearchChief(selection:ResearchChiefSelection){
     const host=conversationHost();if(!host)return Promise.resolve(false);
     return researchChief.prepare(selection,{...host,current:()=>host.current()&&!draftsSuspended.current&&document.visibilityState!=='hidden'},()=>{
@@ -1608,7 +1608,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleCalendar}
               onActiveChange={reportGoogleMessageBusy} taskActive={controls.taskActive} isTaskCurrent={controls.isTaskCurrent} onAuthenticationLost={failure} onSaved={receiveGoogleSource}
               onRequestFullMailAccess={controls.requestFullMailAccess} fullMailAccessBusy={controls.fullMailAccessBusy}
-              onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareGoogleChief(source)}
+              onRefreshVisit={refreshGoogleVisit} onAskChief={(source,intent)=>void prepareGoogleChief(source,'google_message',intent)}
               onChooseVisit={()=>{if(locked||connectionNavigationLocked)return;googleVisitSelection.current='message';setSettingsOpen(false);void loadEncounters();}}/>:undefined}
             calendarWork={GOOGLE_CALENDAR_BUILD&&googleCalendarVisited?controls=><GoogleCalendarMount identity={authenticated}
               workspace={workspace&&(visitLinked||workspace.private_draft?.state==='unlinked')?{id:workspace.id,label:workspace.notebook?.title??workspace.label,revision:workspace.revision,...(visitLinked?{}:{kind:'private_notebook' as const})}:null}
@@ -1631,7 +1631,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             locked={locked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='microsoftMessages'&&value)}
             recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='microsoftMessages'&&value)}
             onActiveChange={reportMicrosoftMessageBusy} onAuthenticationLost={failure} onConnectMicrosoft={controls.connectMicrosoft} connectionBusy={controls.connectionBusy}
-            onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareMicrosoftChief(source)}
+            onRefreshVisit={refreshGoogleVisit} onAskChief={(source,intent)=>void prepareMicrosoftChief(source,intent)}
             onChooseVisit={()=>{if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;microsoftVisitSelection.current=true;setSettingsOpen(false);void loadEncounters();}}/>:undefined}/></AccountRecoveryContext.Provider>:undefined}
         scheduling={SCHEDULING_LOGIN_BUILD&&authenticated?<SchedulingConnectionPanel identity={authenticated} onBusyChange={reportSchedulingBusy} onAuthenticationLost={failure} onObserved={reportSchedulingObservation}/>:undefined}
         core={CORE_CONNECTION_BUILD&&authenticated?<CoreConnectionPanel identity={authenticated} athenaEnabled={false} onOpenAthena={athenaAvailable?()=>void openAthenaTask('connections'):undefined} onBusyChange={reportCoreBusy} onAuthenticationLost={failure} openBlocked={locked||captureNavigationLocked||captureDraftLocked} onOpenNotebook={command=>open(undefined,command)}/>:undefined}
