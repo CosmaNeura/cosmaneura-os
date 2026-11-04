@@ -50,8 +50,8 @@ def validate_microsoft(tenant_id: str, client_id: str, callback_uri: str) -> Non
     if not tenant_id and not client_id and not callback_uri:
         return
     uuid = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    if not re.fullmatch(uuid, tenant_id) or not re.fullmatch(uuid, client_id):
-        raise ValueError("Exact Microsoft tenant and web client UUIDs are required.")
+    if (tenant_id != "organizations" and not re.fullmatch(uuid, tenant_id)) or not re.fullmatch(uuid, client_id):
+        raise ValueError("An exact Microsoft tenant UUID or organizations authority and web client UUID are required.")
     suffix = "/connections/microsoft/callback"
     if not callback_uri.endswith(suffix) or not callback_uri[:-len(suffix)]:
         raise ValueError("The fixed Microsoft callback URI is required.")

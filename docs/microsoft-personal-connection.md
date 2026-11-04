@@ -4,8 +4,9 @@ Connections now offers a separate Microsoft account grant. After accepting their
 CosmasOS invitation, a current member can select Connect Microsoft, approve the
 Microsoft consent screen, return to the app and read their recent inbox or next
 seven days of calendar events. Scheduling staff login remains a separate grant.
-The first beta adapter is for a configured Entra work/school tenant; consumer
-Microsoft accounts and cross-tenant onboarding are not included in this profile.
+The default beta adapter uses a configured Entra work/school tenant. Explicitly
+selecting the `organizations` authority permits work/school accounts from other
+practices' Entra tenants; consumer Microsoft accounts remain excluded.
 
 The app requests delegated `offline_access User.Read Mail.Read Calendars.Read`.
 Token-response validation accepts Microsoft's documented URL-encoded, Graph-qualified
@@ -48,7 +49,9 @@ Ordinary migration `c48b673e219a` adds the two personal-connection tables after
 `b1839fb874da`. The default-off runtime requires authenticated Clerk workspace mode,
 `WORKSPACE_MICROSOFT_CONNECTION_ENABLED=true`, and these server settings:
 
-- `MICROSOFT_CONNECTION_TENANT_ID`: exact Entra tenant UUID.
+- `MICROSOFT_CONNECTION_TENANT_ID`: exact Entra tenant UUID, or the explicit
+  literal `organizations`. `common`, `consumers`, authority URLs and other aliases
+  are rejected. Empty/default configuration leaves the connection disabled.
 - `MICROSOFT_CONNECTION_CLIENT_ID`: registered confidential web-client UUID.
 - `MICROSOFT_CONNECTION_CLIENT_SECRET`: supplied by the deployed secret store.
 - `MICROSOFT_CONNECTION_CALLBACK_URI`: exact HTTPS API origin plus
@@ -64,6 +67,18 @@ public values, require the current native session and a trusted click, and only
 open the exact consent URL and read-only scopes. Server secrets never enter
 native configuration. Empty values disable the handoff. The callback returns a
 fixed status fragment, not a credential; the app then checks server-side status.
+
+`organizations` requires a confidential Entra web app whose `signInAudience` is
+`AzureADMultipleOrgs`, the exact registered callback, and each practice's allowed
+delegated consent. Public preparation receipts declare that registration
+requirement; they never register an app or prove consent. The same authority must
+be supplied to the server, renderer preparation and native builders. Existing
+fixed-tenant inputs retain their behavior. The authority is already part of the
+six-value installed configuration digest: changing it withholds old attempts and
+credentials and requires explicit reconnection. It does not change the current
+Cosmas Box, owner, account-selection, PKCE/state, scopes or custody boundaries.
+Source support does not qualify the frozen or previously signed native clients;
+a separately reviewed build of the owned native policy is required.
 
 ## Independent CosmaBot beta admission
 

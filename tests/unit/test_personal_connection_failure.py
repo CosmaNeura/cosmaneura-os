@@ -24,10 +24,12 @@ from cosmas_os.adapters.microsoft_connection import (
 from cosmas_os.api.auth import RequestIdentity
 from cosmas_os.application.workspace import WorkspaceError
 from cosmas_os.models import AuditEvent, BoxContext, ExternalIdentity, Principal
+from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
 
 
 @pytest.fixture(params=[MicrosoftPersonalConnection, GooglePersonalConnection])
 def connection(request, engine):
+    connection_type, authority = request.param if isinstance(request.param, tuple) else (request.param, None)
     factory = sessionmaker(engine, expire_on_commit=False)
     box, owner, account = (str(uuid4()) for _ in range(3))
     with factory() as session:
@@ -43,7 +45,7 @@ def connection(request, engine):
     settings = SimpleNamespace(workspace_available=True, workspace_authenticated_enabled=True,
         auth_mode="clerk_jwt", workspace_microsoft_connection_enabled=True,
         workspace_google_connection_enabled=True,
-        microsoft_connection_tenant_id=str(uuid4()), microsoft_connection_client_id=str(uuid4()),
+        microsoft_connection_tenant_id=authority or str(uuid4()), microsoft_connection_client_id=str(uuid4()),
         google_connection_client_id="invented.apps.googleusercontent.com")
     for provider in ("microsoft", "google"):
         setattr(settings, provider + "_connection_return_origin", "https://os.example.invalid")
@@ -55,7 +57,7 @@ def connection(request, engine):
     def respond(incoming):
         case.calls.append(incoming.method)
         case.requests.append(incoming)
-        microsoft = request.param is MicrosoftPersonalConnection
+        microsoft = connection_type is MicrosoftPersonalConnection
         if not microsoft and str(incoming.url).split("?", 1)[0] == CALENDAR_URL:
             if case.fault == "calendar_revoke":
                 with factory() as session:
@@ -85,7 +87,7 @@ def connection(request, engine):
         return httpx.Response(status, headers={"content-type": "application/json"},
             stream=httpx.ByteStream(json.dumps(payload).encode()))
 
-    case.service = request.param(settings, factory, transport=httpx.MockTransport(respond))
+    case.service = connection_type(settings, factory, transport=httpx.MockTransport(respond))
     case.identity = RequestIdentity(box, owner, "clerk_jwt", "invented_org", account)
     try:
         yield case
@@ -103,6 +105,41 @@ def outcomes(case):
             AuditEvent.aggregate_id == case.account,
             AuditEvent.event_type.endswith("sign_in_finished"),
         ))]
+
+
+@pytest.mark.parametrize("connection", [MicrosoftPersonalConnection,
+    pytest.param((MicrosoftPersonalConnection, "organizations"), id="organizations")], indirect=True)
+def test_microsoft_authority_pins_both_oauth_endpoints_and_configuration_custody(connection):
+    case = connection
+    authority = case.service.settings.microsoft_connection_tenant_id
+    result = case.service.start(case.identity)
+    authorization = urlsplit(result["authorization_url"])
+    fields = parse_qs(authorization.query)
+    assert authorization.netloc == "login.microsoftonline.com"
+    assert authorization.path == f"/{authority}/oauth2/v2.0/authorize"
+    assert fields["scope"] == ["offline_access User.Read Mail.Read Calendars.Read"]
+    assert case.service.callback(fields["state"][0], "synthetic_PRIVATE_code") is True
+    assert case.requests[0].url.host == "login.microsoftonline.com"
+    assert case.requests[0].url.path == f"/{authority}/oauth2/v2.0/token"
+    assert case.service.status(case.identity)["state"] == "connected"
+    calls = len(case.requests)
+    case.service.settings.microsoft_connection_tenant_id = (
+        str(uuid4()) if authority == "organizations" else "organizations")
+    with pytest.raises(ConnectorUnavailable):
+        case.service.status(case.identity)
+    assert len(case.requests) == calls
+
+
+@pytest.mark.parametrize("connection", [MicrosoftPersonalConnection], indirect=True)
+@pytest.mark.parametrize("authority", ["common", "consumers", "Organizations", "organizations/",
+    "https://login.microsoftonline.com/organizations", "organizations?tenant=other"])
+def test_microsoft_rejects_unreviewed_authorities_before_any_provider_io(connection, authority):
+    case = connection
+    values = vars(case.service.settings).copy()
+    values["microsoft_connection_tenant_id"] = authority
+    with pytest.raises(ValueError):
+        MicrosoftPersonalConnection(SimpleNamespace(**values), case.factory)
+    assert case.requests == []
 
 
 @pytest.mark.parametrize("fault", ["http", "scope", "exception"])

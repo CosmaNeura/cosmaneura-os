@@ -25,3 +25,16 @@ it('rejects credentials, malformed data and extra grants',()=>{
  const url=()=>`https://login.microsoftonline.com/11111111-1111-4111-8111-111111111111/oauth2/v2.0/authorize?${q}`;
  expect(validMicrosoftAuthorizationUrl(url())).toBe(true);q.set('scope','Mail.Send');expect(validMicrosoftAuthorizationUrl(url())).toBe(false);
 });
+it('accepts organizations consent while rejecting mixed, consumer and malformed authorities',()=>{
+ const q=new URLSearchParams({client_id:'22222222-2222-4222-8222-222222222222',redirect_uri:'https://api.example.invalid/connections/microsoft/callback',response_type:'code',response_mode:'query',scope:'offline_access User.Read Mail.Read Calendars.Read',state:'s'.repeat(43),prompt:'select_account',code_challenge_method:'S256',code_challenge:'c'.repeat(43)});
+ const url=(authority:string)=>`https://login.microsoftonline.com/${authority}/oauth2/v2.0/authorize?${q}`;
+ const start={authorization_url:url('organizations'),expires_at:new Date(Date.now()+60000).toISOString()};
+ expect(validMicrosoftAuthorizationUrl(start.authorization_url)).toBe(true);
+ expect(validateMicrosoftResponse(start,'start')).toEqual(start);
+ for(const authority of ['common','consumers','Organizations','organizations/','organizations%2fcommon'])
+   expect(validMicrosoftAuthorizationUrl(url(authority))).toBe(false);
+ for(const bad of [start.authorization_url.replace('login.microsoftonline.com','login.microsoftonline.com.evil.invalid'),
+   start.authorization_url+'#fragment',start.authorization_url+'&state=duplicate',
+   start.authorization_url.replace('Mail.Read','Mail.Send'),start.authorization_url.replace('S256','plain')])
+   expect(()=>validateMicrosoftResponse({...start,authorization_url:bad},'start')).toThrow();
+});

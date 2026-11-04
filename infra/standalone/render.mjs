@@ -49,7 +49,7 @@ function betaFeatures(value){
   if(features.microsoft!==null){
     object(features.microsoft,['tenant_id','client_id','callback_uri','return_origin'],'public_microsoft_shape');
     const identifier=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
-    if(!features.google||!identifier(features.microsoft.tenant_id)||!identifier(features.microsoft.client_id)||
+    if(!features.google||(features.microsoft.tenant_id!=='organizations'&&!identifier(features.microsoft.tenant_id))||!identifier(features.microsoft.client_id)||
       features.microsoft.callback_uri!==value.api_origin+'/connections/microsoft/callback'||
       features.microsoft.return_origin!==value.web_origin)refuse('matching_microsoft_public_contract_required');
   }
@@ -212,6 +212,12 @@ export function render(input){
     if(features.model)contract.private_environment.exact_names.push('WORKSPACE_LLM_API_KEY');
     if(features.google)contract.private_environment.exact_names.push('GOOGLE_CONNECTION_CLIENT_SECRET','GOOGLE_CONNECTION_ENCRYPTION_KEY');
     if(features.microsoft)contract.private_environment.exact_names.push('MICROSOFT_CONNECTION_CLIENT_SECRET','MICROSOFT_CONNECTION_ENCRYPTION_KEY');
+    if(features.microsoft){
+      contract.microsoft_registration={tenant_id:features.microsoft.tenant_id,client_id:features.microsoft.client_id,
+        callback_uri:features.microsoft.callback_uri,account_type:features.microsoft.tenant_id==='organizations'?
+          'any_work_or_school_tenant':'configured_work_or_school_tenant',provider_registration_performed:false};
+      if(features.microsoft.tenant_id==='organizations')contract.microsoft_registration.required_sign_in_audience='AzureADMultipleOrgs';
+    }
   }
   if(ownedVm){
     contract.resource_identity.host_name='vm-cosmabot-staging-eus2-lab01';

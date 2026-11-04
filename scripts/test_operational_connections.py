@@ -87,6 +87,30 @@ class OperationalConnections(unittest.TestCase):
             "google_connection_client_id", result["native-connection-arguments.json"]
         )
 
+    def test_organizations_is_explicit_work_school_multitenant_preparation_only(self):
+        fixed = self.prepare()["provider-registration.json"]["accounts"]["microsoft"]
+        self.assertEqual(fixed["account_type"], "configured_work_or_school_tenant")
+        self.assertNotIn("required_sign_in_audience", fixed)
+        self.connections["microsoft"]["tenant_id"] = "organizations"
+        result = self.prepare()
+        account = result["provider-registration.json"]["accounts"]["microsoft"]
+        self.assertEqual(account["tenant_id"], "organizations")
+        self.assertEqual(account["required_sign_in_audience"], "AzureADMultipleOrgs")
+        self.assertEqual(account["account_type"], "any_work_or_school_tenant")
+        self.assertEqual(account["scopes"], fixed["scopes"])
+        self.assertEqual(result["os.services.tfvars.json"]["workspace_public_configuration"]["MICROSOFT_CONNECTION_TENANT_ID"], "organizations")
+        self.assertEqual(result["native-connection-arguments.json"]["microsoft_connection_tenant_id"], "organizations")
+        self.assertFalse(result["provider-registration.json"]["provider_registration_performed"])
+        self.assertFalse(result["provider-registration.json"]["account_consent_performed"])
+
+    def test_microsoft_authority_rejects_personal_mixed_url_and_coerced_inputs(self):
+        for tenant in ("common", "consumers", "Organizations", " organizations", "organizations/",
+                       "https://login.microsoftonline.com/organizations", None, True):
+            with self.subTest(tenant=tenant):
+                self.connections["microsoft"]["tenant_id"] = tenant
+                with self.assertRaises(ValueError):
+                    self.prepare()
+
     def test_legacy_input_keeps_source_features_dark_and_matches_normal_consent(self):
         result = self.prepare()
         google = result["provider-registration.json"]["accounts"]["google"]
