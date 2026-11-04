@@ -8,7 +8,7 @@ import {workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-pr
 import type {WorkspaceStartupTeam} from './workspace-team-read';
 import './practice-access.css';
 
-export type PracticeAccessContext={role:'owner'|'member';onAccessLost:()=>void;startupTeam?:WorkspaceStartupTeam};
+export type PracticeAccessContext={role:'owner'|'member';onAccessLost:()=>void;startupTeam?:WorkspaceStartupTeam;displayName?:string|null;practiceName?:string|null};
 export const WorkspaceConnectionRecoveryContext=createContext<{
   identity:AuthenticatedWorkspaceIdentity;sequence:number;generation:number;phase:'pending'|'ready'|'blocked';busy:boolean;retry:()=>void;
 }|null>(null);
@@ -104,7 +104,8 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
   },[status?.state,check,identity]);
   const onAccessLost=useCallback(()=>{setObserved(null);setSetup(null);setError('Practice access changed. Check your access to continue.');},[]);
   const profile=setup?.identity===identity?setup.value:null;
-  if(status?.state==='connected' && status.role&&profile&&(profile.state==='owner_ready'||profile.state==='member_ready'))return children({role:status.role,onAccessLost});
+  if(status?.state==='connected' && status.role&&profile&&(profile.state==='owner_ready'||profile.state==='member_ready'))return children({role:status.role,onAccessLost,
+    displayName:profile.display_name,practiceName:profile.practice?.display_name??null});
   if(recovery&&recovery.phase!=='ready')return <section className="workspace-access-paused" aria-label="Practice access paused">
     <nav aria-label="Account and organization">{accountControls}</nav>
     <p>Practice access will be checked after Retry.{uncertain?' Your unconfirmed request is retained; nothing will be sent again.':''}</p>

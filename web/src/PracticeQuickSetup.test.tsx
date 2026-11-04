@@ -2,6 +2,7 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {PracticeAccessGate} from './PracticeAccessGate';
+import {NativeAccountControls} from './NativeAccountControls';
 import {practiceAccessApi} from './practice-access-api';
 import {WorkspaceApiError} from './workspace-api';
 import {validatePracticeSetup,validateCompletePracticeSetup,type PracticeSetupStatus} from './practice-access-contract';
@@ -20,7 +21,8 @@ const button=(label:string)=>[...container.querySelectorAll('button')].find(b=>b
 const click=async(label:string)=>{expect(button(label)).toBeDefined();await act(async()=>button(label).click());};
 const field=(label:string)=>[...container.querySelectorAll('label')].find(l=>l.textContent?.startsWith(label))!.querySelector('input')!;
 async function input(label:string,value:string){await act(async()=>{const item=field(label);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(item,value);item.dispatchEvent(new Event('input',{bubbles:true}));});}
-async function render(id=identity){await act(async()=>root.render(<PracticeAccessGate identity={id} accountControls={<button>Account</button>}>{context=><p>Home: {context.role}</p>}</PracticeAccessGate>));}
+async function render(id=identity){await act(async()=>root.render(<PracticeAccessGate identity={id} accountControls={<button>Account</button>}>{context=><><p>Home: {context.role}</p>
+  <NativeAccountControls displayName={context.displayName} practiceName={context.practiceName} onSignOut={()=>context.onAccessLost()}/></>}</PracticeAccessGate>));}
 async function setup(){await render();await click('Set up my practice');await input('Practice name','Invented solo practice');await input('Your name','Invented clinician');}
 it('takes a reserved solo owner directly to Home with only practice and name confirmation',async()=>{
   await setup();expect(container.textContent).not.toContain('Waiting for your practice owner');await click('Continue to my workspace');
@@ -52,6 +54,20 @@ it('clears private setup after denial and ignores a prior identity response',asy
   let finish!:(value:PracticeSetupStatus)=>void;vi.mocked(practiceAccessApi.setup).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
   await render({...identity});vi.mocked(practiceAccessApi.setup).mockResolvedValue({...available,state:'join_existing',can_start_practice:false});
   await render({...identity});await act(async()=>finish(ready));expect(container.textContent).not.toContain('Home: owner');
+});
+it('shows server-verified account and practice names only for the admitted identity and clears them on access loss',async()=>{
+  vi.mocked(practiceAccessApi.read).mockResolvedValue({contract_version:1,state:'connected',role:'owner',request:null});
+  vi.mocked(practiceAccessApi.setup).mockResolvedValue(ready);await render();
+  expect(container.querySelector('.native-account-controls summary')?.textContent).toContain('Invented solo practice');
+  expect(container.textContent).toContain('Invented clinician');expect(container.querySelector('details')?.open).toBe(false);
+  expect(practiceAccessApi.confirmSetup).not.toHaveBeenCalled();expect(practiceAccessApi.request).not.toHaveBeenCalled();
+  await act(async()=>container.querySelector('summary')!.click());expect(container.querySelector('details')?.open).toBe(true);
+  await click('Log out');expect(container.textContent).not.toContain('Invented clinician');expect(container.textContent).not.toContain('Invented solo practice');
+  let finish!:(value:PracticeSetupStatus)=>void;vi.mocked(practiceAccessApi.setup).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  await render({...identity});vi.mocked(practiceAccessApi.read).mockResolvedValue({contract_version:1,state:'request_required',role:null,request:null});
+  vi.mocked(practiceAccessApi.setup).mockResolvedValue({...available,state:'join_existing',can_start_practice:false});await render({...identity});
+  await act(async()=>finish(ready));expect(container.querySelector('.native-account-controls')).toBeNull();
+  expect(container.textContent).not.toContain('Invented clinician');expect(container.textContent).not.toContain('Invented solo practice');
 });
 it('keeps ownership and setup fields closed',()=>{
   for(const change of [{can_start_practice:false},{is_owner:true},{state:'owner_ready'}])expect(()=>validatePracticeSetup({...available,...change})).toThrow();

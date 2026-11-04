@@ -2,6 +2,7 @@ import { act, useLayoutEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NoteReview } from "./NoteReview";
+import { EditorRecoveryContext } from "./editor-recovery";
 import type { PrivateNote, Workspace } from "./workspace-api";
 import gapFixture from "../../tests/fixtures/capture_gap_draft.json";
 import { validateCaptureGapReview } from "./capture-gap-review";
@@ -31,6 +32,36 @@ describe("private note review", () => {
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(element, value);
       element.dispatchEvent(new Event("input", {bubbles: true})); });
   }
+
+  it('explicitly uses the current saved jottings in an empty mobile review without inventing a reply or saving',async()=>{
+    const notebook:Workspace={...initial,note:{latest:null,history:[]},entries:[{id:'saved-jottings',revision:2,kind:'scratchpad',origin:'human',
+      content:'Earlier invented notes.',source_label:null,ticket:null,created_at:saved.created_at}]};
+    const mount=(value:Workspace)=>act(async()=>root.render(<NoteReview key="saved-jottings" workspace={value} compact active locked={false} onSave={onSave} onSources={onSources}/>));
+    await mount(notebook);
+    expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')!.value).toBe('');
+    const current={...notebook,revision:3,entries:[...notebook.entries,{...notebook.entries[0],id:'current-jottings',revision:3,content:'Current invented notes for review.'}]};
+    await mount(current);await click('Use my saved notes');
+    expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')!.value).toBe('Current invented notes for review.');
+    expect(onSave).not.toHaveBeenCalled();expect(button('Use my saved notes')).toBeUndefined();
+    await click('Save note');expect(onSave).toHaveBeenCalledExactlyOnceWith({type:'note',body:expect.objectContaining({expected_revision:3,
+      base_note_id:null,source_reply_id:null,content:'Current invented notes for review.',sources_reconciled:false})});
+  });
+
+  it('withholds saved-note adoption for unsaved jottings or unavailable recovery and never replaces typed review text',async()=>{
+    const notebook:Workspace={...initial,note:{latest:null,history:[]},entries:[{id:'saved-jottings',revision:2,kind:'scratchpad',origin:'human',
+      content:'Saved invented jottings.',source_label:null,ticket:null,created_at:saved.created_at}]};
+    const mount=(dirty:boolean,recoveryUnavailable=false)=>act(async()=>root.render(<EditorRecoveryContext.Provider value={recoveryUnavailable?null:undefined}>
+      <NoteReview key="protected-jottings" workspace={notebook} compact active notebookDirty={dirty} locked={false} onSave={onSave} onSources={onSources}/>
+    </EditorRecoveryContext.Provider>));
+    await mount(true);expect(button('Use my saved notes').disabled).toBe(true);await click('Use my saved notes');
+    expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')!.value).toBe('');
+    expect(container.textContent).toContain('Save your notebook changes first.');
+    await mount(false,true);expect(button('Use my saved notes').disabled).toBe(true);await click('Use my saved notes');
+    expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')!.value).toBe('');
+    await mount(false);await input('My existing invented review edit.');expect(button('Use my saved notes')).toBeUndefined();
+    await mount(false);expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')!.value).toBe('My existing invented review edit.');
+    expect(onSave).not.toHaveBeenCalled();
+  });
 
   it("requires explicit human review of the exact saved version and removes review after editing", async () => {
     expect(button("Record private review").disabled).toBe(true);
