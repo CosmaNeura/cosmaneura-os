@@ -283,7 +283,7 @@ def test_incomplete_helper_cannot_continue_into_desktop_composition(tmp_path, mo
     helper.mkdir()
     (helper / ".incomplete").write_text("failed packaging")
     output = tmp_path / "composed"
-    monkeypatch.setattr(sys, "argv", ["prepare-desktop-synthetic.py", "--scribe-source", str(tmp_path / "unused-source"),
+    monkeypatch.setattr(sys, "argv", ["prepare-desktop-synthetic.py",
                                     "--web-dist", str(tmp_path / "unused-web"), "--output", str(output),
                                     "--native-auth-helper", str(helper)])
     with pytest.raises(SystemExit):

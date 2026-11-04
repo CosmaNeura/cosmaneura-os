@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "scope": "cosmabot-owned-desktop-boundary",
+  "recovered_source_commit": "0e70fe6a802ab30362ffb77e8cb8538f7123bc1c",
+  "original_asar_sha256": "cfb411e484e1a37e37d3cf41f09d848dda036ebc82ee2d0b69d5c7423fe7f782",
+  "original_archive_sha256": "068eea306d2a615906f9902efb11def6f74dccf1429792bc60155f1a2c6309d9",
+  "files": {
+    "scribe-security.mjs": {
+      "bytes": 3091,
+      "sha256": "b9e78f33ebe5d6a11a8e5d4e5d10dbfa066e93d29428ac569826fd189899c35d"
+    },
+    "scribe-diagnostics.mjs": {
+      "bytes": 1907,
+      "sha256": "1936c6ae16d0fed78804118384e7c38020b9348d78650b0a495e415041659ad0"
+    },
+    "static-assets.mjs": {
+      "bytes": 39949,
+      "sha256": "fb0a8145600d733e2059e113ea4eb56cb0b3067a31d85310a15e1a12accc1192"
+    }
+  }
+}

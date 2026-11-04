@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compose an isolated synthetic Mac client from Scribe desktop boundaries."""
+"""Compose an isolated synthetic Mac client from repository-owned boundaries."""
 
 import argparse
 import hashlib
@@ -32,17 +32,41 @@ _identity_spec = importlib.util.spec_from_file_location("native_identity_build",
 _identity = importlib.util.module_from_spec(_identity_spec)
 _identity_spec.loader.exec_module(_identity)
 
-SOURCE_REF = "fe22a435b6201c2d8013348927ea6a349e0b48c6"
-SOURCES = {
-    "electron-security.ts": "scribe-security.mjs",
-    "electron-diagnostics.ts": "scribe-diagnostics.mjs",
-    "electron-app.ts": "static-assets.mjs",
-}
+BOUNDARY_FILES = ("scribe-security.mjs", "scribe-diagnostics.mjs", "static-assets.mjs")
+
+
+def load_boundary_sources(root: Path) -> tuple[dict, dict[str, bytes]]:
+    """Read the fixed owned files; never resolve or execute an external checkout."""
+    manifest_path = root / "clients/desktop/release/owned-boundary.json"
+    if manifest_path.is_symlink() or manifest_path.resolve() != manifest_path or not manifest_path.is_file():
+        raise ValueError("Owned desktop boundary provenance is unavailable.")
+    manifest = json.loads(manifest_path.read_text())
+    if (not isinstance(manifest, dict) or type(manifest.get("version")) is not int
+            or manifest.get("version") != 1 or manifest.get("scope") != "cosmabot-owned-desktop-boundary"
+            or not isinstance(manifest.get("files"), dict)
+            or set(manifest["files"]) != set(BOUNDARY_FILES)):
+        raise ValueError("Owned desktop boundary provenance has an unexpected shape.")
+    sources = {}
+    for name in BOUNDARY_FILES:
+        path = root / "clients/desktop" / name
+        entry = manifest["files"][name]
+        if (not isinstance(entry, dict) or set(entry) != {"bytes", "sha256"}
+                or type(entry.get("bytes")) is not int or not 0 < entry["bytes"] <= 200_000
+                or not isinstance(entry.get("sha256"), str)
+                or re.fullmatch(r"[a-f0-9]{64}", entry["sha256"]) is None):
+            raise ValueError("Owned desktop boundary file metadata has an unexpected shape.")
+        if path.is_symlink() or path.resolve() != path or not path.is_file():
+            raise ValueError("Owned desktop boundary file is unavailable.")
+        data = path.read_bytes()
+        if (len(data) != entry.get("bytes")
+                or hashlib.sha256(data).hexdigest() != entry.get("sha256")):
+            raise ValueError("Owned desktop boundary differs from its reviewed source hash.")
+        sources[name] = data
+    return manifest, sources
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scribe-source", type=Path, required=True)
     parser.add_argument("--web-dist", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--native-auth-helper", type=Path,
@@ -69,7 +93,7 @@ def main():
     parser.add_argument("--native-identity-config", type=Path, help="Explicit public operational identity; separate stable app/storage")
     parser.add_argument("--data-mode", choices=("synthetic", "authorized_beta"), help="Explicit hosted data classification; synthetic for staging with a real identity")
     args = parser.parse_args()
-    source, web, output = (value.resolve() for value in (args.scribe_source, args.web_dist, args.output))
+    web, output = (value.resolve() for value in (args.web_dist, args.output))
     root = Path(__file__).resolve().parents[1]
     hosted = args.hosted_api_origin is not None
     identity = _identity.load(args.native_identity_config, "desktop", args.hosted_api_origin)
@@ -137,7 +161,7 @@ def main():
         parser.error("An installation root requires an explicit installation profile.")
     installation_root = args.installation_root.resolve() if args.installation_root else None
     if installation_root and any(installation_root.is_relative_to(path) or path.is_relative_to(installation_root)
-                                 for path in (source, web, output, root)):
+                                 for path in (web, output, root)):
         parser.error("Keep installation storage separate from source, web and versioned build directories.")
     if args.microphone_capture and (not args.native_auth_helper or not args.capture_upload_origin):
         parser.error("Microphone capture requires authenticated composition and exact upload origins.")
@@ -167,8 +191,8 @@ def main():
         for path in helper.rglob("*"):
             if path.is_symlink() or path.name.startswith(".env") or path.suffix == ".map":
                 parser.error("Native helper cannot contain links or environment/source-map files.")
-    if output.exists() or output.is_relative_to(source) or source.is_relative_to(output):
-        parser.error("Use a fresh output directory outside the read-only Scribe source.")
+    if output.exists() or output.is_relative_to(root) or root.is_relative_to(output):
+        parser.error("Use a fresh output directory outside the repository source.")
     if output.is_relative_to(web) or web.is_relative_to(output) or not (web / "index.html").is_file():
         parser.error("Use a separately built synthetic web bundle.")
     files = []
@@ -178,6 +202,7 @@ def main():
         if path.is_file():
             files.append(path)
     source_provenance = _source_module.provenance(root, require_clean=operational)
+    boundary_provenance, boundary_sources = load_boundary_sources(root)
     output.mkdir(parents=True)
     app = output / "app"
     app.mkdir()
@@ -190,12 +215,11 @@ def main():
         mime = 'text/javascript' if file.suffix == '.js' else mimetypes.guess_type(relative)[0] or 'application/octet-stream'
         assets['/' + relative] = {"file": "public/" + relative, "contentType": mime}
     assets['/'] = assets['/index.html']
-    for filename, compiled in SOURCES.items():
-        path = "apps/desktop-companion/src/" + filename
-        text = subprocess.check_output(["git", "show", f"{SOURCE_REF}:{path}"], cwd=source)
+    for compiled, text in boundary_sources.items():
+        path = "clients/desktop/" + compiled
         hashes[path] = hashlib.sha256(text).hexdigest()
         code = text.decode()
-        if filename == "electron-app.ts":
+        if compiled == "static-assets.mjs":
             code, count = re.subn(
                 r"const RENDERER_ASSETS = Object.freeze\([\s\S]+?\n\}\);",
                 "const RENDERER_ASSETS = Object.freeze(" + json.dumps(assets, indent=2) + ");",
@@ -203,18 +227,9 @@ def main():
             )
             if count != 1:
                 raise ValueError("Pinned asset resolver no longer matches its reviewed shape.")
-            code = code.replace("resolvePackagedRendererAsset", "resolveStaticAsset")
-        file = extracted / filename
+        file = extracted / compiled
         file.write_text(code)
-        subprocess.run(
-            ["node", "-e",
-             "const ts=require(process.argv[1]),fs=require('node:fs');"
-             "const result=ts.transpileModule(fs.readFileSync(process.argv[2],'utf8'),"
-             "{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ES2022}});"
-             "fs.writeFileSync(process.argv[3],result.outputText);",
-             str(root / "web/node_modules/typescript/lib/typescript.js"),
-             str(file), str(app / compiled)], check=True,
-        )
+        shutil.copyfile(file, app / compiled)
     for filename in ("main.mjs", "api-proxy.mjs", "close-protection.mjs", "startup-recovery.mjs",
                      "workspace-lifecycle.mjs", "preload.cjs"):
         shutil.copyfile(root / "clients/desktop" / filename, app / filename)
@@ -282,7 +297,8 @@ def main():
     }, indent=2) + "\n")
     shutil.copytree(web, app / "public")
     (output / "composition.json").write_text(json.dumps({
-        "source_ref": SOURCE_REF, "source_sha256": hashes,
+        "source_ref": "cosmabot-owned-desktop-boundary-v1", "source_sha256": hashes,
+        "boundary_recovery_provenance": boundary_provenance,
         "os_source_provenance": source_provenance,
         "purpose": "operational-beta-build-input" if operational else "local-synthetic-unsigned", "electron_version": "43.4.1",
         "composed_sha256": {str(path.relative_to(output)): hashlib.sha256(path.read_bytes()).hexdigest()
