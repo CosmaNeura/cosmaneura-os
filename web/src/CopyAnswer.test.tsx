@@ -1,4 +1,4 @@
-import {act} from 'react';
+import {act,createRef} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {CopyAnswer} from './CopyAnswer';
@@ -32,4 +32,11 @@ it.each(['scope','content','closed','locked','stale'])('does not show a late cli
 
 it('allows an explicit retry after a temporary lock hides a settled result',async()=>{
  let fail!:(error:Error)=>void;write.mockImplementationOnce(()=>new Promise<void>((_,reject)=>{fail=reject;}));await render();await click();await render({disabled:true});await act(async()=>fail(new Error('Denied')));expect(host.querySelector('[role=status]')).toBeNull();await render();expect(host.querySelector('button')!.disabled).toBe(false);write.mockResolvedValue(undefined);await click();expect(write).toHaveBeenCalledTimes(2);expect(host.querySelector('[role=status]')?.textContent).toContain('Copied to your clipboard');
+});
+
+it('selects the same editable copy after clipboard denial, accepting DOM line endings and rejecting changed or stale targets',async()=>{
+ const target=createRef<HTMLTextAreaElement>(),body='Invented summary\r\nReview before use.';write.mockRejectedValue(new DOMException('Denied','NotAllowedError'));
+ await act(async()=>root.render(<><textarea ref={target} defaultValue={body}/><CopyAnswer content={body} scope={scope} disabled={false} isCurrent={current} edited manualSelectionTarget={target}/></>));
+ await click('Copy edited copy');expect(write).toHaveBeenCalledExactlyOnceWith(body);expect(host.querySelectorAll('textarea')).toHaveLength(1);expect(target.current!.readOnly).toBe(false);await click('Select edited copy');expect(document.activeElement).toBe(target.current);expect(target.current!.selectionEnd).toBe(body.replace(/\r\n/g,'\n').length);
+ const focus=vi.spyOn(target.current!,'focus');target.current!.value='A different invented copy';await click('Select edited copy');expect(focus).not.toHaveBeenCalled();target.current!.value=body;current.mockReturnValue(false);await click('Select edited copy');expect(focus).not.toHaveBeenCalled();
 });

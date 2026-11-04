@@ -6,8 +6,9 @@ export function canFocusWorkspaceControl(element:HTMLElement|null):element is HT
   return true;
 }
 
-export function WorkspaceDialog({title,onClose,children,closeLabel,canRestoreFocus}:{title:string;onClose:()=>void;children:ReactNode;closeLabel?:string;canRestoreFocus?:()=>boolean}){
+export function WorkspaceDialog({title,onClose,children,closeLabel,canRestoreFocus,navigationLocked=false}:{title:string;onClose:()=>void;children:ReactNode;closeLabel?:string;canRestoreFocus?:()=>boolean;navigationLocked?:boolean}){
   const ref=useRef<HTMLDivElement>(null),id=useId(),close=useRef(onClose);close.current=onClose;
+  const blocked=useRef(navigationLocked);blocked.current=navigationLocked;
   const opener=useRef(typeof document!=='undefined'&&document.activeElement instanceof HTMLElement?document.activeElement:null);
   useEffect(()=>{
     const previous=opener.current,element=ref.current!;
@@ -16,7 +17,7 @@ export function WorkspaceDialog({title,onClose,children,closeLabel,canRestoreFoc
     (controls()[0]??element).focus();
     ownsFocus=element.contains(document.activeElement);
     const key=(event:KeyboardEvent)=>{
-      if(event.key==='Escape'){event.preventDefault();close.current();}
+      if(event.key==='Escape'){event.preventDefault();if(!blocked.current)close.current();}
       if(event.key==='Tab'){const items=controls(),first=items[0],last=items.at(-1);
         if(!first){event.preventDefault();element.focus();}
         else if(event.shiftKey&&(document.activeElement===first||document.activeElement===element)){event.preventDefault();last?.focus();}
@@ -32,7 +33,7 @@ export function WorkspaceDialog({title,onClose,children,closeLabel,canRestoreFoc
       if(sameFocus&&!newDialog&&(!canRestoreFocus||canRestoreFocus())&&canFocusWorkspaceControl(previous))previous.focus({preventScroll:true});
     };
   },[]);
-  return <div className="workspace-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
-    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1} className="workspace-dialog">{closeLabel?<header className="workspace-dialog-heading"><h2 id={id}>{title}</h2><button aria-label={closeLabel} onClick={onClose}>×</button></header>:<h2 id={id}>{title}</h2>}{children}</div>
+  return <div className="workspace-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!blocked.current)onClose();}}>
+    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1} className="workspace-dialog">{closeLabel?<header className="workspace-dialog-heading"><h2 id={id}>{title}</h2><button aria-label={closeLabel} disabled={navigationLocked} onClick={()=>{if(!blocked.current)onClose();}}>×</button></header>:<h2 id={id}>{title}</h2>}{children}</div>
   </div>;
 }

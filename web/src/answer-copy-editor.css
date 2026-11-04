@@ -1,0 +1,5 @@
+.answer-copy-editor{margin-block:1rem;min-width:0}
+.answer-copy-editor label{display:block}
+.answer-copy-editor textarea{display:block;box-sizing:border-box;width:100%;min-height:14rem;margin-top:.5rem;padding:.75rem;font:inherit;line-height:1.5;resize:vertical}
+.answer-copy-editor p{overflow-wrap:anywhere}
+.team-workspace .answer-copy-editor button{min-height:44px;max-width:100%;white-space:normal}
