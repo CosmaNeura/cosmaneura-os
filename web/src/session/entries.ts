@@ -66,7 +66,7 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
   }
   if(['chief','scribe'].includes(bot?.role??'')&&workspace.note?.latest){
     const note=workspace.note.latest;
-    entries.push({kind:'review',id:`note:${note.id}`,author:'Scribe',title:`Saved note · version ${note.version}`,
+    entries.push({kind:'review',id:`note:${note.id}`,author:'Note',title:`Saved note · version ${note.version}`,
       status:note.sources_changed?'Sources changed':note.review?'Reviewed privately':'Needs your review',needsReview:note.sources_changed||!note.review,
       actions:[{kind:'review_note',id:note.id,label:'Review note'}]});
     positions.set(`note:${note.id}`,note.workspace_revision);

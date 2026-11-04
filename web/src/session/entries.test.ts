@@ -112,6 +112,7 @@ describe('saved conversation order',()=>{
     const link:WorkspaceEntry={...turn,id:teamUuid(265),revision:5,kind:'work_link',reply:null,ticket:{id:work.ticket_id,state:work.state,lane:'follow_up'}};
     const projection=projectConversation({...workspace,revision:9,entries:[turn,{...result,revision:3},link,later],note:{latest:note,history:[note]},follow_ups:[work]},team,'chief');
     expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`handoff:${handoff.id}`,`note:${note.id}`,`work:${work.ticket_id}`,later.id]);
+    expect(projection.entries.find(row=>row.id===`note:${note.id}`)).toMatchObject({kind:'review',author:'Note',title:'Saved note · version 1',status:'Needs your review',needsReview:true,actions:[{kind:'review_note',id:note.id,label:'Review note'}]});
     expect(projection.entries.filter(row=>row.kind==='review').flatMap(row=>row.actions.map(action=>action.kind))).toEqual(['review_handoff','review_note','review_work']);
     expect(projection.turns).toEqual([turn,later]);
   });
