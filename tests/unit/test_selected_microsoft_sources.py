@@ -50,6 +50,7 @@ def test_outlook_dispatches_to_its_own_custody_and_masks_uncited_lineage(monkeyp
 def test_outlook_passages_require_feature_gate_and_join_in_revision_order(monkeypatch):
     selected = row()
     flags = SimpleNamespace(workspace_microsoft_message_available=False,
+                            workspace_microsoft_calendar_available=False,
                             workspace_calendar_import_available=False,
                             workspace_ehr_read_available=False,
                             efax_inbound_source_available=False, fax_inbound_source_available=False)
