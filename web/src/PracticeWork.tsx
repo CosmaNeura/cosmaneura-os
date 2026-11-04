@@ -1,3 +1,4 @@
+import {showDemoLabels} from './demo-labels';
 import { useContext, useEffect, useRef, useState } from "react";
 import { useUnsavedWork } from "./unsaved-work";
 import { AccountRecoveryContext } from "./account-recovery";
@@ -258,7 +259,7 @@ function WorkCard({ identity,item, people, locked, onSave,onCurrent,onDenied }: 
     <h2>{item.body}</h2>
     <p><strong>Expected result:</strong> {item.expected_outcome}</p>
     <p>Responsible: <strong>{owner ? "You" : item.responsible.name}</strong>{!item.responsible.available ? " · Account unavailable" : ""}<br />Due {item.due_date} · Started by {item.originator.name}</p>
-    <p className="team-fine">{preparation ? "Shared internally for visit preparation. Provider verification is required before completion." : "Delivery receipt: local synthetic destination."}</p>
+    <p className="team-fine">{preparation ? "Shared internally for visit preparation. Provider verification is required before completion." : showDemoLabels() ? "Delivery receipt: local synthetic destination." : "Saved to practice work."}</p>
     <AccountEditorRecoveryNotice recovery={recovery} label="Practice work form" onRestore={restore}/>
     {earlier&&<div className="team-recovery"><p>This unfinished form belongs to an earlier responsibility or work version. Compare current work before using it.</p>
       {retainedEvidence&&<label>{preparation ? "Earlier preparation evidence" : "Earlier completion evidence"}<textarea readOnly value={retainedEvidence}/></label>}
