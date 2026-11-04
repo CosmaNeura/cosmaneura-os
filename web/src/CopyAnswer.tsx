@@ -2,7 +2,7 @@ import {useLayoutEffect,useMemo,useRef,useState} from 'react';
 import './copy-answer.css';
 
 /** An explicit local copy of a completed answer; never a send or record approval. */
-export function CopyAnswer({content,scope,disabled,isCurrent}:{content:string;scope:object;disabled:boolean;isCurrent:()=>boolean}){
+export function CopyAnswer({content,scope,disabled,isCurrent,edited=false}:{content:string;scope:object;disabled:boolean;isCurrent:()=>boolean;edited?:boolean}){
   const episode=useMemo(()=>({}),[content,scope]),current=useRef<object|null>(episode);current.current=episode;
   const controls=useRef({disabled,isCurrent});controls.current={disabled,isCurrent};
   const inFlight=useRef(false),text=useRef<HTMLTextAreaElement>(null);
@@ -27,11 +27,11 @@ export function CopyAnswer({content,scope,disabled,isCurrent}:{content:string;sc
     }
   }
   return <section className="message-copy-answer" aria-label="Use this answer">
-    <button type="button" disabled={disabled||state==='copying'||!content.trim()} onClick={()=>void copy()}>Copy answer</button>
+    <button type="button" disabled={disabled||state==='copying'||!content.trim()} onClick={()=>void copy()}>{edited?'Copy edited copy':'Copy answer'}</button>
     {state==='copying'&&<p role="status">Copying…</p>}
     {state==='copied'&&<p role="status">Copied to your clipboard. Review the draft before using it.</p>}
     {state==='manual'&&<><p role="status">Copy is unavailable here. Select the answer below and use Copy.</p>
-      <label>Answer to copy<textarea ref={text} readOnly value={content} disabled={disabled} /></label>
-      <button type="button" disabled={disabled} onClick={()=>{if(available()){text.current?.focus({preventScroll:true});text.current?.select();}}}>Select answer</button></>}
+      <label>{edited?'Edited copy to copy':'Answer to copy'}<textarea ref={text} readOnly value={content} disabled={disabled} /></label>
+      <button type="button" disabled={disabled} onClick={()=>{if(available()){text.current?.focus({preventScroll:true});text.current?.select();}}}>{edited?'Select edited copy':'Select answer'}</button></>}
   </section>;
 }

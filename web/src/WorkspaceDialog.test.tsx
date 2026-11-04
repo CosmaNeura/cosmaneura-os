@@ -41,3 +41,10 @@ it('preserves legitimate same-context editor restoration and the Escape/Tab trap
 it('retains the opener when a dialog control already received autoFocus before its effect',async()=>{
  await act(async()=>root.render(<WorkspaceDialog title="Edit reference" onClose={()=>root.render(null)}><input autoFocus aria-label="Reference"/><button onClick={()=>root.render(null)}>Done</button></WorkspaceDialog>));expect(document.activeElement?.getAttribute('aria-label')).toBe('Reference');await act(async()=>host.querySelector<HTMLButtonElement>('button')!.click());expect(document.activeElement).toBe(trigger);
 });
+
+it('keeps every close route fenced during pending editor recovery and unlocks the same dialog after persistence',async()=>{
+ const onClose=vi.fn();const show=async(locked:boolean)=>{await act(async()=>root.render(<WorkspaceDialog title="Details" closeLabel="Close details" navigationLocked={locked} onClose={onClose}><button>Last action</button></WorkspaceDialog>));};
+ await show(false);await show(true);expect(host.querySelector<HTMLButtonElement>('[aria-label="Close details"]')!.disabled).toBe(true);
+ await act(async()=>{host.querySelector<HTMLButtonElement>('[aria-label="Close details"]')!.click();document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));host.querySelector('.workspace-dialog-backdrop')!.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));});
+ expect(onClose).not.toHaveBeenCalled();expect(host.querySelector('[role="dialog"]')).not.toBeNull();await show(false);await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})));expect(onClose).toHaveBeenCalledOnce();
+});

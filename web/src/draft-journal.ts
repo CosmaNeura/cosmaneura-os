@@ -45,12 +45,13 @@ import {validEFaxSourceScope} from './efax-inbound-source-api';
 import {validateSchedulingPatientRecovery} from './scheduling-patient-recovery';
 import {validateAgentResearchRecovery} from './agent-research-recovery';
 import {validatePrivateDraftRecovery,validatePrivateDraftLinkRecovery} from './private-draft-recovery';
+import {parseAnswerCopy} from './answer-copy-contract';
 
 export type TeamDraft = { kind: "team"; baseRevision: number; configuration: TeamConfiguration; pending: TeamSaveInput | null };
 export type ChiefNoteTaskDraft={contract:'chief-note-task.compose.v1';note_id:string;note_version:number;content_hash:string;source_fingerprint:string};
 export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevision: number;
   note: string; thought: string; evidence: string; source: string; pending: Exclude<PendingSave, { type: "team"; body: TeamSaveInput }> | null;previous_model_request?:PreviousModelRequest;chief_note_task?:ChiefNoteTaskDraft };
-export type EditorKind = `conversation:${string}` | "notebook-title" | "private-draft-link" | "agent-research-review" | "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "ehr-read" | "ehr-read:tebra" | "ehr-read:tebra:fhir" | "ehr-read:athena:core" | "ehr-read:athena:core:medications" | "calendar-import" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
+export type EditorKind = `answer-copy:${string}` | `conversation:${string}` | "notebook-title" | "private-draft-link" | "agent-research-review" | "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "ehr-read" | "ehr-read:tebra" | "ehr-read:tebra:fhir" | "ehr-read:athena:core" | "ehr-read:athena:core:medications" | "calendar-import" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
 export type AccountEditorKind = "athena-visit-link" | "conversation-preferences" | "practice-invite" | "private-draft" | "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "outlook-messages" | "google-calendar" | "efax-inbound" | "fax-inbound" | `practice-result:${string}` | `vendor-work:${string}`;
@@ -63,6 +64,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const validEditor = (kind: unknown) => typeof kind === "string" &&
   (kind.startsWith("conversation:") && teamAddress(kind.slice("conversation:".length)) || ["notebook-title", "private-draft-link", "agent-research-review", "private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "scheduling-patient", "ehr-read", "ehr-read:tebra", "ehr-read:tebra:fhir", "ehr-read:athena:core", "ehr-read:athena:core:medications", "calendar-import", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
+    kind.startsWith("answer-copy:") && UUID.test(kind.slice("answer-copy:".length)) ||
     kind.startsWith("creator-review:") && UUID.test(kind.slice("creator-review:".length)) || kind.startsWith("handoff-review:") && UUID.test(kind.slice("handoff-review:".length)) ||
     kind.startsWith("fax-source-review:") && UUID.test(kind.slice("fax-source-review:".length)) ||
     kind.startsWith("efax-source-review:") && UUID.test(kind.slice("efax-source-review:".length)) ||
@@ -131,6 +133,7 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
     if (Object.keys(draft).sort().join(",") !== "data,editor,kind,pending,workspaceId" || !UUID.test(draft.workspaceId) ||
         !validEditor(draft.editor) || address !== editorAddress(draft.workspaceId, draft.editor) ||
         draft.pending !== null && !UUID.test(draft.pending) && !(draft.editor.startsWith("creator-review:") && /^[A-Za-z0-9._-]{8,255}$/.test(draft.pending)) || !draft.data || typeof draft.data !== "object") throw new DraftStoreError("integrity");
+    if(draft.editor.startsWith("answer-copy:")){if(draft.pending!==null)throw new DraftStoreError("integrity");parseAnswerCopy(draft.data,draft.editor.slice("answer-copy:".length));}
     if(draft.editor.startsWith("conversation:")){if(draft.pending!==null)throw new DraftStoreError("integrity");parseConversationDraft(draft.data);}
     return draft;
   }

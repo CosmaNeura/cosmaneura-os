@@ -229,10 +229,12 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const [scribeSourceBusy,setScribeSourceBusy]=useState(false);
   const [schedulingPatientBusy,setSchedulingPatientBusy]=useState(false);
   const [agentResearchBusy,setAgentResearchBusy]=useState(false);
+  const [answerCopyBusy,setAnswerCopyBusy]=useState(false);
   const {preparation:clinicalPreparation,safety:clinicalSafety}=session.clinical;
-  const navigationWorkLocks={receivedFaxBusy,researchPending,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,handoffReviewPending,schedulingPatientBusy,agentResearchBusy,efax:faxSourceBusy,fax:providerFaxSourceBusy,clinicalPreparing};
+  const navigationWorkLocks={answerCopyBusy,receivedFaxBusy,researchPending,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,handoffReviewPending,schedulingPatientBusy,agentResearchBusy,efax:faxSourceBusy,fax:providerFaxSourceBusy,clinicalPreparing};
   const liveNavigationWorkLocks=useRef(navigationWorkLocks);liveNavigationWorkLocks.current=navigationWorkLocks;
   const viewNavigationLocked = Object.values(navigationWorkLocks).some(Boolean);
+  const answerCopyOtherNavigationLocked=Object.entries(navigationWorkLocks).some(([kind,blocked])=>kind!=='answerCopyBusy'&&blocked);
   function sourceViewNavigationLocked(ownSource?:'efax'|'fax'){
     return Object.entries(liveNavigationWorkLocks.current).some(([key,blocked])=>key!==ownSource&&blocked);
   }
@@ -334,6 +336,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setConnectionError(previous=>previous?.identity===authenticated&&previous.generation<=connectionRecovery.generation?null:previous);
   },[authenticated,connectionRecovery?.identity,connectionRecovery?.sequence,connectionRecovery?.generation,connectionRecovery?.phase,connectionRecovery?.busy]);
   const connectionGeneration = generation.current;
+  const answerCopyEpisode=useMemo(()=>({}),[authenticated,workspace?.id,selected,connectionGeneration]),liveAnswerCopyEpisode=useRef(answerCopyEpisode);liveAnswerCopyEpisode.current=answerCopyEpisode;
+  const reportAnswerCopyBusy=useCallback((blocked:boolean)=>{
+    if(liveAnswerCopyEpisode.current!==answerCopyEpisode||generation.current!==connectionGeneration)return;
+    liveNavigationWorkLocks.current={...liveNavigationWorkLocks.current,answerCopyBusy:blocked};setAnswerCopyBusy(blocked);
+  },[answerCopyEpisode,connectionGeneration]);
   const reportAccessBusy = useCallback((blocked:boolean)=>{
     if(generation.current===connectionGeneration)setAccessBusy(blocked);
   },[connectionGeneration]);
@@ -530,7 +537,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setSetupApproval(null); setSetupProjection(null);
     setInboxSelection(null);setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
-    setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPracticePage(authenticated?"home":"visits");
+    setSchedulingPatientBusy(false);setAgentResearchBusy(false);setAnswerCopyBusy(false);setHomeBusy(false);setPracticePage(authenticated?"home":"visits");
     setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,athena:false,microsoft:false,microsoftMessages:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setReceivedFaxOpen(false);setReceivedFaxReturn(null);setFaxPassageOpen(true);setDirectFaxOffer(false);setReceivedFaxBusy(false);receivedFaxOpening.current++;
     setGoogleMessageOpen(false);setGoogleMessageVisited(false);setGoogleWorkReturn(null);googleWorkOpening.current++;setGoogleCalendarOpen(false);setGoogleCalendarVisited(false);googleVisitSelection.current=false;setAthenaTask(null);setAthenaNotebookError('');athenaOpening.current++;
@@ -1907,7 +1914,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               <p>{team?.llm.enabled ? phoneChiefConversation?"Write naturally. Chief can help organize your notes and coordinate your team.":"Ask a question, organize your notes, or think through the next step. Your team works from the saved context you choose." : "Review saved sources with your team. Advanced skills will connect here as their services become ready."}</p>
               {messagesMode&&bot?.role==='chief'&&chiefStarters}
               {bot?.role!=='chief'&&<button disabled={locked || !team?.revision || !bot?.enabled} onClick={() => {if(session.presentation.enabled){updateThought(template?.prompt??'Review this encounter');setQuestionFocus(value=>value+1);}else ask(template?.prompt);}}>{template?.prompt ?? "Review this encounter"}<span aria-hidden="true"> ↗</span></button>}</div>}
-            <ConversationEntries presentation={messagesMode?'messages':'workspace'} projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked} canRestoreFocus={canRestoreDialogFocus}
+            <ConversationEntries presentation={messagesMode?'messages':'workspace'} projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked||answerCopyOtherNavigationLocked||captureNavigationLocked||captureDraftLocked} canRestoreFocus={canRestoreDialogFocus} onBusyChange={reportAnswerCopyBusy}
               onWork={()=>{setPanel('Work');setMobilePanel('Work');}} onSource={openConversationSource}
               onCheck={checkEntryResult} onAction={action=>{
                 if(action.kind==='review_note'){setPanel('Review');setMobilePanel('Review');}
