@@ -33,6 +33,15 @@ describe('Chief first-use controls',()=>{
     const open=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} minimal locked hasSavedContext={false} onChoose={vi.fn()} onOpenNotebook={open}/>));
     const button=container.querySelector('button')!;expect(button.disabled).toBe(true);await act(async()=>button.click());expect(open).not.toHaveBeenCalled();
   });
+  it.each([true,false])('offers source-choice review without replacing an unsent question or changing access: minimal=%s',async minimal=>{
+    const choose=vi.fn(),review=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} minimal={minimal} sourceAllowed={false} hasQuestion onChoose={choose} onReviewSources={review}/>));
+    const buttons=[...container.querySelectorAll('button')];expect(buttons.map(button=>button.textContent)).toEqual([...(minimal?[]:CHIEF_STARTERS.map(task=>task.label)),'Review source choices']);if(minimal)expect(container.textContent).toContain('Your message draft stays here.');else expect(buttons.slice(0,4).every(button=>button.disabled)).toBe(true);expect(review).not.toHaveBeenCalled();
+    await act(async()=>buttons.at(-1)!.click());expect(review).toHaveBeenCalledOnce();expect(choose).not.toHaveBeenCalled();
+  });
+  it.each([{locked:true},{notesDirty:true},{reviewSourcesLocked:true}])('blocks source-choice navigation for %j',async change=>{
+    const review=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} {...change} minimal sourceAllowed={false} onChoose={vi.fn()} onReviewSources={review}/>));
+    const button=container.querySelector('button')!;expect(button.textContent).toBe('Review source choices');expect(button.disabled).toBe(true);await act(async()=>button.click());expect(review).not.toHaveBeenCalled();
+  });
   it.each([{modelEnabled:false},{sourceAllowed:false}])('retains unavailable-context guidance for %j instead of offering a misleading next step',async change=>{
     const open=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} {...change} minimal hasSavedContext={false} onChoose={vi.fn()} onOpenNotebook={open}/>));
     expect(container.textContent).not.toContain('Add notes');expect([...container.querySelectorAll('button')].every(button=>button.disabled)).toBe(true);expect(open).not.toHaveBeenCalled();

@@ -155,6 +155,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const messagesMode=session.presentation.current()==='messages';
   const [openingVisit,setOpeningVisit]=useState(false);
   const [newMessage,setNewMessage]=useState(false),[conversationDetails,setConversationDetails]=useState<false|'details'|'sources'>(false);
+  const [sourceChoicesReview,setSourceChoicesReview]=useState<{address:string;token:object;generation:number;workspaceId:string}|null>(null);
+  useEffect(()=>{setSourceChoicesReview(null);},[authenticated,identity,workspace?.id,selected]);
+  useEffect(()=>{if(!settingsOpen)setSourceChoicesReview(null);},[settingsOpen]);
   const [athenaTask,setAthenaTask]=useState<{identity:AuthenticatedWorkspaceIdentity;open:boolean;view:string;returnLabel:string;target:HTMLElement|null}|null>(null);
   const athenaOpening=useRef(0);
   const [athenaNotebookNavigation,setAthenaNotebookNavigation]=useState<{command:CoreConnectionCommand;identity:AuthenticatedWorkspaceIdentity;generation:number;view:string;journal:DraftJournal;current:()=>boolean}|null>(null);
@@ -676,7 +679,21 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     invalidateSetup:()=>{setSetupApproval(null);setSetupEpoch(value=>value+1);},invalidatePrep:()=>setPrepEpoch(value=>value+1)});}
   function refreshHandoffReview(){return session.loading.refreshHandoff({authenticated,failure,blocked:captureNavigationLocked||captureDraftLocked||recoveryBlocked});}
   function recheckRecovery(){return session.loading.recheckRecovery(loadingContext());}
-  function openSettings(entry:'home'|'connections'|'core'='home'){if(!viewNavigationLocked)clearReceivedFaxReturn();return session.navigation.openSettings(navigationContext(),entry);}
+  function openSettings(entry:'home'|'connections'|'team'|'core'='home'){if(!viewNavigationLocked)clearReceivedFaxReturn();return session.navigation.openSettings(navigationContext(),entry);}
+  function reviewChiefSourceChoices(){
+    const view=session.getSnapshot(),context=navigationContext(),chosen=view.team?.configuration.bots.find(item=>botAddress(item)===view.selected);
+    // This is navigation only. The existing permission editor and reviewed save
+    // remain the sole owners of a source-access change.
+    if(locked||context.viewNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked||view.busy||view.pending||view.conflict||view.recoveryOffers.length||
+      view.settingsOpen||!view.teamDraft||!view.workspace||view.note!==latestNotebookText(view.workspace)||chosen?.role!=='chief'||chosen.include_notebook||chosen.include_evidence||
+      previousIdentity.current!==authenticated||currentIdentity.current!==identity)return;
+    if(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession&&!authenticated.nativeSession.isCurrent()||authenticated?.mode==='desktop_native'&&!authenticated.isCurrent())return;
+    const currentGeneration=generation.current;
+    void openSettings('team');
+    const opened=session.getSnapshot();
+    if(generation.current===currentGeneration&&opened.workspace?.id===view.workspace.id&&opened.selected===view.selected&&opened.settingsOpen&&opened.settingsEntry==='team')
+      setSourceChoicesReview({address:view.selected,token:{},generation:currentGeneration,workspaceId:view.workspace.id});
+  }
   async function refreshRoutineTeam(){await session.team.refresh({authenticated,failure});currentTeam.current=session.getSnapshot().team;currentTeamDraft.current=session.getSnapshot().teamDraft;}
   function receiveSetupTeam(value:ProviderTeam,projection:SetupProjection){session.team.receive(value,{authenticated},projection);currentTeam.current=session.getSnapshot().team;currentTeamDraft.current=session.getSnapshot().teamDraft;}
   function saveTeam(){void session.team.save(saveContext());}
@@ -1309,7 +1326,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     hasSavedContext={chiefSavedContext} notesDirty={note!==latestNote} hasQuestion={!!thought.trim()}
     visitSummary={bot?.role==='chief'?ChiefOpenVisit.summary(workspace):''}
     canDelegate={!bot.blocked_capabilities?.includes('private_draft_handoff')} onChoose={prepareChiefQuestion}
-    onOpenNotebook={bot.include_notebook?()=>showConversationTask('Notebook'):undefined}/>;
+    onOpenNotebook={bot.include_notebook?()=>showConversationTask('Notebook'):undefined} onReviewSources={reviewChiefSourceChoices} reviewSourcesLocked={!!recoveryOffers.length}/>;
   const modelRecovery=<>
       {localModelPending&&!busy&&<section className="team-recovery" aria-label="Unconfirmed model request"><p>{inlineModelRecovery?'Chief hasn’t confirmed this message yet. Check its status before retrying.':'The retained request is unconfirmed. Check its saved result; checking never starts another model call.'}</p>
         {localModelPending.type==='ask'&&localModelPending.body.research_analysis&&<details className="research-model-selection"><summary>Retained selected-source request</summary><p>{localModelPending.body.content}</p><p>Only this exact question and saved public-source selection belong to this key.</p><ul>{localModelPending.body.research_analysis.entries.map(anchor=><li key={anchor.entry_id}>Saved packet revision {anchor.entry_revision} · {anchor.entry_id}<small>Lookup {anchor.run_id} · save proof {anchor.save_request_sha256}</small></li>)}</ul></details>}
@@ -1588,6 +1605,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         teamDirty={!!team && !!teamDraft && teamConfigurationChanged(team.configuration,teamDraft)} onClose={closeSettings}
         team={team && teamDraft ? <TeamConfigurationFlow resetToken={setupEpoch} active={settingsOpen} identity={(authenticated || identity)!}
           team={team} draft={teamDraft} setDraft={setTeamDraft} selected={selected} setSelected={setSelected}
+          savedSourcesReview={settingsOpen&&settingsEntry==='team'&&sourceChoicesReview?.generation===generation.current&&sourceChoicesReview.workspaceId===workspace?.id&&sourceChoicesReview.address===selected?sourceChoicesReview:undefined}
           locked={locked} inputLocked={recoveryBlocked||conflict||pending?.type==='team'||activityBusy} setupAvailable={setupProjection?.team_revision === team.revision}
           activity={activityContext && settingsOpen && !practiceOpen ? {context:activityContext,onOpenEncounter:openActivityEncounter,onBusyChange:reportActivityBusy} : undefined}
           reviewRequired={setupChange(team.configuration, teamDraft) && !(setupApproval?.revision === team.revision && setupApproval.configurationKey === JSON.stringify(teamDraft))}

@@ -1,5 +1,5 @@
 import {teamConfigurationDiff,teamConfigurationChanged} from './team-configuration-diff';
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {ProviderTeamSettings,type ProviderTeamSettingsView} from './ProviderTeamSettings';
 import {TeamSetupPanel,type ReviewedTeamDraft,type TeamSetupView} from './TeamSetupPanel';
 import {setupChange,validTeamConfiguration,type SetupProjection} from './team-setup-request';
@@ -14,6 +14,7 @@ export type TeamConfigurationFlowProps={
   onCurrentTeam:(team:ProviderTeam,setup:SetupProjection)=>void;onReviewChange:(review:ReviewedTeamDraft|null)=>void;
   activity?:{context:AiActivityContext;onOpenEncounter:(selection:AiActivitySelection)=>void|Promise<void>;onBusyChange?:(busy:boolean)=>void};
   onAccessLost:(cause:unknown)=>void;onSave:()=>void;onClose:()=>void;onRefresh:()=>void|Promise<void>;
+  savedSourcesReview?:{address:BotAddress;token:object};
 };
 type Page='overview'|'edit'|'advanced'|'sources'|'practice'|'limits'|'preferences'|'add'|'groups'|'review'|'readiness'|'activity';
 const titles:Record<Page,string>={overview:'Your private team',edit:'Coworker details',advanced:'Skills and permissions',sources:'Source access',practice:'Practice profile',limits:'AI work limit',preferences:'Team preferences',add:'Add a coworker',groups:'Add a team group',review:'Review team changes',readiness:'What your team can do',activity:'AI activity'};
@@ -34,6 +35,7 @@ export function TeamConfigurationFlow(props:TeamConfigurationFlowProps){
   const activityBusyChange=useCallback((value:boolean)=>{setActivityBusy(value);props.activity?.onBusyChange?.(value);},[props.activity?.onBusyChange]);
   useEffect(()=>{if(!props.activity){setActivityBusy(false);setPage(value=>value==='activity'?'preferences':value);}},[!!props.activity]);
   const [page,setPage]=useState<Page>('overview'),[refreshToken,setRefreshToken]=useState(0),heading=useRef<HTMLHeadingElement>(null);
+  useLayoutEffect(()=>{if(props.active!==false&&props.savedSourcesReview?.address===selected)setPage('advanced');},[props.active,props.savedSourcesReview,selected]);
   useEffect(()=>{if(props.active!==false)heading.current?.focus();},[page,props.active]);
   useEffect(()=>{if(props.active===false)setPage('overview');},[props.active]);
   const bot=draft.bots.find(item=>botAddress(item)===selected)??draft.bots[0];
@@ -47,7 +49,7 @@ export function TeamConfigurationFlow(props:TeamConfigurationFlowProps){
       {page==='overview'?<p>{team.revision?'Your saved team is ready for each visit. Personalization is optional.':'Your team comes ready to use: Scribe, Visit Prep, Follow-up, Chief and Research. No need to fill out each bot.'}</p>:['edit','advanced','sources'].includes(page)?<p>{bot?.name||'New coworker'}</p>:null}</div>
       </header>
     {page==='overview'&&<p className="team-flow-status">{changed?`${teamConfigurationDiff(team.configuration,draft).count} unsaved field ${teamConfigurationDiff(team.configuration,draft).count===1?'change':'changes'}`:team.revision?'Saved team':'Not yet saved'} · {draft.bots.filter(item=>!item.retired).length} coworkers</p>}
-    <ProviderTeamSettings {...common} view={providerView} setSelected={address=>{setSelected(address);if(page==='overview')setPage('edit');}} onBotAdded={()=>setPage('edit')}/>
+    <ProviderTeamSettings {...common} view={providerView} sourceChoicesReview={props.savedSourcesReview?.address===selected?props.savedSourcesReview.token:undefined} setSelected={address=>{setSelected(address);if(page==='overview')setPage('edit');}} onBotAdded={()=>setPage('edit')}/>
     {page==='overview'&&<nav aria-label="Team configuration choices" className="team-flow-links"><button disabled={locked} onClick={()=>setPage('add')}>Add a coworker <span aria-hidden="true">›</span></button><button disabled={locked} onClick={()=>setPage('groups')}>Add a team group <span aria-hidden="true">›</span></button><button onClick={()=>setPage('preferences')}>Team preferences <span aria-hidden="true">›</span></button></nav>}
     {['edit','advanced','sources'].includes(page)&&<nav className="team-material-tabs" aria-label="Coworker settings"><button aria-pressed={page==='edit'} onClick={()=>setPage('edit')}>About</button><button aria-pressed={page==='advanced'} onClick={()=>setPage('advanced')}>Permissions</button><button aria-pressed={page==='sources'} onClick={()=>setPage('sources')}>Sources</button></nav>}
     {page==='preferences'&&<nav aria-label="Team preferences" className="team-flow-links"><button onClick={()=>setPage('practice')}>Practice profile <span aria-hidden="true">›</span></button><button onClick={()=>setPage('limits')}>AI work limit <span aria-hidden="true">›</span></button>{props.activity&&<button disabled={locked||activityBusy} onClick={()=>{if(!locked&&!activityBusy)setPage('activity');}}>AI activity <span aria-hidden="true">›</span></button>}<button onClick={()=>setPage('readiness')}>What your team can do <span aria-hidden="true">›</span></button><button disabled={locked} onClick={()=>{setRefreshToken(value=>value+1);onReviewChange(null);void onRefresh();}}>Refresh current settings</button></nav>}

@@ -40,7 +40,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
   appearance?:ReactNode;open: boolean;nativePresentation?:'workspace'|'messages'; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; ehr?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
   googleTaskPresentation?:boolean;receivedFaxTaskOpen?:boolean;receivedFaxReturnLabel?:string;onCloseReceivedFax?:()=>void;onReceivedFaxActiveChange?:(active:boolean)=>void;
   teamSummary: string; teamDirty: boolean; onClose: () => void; beforeLeaveTeam?:(next:()=>void)=>void; navigationLocked?: boolean;
-  initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'|'ehr'|'messaging';guidedConnections?:boolean;
+  initialScreen?:'home'|'connections'|'team'|'core'|'scheduling'|'microsoft'|'google'|'ehr'|'messaging';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
   onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;onReviewFaxDocument?:EFaxInboundPanelProps['onReviewDocument'];onReviewProviderFaxDocument?:FaxInboundPanelProps['onReviewDocument'];
 }) {
@@ -69,7 +69,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
   const inboundActiveCallback=useRef(onReceivedFaxActiveChange);inboundActiveCallback.current=onReceivedFaxActiveChange;
   const reportInboundActive=useCallback((active:boolean)=>{if(liveInboundEpisode.current!==inboundEpisode)return;setInboundBusy(active);inboundActiveCallback.current?.(active);},[inboundEpisode]);
   const leaveLocked=navigationLocked||inboundBusy||providerInboundBusy;
-  const [visited, setVisited] = useState<Editor[]>(initialScreen==='ehr'||!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')?[initialScreen as Editor]:[]);
+  const [visited, setVisited] = useState<Editor[]>(initialScreen==='ehr'||initialScreen==='team'||!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')?[initialScreen as Editor]:[]);
   const [recovering,setRecovering]=useState<ConnectionId|null>(null);
   const title = useRef<HTMLHeadingElement>(null),receivedFaxHeading=useRef<HTMLHeadingElement>(null);
   const section = useRef<HTMLElement>(null);
@@ -131,7 +131,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
   },[open,screen,connectionIdentity,refreshCatalog,summaryIds]);
   useEffect(() => { if (!open) setScreen(initialScreen); }, [open,initialScreen]);
   useEffect(() => {
-    if(open){setScreen(initialScreen);if(initialScreen==='ehr'||!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'))setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
+    if(open){setScreen(initialScreen);if(initialScreen==='ehr'||initialScreen==='team'||!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'))setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
   }, [initialScreen,connectionIdentity]);
   function visit(next: Screen, accepted=false) {
     if (leaveLocked) return;

@@ -1,16 +1,18 @@
 import {emptyPracticeProfile,profileFields,profileLimits,practiceProfileContext,type PracticeProfile} from './practice-profile';
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { botAddress, type BotAddress, type BotRole, type ProviderTeam, type TeamConfiguration } from "./workspace-api";
 import { BLOCKED_CAPABILITIES, type BlockedCapability } from "./team-setup-request";
 import { BotAvatar } from "./BotAvatar";
 
 export type ProviderTeamSettingsView = "full" | "overview" | "edit" | "advanced" | "practice" | "add" | "hidden";
-export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelected, locked, inputLocked=locked, onSave, onClose, reviewRequired = false, setupAvailable = false, view = "full", onBotAdded }: {
-  inputLocked?:boolean;reviewRequired?: boolean; setupAvailable?: boolean; view?: ProviderTeamSettingsView; onBotAdded?: () => void;
+export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelected, locked, inputLocked=locked, onSave, onClose, reviewRequired = false, setupAvailable = false, view = "full", onBotAdded,sourceChoicesReview }: {
+  inputLocked?:boolean;reviewRequired?: boolean; setupAvailable?: boolean; view?: ProviderTeamSettingsView; onBotAdded?: () => void;sourceChoicesReview?:object;
   team: ProviderTeam; draft: TeamConfiguration; setDraft: (draft: TeamConfiguration) => void;
   selected: BotAddress; setSelected: (address: BotAddress) => void; locked: boolean; onSave: () => void; onClose: () => void;
 }) {
   const beforeRetirement = useRef(new Map<BotAddress, {enabled:boolean;retired?:boolean}>());
+  const sourceChoices=useRef<HTMLDetailsElement>(null);
+  useLayoutEffect(()=>{if(view==='advanced'&&sourceChoicesReview&&sourceChoices.current)sourceChoices.current.open=true;},[view,sourceChoicesReview,selected]);
   const bot = draft.bots.find(b => botAddress(b) === selected) ?? draft.bots[0];
   const templates = team.templates ?? team.members.filter(b => !b.instance_id && b.role !== "chief" && b.role !== "custom");
   const template = bot.role === "custom" ? {name: "Custom bot", description: "Give this coworker a job, instructions and the skills it needs.", capabilities: []}
@@ -105,7 +107,7 @@ export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelec
         <label>Review length<select value={bot.response_style} disabled={fieldsLocked} onChange={e => change({ response_style: e.target.value as "brief" | "detailed" })}>
           <option value="brief">Brief</option><option value="detailed">More detail</option>
         </select></label>
-        <details className="team-optional-settings"><summary>Sources this bot can use</summary><fieldset disabled={fieldsLocked}><legend>Sources this bot can use in your encounter</legend>
+        <details ref={sourceChoices} className="team-optional-settings"><summary>Sources this bot can use</summary><fieldset disabled={fieldsLocked}><legend>Sources this bot can use in your encounter</legend>
           <label className="team-check"><input type="checkbox" checked={bot.include_notebook} onChange={e => change({ include_notebook: e.target.checked })} />My saved notebook</label>
           <label className="team-check"><input type="checkbox" checked={bot.include_evidence} onChange={e => change({ include_evidence: e.target.checked })} />Saved preparation and evidence</label>
         </fieldset></details>
