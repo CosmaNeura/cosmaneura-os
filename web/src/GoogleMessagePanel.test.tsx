@@ -41,7 +41,7 @@ const useNative=()=>{props={...props,identity:{mode:'clerk_jwt',getToken:vi.fn()
 const nativeHint=(active:boolean)=>act(async()=>notifyNativeWorkspaceForeground(props.identity,active));
 async function click(label:string){await wait(()=>{expect(button(label),label).toBeTruthy();expect(button(label)!.disabled,label).toBe(false);});await act(async()=>button(label)!.click());await idle();}
 async function selectRead(){await mount();await click('Check email access');await click('Select email');await act(async()=>host.querySelector<HTMLButtonElement>('.google-message-list button')!.click());await idle();await click('Read full email');}
-async function ack(){await act(async()=>host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());}
+async function ack(){await act(async()=>host.querySelector<HTMLInputElement>('.google-message-check input')!.click());}
 async function prepareReview(){await selectRead();await click('Use for current visit');await ack();}
 it('finishes one delayed account journal load across hiding and revealing the retained task',async()=>{
  let release!:(value:GoogleMessageRecoveryRecord|null)=>void;vi.mocked(access.load).mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));
@@ -66,9 +66,9 @@ it('keeps navigation active until an aborted operation settles and does not noti
  await act(async()=>root.render(<GoogleMessagePanel {...props}/>));await act(async()=>release({...list,read_key:key}));expect(first).toHaveBeenLastCalledWith(false);expect(replacement).not.toHaveBeenCalled();expect(props.onSaved).not.toHaveBeenCalled();
 });
 it('clears an ephemeral review on task hide without changing its saved source or permitting hidden actions',async()=>{
- await prepareReview();const prior=structuredClone(saved);expect(host.querySelector<HTMLInputElement>('input')!.checked).toBe(true);
+ await prepareReview();const prior=structuredClone(saved);expect(host.querySelector<HTMLInputElement>('.google-message-check input')!.checked).toBe(true);
  await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive={false}/>));expect(host.querySelector('pre')).toBeNull();await act(async()=>button('Check email access')!.click());expect(googleMessageApi.status).toHaveBeenCalledOnce();
- await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive/>));expect(host.querySelector<HTMLInputElement>('input')!.checked).toBe(false);expect(saved).toEqual(prior);expect(googleMessageApi.review).not.toHaveBeenCalled();
+ await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive/>));expect(host.querySelector<HTMLInputElement>('.google-message-check input')!.checked).toBe(false);expect(saved).toEqual(prior);expect(googleMessageApi.review).not.toHaveBeenCalled();
 });
 it('opens private email storage only after an initially suspended native scene is revalidated',async()=>{
  useNative();await nativeHint(false);await act(async()=>root.render(<GoogleMessagePanel {...props}/>));
@@ -78,13 +78,13 @@ it('opens private email storage only after an initially suspended native scene i
 });
 
 it('masks idle native email and confirmations until an explicit DB-only check after return',async()=>{
- useNative();await prepareReview();const prior=structuredClone(saved);expect(host.querySelector<HTMLInputElement>('input')!.checked).toBe(true);
+ useNative();await prepareReview();const prior=structuredClone(saved);expect(host.querySelector<HTMLInputElement>('.google-message-check input')!.checked).toBe(true);
  await nativeHint(false);expect(host.querySelector('pre')).toBeNull();expect(host.textContent).not.toContain('Invented follow-up');expect(saved).toEqual(prior);
  expect(button('Check email access')!.disabled).toBe(true);expect(props.identity.mode==='clerk_jwt'&&props.identity.nativeSession!.isCurrent()).toBe(true);
  await nativeHint(true);await nativeHint(true);expect(host.querySelector('pre')).toBeNull();expect(googleMessageApi.status).toHaveBeenCalledOnce();
  expect(googleMessageApi.list).toHaveBeenCalledOnce();expect(googleMessageApi.read).toHaveBeenCalledOnce();expect(googleMessageApi.review).not.toHaveBeenCalled();
  await click('Check email access');expect(googleMessageApi.inspect).toHaveBeenCalledOnce();expect(host.querySelector('pre')?.textContent).toBe(message.message!.content);
- expect(host.querySelector<HTMLInputElement>('input')!.checked).toBe(false);expect(button('Save reviewed email for this visit')!.disabled).toBe(true);expect(saved).toEqual(prior);
+ expect(host.querySelector<HTMLInputElement>('.google-message-check input')!.checked).toBe(false);expect(button('Save reviewed email for this visit')!.disabled).toBe(true);expect(saved).toEqual(prior);
 });
 it('fences a late native body result and reopens its exact journal without repeating Google reads',async()=>{
  useNative();await mount();await click('Check email access');await click('Select email');await act(async()=>host.querySelector<HTMLButtonElement>('.google-message-list button')!.click());await idle();
