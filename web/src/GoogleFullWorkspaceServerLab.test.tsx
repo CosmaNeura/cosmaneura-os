@@ -162,8 +162,8 @@ async function selectSource() {
     }
     else {
         await click('Select email');
-        await wait(() => expect(host.querySelector<HTMLButtonElement>('.google-message-list button')?.disabled).toBe(false));
-        await act(async () => host.querySelector<HTMLButtonElement>('.google-message-list button')!.click());
+        await wait(() => expect(host.querySelector<HTMLButtonElement>('.google-message-list ul > li > button')?.disabled).toBe(false));
+        await act(async () => host.querySelector<HTMLButtonElement>('.google-message-list ul > li > button')!.click());
         await click('Read full email');
         await click('Use for current visit');
         await checkSource();

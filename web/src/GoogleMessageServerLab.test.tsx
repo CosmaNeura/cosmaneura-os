@@ -79,8 +79,8 @@ async function openCase(round:string,persona='physician'){
  await wait(()=>expect(button('Check email access').disabled).toBe(false));noteBefore=noteIdentity(packet.workspace);return packet;
 }
 async function readForReview(){
- await click('Check email access');await click('Select email');await wait(()=>expect(host.querySelector<HTMLButtonElement>('.google-message-list button')?.disabled).toBe(false));
- await act(async()=>host.querySelector<HTMLButtonElement>('.google-message-list button')!.click());await click('Read full email');
+ await click('Check email access');await click('Select email');await wait(()=>expect(host.querySelector<HTMLButtonElement>('.google-message-list ul > li > button')?.disabled).toBe(false));
+ await act(async()=>host.querySelector<HTMLButtonElement>('.google-message-list ul > li > button')!.click());await click('Read full email');
  await click('Use for current visit');await act(async()=>host.querySelector<HTMLInputElement>('.google-message-check input')!.click());
 }
 async function counters(path:'revoke'|'inspect',wid:string):Promise<Counters>{
@@ -115,7 +115,7 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
   root=createRoot(host);await act(async()=>root!.render(<Harness initial={packet.workspace} scope={packet.scope} recovery={recovery} auth={identity} teamRevision={teamRevision}/>));
   await wait(()=>expect(button('Check email access').disabled).toBe(false));expect(trial.wire).toHaveLength(0);step('opened_email_mount_with_signed_identity_and_encrypted_journal_no_provider_read');
   await click('Check email access');expect(host.textContent).toContain('Full email access granted');await click('Select email');
-  await wait(()=>expect(host.querySelector<HTMLButtonElement>('.google-message-list button')?.disabled).toBe(false));await act(async()=>host.querySelector<HTMLButtonElement>('.google-message-list button')!.click());
+  await wait(()=>expect(host.querySelector<HTMLButtonElement>('.google-message-list ul > li > button')?.disabled).toBe(false));await act(async()=>host.querySelector<HTMLButtonElement>('.google-message-list ul > li > button')!.click());
   await click('Read full email');await wait(()=>expect(host.querySelector('[aria-label="Complete selected email"]')).toBeTruthy());
   const exact=recoveryRecord!.message!;expect(exact.status).toBe('complete');expect(host.querySelector('[aria-label="Complete selected email"]')!.textContent).toBe(exact.message!.content);
   expect(exact.message!.content_sha256).toBe(await sha(exact.message!.content!));expect(host.querySelector('img,a')).toBeNull();step('full_selected_email_read');await remountSavedEmail(packet);expect(host.querySelector('[aria-label="Complete selected email"]')!.textContent).toBe(exact.message!.content);step('fresh_mount_restores_exact_encrypted_selected_email_without_provider_read');await click('Check email access');
