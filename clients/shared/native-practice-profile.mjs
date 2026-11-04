@@ -9,13 +9,21 @@ const exact = (value, fields) => value && typeof value === 'object' && !Array.is
   Object.values(Object.getOwnPropertyDescriptors(value)).every(property => 'value' in property && property.enumerable);
 const unavailable = () => {throw new Error('Registered native practice is unavailable');};
 const digest = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+/** Each registered data mode admits exactly one identity realm and workspace domain. */
+const REGISTERED_ENVIRONMENTS = Object.freeze({
+  synthetic: Object.freeze({profile: 'operational-staging-v1', domain: 'staging.cosmas.ai',
+    issuer: origin => origin.endsWith('.clerk.accounts.dev'),
+    reserved: ['onboarding.staging.cosmas.ai', 'enrollment-api.staging.cosmas.ai', 'api.staging.cosmas.ai']}),
+  authorized_beta: Object.freeze({profile: 'operational-beta-v1', domain: 'workspace.cosmas.ai',
+    issuer: origin => origin === 'https://clerk.cosmas.ai', reserved: ['api.workspace.cosmas.ai']}),
+});
 
 /** Public registry data only. Native code obtains and authenticates this response. */
 export function validateRegisteredNativeProfile(value) {
   if (!exact(value, ['contract_version','client','nonce','native_origin','nativeIdentity','practice','workspace','data_mode','session','issued_at','expires_at']) ||
       value.contract_version !== REGISTERED_NATIVE_PROFILE_CONTRACT || !['apple','desktop'].includes(value.client) ||
       value.native_origin !== (value.client === 'apple' ? 'capacitor://localhost' : 'app://cosmas') ||
-      !uuid(value.nonce) || value.data_mode !== 'synthetic' ||
+      !uuid(value.nonce) || !Object.hasOwn(REGISTERED_ENVIRONMENTS, value.data_mode) ||
       !exact(value.practice, ['practice_id','box_id']) || !uuid(value.practice.practice_id) || !uuid(value.practice.box_id) ||
       !exact(value.workspace, ['url','source_commit','image_sha256','workspace_proof_sha256','member_proof_sha256','native_qualification_sha256']) ||
       typeof value.workspace.source_commit !== 'string' || !/^[0-9a-f]{40}$/.test(value.workspace.source_commit) ||
@@ -29,19 +37,24 @@ export function validateRegisteredNativeProfile(value) {
     nativeIdentity = validateOperationalNativeIdentity(value.nativeIdentity, value.client, value.nativeIdentity?.apiOrigin);
     workspace = new URL(value.workspace.url);
   } catch { unavailable(); }
-  // This candidate registers independent synthetic practices, never a platform
-  // hostname or the existing beta's compiled connection. Production is separate.
-  if (nativeIdentity.profile !== 'operational-staging-v1' ||
-      !nativeIdentity.frontendOrigin.endsWith('.clerk.accounts.dev') ||
+  // Registered practices only: synthetic staging, or real-data production with
+  // the production identity realm. Never a platform hostname or another realm.
+  const environment = REGISTERED_ENVIRONMENTS[value.data_mode];
+  const domain = '.' + environment.domain;
+  if (nativeIdentity.profile !== environment.profile ||
+      !environment.issuer(nativeIdentity.frontendOrigin) ||
       value.session.issuer !== nativeIdentity.frontendOrigin ||
       workspace.protocol !== 'https:' || workspace.username || workspace.password || workspace.port ||
       workspace.search || workspace.hash || workspace.pathname !== '/chief' ||
-      !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.staging\.cosmas\.ai$/.test(workspace.hostname) ||
-      ['onboarding.staging.cosmas.ai','enrollment-api.staging.cosmas.ai','api.staging.cosmas.ai'].includes(workspace.hostname) ||
+      !workspace.hostname.endsWith(domain) ||
+      !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(workspace.hostname.slice(0, -domain.length)) ||
+      environment.reserved.includes(workspace.hostname) ||
       value.workspace.url !== workspace.origin + '/chief' ||
       nativeIdentity.apiOrigin !== 'https://api.' + workspace.hostname) unavailable();
   const practiceLabel=workspace.hostname.split('.')[0];
   if(uuid(practiceLabel)&&practiceLabel!==value.practice.practice_id)unavailable();
+  // Real-data workspaces are always addressed by their own registered practice UUID.
+  if(value.data_mode==='authorized_beta'&&practiceLabel!==value.practice.practice_id)unavailable();
   // Native activation checks receipt freshness once. Expiry is not a recurring
   // agreement, billing or sign-in gate: active auth and revision fence requests.
   return Object.freeze({...value, nativeIdentity, session: Object.freeze({...value.session}),

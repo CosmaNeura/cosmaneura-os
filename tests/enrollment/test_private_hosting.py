@@ -904,3 +904,31 @@ def test_production_enrollment_registers_only_its_own_practice_uuid_workspace_ho
     assert settings.registered_workspace_origin(f"https://{practice}.workspace.cosmas.ai", practice)
     assert not settings.registered_workspace_origin(f"https://{practice}.staging.cosmas.ai", practice)
     assert not settings.registered_workspace_origin(f"https://{uuid4()}.workspace.cosmas.ai", practice)
+
+
+def test_production_allocator_destination_is_accepted_by_shared_native_profile_contract(production_hosted):
+    c = production_hosted
+    destination = c.allocator.destination(WorkspaceAllocationRequest(c.plan.practice_id, c.plan.box_id,
+        "unused", c.plan.owner_subject, c.plan.issuer))
+    profile = {"contract_version": "cosmas-native-workspace-profile.v1", "client": "apple", "nonce": str(uuid4()),
+        "native_origin": "capacitor://localhost", "data_mode": "authorized_beta",
+        "nativeIdentity": {"version": 1, "profile": "operational-beta-v1", "client": "apple",
+            "apiOrigin": destination.api_origin, "publishableKey": c.config.account["publishable_key"],
+            "frontendOrigin": c.plan.issuer, "organizationId": c.plan.organization_id,
+            "audience": "cosmabot-practice-api"},
+        "practice": {"practice_id": c.plan.practice_id, "box_id": c.plan.box_id},
+        "workspace": {"url": destination.workspace_url, "source_commit": destination.source_commit,
+            "image_sha256": destination.image_sha256, "workspace_proof_sha256": "1" * 64,
+            "member_proof_sha256": "5" * 64, "native_qualification_sha256": "6" * 64},
+        "session": {"issuer": c.plan.issuer, "subject": c.plan.owner_subject, "session_id": "sess_host1"},
+        "issued_at": 1800000000, "expires_at": 1800000120}
+    script = """
+import {readFileSync} from 'node:fs';
+import {validateRegisteredNativeProfile} from './clients/shared/native-practice-profile.mjs';
+const value=validateRegisteredNativeProfile(JSON.parse(readFileSync(0,'utf8')));
+console.log(JSON.stringify({url:value.workspace.url,api:value.nativeIdentity.apiOrigin,mode:value.data_mode}));
+"""
+    result = subprocess.run(["node", "--input-type=module", "-e", script], input=json.dumps(profile),
+        text=True, capture_output=True, check=True, cwd=c.source, timeout=20)
+    assert json.loads(result.stdout) == {"url": destination.workspace_url, "api": destination.api_origin,
+                                         "mode": "authorized_beta"}

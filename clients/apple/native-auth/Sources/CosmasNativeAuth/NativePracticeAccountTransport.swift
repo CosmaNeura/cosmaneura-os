@@ -123,10 +123,12 @@ public struct NativePracticeBundleConfiguration: Sendable {
               Set(realm.keys) == ["publishableKey", "frontendOrigin", "audience", "profile", "keychainNamespace"],
               let key = realm["publishableKey"] as? String, let frontend = realm["frontendOrigin"] as? String,
               let audience = realm["audience"] as? String,
-              realm["profile"] as? String == NativeIdentityProfile.operationalStaging.rawValue,
+              let profileName = realm["profile"] as? String,
+              let profile = NativeIdentityProfile(rawValue: profileName),
+              profile == .operationalStaging || profile == .operationalBeta,
               let namespace = realm["keychainNamespace"] as? String else { throw NativePracticeProfileError.invalidBinding }
         let configuration = try NativeClerkAccountConfiguration(publishableKey: key, frontendOrigin: frontend,
-            bundleIdentifier: bundleIdentifier, profile: .operationalStaging, storageNamespace: namespace)
+            bundleIdentifier: bundleIdentifier, profile: profile, storageNamespace: namespace)
         let policy: NativeRegisteredPracticeOriginPolicy
         if let raw = value["registeredPracticeOrigins"] {
             guard let name = raw as? String, let parsed = NativeRegisteredPracticeOriginPolicy(rawValue: name) else {
