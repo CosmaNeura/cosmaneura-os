@@ -1,5 +1,7 @@
 .source-work-reader[data-chooser-open=false]{grid-template-columns:minmax(0,1fr)}
+.source-work-reader[data-chooser-open=true][data-source-selected=true]{grid-template-columns:minmax(0,1fr)}
 .source-work-content{min-width:0}
+.source-work-content[hidden]{display:none}
 .source-work-choices:not([hidden]){display:grid;gap:.8rem;min-width:0}
 .source-work-choices[hidden]{display:none}
 .source-work-switch{display:flex;align-items:center;justify-content:space-between;gap:.75rem;min-width:0;padding:.65rem 0;border-bottom:1px solid var(--team-line,#d9ddd9)}

@@ -10,6 +10,7 @@ export function SourceWorkReader({className,chooserClassName,contentClassName,ch
 }){
   const id=useId(),[expandedKey,setExpandedKey]=useState<string|null>(null);
   const expanded=selection===null||expandedKey===selection.key;
+  const choosing=selection!==null&&expanded;
   const chooserRef=useRef<HTMLDivElement>(null),contentRef=useRef<HTMLDivElement>(null);
   const focusRequest=useRef<'chooser'|'content'|null>(null),previousSelection=useRef(selection?.key);
   useLayoutEffect(()=>{
@@ -31,7 +32,7 @@ export function SourceWorkReader({className,chooserClassName,contentClassName,ch
     focusRequest.current=expanded?'content':'chooser';
     setExpandedKey(expanded?null:selection.key);
   };
-  return <div className={`${className} source-work-reader`} data-chooser-open={expanded}>
+  return <div className={`${className} source-work-reader`} data-chooser-open={expanded} data-source-selected={selection!==null}>
     <aside className={`${chooserClassName} source-work-chooser`} aria-label={chooserLabel}>
       {selection&&<div className="source-work-switch">
         <p><span>{selectedLabel}</span><strong>{selection.label}</strong></p>
@@ -41,7 +42,7 @@ export function SourceWorkReader({className,chooserClassName,contentClassName,ch
       </div>}
       <div id={id} ref={chooserRef} className="source-work-choices" hidden={!expanded}>{chooser}</div>
     </aside>
-    <div className={`${contentClassName} source-work-content`} ref={contentRef} tabIndex={-1}>
+    <div className={`${contentClassName} source-work-content`} ref={contentRef} tabIndex={-1} hidden={choosing}>
       {children}
     </div>
   </div>;
