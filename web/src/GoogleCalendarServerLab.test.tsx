@@ -120,7 +120,12 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
   const eventId=round===1?'invented-timed':persona==='nurse_practitioner'?'invented-cancelled':'invented-allday';
   await readForReview(eventId);const exact=recoveryRecord!.observation!,event=exact.observation.items.find(e=>e.id===eventId)!,content=googleCalendarSourceContent(exact.observation,event);
   expect(host.querySelector('[aria-label="Exact selected calendar summary"]')!.textContent).toBe(content);expect(host.querySelector('img,a')).toBeNull();
-  if(event.all_day)expect(host.textContent).toContain('(end date excluded)');if(event.cancelled)expect(content).toContain('Status: cancelled');step('selected_calendar_summary_reviewed');
+  if(event.all_day){
+   const day=new Date(event.starts_at+'T12:00:00').toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
+   expect(host.querySelector('.calendar-work-event-details dd')!.textContent).toBe('All day · '+day);
+   expect(content.split('\n')).toContain('Starts: '+event.starts_at);
+   expect(content.split('\n')).toContain('Ends (exclusive): '+event.ends_at);
+  }if(event.cancelled)expect(content).toContain('Status: cancelled');step('selected_calendar_summary_reviewed');
   await remountSavedCalendar(packet);step('fresh_mount_restores_exact_encrypted_selected_calendar_without_provider_read');await click('Check calendar access');expect(host.querySelector('[aria-label="Exact selected calendar summary"]')!.textContent).toBe(content);
   for(const input of host.querySelectorAll<HTMLInputElement>('.google-calendar-checks input'))await act(async()=>input.click());
   const emailBefore=JSON.stringify(packet.workspace.entries.filter(e=>e.kind==='google_message'));
