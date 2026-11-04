@@ -13,6 +13,12 @@ let container: HTMLDivElement, root: Root;
 beforeEach(() => { Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true}); container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 function visibleButtons() { return [...container.querySelectorAll('button')].filter(button => !button.closest('[hidden]')); }
+it('opens the existing team editor directly and retains its state on return without visiting a connection',async()=>{
+  const mounted=vi.fn(),readCatalog=vi.mocked(readConnectionCatalog),baseline=readCatalog.mock.calls.length;
+  function Editor(){useEffect(()=>{mounted();},[]);return <input aria-label="Retained team setting" defaultValue="Keep this value"/>;}
+  await act(async()=>root.render(<SettingsHub open initialScreen="team" team={<Editor/>} teamSummary="Saved coworkers" teamDirty={false} onClose={()=>{}}/>));
+  const field=container.querySelector<HTMLInputElement>('[aria-label="Retained team setting"]')!;expect(field.closest('[hidden]')).toBeNull();expect(field.value).toBe('Keep this value');await click('All settings');await click('Your team');expect(container.querySelector('[aria-label="Retained team setting"]')).toBe(field);expect(mounted).toHaveBeenCalledOnce();expect(readCatalog).toHaveBeenCalledTimes(baseline);
+});
 async function click(text: string) {
   const button = visibleButtons().find(button => button.textContent?.includes(text));
   expect(button, `Visible button: ${text}`).toBeDefined(); await act(async () => button!.click());

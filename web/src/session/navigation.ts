@@ -47,7 +47,7 @@ export class WorkspaceNavigation {
     const {setPracticeOpen,setSettingsOpen,setPracticePage}=this.session;
     this.session.team.leave(settingsOpen,()=>{this.sequence.current++;this.applying.current=false;this.ready.current=true;this.clearPageError(context);context.minimizeRecording();setSettingsOpen(false);setPracticeOpen(false);setPracticePage('notebook');});
   }
-  async openSettings(context:NavigationContext,entry:'home'|'connections'|'core'='home'){
+  async openSettings(context:NavigationContext,entry:'home'|'connections'|'team'|'core'='home'){
     const {team,teamDraft,settingsOpen,settingsEntry,identity}=this.session.getSnapshot();
     const {generation,setError,setBusy,setTeam,setTeamDraft,setSettingsEntry,setPracticeOpen,setSettingsOpen}=this.session;
     const {authenticated,viewNavigationLocked,recoverAfterRead,failure}=context;

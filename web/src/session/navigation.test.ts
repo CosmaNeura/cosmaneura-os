@@ -14,6 +14,13 @@ function context(session:WorkspaceSession):NavigationContext{return {authenticat
 function open(session:WorkspaceSession){session.setIdentity(authenticated);session.setWorkspace(workspace);session.setTeam(teamFixture());session.setTeamDraft(teamFixture().configuration);session.setPracticePage('notebook');session.setSelected('chief');session.setMobilePanel('Conversation');}
 
 describe('one workspace navigation owner',()=>{
+  it('opens the existing team settings entry without replacing the current Chief draft or selected bot',async()=>{
+    const session=new WorkspaceSession();open(session);session.setThought('Retain this invented Chief question');const host=context(session),draft=session.getSnapshot().teamDraft;
+    await session.navigation.openSettings(host,'team');expect(session.getSnapshot()).toMatchObject({settingsOpen:true,settingsEntry:'team',selected:'chief',thought:'Retain this invented Chief question'});expect(session.getSnapshot().teamDraft).toBe(draft);expect(host.openPrivateNotebook).not.toHaveBeenCalled();
+  });
+  it('keeps the team settings entry closed when its existing navigation lock is active',async()=>{
+    const session=new WorkspaceSession();open(session);const host={...context(session),viewNavigationLocked:true};await session.navigation.openSettings(host,'team');expect(session.getSnapshot()).toMatchObject({settingsOpen:false,settingsEntry:'home',selected:'chief'});expect(host.minimizeRecording).not.toHaveBeenCalled();
+  });
   it('keeps bot, context and working draft when changing the material in the same conversation',async()=>{
     const session=new WorkspaceSession();open(session);session.setThought('Invented unsent question');const host=context(session);
     await session.navigation.applyRoute({page:'notebook',workspaceId:workspace.id,helper:'chief',material:'Review'},host);

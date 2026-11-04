@@ -155,6 +155,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const messagesMode=session.presentation.current()==='messages';
   const [openingVisit,setOpeningVisit]=useState(false);
   const [newMessage,setNewMessage]=useState(false),[conversationDetails,setConversationDetails]=useState<false|'details'|'sources'>(false);
+  const [sourceChoicesReview,setSourceChoicesReview]=useState<{address:string;token:object;generation:number;workspaceId:string}|null>(null);
+  useEffect(()=>{setSourceChoicesReview(null);},[authenticated,identity,workspace?.id,selected]);
+  useEffect(()=>{if(!settingsOpen)setSourceChoicesReview(null);},[settingsOpen]);
   const [athenaTask,setAthenaTask]=useState<{identity:AuthenticatedWorkspaceIdentity;open:boolean;view:string;returnLabel:string;target:HTMLElement|null}|null>(null);
   const athenaOpening=useRef(0);
   const [athenaNotebookNavigation,setAthenaNotebookNavigation]=useState<{command:CoreConnectionCommand;identity:AuthenticatedWorkspaceIdentity;generation:number;view:string;journal:DraftJournal;current:()=>boolean}|null>(null);
@@ -209,11 +212,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false),[googleCalendarVisited,setGoogleCalendarVisited]=useState(false);
   const googleVisitSelection=useRef<'message'|'calendar'|false>(false);
   type PracticeRecordIntent={owner:AuthenticatedWorkspaceIdentity;provider:PracticeRecordProvider;intent:object};
-  const ehrVisitSelection=useRef<boolean|(PracticeRecordIntent&{stage:'loading'|'shown'})>(false);
+  const ehrVisitSelection=useRef<boolean|(PracticeRecordIntent&{stage:'loading'|'shown';originWorkspaceId:string|null;originGeneration:number})>(false);
   const [queuedRecordLaunch,setQueuedRecordLaunch]=useState<(PracticeRecordIntent&{workspaceId:string;generation:number})|null>(null);
   const [requestedEhrProvider,setRequestedEhrProvider]=useState<(PracticeRecordIntent&{workspaceId:string})|null>(null);
   useEffect(()=>{setRequestedEhrProvider(previous=>previous&&previous.owner===authenticated&&previous.workspaceId===workspace?.id?previous:null);},[authenticated,workspace?.id]);
-  useEffect(()=>{const selected=ehrVisitSelection.current;if(typeof selected==='object'&&(selected.owner!==authenticated||selected.stage==='shown'&&practicePage!=='visits'))ehrVisitSelection.current=false;},[authenticated,practicePage]);
+  useEffect(()=>{const selected=ehrVisitSelection.current;if(typeof selected==='object'&&(selected.owner!==authenticated||selected.originWorkspaceId!==(workspace?.id??null)||selected.originGeneration!==generation.current||selected.stage==='shown'&&(practicePage!=='visits'||settingsOpen)))ehrVisitSelection.current=false;},[authenticated,workspace?.id,practicePage,settingsOpen]);
   const ehrOpeningIntent=useRef(0),ehrOpeningCleanup=useRef<(()=>void)|null>(null);
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
@@ -624,7 +627,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   }
   function open(appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false,afterOpen?:()=>void){
     const recordChoice=ehrVisitSelection.current;
-    const selectedRecord=typeof recordChoice==='object'&&recordChoice.owner===authenticated&&recordChoice.stage==='shown'&&practicePage==='visits'?recordChoice:null;
+    const selectedRecord=currentRecordsVisitChoice();
     if(typeof recordChoice==='object')ehrVisitSelection.current=false;
     return session.loading.open({...loadingContext(),locked,captureNavigationLocked,captureDraftLocked,hasUnsavedWork,
       begin:()=>{chiefNotebookFocus.current=null;},resetCapture:(record,useRecording)=>{setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(record?1:0);setRecordingSourceRequest(useRecording?1:0);},
@@ -676,7 +679,21 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     invalidateSetup:()=>{setSetupApproval(null);setSetupEpoch(value=>value+1);},invalidatePrep:()=>setPrepEpoch(value=>value+1)});}
   function refreshHandoffReview(){return session.loading.refreshHandoff({authenticated,failure,blocked:captureNavigationLocked||captureDraftLocked||recoveryBlocked});}
   function recheckRecovery(){return session.loading.recheckRecovery(loadingContext());}
-  function openSettings(entry:'home'|'connections'|'core'='home'){if(!viewNavigationLocked)clearReceivedFaxReturn();return session.navigation.openSettings(navigationContext(),entry);}
+  function openSettings(entry:'home'|'connections'|'team'|'core'='home'){if(!viewNavigationLocked)clearReceivedFaxReturn();return session.navigation.openSettings(navigationContext(),entry);}
+  function reviewChiefSourceChoices(){
+    const view=session.getSnapshot(),context=navigationContext(),chosen=view.team?.configuration.bots.find(item=>botAddress(item)===view.selected);
+    // This is navigation only. The existing permission editor and reviewed save
+    // remain the sole owners of a source-access change.
+    if(locked||context.viewNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked||view.busy||view.pending||view.conflict||view.recoveryOffers.length||
+      view.settingsOpen||!view.teamDraft||!view.workspace||view.note!==latestNotebookText(view.workspace)||chosen?.role!=='chief'||chosen.include_notebook||chosen.include_evidence||
+      previousIdentity.current!==authenticated||currentIdentity.current!==identity)return;
+    if(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession&&!authenticated.nativeSession.isCurrent()||authenticated?.mode==='desktop_native'&&!authenticated.isCurrent())return;
+    const currentGeneration=generation.current;
+    void openSettings('team');
+    const opened=session.getSnapshot();
+    if(generation.current===currentGeneration&&opened.workspace?.id===view.workspace.id&&opened.selected===view.selected&&opened.settingsOpen&&opened.settingsEntry==='team')
+      setSourceChoicesReview({address:view.selected,token:{},generation:currentGeneration,workspaceId:view.workspace.id});
+  }
   async function refreshRoutineTeam(){await session.team.refresh({authenticated,failure});currentTeam.current=session.getSnapshot().team;currentTeamDraft.current=session.getSnapshot().teamDraft;}
   function receiveSetupTeam(value:ProviderTeam,projection:SetupProjection){session.team.receive(value,{authenticated},projection);currentTeam.current=session.getSnapshot().team;currentTeamDraft.current=session.getSnapshot().teamDraft;}
   function saveTeam(){void session.team.save(saveContext());}
@@ -1234,7 +1251,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       (provider==='atlas_md'?!CALENDAR_IMPORT_BUILD:!EHR_READ_BUILD))return;
     const choice=continued??{owner:authenticated,provider,intent:{}};
     if(choice.owner!==authenticated)return;
-    if(!visitLinked){const selection={...choice,stage:'loading' as 'loading'|'shown'};ehrVisitSelection.current=selection;setSettingsOpen(false);try{await loadEncounters();}finally{if(ehrVisitSelection.current===selection&&selection.stage==='loading')ehrVisitSelection.current=false;}return;}
+    if(!visitLinked){const selection={...choice,stage:'loading' as 'loading'|'shown',originWorkspaceId:workspace?.id??null,originGeneration:generation.current};ehrVisitSelection.current=selection;setSettingsOpen(false);try{await loadEncounters();}finally{if(ehrVisitSelection.current===selection&&selection.stage==='loading')ehrVisitSelection.current=false;}return;}
     const directory=continued?workspaceFrame.current?.querySelector<HTMLElement>('.connection-directory'):null;
     const visibleControl=(selector:string)=>{const element=workspaceFrame.current?.querySelector<HTMLElement>(selector);return element&&!element.closest('[hidden]')?element:null;};
     const launcher=continued?directory?.closest('.settings-hub')?.querySelector<HTMLElement>('.settings-hub-heading h1'):visibleControl(`[data-practice-record-provider="${provider}"]`)??visibleControl('.provider-portal .team-primary');
@@ -1243,6 +1260,20 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     if(await openVisitSourceTask('connections',provider==='atlas_md'?'calendar':'ehr',launcher)){
       if(provider!=='atlas_md')setRequestedEhrProvider({...choice,workspaceId:id});
     }
+  }
+  function currentRecordsVisitChoice(){
+    const choice=ehrVisitSelection.current,view=session.getSnapshot();
+    return typeof choice==='object'&&choice.owner===authenticated&&choice.originGeneration===generation.current&&choice.originWorkspaceId===(view.workspace?.id??null)&&choice.stage==='shown'&&view.practicePage==='visits'&&!view.settingsOpen?choice:null;
+  }
+  function returnToRecordConnections(){
+    // Return through the ordinary navigation fence; opening Connections clears
+    // this picker intent, while refused navigation retains drafts and the choice.
+    if(!currentRecordsVisitChoice()||locked||homeBusy||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
+    void openSettings('connections');
+  }
+  function refreshRecordsVisits(){
+    if(!currentRecordsVisitChoice()||locked||homeBusy||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
+    void loadEncounters();
   }
   useEffect(()=>{
     if(!queuedRecordLaunch)return;
@@ -1309,7 +1340,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     hasSavedContext={chiefSavedContext} notesDirty={note!==latestNote} hasQuestion={!!thought.trim()}
     visitSummary={bot?.role==='chief'?ChiefOpenVisit.summary(workspace):''}
     canDelegate={!bot.blocked_capabilities?.includes('private_draft_handoff')} onChoose={prepareChiefQuestion}
-    onOpenNotebook={bot.include_notebook?()=>showConversationTask('Notebook'):undefined}/>;
+    onOpenNotebook={bot.include_notebook?()=>showConversationTask('Notebook'):undefined} onReviewSources={reviewChiefSourceChoices} reviewSourcesLocked={!!recoveryOffers.length}/>;
   const modelRecovery=<>
       {localModelPending&&!busy&&<section className="team-recovery" aria-label="Unconfirmed model request"><p>{inlineModelRecovery?'Chief hasn’t confirmed this message yet. Check its status before retrying.':'The retained request is unconfirmed. Check its saved result; checking never starts another model call.'}</p>
         {localModelPending.type==='ask'&&localModelPending.body.research_analysis&&<details className="research-model-selection"><summary>Retained selected-source request</summary><p>{localModelPending.body.content}</p><p>Only this exact question and saved public-source selection belong to this key.</p><ul>{localModelPending.body.research_analysis.entries.map(anchor=><li key={anchor.entry_id}>Saved packet revision {anchor.entry_revision} · {anchor.entry_id}<small>Lookup {anchor.run_id} · save proof {anchor.save_request_sha256}</small></li>)}</ul></details>}
@@ -1387,6 +1418,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     }
   },[messagesMode,messagesTaskLabel,settingsOpen,practiceOpen]);
 
+  const recordsVisitChoice=currentRecordsVisitChoice();
+  const recordsVisitSystem=recordsVisitChoice?{atlas_md:'Atlas.MD',elation:'Elation',tebra:'Tebra',athena:'athenahealth'}[recordsVisitChoice.provider]:null;
   const showExecutionProof=!!onExit&&import.meta.env.VITE_SHOW_EXECUTION_PROOF==='true';
   const errorBanner=error&&<div className="team-banner error workspace-error-banner" role="alert"><p>{error}</p><div className="workspace-error-actions">
     {readRetry&&<button disabled={busy||homeBusy||!!pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void readRetry.run()}>{readRetry.label??'Try again'}</button>}
@@ -1588,6 +1621,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         teamDirty={!!team && !!teamDraft && teamConfigurationChanged(team.configuration,teamDraft)} onClose={closeSettings}
         team={team && teamDraft ? <TeamConfigurationFlow resetToken={setupEpoch} active={settingsOpen} identity={(authenticated || identity)!}
           team={team} draft={teamDraft} setDraft={setTeamDraft} selected={selected} setSelected={setSelected}
+          savedSourcesReview={settingsOpen&&settingsEntry==='team'&&sourceChoicesReview?.generation===generation.current&&sourceChoicesReview.workspaceId===workspace?.id&&sourceChoicesReview.address===selected?sourceChoicesReview:undefined}
           locked={locked} inputLocked={recoveryBlocked||conflict||pending?.type==='team'||activityBusy} setupAvailable={setupProjection?.team_revision === team.revision}
           activity={activityContext && settingsOpen && !practiceOpen ? {context:activityContext,onOpenEncounter:openActivityEncounter,onBusyChange:reportActivityBusy} : undefined}
           reviewRequired={setupChange(team.configuration, teamDraft) && !(setupApproval?.revision === team.revision && setupApproval.configurationKey === JSON.stringify(teamDraft))}
@@ -1637,20 +1671,20 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         recordings={privateRecordings&&privateRecordings.identity===authenticated&&privateRecordings.generation===generation.current&&privateRecordings.scope===journal.current?.scope?privateRecordings.rows:undefined} onReopenRecording={reopenPrivateRecording}
         onOpened={value=>contextOpened(value)} onNoteOpened={value=>contextOpened(value,'notebook')}/></div>}
       <section hidden={settingsOpen||practicePage!=='visits'} data-conversation-picker={!!contextChoice} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
-        <h1>{researchEntry ? "Choose a visit for Research" : entryIntent==="fax" ? "Choose a visit for fax work" : entryIntent==="chief" ? "Choose a visit for Chief" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : entryIntent==='fax' ? "Keep the fax document, recipient and delivery status with the right visit." : entryIntent==='chief' ? "Start with typed notes and prepare your next step." : encounters ? "Record a visit, or open its notes." : "Start with notes, record a conversation, or pick up an existing visit."}</p>
-        <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
+        <h1>{recordsVisitChoice?`Choose a visit for ${recordsVisitSystem} ${recordsVisitChoice.provider==='atlas_md'?'calendar import':'records'}`:researchEntry ? "Choose a visit for Research" : entryIntent==="fax" ? "Choose a visit for fax work" : entryIntent==="chief" ? "Choose a visit for Chief" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{recordsVisitChoice?recordsVisitChoice.provider==='atlas_md'?'Choose the visit for this Atlas.MD calendar import. Next, select and review a calendar file before importing it.':`Choose the visit for these ${recordsVisitSystem} records. Next, check the connection and choose records to review.`:researchEntry ? "Keep trial results and source evidence with the right encounter." : entryIntent==='fax' ? "Keep the fax document, recipient and delivery status with the right visit." : entryIntent==='chief' ? "Start with typed notes and prepare your next step." : encounters ? "Record a visit, or open its notes." : "Start with notes, record a conversation, or pick up an existing visit."}</p>
+        {recordsVisitChoice?<div className="team-welcome-shortcuts"><button disabled={locked||homeBusy||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={returnToRecordConnections}>Return to connections</button><button disabled={locked||homeBusy||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={refreshRecordsVisits}>Refresh visits</button></div>:<WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
           connectionsDisabled={busy||!!pending||connectionNavigationLocked} encounterDisabled={busy||!!pending}
           encounterLabel={busy?'Loading…':encounters?'Refresh encounters':authenticated?'Choose an encounter':'Open synthetic encounter'}
           onConnections={()=>void openSettings('connections')} onEncounter={()=>{setResearchEntry(false);setEntryIntent(null);void (authenticated?loadEncounters():open());}}
           onRecord={authenticated?()=>{setResearchEntry(false);setEntryIntent("record");void loadEncounters();}:undefined}
           onRecording={authenticated?()=>{setResearchEntry(false);setEntryIntent("recording");void loadEncounters();}:undefined}
           onChief={authenticated?()=>{setResearchEntry(false);setEntryIntent('chief');void loadEncounters();}:undefined}
-          onResearch={authenticated?()=>{setResearchEntry(true);setEntryIntent(null);void loadEncounters();}:undefined}/>
+          onResearch={authenticated?()=>{setResearchEntry(true);setEntryIntent(null);void loadEncounters();}:undefined}/>}
         {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         {workspace&&practicePage==='visits'&&!settingsOpen&&<button className="team-phone-notebook-return" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goNotebook}>Current notebook</button>}
         {openingVisit&&<p className="team-fine" role="status">Opening this visit…</p>}
-        {authenticated&&encounters&&<VisitCatalog identity={authenticated} visits={encounters} visitsOnly={contextChoice?.role==='research'} locked={busy||!!pending} recordingActive={!!privateRecordingEntry}
-          onOpen={appointmentId=>{const target=contextBot;void open(appointmentId).then(()=>{const current=session.getSnapshot().workspace;if(target&&current?.appointment_id===appointmentId){setContextBot(null);return openConversation(current.id,target);}});}} onRecord={!contextChoice&&CAPTURE_WORKSPACE_BUILD&&(!team||team.capture?.enabled)?appointmentId=>void open(appointmentId,undefined,undefined,true):undefined}
+        {authenticated&&encounters&&<VisitCatalog identity={authenticated} visits={encounters} visitsOnly={contextChoice?.role==='research'||!!recordsVisitChoice} locked={busy||!!pending} recordingActive={!!privateRecordingEntry}
+          onOpen={appointmentId=>{const target=contextBot;void open(appointmentId).then(()=>{const current=session.getSnapshot().workspace;if(target&&current?.appointment_id===appointmentId){setContextBot(null);return openConversation(current.id,target);}});}} onRecord={!recordsVisitChoice&&!contextChoice&&CAPTURE_WORKSPACE_BUILD&&(!team||team.capture?.enabled)?appointmentId=>void open(appointmentId,undefined,undefined,true):undefined}
           onPrivateNote={workspaceId=>{void session.loading.openSavedPrivate(workspaceId,{authenticated,failure,opened:openPrivateNotebook});}}
           onConnections={()=>void openSettings(CORE_CONNECTION_BUILD?'core':'connections')}/>}
         <p className="team-fine">Notes and private drafts do not need email or calendar setup.</p>

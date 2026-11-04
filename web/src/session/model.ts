@@ -68,7 +68,7 @@ export type WorkspaceSessionState = {
   stage:string;
   entryIntent:'record'|'recording'|'chief'|'fax'|null;
   researchEntry:boolean;
-  settingsEntry:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'|'ehr';
+  settingsEntry:'home'|'connections'|'team'|'core'|'scheduling'|'microsoft'|'google'|'ehr';
   inboxSelection:InboxDraftSelection|null;
   privateRecordingBusy:boolean;
   privateRecordingEntry:PrivateRecordingEntry|null;
