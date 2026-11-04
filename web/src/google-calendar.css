@@ -4,3 +4,4 @@
 .google-calendar-panel button{min-height:44px;max-width:100%;white-space:normal;overflow-wrap:anywhere}
 .google-calendar-checks label{min-height:44px;align-items:center}
 .google-calendar-list li,.google-calendar-content{min-width:0}
+.google-calendar-focus{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.75rem}.google-calendar-focus button{flex:1 1 8rem}.google-calendar-focus-note{font-size:.875rem;margin-block:.4rem}.google-calendar-all-day{margin-top:1rem;padding-top:.5rem;border-top:1px solid var(--border,#d5dbe5)}.google-calendar-outside-focus{padding:.7rem;background:var(--surface-soft,#f4f6fa);border-radius:8px}
