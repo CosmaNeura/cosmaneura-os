@@ -617,7 +617,8 @@ def test_signed_registered_runtime_and_worker_admission_cutoff_keeps_wall_securi
     from datetime import timedelta
 
     from cosmas_os.adapters import enrollment_admission as adapter_module
-    from cosmas_os.enrollment import admission as admission_module, service as service_module
+    from cosmas_os.enrollment import admission as admission_module
+    from cosmas_os.enrollment import service as service_module
 
     start_trial(lab)
     # The before-cutoff proof lasts one second. Control wall-security time
