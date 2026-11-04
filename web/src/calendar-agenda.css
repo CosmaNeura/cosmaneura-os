@@ -1,0 +1,5 @@
+.calendar-agenda{display:grid;gap:1rem;max-height:520px;overflow:auto;overscroll-behavior:contain}
+.calendar-agenda-day{min-width:0}.calendar-agenda-day h5{margin:.25rem 0 .6rem;font-size:.95rem;line-height:1.4}.calendar-agenda-day>p{font-size:.85rem;line-height:1.5}
+.calendar-work-chooser .google-calendar-list .calendar-agenda ul{max-height:none;overflow:visible;margin:0}.calendar-agenda-day button span{font-size:.85rem;line-height:1.5}
+.calendar-agenda-next{display:grid;gap:.4rem;margin-bottom:.8rem}.calendar-agenda-next button{width:100%}.calendar-agenda-next p{margin:0;font-size:.875rem;line-height:1.5;overflow-wrap:anywhere}.calendar-agenda-next small{line-height:1.5;color:var(--team-muted,#637168)}
+@media(max-width:680px){.calendar-agenda{max-height:300px}}

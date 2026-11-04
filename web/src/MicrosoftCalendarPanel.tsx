@@ -10,6 +10,7 @@ import {ConnectorSignInBackup} from './ConnectorSignInBackup';
 import {CalendarWorkFocus,calendarEventInFocus,calendarFocusLabel,useCalendarWorkFocus} from './CalendarWorkFocus';
 import {CalendarWorkHeader,CalendarWorkEmpty,CalendarWorkSelection,type CalendarWorkStep} from './CalendarWorkPresentation';
 import {SourceWorkReader} from './SourceWorkReader';
+import {CalendarAgenda,calendarAgendaHasDates,calendarAgendaWhen,nextCalendarAgendaEvent} from './CalendarAgenda';
 import './google-calendar.css';
 export type MicrosoftCalendarPanelProps={identity:AuthenticatedWorkspaceIdentity;scope:MicrosoftCalendarRecoveryScope;recovery:MicrosoftCalendarRecoveryAccess|null;workspace:MicrosoftCalendarVisit|null;locked?:boolean;recoveryLocked?:boolean;onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;taskActive?:boolean;isTaskCurrent?:()=>boolean;currentSources?:Array<{entry_id:string;state:'current'|'unavailable'}>;onAuthenticationLost:(cause:unknown)=>void;onRequestCalendarAccess?:()=>void;calendarAccessBusy?:boolean;onChooseVisit?:()=>void;onAskChief?:(source:MicrosoftCalendarSaved)=>void;onRefreshVisit?:()=>Promise<void>};
 const authority=(e:unknown)=>e instanceof WorkspaceApiError&&[401,403,404,426].includes(e.status);
@@ -40,9 +41,10 @@ export function MicrosoftCalendarPanel({identity,scope,recovery,workspace,locked
  useEffect(()=>{const resume=()=>setClock(Date.now());window.addEventListener('focus',resume);document.addEventListener('visibilitychange',resume);return()=>{window.removeEventListener('focus',resume);document.removeEventListener('visibilitychange',resume);};},[]);
  useEffect(()=>{if(deadline===null||deadline<=clock)return;const delay=Math.max(0,deadline-Date.now());const timer=setTimeout(()=>setClock(Date.now()),Math.min(delay,2147483647));return()=>clearTimeout(timer);},[deadline,clock]);
  const show=taskActive&&owned&&!nativeForeground.suspended&&!withheld&&!connectionChanged&&!unavailable&&!record.saved?.source_withheld&&!expired,observation=show?record.observation:null,event=observation?.observation.items.find(e=>e.id===record.selected_event_id),pending=owned?record.pending:null;
- const {focus,setFocus,window:focusWindow}=useCalendarWorkFocus(clock,setClock),focusEvents=observation?.observation.items.filter(e=>!e.all_day&&calendarEventInFocus(e,focusWindow))??[],allDayEvents=observation?.observation.items.filter(e=>e.all_day)??[],selectedOutsideFocus=!!event&&!event.all_day&&!focusEvents.some(e=>e.id===event.id);
+ const {focus,setFocus,window:focusWindow}=useCalendarWorkFocus(clock,setClock),focusEvents=observation?.observation.items.filter(e=>!e.all_day&&calendarEventInFocus(e,focusWindow))??[],allDayEvents=observation?.observation.items.filter(e=>e.all_day)??[],selectedOutsideFocus=!!event&&calendarAgendaHasDates(event,'outlook')&&!focusEvents.some(e=>e.id===event.id);
 
  const allowed=show&&!stale&&status?.state==='connected'&&status.calendar_read,blocked=!taskActive||nativeForeground.suspended||!owned||!ready||busy||dispatching||!!offer||!!pending||locked||calendarAccessBusy;
+ const agendaEvents=observation?.observation.items.filter(e=>focusEvents.some(item=>item.id===e.id)||!calendarAgendaHasDates(e,'outlook'))??[],nextEvent=allowed&&observation?nextCalendarAgendaEvent(observation.observation.items,record.selected_event_id,clock,'outlook'):null;
  const visitConfirmed=!!workspace&&!!record.selected_visit&&same(workspace,record.selected_visit),workStep:CalendarWorkStep=!event||!allowed?'event':record.saved?record.saved.workspace_id===workspace?.id?'chief':'visit':visitConfirmed?'review':'visit';
  const unsaved=owned&&(!!offer||!!pending||busy||dispatching||checks.some(Boolean));
  // Only active persistence/request work blocks navigation. Durable pending work
@@ -92,18 +94,14 @@ export function MicrosoftCalendarPanel({identity,scope,recovery,workspace,locked
   <CalendarWorkFocus focus={focus} onChange={setFocus} disabled={blocked}/>
   <h4>{calendarFocusLabel(focus)} · Timed events</h4>
   {!observation.observation.items.length?<CalendarWorkEmpty title="No events in this loaded summary">Check Outlook Calendar for current details. You can load a current summary using the button above.</CalendarWorkEmpty>:!focusEvents.length&&<CalendarWorkEmpty title={`No loaded timed events for ${calendarFocusLabel(focus)}`}>{focus==='today'?'Choose Next 7 days above to look ahead.':'This view includes only events from the loaded summary. Check Outlook Calendar for current details.'}{allDayEvents.length?' All-day events are listed separately below.':''}{event?' Your selected event is still available for review.':''}</CalendarWorkEmpty>}
-  <ul>{focusEvents.map(e=><li key={e.id}><button data-calendar-event={e.id} disabled={blocked} aria-pressed={e.id===record.selected_event_id} onClick={()=>choose(e.id)}><strong>{e.subject||'(Untitled event)'}</strong><span>{when(e.starts_at)+' – '+when(e.ends_at)}</span>{e.cancelled&&<small>Cancelled — do not treat as a planned appointment</small>}</button></li>)}</ul>
-  {!!allDayEvents.length&&<section className="google-calendar-all-day" aria-label="All-day events from loaded summary">
-   <h4>All-day events · Full loaded summary</h4>
-   <p>Their original calendar dates are unavailable, so these events stay visible in both views. Check their day in Outlook Calendar.</p>
-   <ul>{allDayEvents.map(e=><li key={e.id}><button data-calendar-event={e.id} disabled={blocked} aria-pressed={e.id===record.selected_event_id} onClick={()=>choose(e.id)}><strong>{e.subject||'(Untitled event)'}</strong><span>All day · Check the day in Outlook Calendar</span>{e.cancelled&&<small>Cancelled — do not treat as a planned appointment</small>}</button></li>)}</ul>
-  </section>}
+  <CalendarAgenda events={agendaEvents} provider="outlook" startsOn={focusWindow.starts_on} selectedId={record.selected_event_id} disabled={blocked} onChoose={choose}/>
   {observation.observation.more&&<p>The loaded summary contains up to 25 events. More are available in Outlook Calendar.</p>}
  </div></>}>
  <div className="calendar-work-review-pane">
+ <div className="calendar-agenda-next"><button type="button" disabled={blocked||!allowed||!nextEvent} onClick={()=>{if(blocked||!allowed)return;const now=Date.now(),next=nextCalendarAgendaEvent(observation.observation.items,record.selected_event_id,now,'outlook');setClock(now);if(next?.id!==nextEvent?.id)return;if(next)choose(next.id);}}>Next event</button><p>{nextEvent?`Next: ${nextEvent.subject||'(Untitled event)'}`:'No later event to open from this loaded summary.'}</p><small>Moves forward through the loaded summary, including outside this day view. Cancelled events and unavailable dates are skipped.</small></div>
  {event&&observation&&<article className="google-calendar-content">
   {selectedOutsideFocus&&<p className="google-calendar-outside-focus" role="status">This selected event is outside {calendarFocusLabel(focus)}. It stays selected for review.</p>}
-  <CalendarWorkSelection provider="Outlook Calendar" title={event.subject} when={event.all_day?'All day · Check the day in Outlook Calendar':when(event.starts_at)+' – '+when(event.ends_at)} cancelled={event.cancelled} account={observation.observation.account.email} source={microsoftCalendarSourceContent(observation.observation,event)} sourceKey={event.id+':'+observation.source_sha256}/>
+  <CalendarWorkSelection provider="Outlook Calendar" title={event.subject} when={calendarAgendaWhen(event,'outlook')} cancelled={event.cancelled} account={observation.observation.account.email} source={microsoftCalendarSourceContent(observation.observation,event)} sourceKey={event.id+':'+observation.source_sha256}/>
   {!record.saved&&<>
    <section className="calendar-work-visit"><h5>Choose visit</h5><p>Current visit: <strong>{workspace?.label??'No visit selected'}</strong>. Date of birth is optional.</p>
     {!workspace&&onChooseVisit&&<button disabled={blocked} onClick={onChooseVisit}>Choose a visit</button>}
