@@ -3,7 +3,7 @@ const ORIGIN=/^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-
 const CALLBACK='/connections/microsoft/callback';
 export function microsoftNavigationConfig(tenantId='',clientId='',callbackUri='') {
   if(tenantId===''&&clientId===''&&callbackUri==='')return null;
-  if(typeof tenantId!=='string'||!UUID.test(tenantId)||typeof clientId!=='string'||!UUID.test(clientId)||typeof callbackUri!=='string'||
+  if(typeof tenantId!=='string'||(tenantId!=='organizations'&&!UUID.test(tenantId))||typeof clientId!=='string'||!UUID.test(clientId)||typeof callbackUri!=='string'||
     callbackUri.length>512||!callbackUri.endsWith(CALLBACK)||!ORIGIN.test(callbackUri.slice(0,-CALLBACK.length)))throw new Error('Microsoft navigation unavailable');
   return Object.freeze({tenantId,clientId,callbackUri});
 }

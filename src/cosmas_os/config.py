@@ -147,6 +147,7 @@ class Settings(BaseSettings):
     google_connection_broker_enabled: bool = False
     google_connection_broker_origin: str = ""
     workspace_microsoft_connection_enabled: bool = False
+    # Exact tenant UUID, or explicit "organizations" for work/school accounts.
     microsoft_connection_tenant_id: str = ""
     microsoft_connection_client_id: str = ""
     microsoft_connection_client_secret: SecretStr | None = None
@@ -794,7 +795,8 @@ class Settings(BaseSettings):
             except (ValueError, UnicodeError):
                 pass
         identifier = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
-        if (not re.fullmatch(identifier, self.microsoft_connection_tenant_id)
+        if ((self.microsoft_connection_tenant_id != "organizations"
+                and not re.fullmatch(identifier, self.microsoft_connection_tenant_id))
                 or not re.fullmatch(identifier, self.microsoft_connection_client_id)
                 or not self._is_exact_https_origin(origin) or origin != "https://" + hostname
                 or hostname == "cosmaneura.com" or hostname.endswith(".cosmaneura.com")

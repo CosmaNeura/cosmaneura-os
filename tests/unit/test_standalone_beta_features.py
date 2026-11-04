@@ -50,6 +50,7 @@ def microsoft_values():
 
 
 @pytest.mark.parametrize("features", [model_values(), google_values(), microsoft_values(),
+    microsoft_values() | {"microsoft_connection_tenant_id": "organizations"},
     model_values() | google_values() | microsoft_values()])
 def test_explicit_optional_features_preserve_independent_profile(clerk_standalone, features):
     runtime = clerk_standalone.runtime.model_copy(update=features)
@@ -102,7 +103,10 @@ def test_offline_profile_remains_closed(clerk_standalone):
 
 
 @pytest.mark.parametrize("change", [
-    {"microsoft_connection_tenant_id": "common"}, {"microsoft_connection_client_id": "invented-not-a-uuid"},
+    *[{"microsoft_connection_tenant_id": value} for value in (
+        "common", "consumers", "Organizations", " organizations", "organizations/",
+        "https://login.microsoftonline.com/organizations", "organizations?tenant=other")],
+    {"microsoft_connection_client_id": "invented-not-a-uuid"},
     {"microsoft_connection_client_secret": None}, {"microsoft_connection_encryption_key": SecretStr("short")},
     {"microsoft_connection_callback_uri": "https://api.cosmaneura.com/connections/microsoft/callback"},
     {"microsoft_connection_callback_uri": "https://api.invented-cosmabot.test/other"},

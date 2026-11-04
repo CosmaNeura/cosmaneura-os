@@ -141,7 +141,8 @@ def add_connections(inputs, bindings, identity, connections):
     microsoft = connections["microsoft"]
     if microsoft is not None:
         exact(microsoft, {"tenant_id", "client_id", "client_secret", "encryption_key"})
-        tenant, client = uuid(microsoft["tenant_id"]), uuid(microsoft["client_id"])
+        tenant = "organizations" if microsoft["tenant_id"] == "organizations" else uuid(microsoft["tenant_id"])
+        client = uuid(microsoft["client_id"])
         callback = identity["apiOrigin"] + "/connections/microsoft/callback"
         features["WORKSPACE_MICROSOFT_CONNECTION_ENABLED"] = True
         public.update(
@@ -160,8 +161,11 @@ def add_connections(inputs, bindings, identity, connections):
             "callback_uri": callback,
             "scopes": MICROSOFT_SCOPES.split(),
             "access": "inbox_and_calendar_read",
-            "account_type": "configured_work_or_school_tenant",
+            "account_type": ("any_work_or_school_tenant" if tenant == "organizations"
+                             else "configured_work_or_school_tenant"),
         }
+        if tenant == "organizations":
+            registration["accounts"]["microsoft"]["required_sign_in_audience"] = "AzureADMultipleOrgs"
 
     managed = connections["managed_services"]
     if managed is not None:

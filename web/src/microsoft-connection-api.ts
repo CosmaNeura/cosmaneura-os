@@ -23,7 +23,7 @@ export function validMicrosoftAuthorizationUrl(value:unknown):value is string {
   try{
     const url=new URL(value),q=url.searchParams,tenant=url.pathname.split('/')[1];
     const keys=['client_id','code_challenge','code_challenge_method','prompt','redirect_uri','response_mode','response_type','scope','state'];
-    if(url.origin!=='https://login.microsoftonline.com'||url.username||url.password||url.hash||!uuid.test(tenant)||
+    if(url.origin!=='https://login.microsoftonline.com'||url.username||url.password||url.hash||(tenant!=='organizations'&&!uuid.test(tenant))||
       url.pathname!==`/${tenant}/oauth2/v2.0/authorize`||[...q.keys()].sort().join(',')!==keys.join(',')||keys.some(k=>q.getAll(k).length!==1)||
       !uuid.test(q.get('client_id')||'')||q.get('response_type')!=='code'||q.get('response_mode')!=='query'||q.get('prompt')!=='select_account'||
       q.get('scope')!=='offline_access User.Read Mail.Read Calendars.Read'||q.get('code_challenge_method')!=='S256'||
