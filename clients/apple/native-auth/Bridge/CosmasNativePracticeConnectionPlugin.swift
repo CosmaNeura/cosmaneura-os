@@ -25,6 +25,12 @@ import Foundation
     func openEnrollmentDestination(expectedRevision: String, destination: NativePracticeEnrollmentDestination) async throws
 }
 
+/// Optional owned feature; absence never changes the old closed v1 contract.
+@MainActor public protocol NativeSelectedPracticeConnectionHost: NativePracticeConnectionHost {
+    var selectedPracticeAvailable: Bool { get }
+    func activateSelectedPractice(_ request: NativeSelectedPracticeRequest) async throws -> NativePracticeActiveWorkspaceSnapshot
+}
+
 @objc(CosmasNativePracticeConnectionPlugin)
 @MainActor public final class CosmasNativePracticeConnectionPlugin: CAPPlugin, @preconcurrency CAPBridgedPlugin, @unchecked Sendable {
     public let identifier = "CosmasNativePracticeConnectionPlugin"
@@ -32,6 +38,7 @@ import Foundation
     public let pluginMethods: [CAPPluginMethod] = [
         "capabilities", "accountStatus", "beginAccountSignIn", "accountToken", "activatePracticeOrganization",
         "activateRegisteredPractice", "returnToBeta", "signOut", "enrollmentRequest", "openEnrollmentDestination",
+        "selectedPracticeCapabilities", "activateSelectedPractice",
     ].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
     private static var processHost: (any NativePracticeConnectionHost)?
     @nonobjc public static var installedHost: (any NativePracticeConnectionHost)? { processHost }
@@ -105,6 +112,25 @@ import Foundation
     }
     @objc nonisolated public func activateRegisteredPractice(_ call: CAPPluginCall) {
         Task { @MainActor in do { let revision = try Self.revision(call); call.resolve(try await self.host().activateRegisteredPractice(expectedRevision: revision).payload) } catch { Self.reject(call) } }
+    }
+    @objc nonisolated public func selectedPracticeCapabilities(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            do { try Self.empty(call)
+                let host = Self.processHost as? any NativeSelectedPracticeConnectionHost
+                call.resolve(["contract_version": "cosmabot.native-selected-practice.v1",
+                    "available": host?.available == true && host?.enrollmentAvailable == true && host?.selectedPracticeAvailable == true])
+            } catch { Self.reject(call) }
+        }
+    }
+    @objc nonisolated public func activateSelectedPractice(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            do { guard let options = call.options as? [String: Any],
+                       let host = try self.host(enrollment: true) as? any NativeSelectedPracticeConnectionHost,
+                       host.selectedPracticeAvailable else { throw NativePracticeProfileError.unavailable }
+                let request = try NativeSelectedPracticeRequest(options: options)
+                call.resolve(try await host.activateSelectedPractice(request).payload)
+            } catch { Self.reject(call) }
+        }
     }
     @objc nonisolated public func returnToBeta(_ call: CAPPluginCall) {
         Task { @MainActor in do { let revision = try Self.revision(call); try await self.host().returnToBeta(expectedRevision: revision); call.resolve() } catch { Self.reject(call) } }

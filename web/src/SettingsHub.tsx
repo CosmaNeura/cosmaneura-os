@@ -256,7 +256,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       </button>}
     </div>}
     {screen==='home'&&accountControls&&<section className="settings-account" aria-label="Account"><h2>Account</h2>{accountControls}</section>}
-    {screen==='provider'&&<ProviderConnectionPortal locked={leaveLocked} records={practiceRecordActions}/>}
+    {screen==='provider'&&<ProviderConnectionPortal locked={leaveLocked} records={practiceRecordActions} compact={nativePresentation==='messages'}/>}
     {screen === 'connections' && <div className="connection-directory" data-catalog-open={addingConnection}>
       {addingConnection&&<section className="connection-add-catalog" aria-label="Add connection catalog">
         <label className="connection-search"><span>Find a service</span><input type="search" value={connectionSearch} maxLength={100} autoComplete="off" spellCheck={false} disabled={leaveLocked} placeholder="Elation, Gmail, fax, Rx…" onChange={event=>setConnectionSearch(event.target.value)}/></label>

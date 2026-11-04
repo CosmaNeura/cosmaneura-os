@@ -35,7 +35,7 @@ import UIKit
 /// Executable native account-service host. Constructor is SDK/network inert for
 /// marker-free beta users. Only explicit setup intent enters the account realm;
 /// marked restarts restore the previously selected realm and revalidate it.
-@MainActor public final class NativePracticeConnectionController: NativePracticeConnectionHost {
+@MainActor public final class NativePracticeConnectionController: NativeSelectedPracticeConnectionHost {
     private let configuration: NativePracticeBundleConfiguration?
     private var scene: NativePracticeSceneTransition
     private let browser: any NativePracticeBrowser
@@ -59,6 +59,7 @@ import UIKit
     private var destinations: [NativePracticeEnrollmentDestination: (account: NativeAccountIdentity, practice: UUID, url: URL)] = [:]
     public var available: Bool { configuration != nil }
     public var enrollmentAvailable: Bool { configuration != nil && wire != nil }
+    public var selectedPracticeAvailable: Bool { enrollmentAvailable }
     public var isRegisteredPracticeActive: Bool { marker != nil || registered != nil }
 
     public init(configuration: NativePracticeBundleConfiguration?, scene: NativePracticeSceneTransition,
@@ -94,8 +95,8 @@ import UIKit
         return try .init(phase: phase, revision: revision, identity: identity)
     }
     private func currentAccount() -> NativeAccountIdentity? {
-        if let registered, let profile = registered.profile {
-            let state = registered.auth.state()
+        if let runtime = registered ?? pendingCandidate, let profile = runtime.profile {
+            let state = runtime.auth.state()
             guard state.phase == .ready, let identity = state.identity,
                   identity.organizationID == profile.organizationID else { return nil }
             return try? .init(issuer: profile.configuration.frontendOrigin, userID: identity.userID, sessionID: identity.sessionID)
@@ -103,7 +104,9 @@ import UIKit
         return driver?.identity
     }
     public func accountStatus() async throws -> NativePracticeAccountView {
-        if phase == .accountReady, currentAccount() != account { account = nil; changed(.unavailable) }
+        // Source retirement temporarily removes workspace identity. The owned
+        // transition's fresh identity/revision checks decide drift before commit.
+        if !transition, phase == .accountReady, currentAccount() != account { account = nil; changed(.unavailable) }
         return try view()
     }
     private func expect(_ expected: String, ready: Bool = true) throws -> NativeAccountIdentity? {
@@ -161,10 +164,10 @@ import UIKit
         self.pendingCandidate = nil
     }
     private func freshToken(for expected: NativeAccountIdentity) async throws -> String {
-        if let registered {
-            let state = registered.auth.state()
+        if let runtime = registered ?? pendingCandidate {
+            let state = runtime.auth.state()
             guard currentAccount() == expected, state.phase == .ready else { throw NativePracticeProfileError.sessionChanged }
-            return try await registered.auth.token(expectedRevision: state.revision)
+            return try await runtime.auth.token(expectedRevision: state.revision)
         }
         guard let driver else { throw NativePracticeProfileError.unavailable }
         return try await driver.token(expected: expected)
@@ -216,9 +219,11 @@ import UIKit
         guard revision == expectedRevision, currentAccount() == captured else { throw NativePracticeProfileError.sessionChanged }
         return try .init(token: token, revision: expectedRevision)
     }
-    private func qualifiedProfile(captured: NativeAccountIdentity, known: NativePracticeSelectionMarker? = nil) async throws -> NativePracticeProfile {
+    private func qualifiedProfile(captured: NativeAccountIdentity, known: NativePracticeSelectionMarker? = nil,
+                                  selected: NativeSelectedPracticeRequest? = nil) async throws -> NativePracticeProfile {
         guard let configuration else { throw NativePracticeProfileError.unavailable }
         let (receipt, status) = try await registry(for: captured)
+        if let selected { try selected.validate(receipt, account: captured, revision: revision) }
         guard status["stage"] as? String == "ready", let workspace = status["workspace"] as? [String: Any],
               let address = workspace["url"] as? String, let parsed = URLComponents(string: address), parsed.scheme == "https",
               let host = parsed.host, parsed.user == nil, parsed.password == nil, parsed.port == nil, parsed.query == nil, parsed.fragment == nil else {
@@ -272,6 +277,59 @@ import UIKit
             return snapshot
         } catch { registered?.retire(); changed(.unavailable); throw error }
     }
+    public func activateSelectedPractice(_ request: NativeSelectedPracticeRequest) async throws -> NativePracticeActiveWorkspaceSnapshot {
+        guard let captured = try expect(request.expectedRevision), let configuration, let driver else { throw NativePracticeProfileError.unavailable }
+        transition = true; defer { transition = false }
+        var candidate: NativePracticeRuntime?
+        do {
+            let (initial, status) = try await registry(for: captured)
+            try request.validate(initial, account: captured, revision: revision)
+            guard status["stage"] as? String == "ready", let workspace = status["workspace"] as? [String: Any],
+                  workspace["status"] as? String == "ready" else { throw NativePracticeProfileError.unavailable }
+            if let previous = registered {
+                // Drain the original renderer/recording/source/API ownership
+                // before resuming the same Clerk account facade or changing Org.
+                try await scene.prepareAccountRealm()
+                try await CosmasWorkspaceAuthPlugin.retireProcessForPracticeTransition()
+                previous.retire(); try await previous.resources.close()
+                let resumed = try driver.resumeAfterWorkspaceClose(previous, expected: captured)
+                self.driver = resumed; registered = nil
+                try CosmasWorkspaceAuthPlugin.holdProcessForAccountSetup()
+            }
+            try await retireCandidateRuntime()
+            guard revision == request.expectedRevision, currentAccount() == captured, let activeDriver = self.driver else { throw NativePracticeProfileError.sessionChanged }
+            let (receipt, _) = try await registry(for: captured)
+            try request.validate(receipt, account: captured, revision: revision)
+            let service = RegistryService(binding: configuration.binding, receipt: receipt)
+            let resolver = try NativePracticeProfileResolver(binding: configuration.binding, service: service,
+                currentAccount: { [weak self] in self?.currentAccount() })
+            let organization = try await resolver.registeredOrganization()
+            try await activeDriver.activateOrganization(organization)
+            let profile = try await qualifiedProfile(captured: captured, selected: request)
+            let runtime = try await makeAndAdmit(profile); candidate = runtime
+            let admittedState = runtime.auth.state()
+            // The pending candidate's own scoped token performs the final fresh
+            // registry/profile check; the account facade retires at adoption.
+            let fresh = try await qualifiedProfile(captured: captured, selected: request)
+            let (finalReceipt, _) = try await registry(for: captured)
+            let snapshot = try request.commit(runtime: runtime, fresh: fresh, receipt: finalReceipt, account: captured,
+                revision: revision, currentAccount: currentAccount(), admittedState: admittedState) {
+                let snapshot = try NativePracticeActiveWorkspaceSnapshot(runtime: runtime)
+                try snapshot.validateCurrentBinding()
+                let selectedMarker = NativePracticeSelectionMarker(profile: profile)
+                try store.write(selectedMarker)
+                try CosmasWorkspaceAuthPlugin.installRegisteredPracticeRuntime(runtime)
+                marker = selectedMarker; registered = runtime; pendingCandidate = nil; account = captured; changed(.accountReady)
+                return snapshot
+            }
+            try await scene.replaceRenderer(snapshot)
+            return snapshot
+        } catch {
+            candidate?.retire(); registered?.retire()
+            if let candidate { pendingCandidate = candidate }
+            changed(.unavailable); throw error
+        }
+    }
     public func currentSnapshot() async throws -> NativePracticeActiveWorkspaceSnapshot? {
         guard let marker else { return nil }
         guard let configuration else { throw NativePracticeProfileError.unavailable }
@@ -280,6 +338,10 @@ import UIKit
         try marker.validate(binding: configuration.binding)
         if registered == nil {
             // Only marked startup chooses this realm before default plugin load.
+            // A failed selected candidate remains owned until its real SDK/API
+            // work drains; recovery cannot configure over that retained work.
+            try await retireCandidateRuntime()
+            try await retireAccountDriver()
             enteredRealm = true
             try CosmasWorkspaceAuthPlugin.holdProcessForAccountSetup()
             let block = try KeychainAccessBlock(bundleIdentifier: configuration.binding.realm.bundleIdentifier,

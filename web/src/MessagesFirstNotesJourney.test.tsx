@@ -36,5 +36,12 @@ it('takes a new Chief conversation from first notes to an editable task while re
  await type(notebook,'Invented follow-up note: clarify sleep diary timing and missing medication history.');await click('Save notebook revision');await wait(()=>expect(append).toHaveBeenCalledOnce());
  expect(append.mock.calls[0][1]).toBe(await workspaceId);expect(append.mock.calls[0][2]).toMatchObject({kind:'scratchpad',content:'Invented follow-up note: clarify sleep diary timing and missing medication history.'});
  await click('‹ Back to Chief of Staff');await wait(()=>expect(question().disabled).toBe(false));expect(question()).toBe(composer);expect(composer.value).toBe('Keep these invented Chief directions unsent.');expect(button('Add notes')).toBeUndefined();expect(ask).not.toHaveBeenCalled();
+ await click('Details');await click('Prepare a Chief task');await wait(()=>expect(host.querySelector('.messages-thread-header h1')?.textContent).toBe('Tools'));
+ const tasks=()=>host.querySelector<HTMLDetailsElement>('.chief-starters-disclosure')!;await act(async()=>tasks().querySelector('summary')!.click());expect(tasks().open).toBe(true);
+ for(const starter of CHIEF_STARTERS){expect(button(starter.label)?.disabled).toBe(true);await act(async()=>button(starter.label)!.click());}
+ expect(composer.value).toBe('Keep these invented Chief directions unsent.');expect(ask).not.toHaveBeenCalled();
+ await click('‹ Back to Chief of Staff');await type(composer,'');await click('Details');await click('Prepare a Chief task');
+ if(!tasks().open)await act(async()=>tasks().querySelector('summary')!.click());await click('Plan follow-up and research');
+ await wait(()=>expect(question().disabled).toBe(false));expect(question()).toBe(composer);expect(composer.value).toBe(CHIEF_STARTERS[3].prompt);expect(composer.closest('[hidden]')).toBeNull();expect(ask).not.toHaveBeenCalled();expect(append).toHaveBeenCalledOnce();
  await type(composer,'');await click('Organize saved notes');expect(composer.value).toBe(CHIEF_STARTERS[0].prompt);expect(ask).not.toHaveBeenCalled();expect(append).toHaveBeenCalledOnce();expect(create).toHaveBeenCalledOnce();
 });

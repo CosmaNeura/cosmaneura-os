@@ -12,6 +12,7 @@ import { EncounterWorkspace } from "./EncounterWorkspace";
 import { parseNativeAuthState, parseNativeToken, sameNativeState, type NativeAuthState } from "./native-auth";
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
 import {nativeSceneSignal,notifyNativeWorkspaceForeground} from './native-workspace-foreground';
+import {hasUnsavedWork} from './unsaved-work';
 
 type Session = {
   plugin: WorkspaceAuthPlugin; active: boolean; epoch: number; pending: boolean;
@@ -176,7 +177,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   }
 
   function connectPractice(){
-    const owner=session.current;if(!owner?.active||owner.pending||!practiceCanConnect)return;
+    const owner=session.current;if(!owner?.active||owner.pending||!practiceCanConnect||hasUnsavedWork())return;
     // Explicitly fence the old renderer before any account/issuer transition.
     owner.pending=true;owner.epoch++;owner.identityEpoch++;owner.current=null;setState(null);setConnectingPractice(true);
   }
@@ -184,7 +185,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     const owner=session.current;setConnectingPractice(false);
     if(owner?.active){owner.pending=false;void owner.refresh();}
   }
-  if(connectingPractice)return <NativeEnrollmentEntry plugin={practicePlugin} available={practiceConnectionAvailable} onReturn={returnFromPractice}/>;
+  if(connectingPractice)return <NativeEnrollmentEntry plugin={practicePlugin} available={practiceConnectionAvailable} readyPractices onReturn={returnFromPractice}/>;
 
   if (!available || state?.phase === "disabled") return <StatusScreen title="Sign-in isn't available in this build"
     detail="Use the approved test build to sign in to your workspace." />;

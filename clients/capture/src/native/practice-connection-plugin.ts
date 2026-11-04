@@ -26,6 +26,8 @@ export interface NativePracticeConnectionPlugin {
   }): Promise<unknown>;
   activatePracticeOrganization(options: { expectedRevision: string }): Promise<unknown>;
   activateRegisteredPractice(options: { expectedRevision: string }): Promise<unknown>;
+  selectedPracticeCapabilities?(): Promise<unknown>;
+  activateSelectedPractice?(options: { expectedRevision: string; expectedPracticeId: string; expectedRegistryRevision: number }): Promise<unknown>;
   returnToBeta(options: { expectedRevision: string }): Promise<unknown>;
   signOut(options: { expectedRevision: string }): Promise<unknown>;
   addListener(event: "accountStateChanged", listener: (state: unknown) => void): Promise<PluginListenerHandle>;

@@ -17,3 +17,13 @@
 @media (max-width:420px) {
   .provider-portal-systems { grid-template-columns:minmax(0,1fr); }
 }
+.provider-portal-compact { gap:12px; margin-top:0; min-width:0; }
+.provider-portal-compact .provider-portal-systems { grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:1fr; }
+.provider-portal-compact .provider-portal-systems button { min-height:48px; padding:10px 12px; overflow-wrap:anywhere; }
+.provider-portal-compact .provider-portal-detail { padding:0; border:0; min-width:0; }
+.provider-portal-compact .provider-portal-detail h2 { font-size:1.1em; }
+.provider-portal-compact .team-primary { width:100%; justify-self:stretch; }
+.provider-portal-info { min-width:0; border-top:1px solid var(--team-line,#d9ddd9); }
+.provider-portal-info > summary { display:list-item; padding:12px 0; min-height:44px; box-sizing:border-box; cursor:pointer; font-weight:600; }
+.provider-portal-info[open] > :not(summary) { margin-top:12px; }
+.provider-portal-info > summary:focus-visible { outline:2px solid var(--team-accent,#396750); outline-offset:2px; }

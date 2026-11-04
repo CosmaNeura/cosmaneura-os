@@ -1,7 +1,7 @@
 import {act, StrictMode} from "react";
 import {createRoot, type Root} from "react-dom/client";
 import {afterEach, beforeEach, expect, it} from "vitest";
-import {hasUnsavedWork, useUnsavedWork} from "./unsaved-work";
+import {hasUnsavedWork, useUnsavedWork, useUnsavedWorkPresent} from "./unsaved-work";
 
 let root:Root, container:HTMLDivElement;
 beforeEach(()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});container=document.createElement("div");document.body.append(container);root=createRoot(container);});
@@ -32,4 +32,10 @@ it("releases only a confirmed editor marker immediately and protects its next di
  expect(hasUnsavedWork()).toBe(false);
  await act(async()=>root.render(<><PreparedEditor dirty register={register}/><Editor dirty={false}/></>));
  expect(hasUnsavedWork()).toBe(true);release();expect(hasUnsavedWork()).toBe(false);expect(blocked()).toBe(false);
+});
+it('updates account navigation immediately when the last confirmed work marker is released',async()=>{
+ let release!:()=>void;function Account(){return <button disabled={useUnsavedWorkPresent()}>Connect practice</button>;}
+ await act(async()=>root.render(<><PreparedEditor dirty register={value=>{release=value;}}/><Account/></>));
+ expect(container.querySelector('button')?.disabled).toBe(true);
+ await act(async()=>release());expect(container.querySelector('button')?.disabled).toBe(false);
 });

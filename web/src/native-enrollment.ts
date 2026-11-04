@@ -46,6 +46,10 @@ export function nativeEnrollmentCapabilities(value:unknown):boolean {
     value.contract_version!=='cosmabot.native-practice-connection.v1'||typeof value.available!=='boolean'||typeof value.enrollment_available!=='boolean')return false;
   return value.available&&value.enrollment_available;
 }
+/** Separate optional contract: older hosts keep the existing closed v1 shape. */
+export function nativeSelectedPracticeCapabilities(value:unknown):boolean {
+  return closed(value,['contract_version','available'])&&value.contract_version==='cosmabot.native-selected-practice.v1'&&value.available===true;
+}
 /** Resume an already explicit native account transition on a replacement scene.
  * This selects a presentation only; account/clinical authority still comes from
  * the host and server. No browser flag, query parameter or installer is read.
