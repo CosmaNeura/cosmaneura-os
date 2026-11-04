@@ -15,6 +15,13 @@
 .email-work-reader{display:grid;grid-template-columns:minmax(210px,280px) minmax(0,1fr);gap:1.25rem;align-items:start;min-width:0}
 .email-work-inbox,.email-work-message{display:grid;gap:.8rem;min-width:0}
 .email-work-inbox>button{width:100%}
+.email-inbox-filter{display:grid;gap:.45rem;margin-top:.75rem;min-width:0}
+.email-inbox-filter>label{font-size:.8rem;font-weight:600}
+.email-inbox-filter>input{width:100%;min-width:0;box-sizing:border-box;min-height:44px;font-size:1rem;padding:.6rem .7rem;border:1px solid var(--team-line,#d9ddd9);border-radius:.5rem;background:var(--team-surface,#fff);color:inherit}
+.email-inbox-filter-options{display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
+.email-inbox-filter-options>label{display:flex;align-items:center;gap:.45rem;min-height:44px;font-size:.85rem}
+.email-work .email-inbox-filter-options>button{width:auto;padding:.4rem .6rem;border:1px solid var(--team-line,#d9ddd9);border-radius:.4rem;min-height:44px}
+.email-inbox-filter>p{font-size:.78rem;line-height:1.5;color:var(--team-muted,#637168)}
 .email-work .google-message-list>p,.email-work .outlook-message-list>p{font-size:.78rem;line-height:1.5;color:var(--team-muted,#637168);overflow-wrap:anywhere}
 .email-work .google-message-list ul,.email-work .outlook-message-list ul{gap:0;margin:.65rem 0 0;max-height:520px;overflow:auto;overscroll-behavior:contain}
 .email-work .google-message-list button,.email-work .outlook-message-list button{padding:.8rem .65rem;border:0;border-bottom:1px solid var(--team-line,#d9ddd9);border-inline-start:3px solid transparent;border-radius:0;background:none;gap:.3rem}

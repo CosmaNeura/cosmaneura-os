@@ -10,6 +10,7 @@ import {emptyOutlookMessageRecovery,validateOutlookMessageRecovery,type OutlookM
   type OutlookMessageRecoveryScope,type OutlookMessageRecoveryRecord,type OutlookMessageVisit,type OutlookMessageSaved} from './outlook-message-recovery';
 import './outlook-message.css';
 import {EmailWorkHeader,type EmailWorkStep} from './EmailWorkHeader';
+import {EmailInboxFilter,filterLoadedEmail} from './EmailInboxFilter';
 
 export type OutlookMessagePanelProps={identity:AuthenticatedWorkspaceIdentity;scope:OutlookMessageRecoveryScope;recovery:OutlookMessageRecoveryAccess|null;
   workspace:OutlookMessageVisit|null;locked?:boolean;recoveryLocked?:boolean;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;
@@ -30,10 +31,12 @@ export function OutlookMessagePanel({identity,scope,recovery,workspace,locked=fa
     [reviewed,setReviewed]=useState(false),[resolved,setResolved]=useState<OutlookMessageResolve|null>(null),[sourceStale,setSourceStale]=useState(false),[loadEpoch,setLoadEpoch]=useState(0),
     [sourceWithheld,setSourceWithheld]=useState(false),[connectionStamp,setConnectionStamp]=useState<ConnectionReadScope|null>(null);
   const health=useConnectionHealth(identity,'microsoft'),healthScope=connectionReadScope(identity,'microsoft');
+  const [inboxQuery,setInboxQuery]=useState(''),[unreadOnly,setUnreadOnly]=useState(false);
   const latest=useRef(record);latest.current=record;
   const current=useRef({identity,recovery,scopeKey:modelCanonical(scope),alive:true,generation:0});
   const shownOwner=useRef({identity,recovery,scopeKey:modelCanonical(scope)});
   const scopeKey=modelCanonical(scope);
+  useEffect(()=>{setInboxQuery('');setUnreadOnly(false);},[identity,scopeKey,record.list?.read_id]);
   if(current.current.identity!==identity||current.current.recovery!==recovery||current.current.scopeKey!==scopeKey)
     current.current={identity,recovery,scopeKey,alive:true,generation:current.current.generation+1};
   const active=useRef(false),controller=useRef<AbortController|null>(null),callbacks=useRef({onBusyChange,onActiveChange,onAuthenticationLost,onRefreshVisit});callbacks.current={onBusyChange,onActiveChange,onAuthenticationLost,onRefreshVisit};
@@ -150,6 +153,10 @@ export function OutlookMessagePanel({identity,scope,recovery,workspace,locked=fa
   const choose=(id:string)=>{if(blocked)return;void run(async(gen)=>{await persist({...latest.current,selected_message_id:id,message:null,selected_visit:null,saved:null},gen);setReviewed(false);});};
   const selectVisit=()=>{if(blocked||!sourceAllowed||!workspace||!message||message.status!=='complete')return;void run(async(gen)=>{await persist({...latest.current,selected_visit:structuredClone(workspace)},gen);setReviewed(false);});};
   const visitConfirmed=!!workspace&&!!record.selected_visit&&same(workspace,record.selected_visit);
+  const inboxItems=showSource?record.list?.observation?.items??[]:[];
+  const filteredItems=filterLoadedEmail(inboxItems,inboxQuery,unreadOnly);
+  const selectedOutside=inboxItems.find(item=>item.id===record.selected_message_id&&!filteredItems.some(match=>match.id===item.id));
+  const visibleItems=selectedOutside?[selectedOutside,...filteredItems]:filteredItems;
   const workStep:EmailWorkStep=!message||message.status!=='complete'||!sourceAllowed?'read':record.saved?
     workspace?.id===record.saved.workspace_id?'draft':'visit':visitConfirmed?'review':'visit';
   return <section className="outlook-message-panel email-work" aria-label="Work with Outlook">
@@ -183,9 +190,12 @@ export function OutlookMessagePanel({identity,scope,recovery,workspace,locked=fa
       <aside className="email-work-inbox" aria-label="Outlook inbox selection">
       <button className={!record.list?"team-primary":undefined} disabled={blocked||status?.state!=='connected'} onClick={list}>{record.list?'Refresh email list':'Select email'}</button>
       {showSource&&record.list&&<div className="outlook-message-list"><p>Headers from {record.list.observation!.account.email} · Loaded {when(record.list.observation!.observed_at)}</p>
+        <EmailInboxFilter query={inboxQuery} onQueryChange={setInboxQuery} unreadOnly={unreadOnly} onUnreadChange={setUnreadOnly}
+          shown={filteredItems.length} total={inboxItems.length} selectedOutside={!!selectedOutside} disabled={blocked}/>
         {record.list.observation!.items.length===0&&<p>No messages were returned in this bounded inbox check.</p>}
-        <ul>{record.list.observation!.items.map(item=><li key={item.id}><button disabled={blocked} aria-pressed={record.selected_message_id===item.id} onClick={()=>choose(item.id)}>
-          <strong>{item.subject||'(No subject)'}</strong><span>{item.sender||'Sender unavailable'} · {when(item.received_at)}</span>{!item.is_read&&<small>Unread in Outlook</small>}</button></li>)}</ul>
+        <ul>{visibleItems.map(item=><li key={item.id}><button disabled={blocked} aria-pressed={record.selected_message_id===item.id} onClick={()=>choose(item.id)}>
+          <strong>{item.subject||'(No subject)'}</strong><span>{item.sender||'Sender unavailable'} · {when(item.received_at)}</span>{!item.is_read&&<small>Unread in Outlook</small>}
+          {selectedOutside?.id===item.id&&<small>Selected email · outside filters</small>}</button></li>)}</ul>
         {record.list.observation!.more&&<p>This is a bounded list. More messages are available in Outlook.</p>}</div>}
       </aside>
       <div className="email-work-message">
