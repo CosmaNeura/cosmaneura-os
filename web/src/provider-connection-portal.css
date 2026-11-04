@@ -18,7 +18,7 @@
   .provider-portal-systems { grid-template-columns:minmax(0,1fr); }
 }
 .provider-portal-compact { gap:12px; margin-top:0; min-width:0; }
-.provider-portal-compact .provider-portal-systems { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.provider-portal-compact .provider-portal-systems { grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-rows:1fr; }
 .provider-portal-compact .provider-portal-systems button { min-height:48px; padding:10px 12px; overflow-wrap:anywhere; }
 .provider-portal-compact .provider-portal-detail { padding:0; border:0; min-width:0; }
 .provider-portal-compact .provider-portal-detail h2 { font-size:1.1em; }
