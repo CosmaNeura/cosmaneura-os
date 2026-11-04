@@ -153,7 +153,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
   const pickerServices=connectionCards.filter(item=>connectionCategory!=='records'
     &&(connectionCategory==='all'||(connectionCategory==='email')===(item.group==='Email & calendar'))
     &&matchesSearch(titles[item.id],item.description,item.group,...(connectionSearchAliases[item.id]??[])));
-  const showProviderPortal=(connectionCategory==='all'||connectionCategory==='records')&&matchesSearch('EHR & Rx Relay','prescription','Elation','Tebra','Athena','Atlas');
+  const showProviderPortal=(connectionCategory==='all'||connectionCategory==='records'&&!practiceRecordActions)&&matchesSearch('EHR & Rx Relay','prescription','Elation','Tebra','Athena','Atlas');
   const pickerCount=pickerRecords.length+pickerServices.length+(showProviderPortal?1:0);
   const selectedGuide=screen in CONNECTION_GUIDES?CONNECTION_GUIDES[screen as ConnectionId]:null;
   const setupUnavailable=selectedGuide&&catalog?.[screen as ConnectionId]===false;
