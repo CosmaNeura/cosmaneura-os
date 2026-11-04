@@ -17,15 +17,35 @@ const systems: {
 ];
 
 /** Provider setup for read-only EHR access and an honest Rx Relay status. Opening records never sends a prescription. */
-export function ProviderConnectionPortal({locked, records}:{locked:boolean; records?:Partial<Record<RecordsSystem,()=>void>>}) {
+export function ProviderConnectionPortal({locked, records, compact=false}:{locked:boolean; records?:Partial<Record<RecordsSystem,()=>void>>; compact?:boolean}) {
   const [selected, setSelected] = useState<RecordsSystem>('elation');
   const system = systems.find(item => item.id === selected) ?? systems[1];
   const open = records?.[system.id];
-  return <section className="provider-portal" aria-label="EHR and Rx Relay">
-    <p className="provider-portal-lead">Use the CosmaBot connector for this records system. It reads through your signed-in session and does not export a credential. A vendor sign-in portal is only the backup when that connector is not available in this app. Chart access stays read only, and Rx Relay does not sign or send a prescription.</p>
+  const connectionDetails = <p className="provider-portal-lead">Use the CosmaBot connector for this records system. It reads through your signed-in session and does not export a credential. A vendor sign-in portal is only the backup when that connector is not available in this app. Chart access stays read only, and Rx Relay does not sign or send a prescription.</p>;
+  const relay = <section className="provider-portal-relay" aria-label="Rx Relay">
+    <h3>Rx Relay</h3>
+    <p role="status"><strong>Not connected for sending.</strong> {system.relay}</p>
+  </section>;
+  const backup = <section className="provider-portal-backup" aria-label="Sign-in portal backup">
+    <h3>Sign-in portal</h3>
+    <p role="status">Backup only. No vendor sign-in is started from CosmaBot until an administrator enables the {system.name} connector.</p>
+    {!compact&&<button className="team-primary" type="button" disabled>Not available in this app</button>}
+    <p className="provider-portal-access">Ask your practice administrator to make {system.name} available in this app before opening records.</p>
+  </section>;
+  const limits = <section className="provider-portal-limits" aria-label="Before a prescription can be sent">
+    <h2>Before a prescription can leave this app</h2>
+    <ol>
+      <li>Your practice administrator approves the EHR connection.</li>
+      <li>You review the exact record in CosmaBot.</li>
+      <li>A licensed clinician confirms the prescription in the EHR.</li>
+      <li>This beta does not sign or transmit a prescription.</li>
+    </ol>
+  </section>;
+  return <section className={`provider-portal${compact?' provider-portal-compact':''}`} aria-label="EHR and Rx Relay">
+    {compact?<p className="provider-portal-lead">Choose your records system.</p>:connectionDetails}
     <div className="provider-portal-systems" role="group" aria-label="Records system">
       {systems.map(item => <button key={item.id} type="button" aria-pressed={selected===item.id} disabled={locked} onClick={() => setSelected(item.id)}>
-        <strong>{item.name}</strong><small>Read only</small>
+        <strong>{item.name}</strong>{!compact&&<small>Read only</small>}
       </button>)}
     </div>
     <article className="provider-portal-detail" aria-live="polite">
@@ -33,25 +53,9 @@ export function ProviderConnectionPortal({locked, records}:{locked:boolean; reco
       <h2>{system.name}</h2>
       <p>{system.reads}</p>
       <p className="provider-portal-access">{system.access}</p>
-      <section className="provider-portal-relay" aria-label="Rx Relay">
-        <h3>Rx Relay</h3>
-        <p role="status"><strong>Not connected for sending.</strong> {system.relay}</p>
-      </section>
-      {open ? <button className="team-primary" type="button" disabled={locked} onClick={() => open()}>{system.openLabel}</button> : <section className="provider-portal-backup" aria-label="Sign-in portal backup">
-        <h3>Sign-in portal</h3>
-        <p role="status">Backup only. No vendor sign-in is started from CosmaBot until an administrator enables the {system.name} connector.</p>
-        <button className="team-primary" type="button" disabled>Not available in this app</button>
-        <p className="provider-portal-access">Ask your practice administrator to make {system.name} available in this app before opening records.</p>
-      </section>}
+      {!compact&&relay}
+      {open ? <button className="team-primary" type="button" disabled={locked} onClick={() => open()}>{system.openLabel}</button> : compact?<><button className="team-primary" type="button" disabled>Not available in this app</button><p className="provider-portal-access">Ask your practice administrator to enable {system.name}.</p></>:backup}
     </article>
-    <section className="provider-portal-limits" aria-label="Before a prescription can be sent">
-      <h2>Before a prescription can leave this app</h2>
-      <ol>
-        <li>Your practice administrator approves the EHR connection.</li>
-        <li>You review the exact record in CosmaBot.</li>
-        <li>A licensed clinician confirms the prescription in the EHR.</li>
-        <li>This beta does not sign or transmit a prescription.</li>
-      </ol>
-    </section>
+    {compact?<details className="provider-portal-info"><summary>Connection details</summary>{connectionDetails}{relay}{!open&&backup}{limits}</details>:limits}
   </section>;
 }
