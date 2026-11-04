@@ -14,7 +14,7 @@
 .email-work-access>[role=alert],.email-work-access>.connector-sign-in-backup{flex-basis:100%}
 .email-work-reader{display:grid;grid-template-columns:minmax(210px,280px) minmax(0,1fr);gap:1.25rem;align-items:start;min-width:0}
 .email-work-inbox,.email-work-message{display:grid;gap:.8rem;min-width:0}
-.email-work-inbox>button{width:100%}
+.email-work-inbox .source-work-choices>button{width:100%}
 .email-inbox-filter{display:grid;gap:.45rem;margin-top:.75rem;min-width:0}
 .email-inbox-filter>label{font-size:.8rem;font-weight:600}
 .email-inbox-filter>input{width:100%;min-width:0;box-sizing:border-box;min-height:44px;font-size:1rem;padding:.6rem .7rem;border:1px solid var(--team-line,#d9ddd9);border-radius:.5rem;background:var(--team-surface,#fff);color:inherit}
@@ -43,7 +43,6 @@
 @media(max-width:680px){
   .email-work-reader{grid-template-columns:minmax(0,1fr);gap:1rem}
   .email-work .google-message-list ul,.email-work .outlook-message-list ul{max-height:300px}
-  .email-work-reader[data-email-open=true] .google-message-list ul,.email-work-reader[data-email-open=true] .outlook-message-list ul{max-height:180px}
   .email-work-steps li{align-items:flex-start;font-size:.78rem;gap:.3rem}
   .email-work-access{align-items:flex-start}
 }

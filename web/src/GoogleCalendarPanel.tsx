@@ -9,6 +9,7 @@ import {emptyGoogleCalendarRecovery,validateGoogleCalendarRecovery,type GoogleCa
 import {ConnectorSignInBackup} from './ConnectorSignInBackup';
 import {CalendarWorkFocus,calendarEventInFocus,calendarFocusLabel,useCalendarWorkFocus} from './CalendarWorkFocus';
 import {CalendarWorkHeader,CalendarWorkEmpty,CalendarWorkSelection,type CalendarWorkStep} from './CalendarWorkPresentation';
+import {SourceWorkReader} from './SourceWorkReader';
 import './google-calendar.css';
 export type GoogleCalendarPanelProps={identity:AuthenticatedWorkspaceIdentity;scope:GoogleCalendarRecoveryScope;recovery:GoogleCalendarRecoveryAccess|null;workspace:GoogleCalendarVisit|null;locked?:boolean;recoveryLocked?:boolean;onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;taskActive?:boolean;isTaskCurrent?:()=>boolean;currentSources?:Array<{entry_id:string;state:'current'|'unavailable'}>;onAuthenticationLost:(cause:unknown)=>void;onRequestCalendarAccess?:()=>void;calendarAccessBusy?:boolean;onChooseVisit?:()=>void;onAskChief?:(source:GoogleCalendarSaved)=>void;onRefreshVisit?:()=>Promise<void>};
 const authority=(e:unknown)=>e instanceof WorkspaceApiError&&[401,403,404,426].includes(e.status);
@@ -85,8 +86,8 @@ export function GoogleCalendarPanel({identity,scope,recovery,workspace,locked=fa
  {expired&&<p role="alert">The selected calendar summary has expired for new work. Load and review a current summary.</p>}
  {(withheld||connectionChanged||unavailable)&&<p role="alert">Saved calendar contents are unavailable. Check access or load a current summary. The private recovery record is retained.</p>}
  {record.saved?.source_withheld&&<p role="status">The exact calendar source save is confirmed. Its contents are unavailable; review a current summary before new work.</p>}
- {observation&&<div className="calendar-work-reader" data-event-open={!!event}>
- <aside className="calendar-work-chooser" aria-label="Google Calendar event chooser"><h4>Choose an event</h4>
+ {observation&&<SourceWorkReader className="calendar-work-reader" chooserClassName="calendar-work-chooser" contentClassName="calendar-work-event" chooserLabel="Google calendar event selection" selectedLabel="Selected event" selection={event&&allowed?{key:observation.observation_id+':'+event.id,label:event.subject||'(Untitled event)'}:null} changeLabel="Choose another event" returnLabel="Back to selected event" disabled={blocked} chooser={<>
+ <h4>Choose an event</h4>
  <div className="google-calendar-list">
   <p>Loaded {when(observation.observation.observed_at)} · {observation.observation.account.email}</p>
   <CalendarWorkFocus focus={focus} onChange={setFocus} disabled={blocked}/>
@@ -94,7 +95,7 @@ export function GoogleCalendarPanel({identity,scope,recovery,workspace,locked=fa
   {!observation.observation.items.length?<CalendarWorkEmpty title="No events in this loaded summary">Check Google Calendar for current details. You can load a current summary using the button above.</CalendarWorkEmpty>:!focusEvents.length&&<CalendarWorkEmpty title={`No loaded events for ${calendarFocusLabel(focus)}`}>{focus==='today'?'Choose Next 7 days above to look ahead.':'This view includes only events from the loaded summary. Check Google Calendar for current details.'}{event?' Your selected event is still available for review.':''}</CalendarWorkEmpty>}
   <ul>{focusEvents.map(e=><li key={e.id}><button data-calendar-event={e.id} disabled={blocked} aria-pressed={e.id===record.selected_event_id} onClick={()=>choose(e.id)}><strong>{e.subject||'(Untitled event)'}</strong><span>{e.all_day?`All day · ${e.starts_at} to ${e.ends_at} (end date excluded)`:when(e.starts_at)+' – '+when(e.ends_at)}</span>{e.cancelled&&<small>Cancelled — do not treat as a planned appointment</small>}</button></li>)}</ul>
   {observation.observation.more&&<p>The loaded summary contains up to 25 events. More are available in Google Calendar.</p>}
- </div></aside>
+ </div></>}>
  <div className="calendar-work-review-pane">
  {event&&observation&&<article className="google-calendar-content">
   {selectedOutsideFocus&&<p className="google-calendar-outside-focus" role="status">This selected event is outside {calendarFocusLabel(focus)}. It stays selected for review.</p>}
@@ -124,7 +125,7 @@ export function GoogleCalendarPanel({identity,scope,recovery,workspace,locked=fa
   </section>}
  </article>}
  {!event&&<CalendarWorkEmpty title="Choose an event to review">Open an event from the list, then choose {privateNotebook?'this notebook':'a visit'} and review the source before saving it for Chief.</CalendarWorkEmpty>}
- </div></div>}
+ </div></SourceWorkReader>}
  {pending&&<div className="google-calendar-recovery"><p>{pending.kind==='review'?'Calendar source save unconfirmed. Retry its exact saved request.':'Calendar load unconfirmed. Check its saved result; this does not read Google again.'}</p><button disabled={busy||dispatching||!taskActive||(recoveryLocked??locked)} onClick={recover}>{pending.kind==='review'?'Retry exact calendar source save':'Check saved calendar result'}</button>{pending.kind==='observe'&&resolved?.status==='not_found'&&<button disabled={busy||dispatching||!taskActive||(recoveryLocked??locked)} onClick={()=>void run((g,signal)=>execute(pending,g,signal))}>Send same saved calendar request</button>}</div>}
  {stale&&!pending&&onRefreshVisit&&<button disabled={busy||dispatching||!taskActive||(recoveryLocked??locked)} onClick={()=>void run(async()=>{await onRefreshVisit();setChecks([false,false,false]);})}>{privateNotebook?'Refresh notebook':'Refresh selected visit'}</button>}
  </>}
