@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from alembic.script import ScriptDirectory
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "infra/beta/validate_release_schema.py"
@@ -48,6 +49,12 @@ def source_tree(tmp_path: Path) -> Path:
 def test_actual_checkout_agrees_with_selected_release() -> None:
     contract = json.loads((REPO / "infra/beta/environment/release-schema.json").read_text())
     assert schema.validate_release_schema(REPO) == contract["schema_revision"]
+    # The owned Beta already published this revision; future heads must retain
+    # its lineage so an existing database can be recognized and upgraded.
+    graph = ScriptDirectory(str(REPO / "migrations"))
+    assert "bb57e3d10c964" in {
+        revision.revision for revision in graph.walk_revisions(head=contract["schema_revision"])
+    }
 
 
 def test_literal_validation_never_executes_source(tmp_path: Path) -> None:
