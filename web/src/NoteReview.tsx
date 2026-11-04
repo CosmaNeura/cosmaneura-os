@@ -135,7 +135,7 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
       <button disabled={locked} onClick={() => setReplacement(null)}>Keep my text</button></div>}
     <label htmlFor="private-note-text">{compactReview?"Note text":"Private note draft"}</label>
     <textarea id="private-note-text" rows={10} maxLength={core ? undefined : 20000} value={content} readOnly={core} disabled={locked || otherVersion || initializingScribe}
-      onChange={e => { setContent(e.target.value); setConfirmed(false); }} placeholder="Review a Scribe draft or write your own note…" />
+      onChange={e => { setContent(e.target.value); setConfirmed(false); }} placeholder={compactReview?"Write or review your visit notes…":"Review a Scribe draft or write your own note…"} />
     <button className="team-subtle" onClick={onSources}>Check notebook and sources</button>
     {compactReview&&reviewActions}
     {compactReview&&<p className="team-fine">Save your edits, then review the exact saved note. This review does not sign a clinical record or send a follow-up.</p>}
