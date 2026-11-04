@@ -1342,7 +1342,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     <summary>Team drafts · {(workspace.handoffs??[]).filter(handoff=>handoff.status==='completed').length} saved</summary>
     <TeamWorkPanel handoffs={workspace.handoffs??[]} entries={workspace.entries} locked={locked} onRetry={retryTeamTask} onReview={reviewTeamResult}/>
   </details>;
-  const chiefStarters=bot?.role==='chief'&&!!team?.revision&&<ChiefStartActions compact={phoneLayout()} minimal={messagesMode&&!messagesTask} locked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||!bot.enabled||!!bot.retired}
+  const chiefStarters=bot?.role==='chief'&&!!team?.revision&&<ChiefStartActions compact={phoneLayout()&&!(messagesMode&&messagesTask==='Tools')} minimal={messagesMode&&!messagesTask} locked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||!bot.enabled||!!bot.retired}
     modelEnabled={team.llm.enabled&&!bot.blocked_capabilities?.includes('model_answer')} sourceAllowed={bot.include_notebook||bot.include_evidence}
     hasSavedContext={chiefSavedContext} notesDirty={note!==latestNote} hasQuestion={!!thought.trim()}
     visitSummary={bot?.role==='chief'?ChiefOpenVisit.summary(workspace):''}

@@ -36,16 +36,16 @@ it('takes an independent beta user directly from New message to first notes and 
  expect(append.mock.calls[0][1]).toBe(await workspaceId);expect(append.mock.calls[0][2]).toMatchObject({kind:'scratchpad',content:'Invented follow-up note: clarify sleep diary timing and missing medication history.'});
  await click('‹ Back to Chief of Staff');await wait(()=>expect(question().disabled).toBe(false));expect(question()).toBe(composer);expect(composer.value).toBe('Keep these invented Chief directions unsent.');expect(button('Add notes')).toBeUndefined();expect(ask).not.toHaveBeenCalled();
  await click('Details');await click('Prepare a Chief task');await wait(()=>expect(host.querySelector('.messages-thread-header h1')?.textContent).toBe('Tools'));
- const tasks=()=>host.querySelector<HTMLDetailsElement>('.chief-starters-disclosure')!;await act(async()=>tasks().querySelector('summary')!.click());expect(tasks().open).toBe(true);
+ const tasks=()=>host.querySelector<HTMLDetailsElement>('.chief-starters-disclosure')!;expect(tasks().open).toBe(true);
  for(const starter of CHIEF_STARTERS){expect(button(starter.label)?.disabled).toBe(true);await act(async()=>button(starter.label)!.click());}
  expect(composer.value).toBe('Keep these invented Chief directions unsent.');expect(ask).not.toHaveBeenCalled();
  await click('‹ Back to Chief of Staff');await type(composer,'');await click('Details');await click('Prepare a Chief task');
- if(!tasks().open)await act(async()=>tasks().querySelector('summary')!.click());await click('Plan follow-up and research');
+ expect(tasks().open).toBe(true);await click('Plan follow-up and research');
  await wait(()=>expect(question().disabled).toBe(false));expect(question()).toBe(composer);expect(composer.value).toBe(CHIEF_STARTERS[3].prompt);expect(composer.closest('[hidden]')).toBeNull();expect(ask).not.toHaveBeenCalled();expect(append).toHaveBeenCalledOnce();
  await type(composer,'');await click('Organize saved notes');expect(composer.value).toBe(CHIEF_STARTERS[0].prompt);expect(ask).not.toHaveBeenCalled();expect(append).toHaveBeenCalledOnce();expect(create).toHaveBeenCalledOnce();
  for(const label of ['Draft a visit note','Draft patient instructions']){
   await type(composer,'');await click('Details');await click('Prepare a Chief task');
-  if(!tasks().open)await act(async()=>tasks().querySelector('summary')!.click());await click(label);
+  expect(tasks().open).toBe(true);await click(label);
   await wait(()=>expect(question().disabled).toBe(false));expect(question()).toBe(composer);expect(composer.closest('[hidden]')).toBeNull();
   expect(composer.value).toContain(label==='Draft a visit note'?'Subjective, Objective, Assessment and Plan':'plain-language patient instructions');
   expect(composer.value).toContain('My directions: ');await type(composer,composer.value+'Use the invented sleep-diary note; keep medication details missing.');
