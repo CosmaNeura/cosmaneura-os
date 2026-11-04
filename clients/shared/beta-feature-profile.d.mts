@@ -5,6 +5,7 @@ export const INDEPENDENT_BETA_FEATURE_PROFILE: "independent-beta-v1";
 export const BETA_FEATURE_FLAGS: readonly string[];
 export const STANDALONE_FEATURE_FLAGS: readonly string[];
 export const INDEPENDENT_BETA_FEATURE_FLAGS: readonly string[];
+export const INDEPENDENT_MICROSOFT_FEATURE_FLAGS: readonly string[];
 export type BetaFeatureManifest = {
   version: 1; profile: typeof BETA_FEATURE_PROFILE | typeof NATIVE_STAGING_FEATURE_PROFILE | typeof STANDALONE_FEATURE_PROFILE | typeof INDEPENDENT_BETA_FEATURE_PROFILE; client: "web" | "desktop" | "apple";
   dataMode: "synthetic" | "authorized_beta"; apiOrigin: string; apiBase: string; pageOrigin: string;

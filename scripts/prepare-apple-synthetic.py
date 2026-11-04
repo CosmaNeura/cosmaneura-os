@@ -443,9 +443,13 @@ def prepare(
     if independent:
         if not native_renderer_recovery:
             raise ValueError("Independent beta requires the native recovery and keyboard host.")
-        if any((microsoft_connection_tenant_id, microsoft_connection_client_id,
-                microsoft_connection_callback_uri, scheduling_google_client_id, scheduling_google_callback_uri)):
-            raise ValueError("Independent beta permits only the approved Google account connection.")
+        if any((scheduling_google_client_id, scheduling_google_callback_uri)):
+            raise ValueError("Independent beta does not admit scheduling account connections.")
+        microsoft_enabled = "VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED" in feature_manifest["enabledFlags"]
+        microsoft_inputs = (microsoft_connection_tenant_id, microsoft_connection_client_id, microsoft_connection_callback_uri)
+        if (microsoft_enabled and not all(microsoft_inputs) or not microsoft_enabled and any(microsoft_inputs)
+                or microsoft_enabled and microsoft_connection_callback_uri != workspace_api_origin + "/connections/microsoft/callback"):
+            raise ValueError("Independent beta Microsoft inputs must match its selected capability and exact API callback.")
         if google_connection_client_id and google_connection_callback_uri != workspace_api_origin + "/connections/google/callback":
             raise ValueError("Independent beta Google sign-in must return to its exact configured API.")
     policy = ((hosted_workspace_policy if hosted_workspace else local_workspace_policy)(workspace_api_origin, capture_upload_origins)

@@ -33,9 +33,9 @@ it('cancels a pending consent without having to wait for its expiry',async()=>{
  await mount();await click('Connect with Microsoft');await click('Cancel Microsoft connection');expect(host.querySelector('a')).toBeNull();
 });
 
-it('keeps account changes blocked while saved email work is locked and recovers after release',async()=>{
+it.each(['email','calendar'] as const)('keeps account changes blocked while saved %s work is locked and recovers after release',async kind=>{
  vi.mocked(microsoftConnectionRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link).mockResolvedValueOnce({state:'disconnected'});
- const render=(locked:boolean)=>act(async()=>root.render(<MicrosoftConnectionPanel identity={browser} onAuthenticationLost={()=>{}} messageWorkLocked={locked}/>));
+ const render=(locked:boolean)=>act(async()=>root.render(<MicrosoftConnectionPanel identity={browser} onAuthenticationLost={()=>{}} messageWorkLocked={kind==='email'&&locked} calendarWorkLocked={kind==='calendar'&&locked}/>));
  await render(true);const connect=()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Connect with Microsoft')!;
  expect(connect().disabled).toBe(true);await act(async()=>connect().click());expect(microsoftConnectionRequest).toHaveBeenCalledTimes(1);
  await render(false);await click('Connect with Microsoft');await render(true);
@@ -45,11 +45,11 @@ it('keeps account changes blocked while saved email work is locked and recovers 
  await render(false);expect(host.querySelector('a')?.getAttribute('href')).toBe(link.authorization_url);await click('Cancel Microsoft connection');expect(microsoftConnectionRequest).toHaveBeenCalledTimes(3);
 });
 
-it('withholds native Microsoft handoff while saved email work is locked',async()=>{
+it.each(['email','calendar'] as const)('withholds native Microsoft handoff while saved %s work is locked',async kind=>{
  const identity:AuthenticatedWorkspaceIdentity={mode:'desktop_native',revision:'12345678-1234-4234-8234-123456789abc',isCurrent:()=>true};
  window.cosmasMicrosoftNavigation={version:1,available:true,mode:'trusted-click'};
  vi.mocked(microsoftConnectionRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link);
- const render=(locked:boolean)=>act(async()=>root.render(<MicrosoftConnectionPanel identity={identity} onAuthenticationLost={()=>{}} messageWorkLocked={locked}/>));
+ const render=(locked:boolean)=>act(async()=>root.render(<MicrosoftConnectionPanel identity={identity} onAuthenticationLost={()=>{}} messageWorkLocked={kind==='email'&&locked} calendarWorkLocked={kind==='calendar'&&locked}/>));
  await render(false);await click('Connect with Microsoft');expect(host.querySelector('[data-microsoft-connection]')).toBeTruthy();
  await render(true);const continuation=[...host.querySelectorAll('button')].find(b=>b.textContent==='Continue with Microsoft')!;expect(continuation.disabled).toBe(true);expect(continuation.hasAttribute('data-microsoft-connection')).toBe(false);
  await act(async()=>continuation.click());expect(microsoftConnectionRequest).toHaveBeenCalledTimes(2);

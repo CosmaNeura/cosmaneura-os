@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from functools import lru_cache
 from typing import Any
 from uuid import UUID
@@ -144,9 +144,12 @@ async def lifespan(application: FastAPI):
 
         validate_standalone_runtime(settings, engine)
         application.state.workspace_worker_progress = {}
-        # Only the explicitly configured personal Google service. No queue,
+        # Only the explicitly configured personal account services. No queue,
         # handoff/routine workers, Core or unrelated connector runtimes.
-        with google_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)):
+        with google_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), (
+            microsoft_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal))
+            if settings.workspace_microsoft_connection_enabled else nullcontext()
+        ):
             yield
         return
     async with portal_services_lifespan(application, settings, lambda: new_capture_session(SessionLocal)):
@@ -2287,6 +2290,17 @@ app.include_router(microsoft_message_router(
     identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
     fence=_refresh_model_identity))
 app.add_middleware(MicrosoftMessageBoundary)
+
+from cosmas_os.api.microsoft_calendar_routes import MicrosoftCalendarBoundary  # noqa: E402
+from cosmas_os.api.microsoft_calendar_routes import (  # noqa: E402
+    router as microsoft_calendar_router,
+)
+
+app.include_router(microsoft_calendar_router(
+    runtime=lambda: getattr(app.state, "microsoft_connection", None), configuration=lambda: settings,
+    identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity))
+app.add_middleware(MicrosoftCalendarBoundary)
 
 from cosmas_os.api.google_calendar_routes import GoogleCalendarBoundary  # noqa: E402
 from cosmas_os.api.google_calendar_routes import router as google_calendar_router  # noqa: E402

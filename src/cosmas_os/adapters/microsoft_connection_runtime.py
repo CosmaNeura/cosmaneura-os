@@ -4,6 +4,9 @@ from contextlib import contextmanager
 
 from cosmas_os.adapters.microsoft_connection import MicrosoftPersonalConnection
 from cosmas_os.api.auth import RequestIdentity
+from cosmas_os.application.microsoft_calendar import (
+    install_binding_reader as install_calendar_binding_reader,
+)
 from cosmas_os.application.microsoft_message import install_binding_reader
 from cosmas_os.application.workspace import WorkspaceError
 
@@ -22,7 +25,14 @@ def microsoft_connection_lifespan(app, settings, sessions):
                                        account.organization_id, account.id)
             return service.message_binding(identity, require_full=require_full, session=session)
 
-        with install_binding_reader(binding_reader):
+        def calendar_binding_reader(session, account):
+            if service is None or not settings.workspace_microsoft_calendar_available:
+                raise WorkspaceError("microsoft_calendar_unavailable", 404)
+            identity = RequestIdentity(account.box_id, account.principal_id, "clerk_jwt",
+                                       account.organization_id, account.id)
+            return service.calendar_binding(identity, session=session)
+
+        with install_binding_reader(binding_reader), install_calendar_binding_reader(calendar_binding_reader):
             yield
     finally:
         app.state.microsoft_connection = None

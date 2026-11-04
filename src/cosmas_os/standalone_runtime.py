@@ -39,6 +39,15 @@ def standalone_request_allowed(method: str, path: str, runtime: Settings | None 
         if runtime.workspace_google_calendar_available and (path == "/connections/google/calendar-summaries"
                 or re.fullmatch(r"/workspaces/" + identifier + r"/google-calendar/review", path)):
             return True
+        if (runtime.workspace_microsoft_connection_enabled and not runtime._standalone_microsoft_errors()
+                and path == "/connections/microsoft/session"):
+            return True
+        if runtime.workspace_microsoft_message_available and (path == "/connections/microsoft/messages"
+                or re.fullmatch(r"/workspaces/" + identifier + r"/microsoft-messages/review", path)):
+            return True
+        if runtime.workspace_microsoft_calendar_available and (path == "/connections/microsoft/calendar-summaries"
+                or re.fullmatch(r"/workspaces/" + identifier + r"/microsoft-calendar/review", path)):
+            return True
     bot = r"(?:scribe|visit_prep|follow_up|chief|" + identifier + r")"
     return bool(re.fullmatch(r"/workspaces/" + identifier
         + r"/(entries|notes|title(?:/resolve)?|appointment-link(?:/resolve)?|work-links|conversations/"

@@ -132,10 +132,14 @@ def main():
                         args.microsoft_connection_callback_uri, args.scheduling_google_client_id,
                         args.scheduling_google_callback_uri)):
         parser.error("External account connections are disabled for first-owner staging.")
-    if independent and any((args.microsoft_connection_tenant_id, args.microsoft_connection_client_id,
-                            args.microsoft_connection_callback_uri, args.scheduling_google_client_id,
-                            args.scheduling_google_callback_uri)):
-        parser.error("Independent beta permits only the approved Google account connection.")
+    if independent and any((args.scheduling_google_client_id, args.scheduling_google_callback_uri)):
+        parser.error("Independent beta does not admit scheduling account connections.")
+    if independent:
+        microsoft_enabled = "VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED" in feature_manifest["enabledFlags"]
+        microsoft_inputs = (args.microsoft_connection_tenant_id, args.microsoft_connection_client_id, args.microsoft_connection_callback_uri)
+        if (microsoft_enabled and not all(microsoft_inputs) or not microsoft_enabled and any(microsoft_inputs)
+                or microsoft_enabled and args.microsoft_connection_callback_uri != args.hosted_api_origin + "/connections/microsoft/callback"):
+            parser.error("Independent beta Microsoft inputs must match its selected capability and exact API callback.")
     if independent and args.google_connection_client_id and args.google_connection_callback_uri != args.hosted_api_origin + "/connections/google/callback":
         parser.error("Independent beta Google sign-in must return to its exact configured API.")
     native_capture = operational and not capture_disabled

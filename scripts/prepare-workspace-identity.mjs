@@ -13,10 +13,12 @@ export function identityDigest(identity) {
 }
 
 /** Reuse the existing native schema; all output values are public configuration. */
-export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile}) {
+export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile,microsoftConnectionEnabled=false}) {
   if(![BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE].includes(nativeFeatureProfile))throw new Error('Unknown native feature profile');
   const standalone=[STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE].includes(featureProfile);
   if(featureProfile!==undefined&&(!standalone||nativeFeatureProfile!==BETA_FEATURE_PROFILE))throw new Error('Select one explicit standalone feature profile');
+  if(typeof microsoftConnectionEnabled!=='boolean'||microsoftConnectionEnabled&&featureProfile!==INDEPENDENT_BETA_FEATURE_PROFILE)
+    throw new Error('Microsoft standalone work requires its explicit independent beta profile');
   const desktop=validateOperationalNativeIdentity(candidate,'desktop',candidate?.apiOrigin);
   validateOperationalNativeDataMode(dataMode,desktop);
   const apple=validateOperationalNativeIdentity({...desktop,client:'apple'},'apple',desktop.apiOrigin);
@@ -33,6 +35,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
       VITE_WORKSPACE_WEB_ORIGIN:client==='web'?webOrigin:'',
       VITE_CLERK_PUBLISHABLE_KEY:desktop.publishableKey,
       ...(standalone&&client==='web'?{VITE_WORKSPACE_ORGANIZATION_ID:desktop.organizationId}:{}),
+      ...(microsoftConnectionEnabled?{VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED:'true',VITE_MICROSOFT_MESSAGE_ENABLED:'true'}:{}),
       VITE_COSMANEURA_WEB_ORIGIN:staging?'':coreWebOrigin,
       VITE_CAPTURE_UPLOAD_ORIGINS:staging?'':captureUploadOrigins.join(','),
       VITE_WORKSPACE_CAPTURE_MODE:standalone||staging?'disabled':client==='apple'?'ios_native':'browser_microphone',
@@ -44,6 +47,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
     'VITE_CAPTURE_UPLOAD_ORIGINS','VITE_WORKSPACE_CAPTURE_MODE'].map(key=>[key,builds.web.env[key]]));
   if(standalone)Object.assign(webArgs,{VITE_WORKSPACE_FEATURE_PROFILE:featureProfile,VITE_MESSAGES_ENABLED:'true',
     VITE_WORKSPACE_ORGANIZATION_ID:desktop.organizationId});
+  if(microsoftConnectionEnabled)Object.assign(webArgs,{VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED:'true',VITE_MICROSOFT_MESSAGE_ENABLED:'true'});
   return {
     'desktop-identity.json':desktop,
     'apple-identity.json':apple,

@@ -35,10 +35,10 @@ const connectionSearchAliases: Partial<Record<ConnectionId, string[]>> = {
 const searchText = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({appearance,accountControls,practiceRecordActions,open,nativePresentation,googleTaskPresentation=false, receivedFaxTaskOpen=false, receivedFaxReturnLabel='Back to saved sources', onCloseReceivedFax, onReceivedFaxActiveChange, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+export function SettingsHub({appearance,accountControls,practiceRecordActions,open,nativePresentation,googleTaskPresentation=false, microsoftTaskPresentation=false, receivedFaxTaskOpen=false, receivedFaxReturnLabel='Back to saved sources', onCloseReceivedFax, onReceivedFaxActiveChange, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
   accountControls?:ReactNode;practiceRecordActions?:Partial<Record<PracticeRecordProvider,()=>void>>;
   appearance?:ReactNode;open: boolean;nativePresentation?:'workspace'|'messages'; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; ehr?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
-  googleTaskPresentation?:boolean;receivedFaxTaskOpen?:boolean;receivedFaxReturnLabel?:string;onCloseReceivedFax?:()=>void;onReceivedFaxActiveChange?:(active:boolean)=>void;
+  googleTaskPresentation?:boolean;microsoftTaskPresentation?:boolean;receivedFaxTaskOpen?:boolean;receivedFaxReturnLabel?:string;onCloseReceivedFax?:()=>void;onReceivedFaxActiveChange?:(active:boolean)=>void;
   teamSummary: string; teamDirty: boolean; onClose: () => void; beforeLeaveTeam?:(next:()=>void)=>void; navigationLocked?: boolean;
   initialScreen?:'home'|'connections'|'team'|'core'|'scheduling'|'microsoft'|'google'|'ehr'|'messaging';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
@@ -170,8 +170,9 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
   // remove the only escape while catalog/access/setup keeps its editor hidden.
   const presentingGoogleTask=googleTaskPresentation&&open&&screen==='google'&&google!=null&&visited.includes('google')&&!hiddenSetup&&!availabilityPending&&!current?.denied;
   const receivedFaxVisible=!!(open&&screen==='messaging'&&inboundOwner===connectionIdentity&&connectionIdentity&&!hiddenSetup&&!availabilityPending&&!current?.denied);
+  const presentingMicrosoftTask=microsoftTaskPresentation&&open&&screen==='microsoft'&&microsoft!=null&&visited.includes('microsoft')&&!hiddenSetup&&!availabilityPending&&!current?.denied;
   const presentingReceivedFaxTask=receivedFaxTaskOpen&&receivedFaxVisible;
-  const presentingTask=presentingGoogleTask||presentingReceivedFaxTask;
+  const presentingTask=presentingGoogleTask||presentingMicrosoftTask||presentingReceivedFaxTask;
   const liveReceivedFaxVisible=useRef(receivedFaxVisible);liveReceivedFaxVisible.current=receivedFaxVisible;
   const isReceivedFaxCurrent=useCallback(()=>liveReceivedFaxVisible.current,[]);
   useEffect(()=>{if(!presentingReceivedFaxTask)return;let current=true;const frame=requestAnimationFrame(()=>{const target=receivedFaxHeading.current;if(current&&target&&!target.closest('[hidden]')){target.focus({preventScroll:true});target.scrollIntoView?.({block:'start'});}});return()=>{current=false;cancelAnimationFrame(frame);};},[presentingReceivedFaxTask,inboundEpisode]);
@@ -216,7 +217,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       return !!value&&!discoveryOnly(value);
     }):[]
     :connectionCards;
-  return <section ref={section} className="settings-hub" hidden={!open} aria-label={presentingTask?undefined:'Settings'} data-editor-task={presentingGoogleTask?'google':presentingReceivedFaxTask?'efax':undefined}>
+  return <section ref={section} className="settings-hub" hidden={!open} aria-label={presentingTask?undefined:'Settings'} data-editor-task={presentingGoogleTask?'google':presentingMicrosoftTask?'microsoft':presentingReceivedFaxTask?'efax':undefined}>
     <nav className="settings-hub-nav" aria-label="Settings navigation" hidden={presentingTask}>
       {screen !== 'home' && <button aria-label={addingConnection?'Back to connections':undefined} disabled={leaveLocked} onClick={() => addingConnection?setAddingConnection(false):visit(screen === 'members' || screen === 'team' || screen === 'connections' || screen === 'provider' ? 'home' : 'connections')}>
         <span aria-hidden="true">← </span>{addingConnection?'Back to connections':screen === 'members' || screen === 'team' || screen === 'connections' || screen === 'provider' ? 'All settings' : 'All connections'}

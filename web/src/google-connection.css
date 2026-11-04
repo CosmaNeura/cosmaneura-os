@@ -4,6 +4,11 @@
 .google-results-hint {padding:12px 0;color:var(--team-muted);font-size:14px}
 .google-account-controls {margin-top:20px;border-top:1px solid var(--team-line,#d9ddd9);padding-top:8px}
 .google-account-controls summary {min-height:44px;align-content:center;cursor:pointer}
+.google-limited-setup {max-width:24rem;margin:8px 0 16px;color:var(--team-muted);font-size:14px}
+.google-limited-setup summary {min-height:44px;align-content:center;cursor:pointer}
+.google-limited-setup p {line-height:1.5}
+.google-connection .google-limited-setup button {box-sizing:border-box;width:100%;min-width:0;min-height:48px;margin:0;padding:12px 16px;border:1px solid var(--team-line,#d9ddd9);border-radius:10px;white-space:normal;font:inherit;font-weight:600;cursor:pointer}
+.google-limited-setup button:focus-visible {outline:2px solid var(--team-accent,#396750);outline-offset:2px}
 .google-connection .connection-service-action button {width:100%;margin:0;white-space:normal}
 .google-account-controls .microsoft-actions button {margin:0}
 .google-next-step {display:grid;gap:4px;margin:12px 0;font-size:14px;line-height:1.5}

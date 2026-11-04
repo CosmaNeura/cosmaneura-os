@@ -47,23 +47,23 @@ describe('shared selected-source preparation',()=>{
 it.each([undefined,'reply'] as const)('prepares a reviewed Outlook source in the retained Chief draft without moving specialist text or sending (%s)',async intent=>{
  const f=await fixture({},'microsoft_message'),save=vi.spyOn(f.session.models,'save');f.session.models.updateThought('Existing Chief directions');await f.session.conversations.observe(f.host);
  await f.session.conversations.open(f.workspace.id,'follow_up',f.host);f.session.models.updateThought('Separate specialist directions');
- await f.session.sources.prepareMicrosoft(f.context,f.source,intent);
+ await f.session.sources.prepareMicrosoft(f.context,f.source,'microsoft_message',intent);
  expect(f.session.getSnapshot().thought).toContain('Existing Chief directions\n\nReview the human-selected email source '+f.source.entry_id);
  if(intent==='reply')expect(f.session.getSnapshot().thought).toContain('draft a reply for my review');
  else expect(f.session.getSnapshot().thought).toBe('Existing Chief directions\n\nReview the human-selected email source '+f.source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.');
  expect(await f.journal.load(editorAddress(f.workspace.id,'conversation:follow_up'))).toMatchObject({data:{text:'Separate specialist directions'}});expect(save).not.toHaveBeenCalled();expect(f.context.focusQuestion).toHaveBeenCalledOnce();
 });
 it.each([undefined,'reply'] as const)('requires Microsoft source custody and refuses Gmail substitution or withdrawn Outlook content (%s)',async intent=>{
- const gmail=await fixture();gmail.session.models.updateThought('Keep directions');await gmail.session.sources.prepareMicrosoft(gmail.context,gmail.source,intent);
+ const gmail=await fixture();gmail.session.models.updateThought('Keep directions');await gmail.session.sources.prepareMicrosoft(gmail.context,gmail.source,'microsoft_message',intent);
  expect(gmail.session.getSnapshot().thought).toBe('Keep directions');expect(gmail.context.failure).toHaveBeenCalledOnce();
- const outlook=await fixture({},'microsoft_message');outlook.workspace.entries[0].microsoft_source_state='unavailable';await outlook.session.sources.prepareMicrosoft(outlook.context,outlook.source,intent);
+ const outlook=await fixture({},'microsoft_message');outlook.workspace.entries[0].microsoft_source_state='unavailable';await outlook.session.sources.prepareMicrosoft(outlook.context,outlook.source,'microsoft_message',intent);
  expect(outlook.session.getSnapshot().thought).toBe('');expect(outlook.context.failure).toHaveBeenCalledOnce();
 });
 it.each([undefined,'reply'] as const)('withholds Outlook draft preparation if access changes while authorization is pending (%s)',async intent=>{
  const f=await fixture({},'microsoft_message');f.session.models.updateThought('Keep directions');let release!:()=>void;
  // Observe/retain first, so this deferred authorization is the final source check.
  await f.session.conversations.observe(f.host);f.host.authorize=()=>new Promise<void>(resolve=>{release=resolve;});
- const work=f.session.sources.prepareMicrosoft(f.context,f.source,intent);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+ const work=f.session.sources.prepareMicrosoft(f.context,f.source,'microsoft_message',intent);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
  f.session.sources.receive({...f.workspace,entries:f.workspace.entries.map(e=>({...e,microsoft_source_state:'unavailable' as const,content:''}))});release();await work;
  expect(f.session.getSnapshot().thought).toBe('Keep directions');expect(f.context.focusQuestion).not.toHaveBeenCalled();
 });

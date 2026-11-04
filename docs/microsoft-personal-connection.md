@@ -65,6 +65,26 @@ open the exact consent URL and read-only scopes. Server secrets never enter
 native configuration. Empty values disable the handoff. The callback returns a
 fixed status fragment, not a credential; the app then checks server-side status.
 
+## Independent CosmaBot beta admission
+
+The existing Microsoft OAuth broker can be explicitly configured in
+`standalone_clerk_synthetic`. The connection, selected-email and calendar-review
+flags default to false. Enabling the connection requires the same tenant/client
+settings above, an owned HTTPS callback, a permitted workspace return origin and
+the exact protected client-secret/encryption-key pair. Offline standalone stays
+closed. The standalone runtime starts this personal service only when configured;
+it opens only its bounded account, email-read and calendar-review routes.
+
+The public standalone renderer accepts an optional `beta_features.microsoft`
+object with `tenant_id`, `client_id`, `callback_uri` and `return_origin`, alongside
+the existing Google setup. Omission retains the existing Google-only build. The
+overlay selects the Microsoft connection and source flags in all three clients,
+lists the protected secret names and declares Microsoft's existing login/Graph
+egress. It contains no secret values and does not change the deployment.
+Desktop and Apple composers require matching explicit Microsoft native inputs
+and the exact owned API callback. Existing Google, Clerk, native recovery,
+identity storage and read-only scope fences remain in place.
+
 ## Reused source
 
 Delegated OAuth/Graph mapping patterns are adapted from the MIT community pieces

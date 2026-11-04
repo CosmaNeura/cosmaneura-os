@@ -38,13 +38,27 @@ def google_values():
         "google_connection_encryption_key": SecretStr(base64.urlsafe_b64encode(b"x" * 32).decode())}
 
 
-@pytest.mark.parametrize("features", [model_values(), google_values(), model_values() | google_values()])
+def microsoft_values():
+    return {"workspace_microsoft_connection_enabled": True, "workspace_microsoft_message_enabled": True,
+        "workspace_microsoft_calendar_enabled": True,
+        "microsoft_connection_tenant_id": "10000000-0000-4000-8000-000000000001",
+        "microsoft_connection_client_id": "10000000-0000-4000-8000-000000000002",
+        "microsoft_connection_client_secret": SecretStr("invented-microsoft-secret"),
+        "microsoft_connection_callback_uri": "https://api.invented-cosmabot.test/connections/microsoft/callback",
+        "microsoft_connection_return_origin": "https://workspace.invented-cosmabot.test",
+        "microsoft_connection_encryption_key": SecretStr(base64.urlsafe_b64encode(b"m" * 32).decode())}
+
+
+@pytest.mark.parametrize("features", [model_values(), google_values(), microsoft_values(),
+    model_values() | google_values() | microsoft_values()])
 def test_explicit_optional_features_preserve_independent_profile(clerk_standalone, features):
     runtime = clerk_standalone.runtime.model_copy(update=features)
     runtime.validate_runtime_configuration()
     assert runtime.workspace_llm_available == ("workspace_llm_backend" in features)
     assert runtime.workspace_google_message_available == ("workspace_google_connection_enabled" in features)
     assert runtime.workspace_google_calendar_available == ("workspace_google_connection_enabled" in features)
+    assert runtime.workspace_microsoft_message_available == ("workspace_microsoft_connection_enabled" in features)
+    assert runtime.workspace_microsoft_calendar_available == ("workspace_microsoft_connection_enabled" in features)
     assert not runtime.workspace_core_connection_available
     assert not runtime.workspace_agent_tools_enabled
     assert not runtime.workspace_routines_enabled
@@ -83,8 +97,71 @@ def test_google_incomplete_or_broadened_configuration_fails(clerk_standalone, ch
 
 
 def test_offline_profile_remains_closed(clerk_standalone):
-    for values in (model_values(), google_values()):
+    for values in (model_values(), google_values(), microsoft_values()):
         assert clerk_standalone.offline.model_copy(update=values).runtime_configuration_errors()
+
+
+@pytest.mark.parametrize("change", [
+    {"microsoft_connection_tenant_id": "common"}, {"microsoft_connection_client_id": "invented-not-a-uuid"},
+    {"microsoft_connection_client_secret": None}, {"microsoft_connection_encryption_key": SecretStr("short")},
+    {"microsoft_connection_callback_uri": "https://api.cosmaneura.com/connections/microsoft/callback"},
+    {"microsoft_connection_callback_uri": "https://api.invented-cosmabot.test/other"},
+    {"microsoft_connection_callback_uri": "https://api.invented-cosmabot.test/connections/microsoft/callback?x=1"},
+    {"microsoft_connection_return_origin": "https://other.invented-cosmabot.test"},
+    {"workspace_microsoft_connection_enabled": False},
+])
+def test_microsoft_incomplete_or_broadened_configuration_stays_unavailable(clerk_standalone, change):
+    runtime = clerk_standalone.runtime.model_copy(update=microsoft_values() | change)
+    assert runtime.runtime_configuration_errors()
+    assert not runtime.workspace_microsoft_message_available
+    assert not runtime.workspace_microsoft_calendar_available
+
+
+def test_microsoft_opens_only_selected_actor_authenticated_routes(clerk_standalone):
+    base = clerk_standalone.runtime
+    microsoft = base.model_copy(update=microsoft_values())
+    visit = "/workspaces/" + str(uuid4())
+    for path in ("/connections/microsoft/session", "/connections/microsoft/messages",
+                 "/connections/microsoft/calendar-summaries", visit + "/microsoft-messages/review",
+                 visit + "/microsoft-calendar/review"):
+        assert standalone_request_allowed("POST", path, microsoft)
+        assert not standalone_request_allowed("POST", path, base)
+        assert not standalone_request_allowed("POST", path, clerk_standalone.offline)
+    for path in ("/connections/microsoft/session/extra", visit + "/microsoft-calendar/review/extra",
+                 visit + "/handoffs", "/practice-access/invitations", "/connections/google/session"):
+        assert not standalone_request_allowed("POST", path, microsoft)
+
+
+def test_microsoft_standalone_lifecycle_opens_only_configured_personal_service(clerk_standalone, monkeypatch):
+    from cosmas_os import standalone_runtime
+    from cosmas_os.adapters import microsoft_connection_runtime
+    from cosmas_os.api import app as api
+
+    runtime = clerk_standalone.runtime.model_copy(update=microsoft_values())
+    calls = []
+
+    class Microsoft:
+        def __init__(self, selected, _sessions):
+            assert selected is runtime
+            calls.append("microsoft_created")
+
+        def close(self):
+            calls.append("microsoft_closed")
+
+    monkeypatch.setattr(api, "settings", runtime)
+    monkeypatch.setattr(standalone_runtime, "validate_standalone_runtime", lambda *_: calls.append("owned_guard"))
+    monkeypatch.setattr(microsoft_connection_runtime, "MicrosoftPersonalConnection", Microsoft)
+    app = FastAPI()
+
+    async def exercise():
+        async with api.lifespan(app):
+            assert app.state.workspace_worker_progress == {}
+            assert app.state.microsoft_connection is not None
+            assert app.state.google_connection is None
+
+    asyncio.run(exercise())
+    assert app.state.microsoft_connection is None
+    assert calls == ["owned_guard", "microsoft_created", "microsoft_closed"]
 
 
 def test_only_selected_write_paths_open_and_durable_resolution_survives_disable(clerk_standalone):

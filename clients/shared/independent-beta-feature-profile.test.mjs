@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {INDEPENDENT_BETA_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_FLAGS,STANDALONE_FEATURE_PROFILE,
+import {INDEPENDENT_BETA_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_FLAGS,INDEPENDENT_MICROSOFT_FEATURE_FLAGS,STANDALONE_FEATURE_PROFILE,
   resolveBetaFeatureProfile,validateBetaFeatureManifest,validateNativeBetaProfile} from './beta-feature-profile.mjs';
 import {workspaceIdentityInputs} from '../../scripts/prepare-workspace-identity.mjs';
 const common={VITE_WORKSPACE_FEATURE_PROFILE:INDEPENDENT_BETA_FEATURE_PROFILE,
@@ -27,7 +27,7 @@ test('main independent beta exposes Chief and Google while preserving platform i
 });
 test('independent beta refuses broadening and misleading or partial feature manifests',()=>{
   for(const change of [{VITE_CORE_CONNECTION_ENABLED:'true'},{VITE_WORKSPACE_CAPTURE_ENABLED:'true'},
-    {VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED:'true'},{VITE_WORKSPACE_SCHEDULING_ENABLED:'true'},
+    {VITE_MICROSOFT_MESSAGE_ENABLED:'true'},{VITE_WORKSPACE_SCHEDULING_ENABLED:'true'},
     {VITE_EHR_READ_ENABLED:'true'},{VITE_WORKSPACE_DATA_MODE:'authorized_beta'},
     {VITE_WORKSPACE_ORGANIZATION_ID:undefined},{VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED:'false'}])
     assert.throws(()=>resolveBetaFeatureProfile({...input('web'),...change}));
@@ -35,6 +35,20 @@ test('independent beta refuses broadening and misleading or partial feature mani
   assert.throws(()=>validateBetaFeatureManifest({...m,enabledFlags:m.enabledFlags.filter(s=>s!=='VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED')}));
   assert.throws(()=>validateBetaFeatureManifest({...m,enabledFlags:[...m.enabledFlags,'VITE_EHR_READ_ENABLED']}));
   assert.throws(()=>validateBetaFeatureManifest({...m,profile:STANDALONE_FEATURE_PROFILE}));
+});
+test('Microsoft account work requires explicit matching opt-in and preserves default-off manifests',()=>{
+  for(const client of ['web','desktop','apple']){
+    const selected=Object.fromEntries(INDEPENDENT_MICROSOFT_FEATURE_FLAGS.map(flag=>[flag,'true']));
+    const {env,manifest}=resolveBetaFeatureProfile({...input(client),...selected});
+    assert.deepEqual(manifest.enabledFlags,[...INDEPENDENT_BETA_FEATURE_FLAGS,...INDEPENDENT_MICROSOFT_FEATURE_FLAGS]);
+    assert.equal(validateBetaFeatureManifest(manifest),manifest);
+    for(const flag of INDEPENDENT_MICROSOFT_FEATURE_FLAGS){
+      assert.equal(env[flag],'true');assert.equal(resolveBetaFeatureProfile(input(client)).env[flag],'false');
+    }
+    assert.throws(()=>resolveBetaFeatureProfile({...input(client),VITE_MICROSOFT_MESSAGE_ENABLED:'true'}));
+    assert.throws(()=>resolveBetaFeatureProfile({...input(client),VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED:'TRUE'}));
+    assert.throws(()=>validateBetaFeatureManifest({...manifest,enabledFlags:manifest.enabledFlags.filter(flag=>flag!=='VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED')}));
+  }
 });
 test('public identity preparation carries the main independent profile into all three actual builds',()=>{
   const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.com',

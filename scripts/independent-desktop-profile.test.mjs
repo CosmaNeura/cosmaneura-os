@@ -8,19 +8,33 @@ const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
   publishableKey: 'pk_live_' + Buffer.from('identity.example.invalid$').toString('base64'),
   organizationId: 'org_invented_practice', audience: 'invented-cosmabot-api'};
 const info = {CFBundleIdentifier: 'com.cosmasos.beta.desktop', CFBundleShortVersionString: '0.1.143', CFBundleVersion: '1103'};
-function fixture(profile = 'independent-beta-v1') {
+function fixture(profile = 'independent-beta-v1', microsoft = false) {
   const manifest = resolveBetaFeatureProfile({VITE_WORKSPACE_FEATURE_PROFILE: profile,
     VITE_WORKSPACE_HOSTED_CLIENT: 'desktop', VITE_WORKSPACE_DATA_MODE: 'synthetic',
     VITE_WORKSPACE_HOSTED_API_ORIGIN: identity.apiOrigin, VITE_API_BASE: 'app://cosmas/api',
     VITE_WORKSPACE_WEB_ORIGIN: '', VITE_COSMANEURA_WEB_ORIGIN: '',
     VITE_CAPTURE_UPLOAD_ORIGINS: '', VITE_WORKSPACE_CAPTURE_MODE: 'disabled',
-    VITE_CLERK_PUBLISHABLE_KEY: identity.publishableKey}).manifest;
+    VITE_CLERK_PUBLISHABLE_KEY: identity.publishableKey,
+    ...(microsoft?{VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED:'true',VITE_MICROSOFT_MESSAGE_ENABLED:'true'}:{})}).manifest;
   const config = {nativeIdentity: identity, mode: 'hosted-beta-authenticated', dataMode: 'synthetic',
     apiOrigin: identity.apiOrigin, appVersion: info.CFBundleShortVersionString, buildNumber: info.CFBundleVersion,
     nativeCaptureEnabled: false, installation: {bundleIdentifier: info.CFBundleIdentifier,
       ...(profile === 'independent-beta-v1' ? {storageScope: 'identity-v1'} : {})}};
   return {manifest, config};
 }
+
+test('independent desktop Microsoft release requires the selected capability and exact native broker inputs',()=>{
+  const {manifest,config}=fixture('independent-beta-v1',true);
+  const microsoft={microsoftConnectionTenantId:'10000000-0000-4000-8000-000000000001',
+    microsoftConnectionClientId:'10000000-0000-4000-8000-000000000002',
+    microsoftConnectionCallbackUri:identity.apiOrigin+'/connections/microsoft/callback'};
+  assert.deepEqual(validateOperationalReleaseProfile({...config,...microsoft},manifest,info),identity);
+  assert.throws(()=>validateOperationalReleaseProfile(config,manifest,info));
+  assert.throws(()=>validateOperationalReleaseProfile({...config,...microsoft},fixture().manifest,info));
+  for(const change of [{microsoftConnectionTenantId:'common'}, {microsoftConnectionClientId:undefined},
+    {microsoftConnectionCallbackUri:'https://other.example.invalid/connections/microsoft/callback'}])
+    assert.throws(()=>validateOperationalReleaseProfile({...config,...microsoft,...change},manifest,info));
+});
 
 test('independent desktop release requires the new private identity namespace and accepts the approved Google pair', () => {
   const {manifest, config} = fixture();

@@ -615,7 +615,7 @@ def _context_for(
     from cosmas_os.application.clinical_note_share import clinical_request
 
     context = clinical_request(s, workspace, settings, command["content"], context)
-    bounded_connector_kinds = {"google_message", "microsoft_message", "google_calendar", "ehr_read_source", "calendar_import_source"}
+    bounded_connector_kinds = {"google_message", "microsoft_message", "google_calendar", "microsoft_calendar", "ehr_read_source", "calendar_import_source"}
     if any(s.get(WorkspaceEntry, source.entry_id).kind in bounded_connector_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
             len(context.sources) > 12 or any(len(source.content) > 5000 and not (
@@ -626,7 +626,7 @@ def _context_for(
         if any(s.get(WorkspaceEntry, source.entry_id).kind == "calendar_import_source"
                for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None):
             raise ws.WorkspaceError("calendar_import_source_context_too_large", 422)
-        has_calendar = any(s.get(WorkspaceEntry, source.entry_id).kind == "google_calendar"
+        has_calendar = any(s.get(WorkspaceEntry, source.entry_id).kind in {"google_calendar", "microsoft_calendar"}
             for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
         if any(s.get(WorkspaceEntry, source.entry_id).kind == "ehr_read_source"
                for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None):
@@ -713,6 +713,10 @@ def _selected_connector_passages(s, workspace, settings):
         from cosmas_os.application import microsoft_message
 
         reviewed.extend(microsoft_message.selected_entries(s, workspace, settings, workspace.revision))
+    if team.runtime_settings.workspace_microsoft_calendar_available:
+        from cosmas_os.application import microsoft_calendar
+
+        reviewed.extend(microsoft_calendar.selected_entries(s, workspace, settings, workspace.revision))
     if team.runtime_settings.workspace_calendar_import_available:
         from cosmas_os.application import calendar_imports
 

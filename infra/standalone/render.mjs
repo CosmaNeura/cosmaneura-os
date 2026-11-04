@@ -28,8 +28,10 @@ function origin(value,ownedStaging=false){
 }
 
 function betaFeatures(value){
-  if(value.beta_features===undefined)return {profile:'standalone-practice-v1',model:null,google:null};
-  const features=value.beta_features;object(features,['model','google'],'public_beta_features_shape');
+  if(value.beta_features===undefined)return {profile:'standalone-practice-v1',model:null,google:null,microsoft:null};
+  const selected=value.beta_features;
+  object(selected,Object.hasOwn(selected??{},'microsoft')?['model','google','microsoft']:['model','google'],'public_beta_features_shape');
+  const features={...selected,microsoft:Object.hasOwn(selected,'microsoft')?selected.microsoft:null};
   if(features.model!==null){
     object(features.model,['origin','endpoint','deployment'],'public_model_shape');
     const model=features.model;
@@ -43,6 +45,13 @@ function betaFeatures(value){
       !/^[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com$/.test(features.google.client_id)||
       features.google.callback_uri!==value.api_origin+'/connections/google/callback'||
       features.google.return_origin!==value.web_origin)refuse('matching_google_public_contract_required');
+  }
+  if(features.microsoft!==null){
+    object(features.microsoft,['tenant_id','client_id','callback_uri','return_origin'],'public_microsoft_shape');
+    const identifier=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
+    if(!features.google||!identifier(features.microsoft.tenant_id)||!identifier(features.microsoft.client_id)||
+      features.microsoft.callback_uri!==value.api_origin+'/connections/microsoft/callback'||
+      features.microsoft.return_origin!==value.web_origin)refuse('matching_microsoft_public_contract_required');
   }
   return {...features,profile:features.google?'independent-beta-v1':'standalone-practice-v1'};
 }
@@ -95,6 +104,7 @@ WORKSPACE_CORE_APPOINTMENT_SETUP_ENABLED WORKSPACE_PREP_ENABLED WORKSPACE_PREP_W
 WORKSPACE_SCHEDULING_ENABLED WORKSPACE_SCHEDULING_LOGIN_ENABLED WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED
 WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED WORKSPACE_GOOGLE_CONNECTION_ENABLED WORKSPACE_GOOGLE_MESSAGE_ENABLED
 WORKSPACE_MICROSOFT_MESSAGE_ENABLED WORKSPACE_GOOGLE_CALENDAR_ENABLED WORKSPACE_CALENDAR_IMPORT_ENABLED
+WORKSPACE_MICROSOFT_CALENDAR_ENABLED
 WORKSPACE_EHR_READ_ENABLED WORKSPACE_ELATION_SANDBOX_ENABLED WORKSPACE_ELATION_PROBLEMS_ENABLED
 WORKSPACE_ELATION_MEDICATIONS_ENABLED WORKSPACE_ELATION_LABS_ENABLED WORKSPACE_TEBRA_FHIR_ENABLED
 WORKSPACE_ATHENA_ALLERGIES_ENABLED WORKSPACE_ATHENA_MEDICATIONS_ENABLED WORKSPACE_MICROSOFT_CONNECTION_ENABLED
@@ -119,7 +129,7 @@ export function render(input){
   const apiUser=`cosmabot-api-${short}`,pgUser=`cosmabot-pg-${short}`,proxyUser=`cosmabot-web-${short}`;
   const dbName=`cosmabot_standalone_${id.replaceAll('-','')}`,dbRole=`cosmabot_runtime_${short}`,migrationRole=`cbpg_${short}`;
   const files=workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,coreWebOrigin:'',captureUploadOrigins:[],
-    dataMode:'synthetic',featureProfile:features.profile});
+    dataMode:'synthetic',featureProfile:features.profile,microsoftConnectionEnabled:!!features.microsoft});
   const parties=[value.web_origin,'app://cosmas','capacitor://localhost'].join(',');
   const environment={...Object.fromEntries(disabledFlags.map(name=>[name,'false'])),
     COSMAS_ENV:'standalone_clerk_synthetic',DATA_MODE:'synthetic',AUTH_MODE:'clerk_jwt',BETA_BOX_ID:value.box_id,
@@ -141,6 +151,10 @@ export function render(input){
   if(features.google)Object.assign(environment,{WORKSPACE_GOOGLE_CONNECTION_ENABLED:'true',WORKSPACE_GOOGLE_MESSAGE_ENABLED:'true',
     WORKSPACE_GOOGLE_CALENDAR_ENABLED:'true',GOOGLE_CONNECTION_CLIENT_ID:features.google.client_id,
     GOOGLE_CONNECTION_CALLBACK_URI:features.google.callback_uri,GOOGLE_CONNECTION_RETURN_ORIGIN:features.google.return_origin});
+  if(features.microsoft)Object.assign(environment,{WORKSPACE_MICROSOFT_CONNECTION_ENABLED:'true',WORKSPACE_MICROSOFT_MESSAGE_ENABLED:'true',
+    WORKSPACE_MICROSOFT_CALENDAR_ENABLED:'true',MICROSOFT_CONNECTION_TENANT_ID:features.microsoft.tenant_id,
+    MICROSOFT_CONNECTION_CLIENT_ID:features.microsoft.client_id,MICROSOFT_CONNECTION_CALLBACK_URI:features.microsoft.callback_uri,
+    MICROSOFT_CONNECTION_RETURN_ORIGIN:features.microsoft.return_origin});
   const contract={schema:'cosmabot-standalone-host-preparation/v1',state:'PREPARATION_ONLY_STARTUP_HELD',
     instance_id:id,box_id:value.box_id,source_commit:value.source_commit,resource_scope:value.resource_scope,
     deployment_authorized:false,resource_ownership_verified:false,account_mapping_verified:false,
@@ -192,10 +206,12 @@ export function render(input){
     external_workers:[],platform_connections:[],automatic_migrations:false,automatic_seed:false};
   if(value.beta_features!==undefined){
     contract.feature_profile=features.profile;
-    contract.optional_runtime_features={model:!!features.model,google:!!features.google,live_provider_acceptance:false,
-      secrets_in_package:false,practice_records:'invented synthetic records',google_content:'actual consenting account content; never relabelled as invented'};
+    contract.optional_runtime_features={model:!!features.model,google:!!features.google,microsoft:!!features.microsoft,live_provider_acceptance:false,
+      secrets_in_package:false,practice_records:'invented synthetic records',google_content:'actual consenting account content; never relabelled as invented',
+      microsoft_content:'actual consenting account content; never relabelled as invented'};
     if(features.model)contract.private_environment.exact_names.push('WORKSPACE_LLM_API_KEY');
     if(features.google)contract.private_environment.exact_names.push('GOOGLE_CONNECTION_CLIENT_SECRET','GOOGLE_CONNECTION_ENCRYPTION_KEY');
+    if(features.microsoft)contract.private_environment.exact_names.push('MICROSOFT_CONNECTION_CLIENT_SECRET','MICROSOFT_CONNECTION_ENCRYPTION_KEY');
   }
   if(ownedVm){
     contract.resource_identity.host_name='vm-cosmabot-staging-eus2-lab01';
@@ -225,10 +241,15 @@ export function render(input){
       firewall.api_egress.push({protocol:'https',hostname,tcp_port:443,redirects_allowed:false});
     firewall.browser_oauth_origins=['https://accounts.google.com'];
   }
+  if(features.microsoft){
+    for(const hostname of ['login.microsoftonline.com','graph.microsoft.com'])
+      firewall.api_egress.push({protocol:'https',hostname,tcp_port:443,redirects_allowed:false});
+    (firewall.browser_oauth_origins??=[]).push('https://login.microsoftonline.com');
+  }
   if(value.beta_features!==undefined){
-    firewall.dns='Only the exact configured Clerk/model and documented Google API hostnames; qualify resolver enforcement separately.';
+    firewall.dns='Only the exact configured Clerk/model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
     contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
-      'Host firewall and DNS qualification: only declared Clerk, optional own model and Google API egress; no metadata or other providers':item);
+      'Host firewall and DNS qualification: only declared Clerk, optional own model and selected Google/Microsoft API egress; no metadata or other providers':item);
   }
   if(ownedVm){
     firewall.dedicated_host_required=false;firewall.existing_owned_cosmabot_host_required=true;
