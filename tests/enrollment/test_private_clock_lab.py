@@ -613,8 +613,20 @@ def runtime_adapter(lab):
 
 
 @pytest.mark.parametrize("point", ["expiry", "after"])
-def test_signed_registered_runtime_and_worker_admission_cutoff_keeps_wall_security_time(lab, point):
+def test_signed_registered_runtime_and_worker_admission_cutoff_keeps_wall_security_time(lab, point, monkeypatch):
+    from datetime import timedelta
+
+    from cosmas_os.adapters import enrollment_admission as adapter_module
+    from cosmas_os.enrollment import admission as admission_module, service as service_module
+
     start_trial(lab)
+    # The before-cutoff proof lasts one second. Control wall-security time
+    # separately from the private Stripe clock, including actual stale-signature time.
+    wall = {"now": service_module.now_utc()}
+    wall_security = SimpleNamespace(time=lambda: wall["now"].timestamp())
+    monkeypatch.setattr(adapter_module, "time", wall_security)
+    monkeypatch.setattr(admission_module, "time", wall_security)
+    monkeypatch.setattr(service_module, "now_utc", lambda: wall["now"])
     adapter, key = runtime_adapter(lab)
     token = lab.token(
         {
@@ -623,6 +635,7 @@ def test_signed_registered_runtime_and_worker_admission_cutoff_keeps_wall_securi
         }
     )
     lab.commerce.advance("before")
+    period_before = lab.commerce.now()
     assert adapter.authorize(token, lab.binding.owner_subject)["enforced"]
     assert adapter.authorize(
         "",
@@ -631,7 +644,7 @@ def test_signed_registered_runtime_and_worker_admission_cutoff_keeps_wall_securi
         operation_id=str(uuid4()),
         approval_sha256="a" * 64,
     )["enforced"]
-    stamp = int(time.time()) - 60
+    stamp = int(wall["now"].timestamp())
     request = AdmissionRequest(
         practice_id=lab.binding.practice_id,
         box_id=lab.binding.box_id,
@@ -644,16 +657,19 @@ def test_signed_registered_runtime_and_worker_admission_cutoff_keeps_wall_securi
         token_sha256=hashlib.sha256(token.encode()).hexdigest(),
     )
     raw = encode(request.model_dump())
+    signed_request = signature(key, raw, direction="request", nonce=request.nonce)
+    wall["now"] += timedelta(seconds=60)
     response = lab.client.post(
         "/enrollment/v1/runtime/admission",
         content=raw,
         headers={
             "Authorization": "Bearer " + token,
             "Content-Type": "application/json",
-            ADMISSION_HEADER: signature(key, raw, direction="request", nonce=request.nonce),
+            ADMISSION_HEADER: signed_request,
         },
     )
     assert response.status_code == 401
+    assert lab.commerce.now() == period_before
     lab.commerce.advance(point)
     with pytest.raises(RuntimeAdmissionError):
         adapter.authorize(token, lab.binding.owner_subject)
