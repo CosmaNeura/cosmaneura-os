@@ -63,6 +63,7 @@ it('fences close, Escape, backdrop, citations and navigation during a write, the
  workspace.entries.push({...entry(),id:'00000000-0000-4000-8000-000000000074',reply:{...entry().reply!,content:'Another invented Chief answer'}});
  await show();await openEditor();await savedCopy(original);holdWrite=true;await fill('First invented edit');await wait(()=>expect(releaseWrite).toBeTypeOf('function'));await fill(edited);
  expect(button('Close message details').disabled).toBe(true);expect(button('Invented saved notes').disabled).toBe(true);expect(button('Copy edited copy').disabled).toBe(true);expect(busyChanged).toHaveBeenLastCalledWith(true);expect(hasUnsavedWork()).toBe(true);
+ expect(button('Cancel editing').disabled).toBe(true);
  const another=host.querySelectorAll<HTMLButtonElement>('.messages-source-details')[1];expect(another.disabled).toBe(true);
  await act(async()=>{another.click();button('Close message details').click();button('Invented saved notes').click();document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));host.querySelector('.workspace-dialog-backdrop')!.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));});
  expect(host.querySelector('[role=dialog]')).not.toBeNull();expect(source).not.toHaveBeenCalled();await act(async()=>releaseWrite!());await savedCopy(edited);expect(busyChanged).toHaveBeenLastCalledWith(false);await click('Close message details');
@@ -70,6 +71,7 @@ it('fences close, Escape, backdrop, citations and navigation during a write, the
 
 it('retains failed volatile edits through recheck and recovery of an earlier saved copy before retrying storage',async()=>{
  await show();await openEditor();await savedCopy(original);failWrites=true;await fill(edited);await wait(()=>expect(host.textContent).toContain('Local editor storage is unavailable'));expect(button('Close message details').disabled).toBe(true);expect(host.querySelector<HTMLTextAreaElement>('.answer-copy-editor > label textarea')!.value).toBe(edited);
+ expect(button('Cancel editing').disabled).toBe(true);
  failWrites=false;await click('Recheck answer copy recovery');await wait(()=>expect(host.textContent).toContain('saved answer copy draft'));expect(button('Close message details').disabled).toBe(true);
  await click('Restore answer copy draft');await savedCopy(edited);expect(host.querySelector<HTMLTextAreaElement>('.answer-copy-editor > label textarea')!.value).toBe(edited);await click('Copy edited copy');expect(writeClipboard).toHaveBeenCalledExactlyOnceWith(edited);expect(fetcher).not.toHaveBeenCalled();
 });
@@ -111,4 +113,20 @@ it('offers editing only for the completed available Chief conversation, without 
    workspace={...workspace,entries:[changed]};await show();await act(async()=>host.querySelector<HTMLButtonElement>('.messages-source-details')!.click());expect([...host.querySelectorAll('button')].some(b=>b.textContent==='Edit a copy')).toBe(false);await click('Close message details');
  }
  expect(journal.has(address)).toBe(false);expect(fetcher).not.toHaveBeenCalled();
+});
+
+it('cancels after a permanently failed initial recovery check without deleting the encrypted record or bypassing blocked editing',async()=>{
+ const retained=editorDraft(wid,`answer-copy:${eid}`,answerCopyData(entry(),edited));await journal.load(address);await journal.persist(address,retained);
+ const load=vi.spyOn(journal,'load').mockRejectedValue(new DraftStoreError('unavailable')),persist=vi.spyOn(journal,'persist');
+ await show();await openEditor();await wait(()=>expect(host.textContent).toContain('Local editor storage is unavailable'));expect(button('Copy edited copy').disabled).toBe(true);expect(host.querySelector<HTMLTextAreaElement>('.answer-copy-editor > label textarea')!.disabled).toBe(true);expect(button('Close message details').disabled).toBe(true);
+ await click('Cancel editing');expect(host.querySelector('.answer-copy-editor')).toBeNull();expect(button('Close message details').disabled).toBe(false);expect(hasUnsavedWork()).toBe(false);expect(busyChanged).toHaveBeenLastCalledWith(false);expect(persist).not.toHaveBeenCalled();load.mockRestore();expect(await journal.load(address)).toEqual(retained);
+ expect(access!.authorize).not.toHaveBeenCalled();for(const fn of [source,check,action,work,writeClipboard,fetcher])expect(fn).not.toHaveBeenCalled();await click('Close message details');
+});
+
+it('cancels an unread saved offer while keeping its exact encrypted draft available for a later recovery',async()=>{
+ const retained=editorDraft(wid,`answer-copy:${eid}`,answerCopyData(entry(),edited));await journal.load(address);await journal.persist(address,retained);const persist=vi.spyOn(journal,'persist');
+ await show();await openEditor();await wait(()=>expect(host.textContent).toContain('saved answer copy draft'));expect(button('Copy edited copy').disabled).toBe(true);expect(button('Close message details').disabled).toBe(true);
+ await click('Cancel editing');expect(host.querySelector('.answer-copy-editor')).toBeNull();expect(button('Close message details').disabled).toBe(false);expect(hasUnsavedWork()).toBe(false);expect(persist).not.toHaveBeenCalled();expect(await journal.load(address)).toEqual(retained);
+ await click('Edit a copy');await wait(()=>expect(host.textContent).toContain('saved answer copy draft'));expect(button('Copy edited copy').disabled).toBe(true);expect(await journal.load(address)).toEqual(retained);await click('Cancel editing');
+ expect(access!.authorize).not.toHaveBeenCalled();for(const fn of [source,check,action,work,writeClipboard,fetcher])expect(fn).not.toHaveBeenCalled();expect(workspace.entries[0].reply!.content).toBe(original);
 });
