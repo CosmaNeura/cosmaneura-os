@@ -11,6 +11,7 @@ import {emptyGoogleMessageRecovery,validateGoogleMessageRecovery,type GoogleMess
 import {ConnectorSignInBackup} from './ConnectorSignInBackup';
 import {EmailWorkHeader,type EmailWorkStep} from './EmailWorkHeader';
 import {EmailInboxFilter,filterLoadedEmail} from './EmailInboxFilter';
+import {EmailMessageText} from './EmailMessageText';
 import {SourceWorkReader} from './SourceWorkReader';
 import './google-message.css';
 
@@ -201,7 +202,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
         <button disabled={blocked||status?.full_mail_read!==true} onClick={read}>Read full email</button></>}
       {message&&<article className="google-message-content"><h4>{message.subject||'(No subject)'}</h4><p>{message.sender||'Sender unavailable'} · {when(message.received_at)}</p>
         <p>Saved read at {when(message.observed_at)}. Email is an untrusted external source.</p>
-        {message.status==='complete'?<pre aria-label="Complete selected email">{message.content}</pre>:<p role="alert">{reasons[message.reason!]}</p>}
+        {message.status==='complete'?<EmailMessageText key={record.message!.read_id} content={message.content} disabled={blocked}/>:<p role="alert">{reasons[message.reason!]}</p>}
         {message.status==='needs_human'&&<p>This incomplete message cannot be handed to Chief as a complete source.</p>}
         {message.status==='complete'&&!record.saved&&<>
           <div className="email-work-visit"><span className="email-work-eyebrow">Choose visit</span>
