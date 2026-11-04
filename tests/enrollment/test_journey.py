@@ -177,6 +177,51 @@ def test_activation_pending_does_not_create_checkout_or_start_trial(lab):
     assert mutate(client, owner, "/checkout", {"workspace_status": "ready"}).status_code == 422
 
 
+def test_confirmation_available_uses_private_binding_without_exposing_prebilling_url(lab):
+    app, client = lab
+    owner, staff = signed(client), signed(client, "staff-a")
+    state = accepted(client, owner, 2)
+    service, practice_id = app.state.enrollment_service, state["practice"]["id"]
+    assert state["workspace"]["confirmation_available"] is False
+    with service.sessions.begin() as session:
+        session.get(Practice, practice_id).organization_id = "org_synthetic_binding"
+    assert status(client, owner)["workspace"]["confirmation_available"] is False
+    service.record_workspace(practice_id, box_id=str(uuid4()), organization_id="org_synthetic_binding",
+        url="https://app.example.invalid/chief", proof_sha256="c" * 64, status="provisioning",
+        workspace_api_origin="https://api.example.invalid", source_commit="a" * 40, image_sha256="b" * 64)
+    bound = status(client, owner)
+    assert bound["stage"] == "activation_pending"
+    assert bound["workspace"]["confirmation_available"] is True
+    assert bound["workspace"]["url"] is None
+    assert bound["billing"]["status"] == "none" and bound["billing"]["trial_ends_at"] is None
+    assert app.state.synthetic_commerce.create_count == 0
+    invitation = mutate(client, owner, "/invitations", {"email": "staff-a@example.invalid",
+        "role": "staff", "can_sign": False}).json()
+    joined = mutate(client, staff, "/join", {"token": invitation["token"]}).json()
+    assert joined["workspace"]["confirmation_available"] is False
+    with service.sessions.begin() as session:
+        session.get(Practice, practice_id).workspace_status = "failed"
+    assert status(client, owner)["workspace"]["confirmation_available"] is False
+
+
+@pytest.mark.parametrize("field", ["box_id", "organization_id", "workspace_url",
+    "workspace_api_origin", "source_commit", "image_sha256"])
+def test_confirmation_unavailable_when_any_private_binding_prerequisite_is_missing(lab, field):
+    app, client = lab
+    owner = signed(client)
+    state = accepted(client, owner)
+    service, practice_id = app.state.enrollment_service, state["practice"]["id"]
+    service.record_workspace(practice_id, box_id=str(uuid4()), organization_id="org_synthetic_binding",
+        url="https://app.example.invalid/chief", proof_sha256="c" * 64, status="provisioning",
+        workspace_api_origin="https://api.example.invalid", source_commit="a" * 40, image_sha256="b" * 64)
+    with service.sessions.begin() as session:
+        setattr(session.get(Practice, practice_id), field, None)
+    state = status(client, owner)
+    assert state["workspace"]["confirmation_available"] is False
+    assert state["workspace"]["url"] is None and state["stage"] != "ready"
+    assert state["billing"]["trial_ends_at"] is None
+
+
 def test_lost_checkout_reply_reuses_durable_frozen_attempt(lab):
     app, client = lab
     owner = signed(client)
@@ -191,6 +236,32 @@ def test_lost_checkout_reply_reuses_durable_frozen_attempt(lab):
     assert resumed["url"].startswith("https://checkout.stripe.com/")
     assert app.state.synthetic_commerce.create_count == 1
     with app.state.enrollment_service.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(CheckoutAttempt)) == 1
+
+
+def test_checkout_recovery_stays_available_when_only_new_acquisition_is_closed(lab):
+    app, client = lab
+    owner, new_owner = signed(client), signed(client, "owner-b")
+    original = ready_checkout(client, owner)
+    service, commerce = app.state.enrollment_service, app.state.synthetic_commerce
+    service.settings.stripe_acquisition_enabled = False
+    config = client.get("/enrollment/v1/config").json()
+    assert config["activation_available"] is False
+    assert config["checkout_recovery_available"] is True
+    pending = status(client, owner)
+    assert pending["stage"] == "finishing_setup" and pending["billing"]["status"] == "pending"
+    resumed = mutate(client, owner, "/checkout", {})
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["url"] == original["url"]
+    assert commerce.create_count == 1
+    with service.sessions() as session:
+        assert session.scalar(select(func.count()).select_from(CheckoutAttempt)) == 1
+    fresh = accepted(client, new_owner)
+    assert client.post("/lab/qualify", json={"practice_id": fresh["practice"]["id"]}).status_code == 200
+    denied = mutate(client, new_owner, "/checkout", {})
+    assert denied.status_code == 503 and denied.json()["detail"]["code"] == "enrollment_billing_acquisition_disabled"
+    assert commerce.create_count == 1
+    with service.sessions() as session:
         assert session.scalar(select(func.count()).select_from(CheckoutAttempt)) == 1
 
 
@@ -441,6 +512,8 @@ def test_workspace_confirmation_requires_same_human_and_second_scoped_proof(lab)
     invitation = mutate(client, owner, "/invitations", {"email": "staff-a@example.invalid", "role": "staff", "can_sign": False}).json()
     joined = mutate(client, staff, "/join", {"token": invitation["token"]}).json()
     assert joined["stage"] == "finishing_setup"
+    assert joined["workspace"]["confirmation_available"] is True
+    assert joined["workspace"]["url"] is None
     owner_token = client.post("/lab/session", json={"user": "owner-a"}).json()["token"]
     assert mutate(client, staff, "/workspace/confirm", {"workspace_token": owner_token}).status_code == 403
     token = client.post("/lab/session", json={"user": "staff-a"}).json()["token"]

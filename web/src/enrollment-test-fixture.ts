@@ -1,7 +1,7 @@
 import { BAA, ENROLLMENT_CONTRACT, type EnrollmentConfig, type EnrollmentDocument, type EnrollmentStatus } from './enrollment-contract';
 export const enrollmentConfig = ():EnrollmentConfig => ({contract_version:ENROLLMENT_CONTRACT,enabled:true,data_mode:'synthetic',
   auth_configured:true,clerk_publishable_key:'pk_test_invented',auth_methods:['google','microsoft','password'],billing_configured:true,
-  activation_available:false,production_qualified:false,blockers:[],allowed_workspace_origins:['https://workspace.example.invalid'],baa:BAA,
+  activation_available:false,checkout_recovery_available:false,production_qualified:false,blockers:[],allowed_workspace_origins:['https://workspace.example.invalid'],baa:BAA,
   pricing:{currency:'usd',interval:'month',first_human_cents:30000,additional_human_cents:10000,max_self_serve_humans:10,trial_days:14,
     seat_policy:'All humans consume a purchased seat; paused users retain their seat until removed.'}});
 export const enrollmentDocument = ():EnrollmentDocument => ({...BAA,html:'<article><h1>CN-BAA-CUST-CW v2.3</h1><p>Invented render fixture only; this is not a signed agreement.</p></article>'});

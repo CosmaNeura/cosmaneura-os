@@ -14,6 +14,7 @@ export type EnrollmentConfig = {
   data_mode: 'disabled' | 'synthetic' | 'production'; auth_configured: boolean;
   clerk_publishable_key: string | null; auth_methods: ('google' | 'microsoft' | 'password')[];
   billing_configured: boolean; activation_available: boolean; production_qualified: boolean;
+  checkout_recovery_available?: boolean;
   blockers: string[]; allowed_workspace_origins: string[];
   workspace_origin_policy?: EnrollmentWorkspaceOriginPolicy; baa: typeof BAA;
   pricing: { currency: 'usd'; interval: 'month'; first_human_cents: 30000;
@@ -36,7 +37,7 @@ export type EnrollmentStatus = {
   quote: EnrollmentQuote | null;
   billing: { status: string; trial_ends_at: string | null; first_charge_at: string | null;
     cancel_at_period_end: boolean; payment_action_required: boolean };
-  workspace: { status: 'pending' | 'provisioning' | 'ready' | 'failed'; url: string | null; organization_id: string | null; box_id: string | null };
+  workspace: { status: 'pending' | 'provisioning' | 'ready' | 'failed'; url: string | null; organization_id: string | null; box_id: string | null; confirmation_available?: boolean };
   action_required: string | null;
 };
 export type EnrollmentDocument = { doc_id: string; version: string; sha256: string; html: string; pdf_url: string };
@@ -96,6 +97,7 @@ export function validateEnrollmentConfig(value: unknown): EnrollmentConfig {
       workspacePolicy === 'synthetic-practice-uuid-staging-v1' && v.data_mode !== 'synthetic') return invalid();
   const config = { ...v, enabled: bool(v.enabled), auth_configured: bool(v.auth_configured),
     billing_configured: bool(v.billing_configured), activation_available: bool(v.activation_available),
+    checkout_recovery_available:v.checkout_recovery_available===undefined?false:bool(v.checkout_recovery_available),
     production_qualified: bool(v.production_qualified), clerk_publishable_key: nullableText(v.clerk_publishable_key, 1024),
     workspace_origin_policy: workspacePolicy as EnrollmentWorkspaceOriginPolicy,
     blockers: v.blockers.map(item => text(item)), allowed_workspace_origins:v.allowed_workspace_origins.map(item=>{
@@ -153,7 +155,8 @@ export function validateEnrollmentStatus(value: unknown): EnrollmentStatus {
       first_charge_at: timestamp(billing.first_charge_at), cancel_at_period_end: bool(billing.cancel_at_period_end),
       payment_action_required: bool(billing.payment_action_required) },
     workspace: { status: workspace.status as EnrollmentStatus['workspace']['status'], url: nullableText(workspace.url, 2048),
-      organization_id:nullableText(workspace.organization_id),box_id:nullableText(workspace.box_id) },
+      organization_id:nullableText(workspace.organization_id),box_id:nullableText(workspace.box_id),
+      confirmation_available:workspace.confirmation_available===undefined?false:bool(workspace.confirmation_available) },
     action_required: nullableText(v.action_required, 1000),
   };
   if (practice && (practice.country !== 'US' || !['owner','admin','staff'].includes(String(practice.role))) ||

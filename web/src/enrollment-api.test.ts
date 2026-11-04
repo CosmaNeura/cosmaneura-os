@@ -50,6 +50,20 @@ it('fails closed for forged ready state, wrong BAA, wrong price, or unqualified 
   expect(()=>validateEnrollmentConfig({...enrollmentConfig(),baa:{...enrollmentConfig().baa,sha256:'a'.repeat(64)}})).toThrow();
   expect(()=>validateEnrollmentConfig({...enrollmentConfig(),data_mode:'production',production_qualified:false})).toThrow();
 });
+it('defaults absent confirmation availability to false and accepts only a server boolean without granting ready access',()=>{
+  const pending=enrollmentStatus('activation_pending',3);
+  expect(validateEnrollmentStatus(pending).workspace.confirmation_available).toBe(false);
+  const offered={...pending,workspace:{...pending.workspace,confirmation_available:true,organization_id:'org_invented',box_id:'10000000-0000-4000-8000-000000000003'}};
+  expect(validateEnrollmentStatus(offered).workspace).toMatchObject({url:null,confirmation_available:true});
+  for(const value of ['true',1,null,{}])expect(()=>validateEnrollmentStatus({...offered,workspace:{...offered.workspace,confirmation_available:value}})).toThrow();
+  expect(()=>validateEnrollmentStatus({...offered,stage:'ready'})).toThrow();
+});
+it('defaults absent checkout recovery availability to false and rejects malformed recovery flags',()=>{
+  const config={...enrollmentConfig()};delete config.checkout_recovery_available;
+  expect(validateEnrollmentConfig(config).checkout_recovery_available).toBe(false);
+  expect(validateEnrollmentConfig({...config,activation_available:false,checkout_recovery_available:true}).checkout_recovery_available).toBe(true);
+  for(const value of ['true',1,null,{}])expect(()=>validateEnrollmentConfig({...config,checkout_recovery_available:value})).toThrow();
+});
 it('accepts compatible saved runtime names while preserving the full legal practice name',()=>{
   const status=enrollmentStatus('ready',5),name='N'.repeat(120);status.profile!.display_name=name;status.practice!.display_name=name;status.practice!.legal_name='L'.repeat(160);
   expect(validateEnrollmentStatus(status).practice).toMatchObject({display_name:name,legal_name:'L'.repeat(160)});
