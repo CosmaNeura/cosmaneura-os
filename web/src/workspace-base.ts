@@ -58,7 +58,8 @@ export function workspaceApiBase(identity?:WorkspaceIdentity,fallback='http://12
 export function registeredNativeWorkspaceConfiguration(identity?:WorkspaceIdentity):HostedWorkspaceConfiguration|null {
   const selected=transport.resolve(identity);if(!selected)return null;
   const profile=selected.profile;
-  return Object.freeze({client:profile.client,dataMode:'synthetic',apiOrigin:profile.nativeIdentity.apiOrigin,
+  // The validated registered profile carries the practice's data mode (synthetic staging or real-data production).
+  return Object.freeze({client:profile.client,dataMode:profile.data_mode,apiOrigin:profile.nativeIdentity.apiOrigin,
     apiBase:profile.client==='desktop'?'app://cosmas/api':profile.nativeIdentity.apiOrigin,
     pageOrigin:profile.client==='desktop'?'app://cosmas':'capacitor://localhost'});
 }

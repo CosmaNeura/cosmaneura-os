@@ -45,6 +45,18 @@ public enum NativePracticeProfileError: String, Error, Sendable {
 public enum NativeRegisteredPracticeOriginPolicy: String, Sendable {
     case exact
     case syntheticPracticeUUIDStaging = "synthetic-practice-uuid-staging-v1"
+    /// Real practice data: production Clerk realm and `<uuid>.workspace.cosmas.ai` only.
+    case practiceUUIDProduction = "practice-uuid-production-v1"
+
+    /// Each registered policy is bound to exactly one realm profile.
+    func admits(_ profile: NativeIdentityProfile) -> Bool {
+        switch self {
+        case .exact, .syntheticPracticeUUIDStaging: return profile == .operationalStaging
+        case .practiceUUIDProduction: return profile == .operationalBeta
+        }
+    }
+
+    var dataMode: String { self == .practiceUUIDProduction ? "authorized_beta" : "synthetic" }
 }
 
 public struct NativePracticeAccountServiceBinding: Equatable, Sendable {
@@ -59,7 +71,7 @@ public struct NativePracticeAccountServiceBinding: Equatable, Sendable {
                 registeredPracticeOrigins: NativeRegisteredPracticeOriginPolicy = .exact) throws {
         guard exactPracticeOrigin(accountOrigin), registeredPracticeOrigins != .exact || !allowedAPIOrigins.isEmpty,
               allowedAPIOrigins.count <= 32, allowedAPIOrigins.allSatisfy(exactPracticeOrigin),
-              realm.profile == .operationalStaging, realm.storageNamespace != nil else {
+              registeredPracticeOrigins.admits(realm.profile), realm.storageNamespace != nil else {
             throw NativePracticeProfileError.invalidBinding
         }
         _ = try NativeAccountTokenPolicy(configuration: realm, audience: audience)
@@ -68,14 +80,22 @@ public struct NativePracticeAccountServiceBinding: Equatable, Sendable {
         self.registeredPracticeOrigins = registeredPracticeOrigins
     }
     /// Exact reviewed addresses remain valid. The optional dynamic policy is
-    /// closed to this server-registered UUID, synthetic staging only; reserved
-    /// beta/account names and arbitrary suffixes cannot match it.
+    /// closed to this server-registered UUID in its own environment (synthetic
+    /// staging or production); reserved names and arbitrary suffixes cannot match it.
     public func allowsAPI(_ origin: String, practiceID: UUID) -> Bool {
         if allowedAPIOrigins.contains(origin) { return true }
-        return registeredPracticeOrigins == .syntheticPracticeUUIDStaging &&
-            realm.profile == .operationalStaging && origin ==
-                "https://api." + practiceID.uuidString.lowercased() + ".staging.cosmas.ai"
+        let practice = practiceID.uuidString.lowercased()
+        switch registeredPracticeOrigins {
+        case .exact: return false
+        case .syntheticPracticeUUIDStaging:
+            return realm.profile == .operationalStaging && origin == "https://api." + practice + ".staging.cosmas.ai"
+        case .practiceUUIDProduction:
+            return realm.profile == .operationalBeta && origin == "https://api." + practice + ".workspace.cosmas.ai"
+        }
     }
+
+    /// The data mode the account service must report for this binding.
+    public var dataMode: String { registeredPracticeOrigins.dataMode }
 }
 
 /// Minted by native setup/selection after a trusted account-service discovery.

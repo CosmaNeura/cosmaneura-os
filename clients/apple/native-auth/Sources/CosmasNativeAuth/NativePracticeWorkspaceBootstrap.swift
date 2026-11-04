@@ -22,7 +22,7 @@ public struct NativePracticeWorkspaceBootstrap: Equatable, Sendable {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               Set(root.keys) == ["contract_version", "client", "nonce", "native_origin", "data_mode", "nativeIdentity", "session", "practice", "workspace", "issued_at", "expires_at"],
               root["contract_version"] as? String == "cosmas-native-workspace-profile.v1",
-              root["client"] as? String == "apple", root["data_mode"] as? String == "synthetic",
+              root["client"] as? String == "apple", root["data_mode"] as? String == binding.dataMode,
               root["native_origin"] as? String == binding.realm.workspaceOrigin.rawValue,
               root["nonce"] as? String == expectation.nonce.uuidString.lowercased(),
               let native = root["nativeIdentity"] as? [String: Any],
