@@ -6,11 +6,12 @@ import { useUnsavedWork } from "./unsaved-work";
 import { EditorRecoveryNotice, editorData, editorDraft, useEditorRecovery } from "./editor-recovery";
 import { DraftStoreError } from "./draft-store";
 
-export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange,onTeamDrafts,compact=false }: {
+export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange,onTeamDrafts,compact=false,notebookDirty=false }: {
   workspace: Workspace; locked: boolean; onSave: (operation: NoteOperation) => void; onSources: () => void; active?:boolean;
   onStateChange?:(state:'editing'|'review'|'saved')=>void;
   onTeamDrafts?:(noteId:string)=>void;
   compact?:boolean;
+  notebookDirty?:boolean;
 }) {
   const latest = workspace.note?.latest;
   const core = !!latest?.core_source;
@@ -78,6 +79,15 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
     if(initializingScribe)useScribe(scribe!);
   },[initializingScribe,scribe]);
   const compactReview=compact&&!core;
+  const savedNotebook=workspace.entries.filter(entry=>entry.kind==='scratchpad').at(-1);
+  const canUseSavedNotes=compactReview&&!latest&&!baseId&&!content&&sourceId===null&&!!savedNotebook?.content.trim();
+  function useSavedNotes(){
+    // This is an explicit copy into the existing private editor, not a bot
+    // reply, note save or review. The normal save binds the current sources.
+    if(!active||locked||notebookDirty||otherVersion||initializingScribe||!canUseSavedNotes)return;
+    baseCore.current=false;setContent(savedNotebook!.content);setSourceId(null);
+    setReconciled(false);setConfirmed(false);setAcknowledgedGapTarget(null);setReplacement(null);
+  }
   const reviewHeading=<div className="team-notebook-title"><h2>Note review</h2><span className="team-pill">
       {otherVersion ? "New version available" : dirty ? "Review version not saved" : sourcesChanged ? "Sources changed" : latest?.review ? "Reviewed privately" : "Needs review"}
     </span></div>;
@@ -133,6 +143,8 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
     {replacement && !core && <div className="team-note-notice" role="status"><p>Replace the editor with Scribe's latest draft? Saved versions remain in history.</p>
       <button disabled={locked} onClick={() => useScribe(replacement)}>Replace editor with draft</button>
       <button disabled={locked} onClick={() => setReplacement(null)}>Keep my text</button></div>}
+    {canUseSavedNotes&&<><button className="team-subtle" disabled={!active||locked||notebookDirty||otherVersion||initializingScribe} onClick={useSavedNotes}>Use my saved notes</button>
+      {notebookDirty&&<p className="team-fine" role="status">Save your notebook changes first. Your review text stays separate.</p>}</>}
     <label htmlFor="private-note-text">{compactReview?"Note text":"Private note draft"}</label>
     <textarea id="private-note-text" rows={10} maxLength={core ? undefined : 20000} value={content} readOnly={core} disabled={locked || otherVersion || initializingScribe}
       onChange={e => { setContent(e.target.value); setConfirmed(false); }} placeholder={compactReview?"Write or review your visit notes…":"Review a Scribe draft or write your own note…"} />
