@@ -56,6 +56,7 @@ import { TeamWorkPanel } from "./TeamWorkPanel";
 import { HandoffReviewPanel } from "./HandoffReviewPanel";
 import {modelActive, type ModelOperation} from "./model-work-request";
 import { NoteReview } from "./NoteReview";
+import {canReviewChiefNote,supportsChiefNoteSource,type ChiefNoteOffer} from './chief-note-source';
 import { FollowUpWork } from "./FollowUpWork";
 import { VendorWorkspaceMount } from "./VendorWorkMount";
 import { PortalSetupMount, PORTAL_SETUP_BUILD } from "./PortalSetupMount";
@@ -169,6 +170,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const athenaTaskOpen=!!athenaTask&&athenaTask.identity===authenticated&&athenaTask.open&&athenaTask.view===athenaView;
   useEffect(()=>{athenaOpening.current++;setAthenaTask(previous=>previous?.open&&previous.view!==athenaView?{...previous,open:false}:previous);},[athenaView,authenticated]);
   const [contextBot,setContextBot]=useState<string|null>(null),[messagesTaskChoice,setMessagesTask]=useState<'Tools'|'Activity'|null>(null);
+  const [chiefNoteSelection,setChiefNoteSelection]=useState<(ChiefNoteOffer&{owner:typeof authenticated;identity:typeof identity;workspaceId:string;address:string;generation:number})|null>(null);
+  useEffect(()=>{setChiefNoteSelection(null);},[authenticated,identity,workspace?.id,selected]);
   const [captureTransition,setCaptureTransition]=useState(false),[homePending,setHomePending]=useState(false),[privateLinkPending,setPrivateLinkPending]=useState(false);
   const contextBotRef=useRef(contextBot);contextBotRef.current=contextBot;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
@@ -595,6 +598,14 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     taskFocusPending.current=true;taskScrollReturn.current=mobileChatFrame.scrollRef.current?.scrollTop??null;
     if(task==='Activity'||task==='Tools'){setMessagesTask(task);setMobilePanel('Conversation');setPhoneChatToolsOpen(true);setTeamWorkExpanded(task==='Activity');}
     else{setMessagesTask(null);setPanel(task);setMobilePanel(task);setPhoneChatToolsOpen(false);}
+  }
+  function reviewChiefAnswer(entry:WorkspaceEntry){
+    const view=session.getSnapshot(),current=view.workspace?.entries.find(saved=>saved.id===entry.id);
+    if(locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked||previousIdentity.current!==authenticated||
+      view.workspace?.id!==workspace?.id||view.selected!==selected||workspace?.note?.latest?.core_source||!view.workspace||!supportsChiefNoteSource(view.workspace)||!current||
+      !canReviewChiefNote(current,view.workspace.note?.chief_source_min_revision)||current.reply?.content!==entry.reply?.content||current.reply?.context_revision!==entry.reply?.context_revision)return;
+    setChiefNoteSelection({entry:current,token:{},owner:authenticated,identity,workspaceId:view.workspace!.id,address:selected,generation:generation.current});
+    showConversationTask('Review');
   }
   function openConversationSource(id:string){
     const view=session.getSnapshot();if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked||previousIdentity.current!==authenticated||view.workspace?.id!==workspace?.id||view.selected!==selected||!view.workspace?.entries.some(entry=>entry.id===id))return;
@@ -1915,7 +1926,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               {messagesMode&&bot?.role==='chief'&&chiefStarters}
               {bot?.role!=='chief'&&<button disabled={locked || !team?.revision || !bot?.enabled} onClick={() => {if(session.presentation.enabled){updateThought(template?.prompt??'Review this encounter');setQuestionFocus(value=>value+1);}else ask(template?.prompt);}}>{template?.prompt ?? "Review this encounter"}<span aria-hidden="true"> ↗</span></button>}</div>}
             <ConversationEntries presentation={messagesMode?'messages':'workspace'} projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked||answerCopyOtherNavigationLocked||captureNavigationLocked||captureDraftLocked} canRestoreFocus={canRestoreDialogFocus} onBusyChange={reportAnswerCopyBusy}
-              onWork={()=>{setPanel('Work');setMobilePanel('Work');}} onSource={openConversationSource}
+              onWork={()=>{setPanel('Work');setMobilePanel('Work');}} onSource={openConversationSource} onReviewNote={!workspace.note?.latest?.core_source&&supportsChiefNoteSource(workspace)?reviewChiefAnswer:undefined} noteSourceMinimumRevision={workspace.note?.chief_source_min_revision}
               onCheck={checkEntryResult} onAction={action=>{
                 if(action.kind==='review_note'){setPanel('Review');setMobilePanel('Review');}
                 else if(action.kind==='review_work'){setPanel('Work');setMobilePanel('Work');}
@@ -1970,6 +1981,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             <div hidden={panel !== "Review"}>
               {workspace.note?.latest&&!(messagesMode&&!workspace.note.latest.core_source)&&<p className="team-fine">Prepare Follow-up and Research shares this exact saved note, version {workspace.note.latest.version}, with your private team and asks Chief for drafts. It does not send a patient email or run a public search.</p>}
               <NoteReview key={workspace.id} active={panel === "Review"} compact={messagesMode} notebookDirty={note!==latestNote} workspace={reviewWorkspace!} locked={locked || captureDraftLocked} onStateChange={setReviewState}
+                chiefNoteOffer={chiefNoteSelection&&chiefNoteSelection.owner===authenticated&&chiefNoteSelection.identity===identity&&chiefNoteSelection.workspaceId===workspace.id&&chiefNoteSelection.address===selected&&chiefNoteSelection.generation===generation.current?chiefNoteSelection:undefined}
               onTeamDrafts={authenticated&&team?.configuration.bots.some(item=>item.role==='chief'&&item.enabled&&!item.retired)?openClinicalTeamDrafts:undefined}
               onSave={operation => void save(operation)} onSources={() => { setPanel("Sources"); setMobilePanel("Sources"); }} /></div>
             {visitLinked&&<div hidden={panel !== "Work"}><FollowUpWork key={workspace.id} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}

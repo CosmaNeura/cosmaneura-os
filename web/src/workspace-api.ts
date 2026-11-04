@@ -149,7 +149,7 @@ export type Workspace = {
   private_draft?: {title:string;state:'unlinked'|'linked';link_receipt_id:string|null;linked_at:string|null};
   entries: WorkspaceEntry[]; work_candidates: WorkReference[];
   handoffs?: DraftHandoff[];
-  note?: { latest: PrivateNote | null; history: PrivateNote[] };
+  note?: { latest: PrivateNote | null; history: PrivateNote[]; allowed_reply_roles?: string[]; chief_source_min_revision?:number };
   follow_ups?: FollowUp[];
   model_contract_version?: 1;
   model_observed_at?: string;
@@ -242,6 +242,7 @@ export class WorkspaceApiError extends Error {
       code === "team_setup_prerequisites_changed" ? "Team prerequisites changed. Your settings are retained; refresh the setup and run the invented rehearsal again before saving." :
       code === "team_setup_review_required" || code === "team_setup_configuration_changed" || code === "team_catalog_changed" ? "Review this exact team configuration and run the invented rehearsal again before saving. Your draft is retained." :
       code === "capture_notebook_changed" ? "The saved scratch notes changed. Check the latest notebook revision and prepare a draft from it before review." :
+      code === "note_source_context_changed" ? "This Chief answer predates the current visit connection. Your note text is kept. Ask Chief for a draft in the current visit before importing a new answer." :
       code === "core_note_changed" || code === "capture_note_conflict" ? "The saved Core note or recording changed. Check its saved draft, use the current version for review, and review it again before follow-up." :
       code === "core_note_edit_required" ? "Edit this note in the recorded visit draft, then use the saved Core version for review." :
       status === 409 ? "The saved workspace changed. Load the latest version before saving again." :
