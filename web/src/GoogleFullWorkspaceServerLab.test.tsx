@@ -154,6 +154,7 @@ async function selectSource() {
     await click(calendar ? 'Check calendar access' : 'Check email access');
     if (calendar) {
         await click('Load next 7 days');
+        await click('Next 7 days');
         await wait(() => expect(host.querySelector<HTMLButtonElement>('[data-calendar-event="invented-timed"]')?.disabled).toBe(false));
         await act(async () => host.querySelector<HTMLButtonElement>('[data-calendar-event="invented-timed"]')!.click());
         await click('Use current visit');
@@ -274,7 +275,13 @@ it.skipIf(!base).each([{ persona: 'physician', round: 1 }, { persona: 'nurse_pra
         expect((await inspect()).provider_calls).toBe(before.provider_calls);
         ep.steps.push('fresh_parent_journal_restore_exact_selected_source_without_provider_repeat');
         await click(calendar ? 'Check calendar access' : 'Check email access');
-        await click(calendar ? 'Use current visit' : 'Use for current visit');
+        if (calendar) {
+            await wait(() => expect(host.textContent).toContain('This visit is selected for review.'));
+            expect(host.querySelectorAll('.google-calendar-checks input')).toHaveLength(3);
+        }
+        else {
+            await click('Use for current visit');
+        }
         await checkSource();
         const saved = await saveSource();
         const final = await revisionAccept();
