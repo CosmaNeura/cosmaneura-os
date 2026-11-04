@@ -172,7 +172,7 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
   await c.click('Send message');await c.wait(()=>expect(ep.host.querySelector<HTMLTextAreaElement>('#team-question')?.value).toBe(''));
   async function work(handoff_id?:string){const response=await ep.lifecycle.fetch(realFetch,`${base}/lab/work`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({case_id:ep.packet!.case_id,...handoff_id?{handoff_id}:{}}),cache:'no-store',credentials:'omit',redirect:'error'});expect(response.status,await response.clone().text()).toBe(200);await refresh(ep);}
   await work();const first=ep.workspace!.handoffs!.find(h=>h.status==='completed')! as ReviewableHandoff;expect(first).toBeTruthy();
-  await c.click(`Review ${first.recipient_name} result`);await c.wait(()=>expect(ep.host.querySelector('[aria-label="Complete saved draft"]')).toBeTruthy());
+  await c.click(`Review result · ${first.recipient_name}`);await c.wait(()=>expect(ep.host.querySelector('[aria-label="Complete saved draft"]')).toBeTruthy());
   await c.click('Request changes');const feedback=`${persona}: identify an owner and due date; preserve uncertain history and trial eligibility.`;await input('Change request',feedback);await c.click('Save change request');await c.wait(()=>expect(c.button('Prepare revised draft').disabled).toBe(false));
   ep.workspace=await workspaceApi.read(ep.identity,ep.packet.workspace.id);const changed=ep.workspace.handoffs!.find(h=>h.id===first.id)!;expect(changed.review).toMatchObject({decision:'changes_requested',feedback,result_sha256:first.result_sha256});
   await c.click('Prepare revised draft');await c.wait(()=>expect(ep.host.textContent).not.toContain('Saving revised assignment…'));ep.workspace=await workspaceApi.read(ep.identity,ep.packet.workspace.id);
@@ -189,7 +189,7 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
   ep.workspace=await workspaceApi.read(ep.identity,ep.packet.workspace.id);expect(ep.workspace.handoffs!.find(h=>h.id===accepted.id)?.review).toEqual(accepted.review);
   const counts=await c.inspect();expect(counts.case_provider_calls).toBe(2);expect(counts.review_count).toBe(1);expect(counts.model_rounds).toBe(6);expect(trial.wire.filter(w=>w.path==='/fax-inbound/acquire')).toHaveLength(1);expect(trial.wire.filter(w=>w.path.endsWith('/fax-inbound-source'))).toHaveLength(1);
   step('full_workspace_settings_reviewed_passage_editable_chief_scribe_requested_edits_accept_fresh_reopen_exact_no_duplicate');
-  await c.click(`Review ${first.recipient_name} result`);await c.wait(()=>expect(ep.host.querySelector('[aria-label="Complete saved draft"]')).toBeTruthy());
+  await c.click(`Review result · ${first.recipient_name}`);await c.wait(()=>expect(ep.host.querySelector('[aria-label="Complete saved draft"]')).toBeTruthy());
   const revoke=await ep.lifecycle.fetch(realFetch,`${base}/lab/revoke`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({case_id:ep.packet.case_id}),cache:'no-store',credentials:'omit',redirect:'error'});expect(revoke.status,await revoke.clone().text()).toBe(200);
   await refresh(ep);await c.wait(()=>expect(ep.host.querySelector('[aria-label="Complete saved draft"]')).toBeNull());expect(ep.host.textContent).not.toContain(ep.packet.passage);
   await c.wait(()=>expect(ep.host.querySelector(`[id="source-${sourceRecord.saved!.entry_id}"]`)?.textContent).not.toContain(ep.packet!.passage));

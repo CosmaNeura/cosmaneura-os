@@ -18,7 +18,7 @@ export function RoutineTimeInput({label,value,onChange,disabled=false}: {
       aria-invalid={!canUsePicker||undefined}
       onChange={event=>{if(!disabled)onChange(event.target.value);}}/></label>
     <div className="routine-time__controls">
-      <button type="button" aria-controls={id} aria-label={`${usingText?'Use time picker for':'Type'} ${label.toLowerCase()}`}
+      <button type="button" aria-controls={id} aria-label={`${usingText?'Use time picker':'Type time'} · ${label}`}
         disabled={disabled||usingText&&!canUsePicker}
         onClick={()=>{if(!disabled&&(!usingText||canUsePicker))setPreferText(!usingText);}}>
         {usingText?'Use time picker':'Type time'}</button>

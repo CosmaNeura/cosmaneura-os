@@ -1270,7 +1270,7 @@ describe("private encounter workspace", () => {
     expect(container.textContent).toContain("Draft ready");
     expect(container.textContent).not.toContain("Brief from Chief");
     expect(container.querySelector<HTMLTextAreaElement>("#team-notebook")?.value).toBe("My unsaved private thought");
-    await click("Review Scribe result");
+    await click("Review result · Scribe");
     expect(container.textContent).toContain("Brief from Chief");
     expect(document.activeElement?.id).toBe("turn-draft-result");
     expect(container.querySelector("#turn-draft-result .team-pill")?.textContent).toBe("Unreviewed draft");
@@ -1290,7 +1290,7 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:value,team:configured});
     await click('Open synthetic encounter');await chooseBot('Research');
     expect(container.querySelector('.team-messages')?.hasAttribute('hidden')).toBe(true);
-    await click('Review Research result');
+    await click('Review result · Research');
     expect(container.querySelector('.team-messages')?.hasAttribute('hidden')).toBe(false);
     expect(document.activeElement?.id).toBe(`turn-${resultId}`);
     const question=container.querySelector<HTMLTextAreaElement>('#team-question')!;question.focus();

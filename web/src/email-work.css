@@ -1,7 +1,7 @@
 .google-message-panel.email-work,.outlook-message-panel.email-work{gap:1rem;border:0;padding:0;min-width:0}
 .email-work-header{display:grid;gap:.65rem;min-width:0}
 .email-work-heading{display:flex;align-items:center;justify-content:space-between;gap:.75rem}
-.email-work-provider{font-size:.8rem;color:var(--team-muted,#637168)}
+.email-work-provider{font-size:.8125rem;color:var(--team-muted,#637168)}
 .email-work-header>p{color:var(--team-muted,#637168);line-height:1.5}
 .email-work-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;list-style:none;padding:0;margin:.2rem 0 0}
 .email-work-steps li{display:flex;align-items:center;gap:.45rem;min-width:0;padding:.65rem 0;border-bottom:2px solid var(--team-line,#d9ddd9);font-size:.85rem;line-height:1.25;color:var(--team-muted,#637168)}
@@ -16,34 +16,34 @@
 .email-work-inbox,.email-work-message{display:grid;gap:.8rem;min-width:0}
 .email-work-inbox .source-work-choices>button{width:100%}
 .email-inbox-filter{display:grid;gap:.45rem;margin-top:.75rem;min-width:0}
-.email-inbox-filter>label{font-size:.8rem;font-weight:600}
+.email-inbox-filter>label{font-size:.8125rem;font-weight:600}
 .email-inbox-filter>input{width:100%;min-width:0;box-sizing:border-box;min-height:44px;font-size:1rem;padding:.6rem .7rem;border:1px solid var(--team-line,#d9ddd9);border-radius:.5rem;background:var(--team-surface,#fff);color:inherit}
 .email-inbox-filter-options{display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap}
 .email-inbox-filter-options>label{display:flex;align-items:center;gap:.45rem;min-height:44px;font-size:.85rem}
 .email-work .email-inbox-filter-options>button{width:auto;padding:.4rem .6rem;border:1px solid var(--team-line,#d9ddd9);border-radius:.4rem;min-height:44px}
-.email-inbox-filter>p{font-size:.78rem;line-height:1.5;color:var(--team-muted,#637168)}
-.email-work .google-message-list>p,.email-work .outlook-message-list>p{font-size:.78rem;line-height:1.5;color:var(--team-muted,#637168);overflow-wrap:anywhere}
+.email-inbox-filter>p{font-size:.8125rem;line-height:1.5;color:var(--team-muted,#637168)}
+.email-work .google-message-list>p,.email-work .outlook-message-list>p{font-size:.8125rem;line-height:1.5;color:var(--team-muted,#637168);overflow-wrap:anywhere}
 .email-work .google-message-list ul,.email-work .outlook-message-list ul{gap:0;margin:.65rem 0 0;max-height:520px;overflow:auto;overscroll-behavior:contain}
 .email-work .google-message-list button,.email-work .outlook-message-list button{padding:.8rem .65rem;border:0;border-bottom:1px solid var(--team-line,#d9ddd9);border-inline-start:3px solid transparent;border-radius:0;background:none;gap:.3rem}
 .email-work .google-message-list button[aria-pressed=true],.email-work .outlook-message-list button[aria-pressed=true]{border-inline-start-color:var(--team-accent,#396750);background:var(--team-accent-soft,#edf4ef)}
-.email-work .google-message-list button span,.email-work .outlook-message-list button span{font-size:.78rem;color:var(--team-muted,#637168)}
+.email-work .google-message-list button span,.email-work .outlook-message-list button span{font-size:.8125rem;color:var(--team-muted,#637168)}
 .email-work-empty{padding:1rem 0;color:var(--team-muted,#637168);line-height:1.5}
 .email-work .google-message-content,.email-work .outlook-message-content{gap:.75rem}
 .email-work .google-message-content>p,.email-work .outlook-message-content>p{font-size:.85rem;line-height:1.5;overflow-wrap:anywhere}
 .email-work .google-message-content pre,.email-work .outlook-message-content pre{padding:0 0 1rem;background:none;border-radius:0;border-bottom:1px solid var(--team-line,#d9ddd9);line-height:1.6}
-.email-work-visit,.email-work-review,.email-work-reply{display:grid;gap:.65rem;min-width:0}
+.email-work-visit,.email-work-review,.email-work-reply{display:grid;gap:.55rem;min-width:0}
 .email-work-visit p,.email-work-review p,.email-work-reply p{line-height:1.5}
 .email-work-eyebrow{font-size:.75rem;font-weight:600;color:var(--team-muted,#637168)}
 .email-work-action-row{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}
 .email-work-action-row>button{flex:0 1 auto}
 .email-work .google-message-check,.email-work .outlook-message-check{padding:.35rem 0;line-height:1.5}
 .email-work-review{padding-top:.65rem;border-top:1px solid var(--team-line,#d9ddd9)}
-.email-work-review>p{font-size:.8rem;color:var(--team-muted,#637168)}
+.email-work-review>p{font-size:.8125rem;color:var(--team-muted,#637168)}
 .email-work-reply{padding-top:.5rem}
 @media(max-width:680px){
   .email-work-reader{grid-template-columns:minmax(0,1fr);gap:1rem}
   .email-work .google-message-list ul,.email-work .outlook-message-list ul{max-height:300px}
-  .email-work-steps li{align-items:flex-start;font-size:.78rem;gap:.3rem}
+  .email-work-steps li{align-items:flex-start;font-size:.8125rem;gap:.3rem}
   .email-work-access{align-items:flex-start}
 }
 @media(max-width:420px){

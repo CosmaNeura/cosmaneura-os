@@ -26,7 +26,7 @@ async function type(value:string){await act(async()=>{
 
 it('switches a valid time between native and text entry without editing or submitting',async()=>{
   await render('09:45');const id=field().id;
-  expect(field().type).toBe('time');expect(toggle().getAttribute('aria-label')).toBe('Type brief time');
+  expect(field().type).toBe('time');expect(toggle().getAttribute('aria-label')).toBe('Type time · Brief time');
   await click();expect(field().type).toBe('text');expect(field().value).toBe('09:45');expect(field().id).toBe(id);
   expect(field().maxLength).toBe(5);expect(field().placeholder).toBe('HH:MM');
   expect(host.querySelector('label')!.htmlFor).toBe(id);
