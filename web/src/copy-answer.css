@@ -1,0 +1,5 @@
+.message-copy-answer{margin-block:1rem}
+.team-workspace .message-copy-answer button{min-height:44px;max-width:100%;white-space:normal}
+.message-copy-answer label{display:block}
+.message-copy-answer textarea{display:block;box-sizing:border-box;width:100%;min-height:10rem;margin-top:.5rem;padding:.75rem;font:inherit;line-height:1.5;resize:vertical}
+.message-copy-answer p{overflow-wrap:anywhere}
