@@ -13,7 +13,7 @@ export function AnswerCopyEditor({workspaceId,entry,scope,locked,isCurrent,onBus
   const access=useContext(EditorRecoveryContext);
   const [binding]=useState(()=>({workspaceId,entryId:entry.id,scope,access,originalContent:entry.reply!.content,contextRevision:entry.reply!.context_revision}));
   const [content,setContent]=useState(binding.originalContent),[persisted,setPersisted]=useState<string|null>(null),[writing,setWriting]=useState(false);
-  const volatile=useRef(false),inFlight=useRef(false),alive=useRef(true);
+  const volatile=useRef(false),inFlight=useRef(false),alive=useRef(true),field=useRef<HTMLTextAreaElement>(null);
   const current=useRef({access,workspaceId,entry,scope,locked,isCurrent,content});current.current={access,workspaceId,entry,scope,locked,isCurrent,content};
   const ownsStorage=()=>{const now=current.current;return alive.current&&now.access===binding.access&&now.scope===binding.scope&&now.workspaceId===binding.workspaceId&&now.entry.id===binding.entryId&&now.isCurrent();};
   const owns=()=>{const now=current.current;return ownsStorage()&&canEditAnswerCopy(now.workspaceId,now.entry)&&now.entry.reply!.content===binding.originalContent&&now.entry.reply!.context_revision===binding.contextRevision;};
@@ -49,11 +49,11 @@ export function AnswerCopyEditor({workspaceId,entry,scope,locked,isCurrent,onBus
     <EditorRecoveryNotice recovery={recovery} label="Answer copy" onRestore={restore}/>
     {volatile.current&&recovery.offer&&<p>Your current edits are retained while you check the earlier saved copy.</p>}
     {!contentValid&&<p role="alert">This copy is too long to save on this device. Shorten it before copying or closing; your current text is retained.</p>}
-    <label>Editable answer copy<textarea value={content} maxLength={65536} disabled={locked||recovery.blocked} onChange={event=>{
+    <label>Editable answer copy<textarea ref={field} value={content} maxLength={65536} disabled={locked||recovery.blocked} onChange={event=>{
       if(!owns()||current.current.locked||recovery.blocked)return;
       volatile.current=true;blocked.current=true;onBusyChange(true);setContent(event.target.value);
     }}/></label>
-    <CopyAnswer content={content} scope={binding} edited disabled={locked||unsafe} isCurrent={()=>owns()&&!blocked.current&&!current.current.locked}/>
+    <CopyAnswer content={content} scope={binding} edited manualSelectionTarget={field} disabled={locked||unsafe} isCurrent={()=>owns()&&!blocked.current&&!current.current.locked}/>
     <button type="button" disabled={locked||unsafe} onClick={()=>{if(owns()&&!blocked.current&&!current.current.locked)onDone();}}>Finish editing</button>
   </section>;
 }
