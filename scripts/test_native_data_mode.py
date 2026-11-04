@@ -82,7 +82,7 @@ class NativeDataMode(unittest.TestCase):
                                      "ios_native" if client == "apple" else "browser_microphone")
                     self.assertEqual("VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED" in manifest["enabledFlags"], not staging)
                     if client == "desktop":
-                        argv = ["prepare-desktop-synthetic.py", "--scribe-source", str(self.root / "unread-source"),
+                        argv = ["prepare-desktop-synthetic.py",
                             "--web-dist", str(web), "--output", str(self.root / "never-created"),
                             "--native-auth-helper", str(self.root / "unread-helper"), "--installation-profile", "beta",
                             "--hosted-api-origin", self.identity["apiOrigin"], "--native-identity-config", str(identity),
@@ -124,7 +124,7 @@ class NativeDataMode(unittest.TestCase):
 
         with patch.object(target._beta, "validate_native", side_effect=finish_preflight):
             if client == "desktop":
-                argv = ["prepare-desktop-synthetic.py", "--scribe-source", str(self.root / "unread-source"),
+                argv = ["prepare-desktop-synthetic.py",
                         "--web-dist", str(web), "--output", str(self.root / "never-created"),
                         "--native-auth-helper", str(self.root / "unread-helper"), "--installation-profile", "beta",
                         "--hosted-api-origin", self.identity["apiOrigin"], "--native-identity-config", str(identity),
@@ -209,11 +209,16 @@ class NativeDataMode(unittest.TestCase):
                 }))
                 (app / "public").mkdir()
                 (app / "public/cosmas-workspace-build.json").write_bytes((web / "cosmas-workspace-build.json").read_bytes())
+                (app / "public/cosmas-beta-features.json").write_bytes((web / "cosmas-beta-features.json").read_bytes())
+                features = json.loads((web / "cosmas-beta-features.json").read_text())
                 (app / "main.mjs").write_text("// Invented packaging fixture; never executed.\n")
                 (app / "package.json").write_text(json.dumps({"version": "0.1.0"}))
                 config = {"mode": "hosted-beta-authenticated", "dataMode": data_mode,
                     "apiOrigin": self.identity["apiOrigin"], "nativeIdentity": identity["identity"],
                     "nativeAuthEnabled": True, "appVersion": "0.1.0", "buildNumber": "1",
+                    "cosmaneuraWebOrigin": features["coreWebOrigin"],
+                    "captureUploadOrigins": features["captureUploadOrigins"],
+                    "microphoneCaptureEnabled": features["captureMode"] == "browser_microphone",
                     "installation": {"profile": "beta", "bundleIdentifier": "com.cosmasos.beta.desktop",
                         "rendererPartition": "persist:cosmasos-operational-beta", "authHelperBundleIdentifier": identity["bundle"]}}
                 (app / "synthetic-build.json").write_text(json.dumps(config))

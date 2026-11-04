@@ -1,12 +1,17 @@
 # Desktop client composition
 
-The Mac synthetic client reuses Scribe's sandboxed BrowserWindow configuration,
-navigation/permission restrictions, diagnostics policy and finite static-asset
-resolver at commit `fe22a435b6201c2d8013348927ea6a349e0b48c6`. The composition script
-records source hashes. It expands only the resolver's explicit asset map to the
-actual OS bundle and enables same-origin fetch on the existing local app scheme.
-The original renderer CSP is the default. Authenticated capture builds can add
-explicit HTTPS upload origins as described below.
+The Mac client composes entirely from this repository. Its three generic
+boundary modules (`scribe-security.mjs`, `scribe-diagnostics.mjs`, and
+`static-assets.mjs`) are byte-preserved consumed modules recovered from the
+verified CosmaBot1107 release at `0e70fe6`. Their historical filenames remain
+for existing imports; they do not call the Scribe app or another platform.
+`release/owned-boundary.json` retains the original archive, ASAR, and file hashes.
+The composer checks those hashes before creating output and copies the modules
+without TypeScript compilation or an external source checkout. Only the finite
+static renderer asset map changes to match the selected current web bundle.
+The sandbox, closed `app://cosmas` origin, CSP, diagnostics, navigation,
+permission, and download restrictions remain unchanged. Existing independent
+beta preflights continue to disable platform and capture access.
 
 The local renderer calls `app://cosmas/api`. A main-process bridge permits only
 listed workspace/Provider Team and existing synthetic work routes to the fixed
@@ -18,9 +23,9 @@ connect a hosted or real-data backend.
 
 Build the web bundle with `VITE_COSMAS_ENV=synth_os`, `VITE_WORKSPACE_ENABLED=true`,
 `VITE_DESKTOP_SYNTHETIC_ENABLED=true` and `VITE_API_BASE=app://cosmas/api`, then run
-`scripts/prepare-desktop-synthetic.py` with the read-only Scribe path, web bundle
-and a fresh isolated output. Run its `app` directory with official Electron
-43.4.1, matching Scribe's existing pin. No Recall SDK is installed or activated by
+`scripts/prepare-desktop-synthetic.py --web-dist /path/to/web/dist --output
+/path/to/fresh/composition`; no external source path is accepted. The composed
+`app` uses the official pinned Electron43.4.1 runtime. No Recall SDK is installed or activated by
 this composition. `scripts/package-desktop-synthetic.py` packages a distinct local
 test app from that official runtime. Capture, native authentication, release
 signing and updates need their own subsequent integration and verification.

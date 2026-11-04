@@ -64,7 +64,7 @@ class StandaloneNativeProfile(unittest.TestCase):
             (self.root / f"{client}-identity.json").write_text(json.dumps(files[f"{client}-identity.json"]))
 
     def desktop_args(self, output, extra=()):
-        return ["prepare-desktop-synthetic.py", "--scribe-source", str(self.root / "unread-source"),
+        return ["prepare-desktop-synthetic.py",
                 "--web-dist", str(self.root / "desktop"), "--output", str(output),
                 "--native-auth-helper", str(self.root / "helper.app"), "--installation-profile", "beta",
                 "--hosted-api-origin", self.identity["apiOrigin"], "--data-mode", "synthetic",

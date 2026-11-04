@@ -72,7 +72,7 @@ class IndependentDesktopProfile(unittest.TestCase):
         }))
 
     def arguments(self, output, extra=()):
-        return ["prepare-desktop-synthetic.py", "--scribe-source", str(self.root / "unread-template-source"),
+        return ["prepare-desktop-synthetic.py",
                 "--web-dist", str(self.web), "--output", str(output), "--native-auth-helper", str(self.helper),
                 "--installation-profile", "beta", "--hosted-api-origin", self.identity["apiOrigin"],
                 "--data-mode", "synthetic", "--native-identity-config", str(self.identity_path),
@@ -81,16 +81,11 @@ class IndependentDesktopProfile(unittest.TestCase):
     def compose(self, profile="independent-beta-v1"):
         self.write_profile(profile)
         output = self.root / profile
-        # The three retained source templates are replaced with inert invented
-        # text. Actual public validation, compilation, file copying and emitted
-        # descriptors execute; no legacy source or native binary is accessed.
-        def source_template(command, **_kwargs):
-            self.assertEqual(command[:2], ["git", "show"])
-            return b"const RENDERER_ASSETS = Object.freeze({\n});\nexport const invented = true;\n"
+        # Read the actual repository-owned boundary. Only Git provenance is an
+        # invented test value; no legacy source, native binary or service is used.
         provenance = {"version": 1, "commit": "1" * 40, "tree": "2" * 40, "dirty": False}
         with patch.object(sys, "argv", self.arguments(output)), \
-                patch.object(composer._source_module, "provenance", return_value=provenance), \
-                patch.object(composer.subprocess, "check_output", side_effect=source_template):
+                patch.object(composer._source_module, "provenance", return_value=provenance):
             composer.main()
         app = output / "app"
         return app, json.loads((app / "synthetic-build.json").read_text())
