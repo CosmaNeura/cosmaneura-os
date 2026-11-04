@@ -12,6 +12,11 @@ import {useInboxSearch} from './use-inbox-search';
 import './messages-presentation.css';
 
 const attention={idle:'',working:'Working',needs_review:'Needs you',needs_check:'Check status'};
+export function newMessageChoices(team:ProviderTeam){
+  const independent=import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE==='independent-beta-v1';
+  const notesOnly=['standalone-practice-v1','independent-beta-v1'].includes(import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE??'')&&!team.llm.enabled;
+  return [...team.configuration.bots].filter(bot=>!bot.retired&&(!(independent||notesOnly)||bot.role==='chief')).sort((a,b)=>Number(b.role==='chief')-Number(a.role==='chief'));
+}
 export function MessagesInbox({identity,inbox,team,loading,error,locked,organization,drafts,onRefreshDrafts,onOpen,onNew,onChief,onRefresh,onMore,onUnread,onSettings,onOrganize,onRestoreAll,onInspect,onCloseMenu,onRename,onReloadOrganization,canRestoreFocus}:{
   identity?:AuthenticatedWorkspaceIdentity;
   inbox:ConversationInbox|null;team:ProviderTeam|null;loading:boolean;error:string;locked:boolean;
@@ -78,7 +83,7 @@ export function NewMessagePicker({team,locked,onChoose,onClose,canRestoreFocus}:
   const independent=import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE==='independent-beta-v1';
   const notesOnly=['standalone-practice-v1','independent-beta-v1'].includes(import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE??'')&&!team.llm.enabled;
   return <WorkspaceDialog title={notesOnly?'Open notes':'New message'} onClose={onClose} closeLabel={notesOnly?'Close notes':'Close new message'} canRestoreFocus={canRestoreFocus}><p>{notesOnly?'Choose Chief to open a visit notebook or private note. AI chat is not connected yet.':independent?'Start with Chief. Choose a visit or private note next.':'Choose who can help. You’ll choose the visit or private note next.'}</p><div className="messages-bot-choices">
-    {[...team.configuration.bots].filter(bot=>!bot.retired&&(!(independent||notesOnly)||bot.role==='chief')).sort((a,b)=>Number(b.role==='chief')-Number(a.role==='chief')).map(bot=><button key={botAddress(bot)} disabled={locked||!bot.enabled} onClick={()=>onChoose(botAddress(bot))}><BotAvatar role={bot.role}/><span><strong>{bot.name}</strong><small>{!bot.enabled?'Paused in Settings':notesOnly?'Visit notebook and saved drafts':bot.role==='scribe'?'Notes and recording':bot.role==='research'?'Choose a visit, query and sources':'Private conversation'}</small></span></button>)}
+    {newMessageChoices(team).map(bot=><button key={botAddress(bot)} disabled={locked||!bot.enabled} onClick={()=>onChoose(botAddress(bot))}><BotAvatar role={bot.role}/><span><strong>{bot.name}</strong><small>{!bot.enabled?'Paused in Settings':notesOnly?'Visit notebook and saved drafts':bot.role==='scribe'?'Notes and recording':bot.role==='research'?'Choose a visit, query and sources':'Private conversation'}</small></span></button>)}
   </div><button onClick={onClose} disabled={locked}>Cancel</button></WorkspaceDialog>;
 }
 export function MessagesThreadHeader({name,role,context,contextKind,task,locked,onBack,onContext,onDetails,onReturn,returnLabel}:{name:string;role:BotRole;context:string;contextKind:string;task:string|null;locked:boolean;onBack:()=>void;onContext:()=>void;onDetails:()=>void;onReturn:()=>void;returnLabel?:string}){

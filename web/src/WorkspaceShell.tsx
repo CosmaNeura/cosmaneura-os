@@ -1,7 +1,7 @@
 import {AthenaVisitTask} from './AthenaVisitTask';
 import {configuredWorkspaceApiBase} from './workspace-base';
 import {ATHENA_VISIT_LINK_BUILD} from './athena-visit-link-api';
-import {MessagesInbox,NewMessagePicker,MessagesThreadHeader,ConversationDetails,LayoutSetting} from './MessagesPresentation';
+import {MessagesInbox,NewMessagePicker,newMessageChoices,MessagesThreadHeader,ConversationDetails,LayoutSetting} from './MessagesPresentation';
 import {nativePresentationFeedback,setNativePresentation} from './native-presentation';
 import {NotebookTitleEditor} from './NotebookTitleEditor';
 import type {InboxRenameTarget,InboxPreferencesHost} from './session/inbox-preferences';
@@ -1546,7 +1546,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox identity={authenticated} inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError} organization={inboxOrganization} canRestoreFocus={canRestoreDialogFocus}
         drafts={currentInboxDrafts} onRefreshDrafts={()=>void session.conversations.drafts.refresh()}
         locked={conversationBusy||busy||!!pending||homeBusy||homePending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||!accountAccess}
-        onNew={()=>setNewMessage(true)} onChief={address=>void chooseConversationContext(address)} onSettings={()=>void openSettings()}
+        onNew={()=>{const choices=team?newMessageChoices(team):[];if(choices.length===1&&choices[0].role==='chief'&&choices[0].enabled)void chooseConversationContext(botAddress(choices[0]));else setNewMessage(true);}} onChief={address=>void chooseConversationContext(address)} onSettings={()=>void openSettings()}
         onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated,failure)}
         onOrganize={(row,change)=>session.inboxPreferences.set(row,change)} onRestoreAll={()=>session.inboxPreferences.restoreAll()} onInspect={row=>void session.inboxPreferences.inspect(row)} onCloseMenu={()=>session.inboxPreferences.closeMenu()}
         onReloadOrganization={()=>void session.inboxPreferences.bind(inboxPreferencesHost(),true)} onRename={target=>setInboxRename({target,identity:authenticated,scope:accountAccess?.recoveryScope})}/>}
