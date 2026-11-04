@@ -106,6 +106,8 @@ export function MicrosoftCalendarPanel({identity,scope,recovery,workspace,locked
   {!record.saved&&<>
    <section className="calendar-work-visit"><h5>Choose visit</h5><p>Current visit: <strong>{workspace?.label??'No visit selected'}</strong>. Date of birth is optional.</p>
     {!workspace&&onChooseVisit&&<button disabled={blocked} onClick={onChooseVisit}>Choose a visit</button>}
+    {workspace&&onChooseVisit&&<button disabled={blocked||checks.some(Boolean)} onClick={onChooseVisit}>Choose another visit</button>}
+    {onChooseVisit&&checks.some(Boolean)&&<p>Clear the review boxes before choosing a different visit.</p>}
     {workspace&&!visitConfirmed&&<button disabled={blocked||!allowed} onClick={selectVisit}>Use current visit</button>}
     {visitConfirmed&&<p>This visit is selected for review.</p>}
     {record.selected_visit&&!visitConfirmed&&<p role="status">The current visit has changed. Use current visit and review it again before saving.</p>}
@@ -118,7 +120,8 @@ export function MicrosoftCalendarPanel({identity,scope,recovery,workspace,locked
    </div></section>}
   </>}
   {record.saved&&<section className="calendar-work-chief"><h5>Saved calendar source</h5><p role="status">✅ Calendar source saved. Your clinical note is unchanged.</p>
-   {record.saved.workspace_id!==workspace?.id&&<p>This source was saved for another visit. Choose an event again before saving for the current visit.</p>}
+   {record.saved.workspace_id!==workspace?.id&&<><p>This source was saved for {record.selected_visit?.label??'another visit'}. Choose that visit to prepare a Chief draft from the saved source.</p>
+    {onChooseVisit&&<button disabled={blocked} onClick={onChooseVisit}>Choose the saved visit</button>}</>}
    {onAskChief&&record.saved.workspace_id===workspace?.id&&<><p>Ask Chief to prepare work from this saved summary. Review any draft before using it.</p><button className="team-primary" disabled={blocked||!allowed} onClick={()=>{if(!blocked&&valid(owner.current.generation))onAskChief(record.saved!);}}>Ask Chief about this calendar summary</button></>}
   </section>}
  </article>}

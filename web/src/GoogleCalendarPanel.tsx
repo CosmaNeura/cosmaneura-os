@@ -103,6 +103,8 @@ export function GoogleCalendarPanel({identity,scope,recovery,workspace,locked=fa
    <section className="calendar-work-visit"><h5>{privateNotebook?'Choose notebook':'Choose visit'}</h5>
     <p>{privateNotebook?'Private notebook: ':'Current visit: '}<strong>{workspace?.label??'No visit selected'}</strong>{privateNotebook?'. No patient or visit is linked.':'. Date of birth is optional.'}</p>
     {!workspace&&onChooseVisit&&<button disabled={blocked} onClick={onChooseVisit}>Choose a visit</button>}
+    {workspace&&!privateNotebook&&onChooseVisit&&<button disabled={blocked||checks.some(Boolean)} onClick={onChooseVisit}>Choose another visit</button>}
+    {!privateNotebook&&onChooseVisit&&checks.some(Boolean)&&<p>Clear the review boxes before choosing a different visit.</p>}
     {workspace&&!visitConfirmed&&<button disabled={blocked||!allowed} onClick={selectVisit}>{privateNotebook?'Use this notebook':'Use current visit'}</button>}
     {visitConfirmed&&<p>{privateNotebook?'This notebook is selected for review.':'This visit is selected for review.'}</p>}
     {record.selected_visit&&!visitConfirmed&&<p role="status">{privateNotebook?'The notebook has changed. Use this notebook and review it again before saving.':'The current visit has changed. Use current visit and review it again before saving.'}</p>}
@@ -116,7 +118,8 @@ export function GoogleCalendarPanel({identity,scope,recovery,workspace,locked=fa
   </>}
   {record.saved&&<section className="calendar-work-chief"><h5>Saved calendar source</h5>
    <p role="status">{privateNotebook?'✅ Calendar source added. Your notes are unchanged.':'✅ Calendar source saved. Your clinical note is unchanged.'}</p>
-   {record.saved.workspace_id!==workspace?.id&&<p>This source was saved for another {privateNotebook?'notebook':'visit'}. Choose an event again before saving for the current {privateNotebook?'notebook':'visit'}.</p>}
+   {record.saved.workspace_id!==workspace?.id&&<><p>This source was saved for {record.selected_visit?.label??'another visit or notebook'}. Open that visit or notebook to prepare a Chief draft from the saved source.</p>
+    {onChooseVisit&&record.selected_visit?.kind!=='private_notebook'&&<button disabled={blocked} onClick={onChooseVisit}>Choose the saved visit</button>}</>}
    {onAskChief&&record.saved.workspace_id===workspace?.id&&<><p>Ask Chief to prepare work from this saved summary. Review any draft before using it.</p><button className="team-primary" disabled={blocked||!allowed} onClick={()=>{if(!blocked&&valid(owner.current.generation))onAskChief(record.saved!);}}>{privateNotebook?'Prepare Chief draft':'Ask Chief about this calendar summary'}</button></>}
   </section>}
  </article>}
