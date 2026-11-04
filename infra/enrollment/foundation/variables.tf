@@ -16,8 +16,8 @@ variable "environment" {
   type    = string
   default = "staging"
   validation {
-    condition     = var.environment == "staging"
-    error_message = "This foundation is staging only; production requires a separate reviewed definition."
+    condition     = contains(["staging", "production"], var.environment)
+    error_message = "Select staging (synthetic) or production (real practice data); each gets its own resource names and state."
   }
 }
 variable "location" {
@@ -25,7 +25,7 @@ variable "location" {
   default = "centralus"
   validation {
     condition     = contains(["centralus", "eastus2"], var.location)
-    error_message = "This bounded staging foundation permits only Central US or East US 2."
+    error_message = "This bounded foundation permits only Central US or East US 2."
   }
 }
 variable "resource_name_suffix" {
@@ -40,7 +40,7 @@ variable "state_namespace" {
   type    = string
   default = "cosmabot-enrollment/staging/foundation-local-v1"
   validation {
-    condition     = var.state_namespace == "cosmabot-enrollment/staging/foundation-local-v1"
+    condition     = var.state_namespace == "cosmabot-enrollment/${var.environment}/foundation-local-v1"
     error_message = "Do not reuse another product's backend or state namespace."
   }
 }

@@ -2,7 +2,7 @@ output "foundation" {
   description = "Owned resource coordinates only; not application, database-role, vendor or journey qualification."
   value = {
     contract_version             = "enrollment-foundation.v1"
-    environment                  = "staging"
+    environment                  = var.environment
     application_deployed         = false
     database_qualified           = false
     runtime_ready                = false
@@ -30,7 +30,7 @@ output "foundation" {
       resource_group_name  = azurerm_resource_group.enrollment.name
       storage_account_name = azurerm_storage_account.state.name
       container_name       = azurerm_storage_container.runtime_state.name
-      key                  = "cosmabot-enrollment/staging/runtime-v1.tfstate"
+      key                  = "cosmabot-enrollment/${var.environment}/runtime-v1.tfstate"
       use_azuread_auth     = true
     }
   }

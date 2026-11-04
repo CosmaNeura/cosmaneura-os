@@ -19,6 +19,7 @@ from .domain import (
     MAX_HUMANS,
     SEAT_POLICY,
 )
+from .environments import hosting_environment_for_data_mode
 
 
 def owned_origin(value: str) -> bool:
@@ -75,11 +76,12 @@ class EnrollmentSettings(BaseSettings):
     def google_broker_errors(self) -> list[str]:
         if not self.google_callback_broker_enabled:
             return []
-        if (not self.enabled or self.data_mode != "synthetic" or not self.workspace_allocation_enabled
-                or self.google_callback_broker_origin != "https://enrollment-api.staging.cosmas.ai"
+        env = hosting_environment_for_data_mode(self.data_mode)
+        if (not self.enabled or env is None or not self.workspace_allocation_enabled
+                or self.google_callback_broker_origin != env.api_origin
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", self.google_callback_client_id)
                 or len(self.runtime_admission_secret.get_secret_value()) < 32):
-            return ["Google callback routing requires the explicit isolated staging broker and per-Box custody."]
+            return ["Google callback routing requires this environment's isolated broker and per-Box custody."]
         return []
 
     def native_origin_enabled(self, origin: str) -> bool:
@@ -91,19 +93,28 @@ class EnrollmentSettings(BaseSettings):
     def registered_workspace_origin(self, origin: str, practice_id: str) -> bool:
         """Validate a stored practice destination, never arbitrary browser input.
 
-        The additional staging namespace is enabled only with the private
-        allocation workflow. Existing reviewed destinations remain exact.
+        The additional practice-UUID namespace (staging or production) is enabled
+        only with the private allocation workflow. Existing reviewed destinations
+        remain exact.
         """
         if origin in self.allowed_workspace_origins:
             return True
-        if not self.workspace_allocation_enabled or self.data_mode != "synthetic":
+        env = hosting_environment_for_data_mode(self.data_mode)
+        if not self.workspace_allocation_enabled or env is None:
             return False
         try:
             if str(UUID(practice_id)) != practice_id:
                 return False
         except (ValueError, TypeError):
             return False
-        return origin == "https://" + practice_id + ".staging.cosmas.ai"
+        return origin == env.workspace_origin(practice_id)
+
+    def workspace_origin_policy(self) -> str:
+        if self.workspace_allocation_enabled and self.data_mode == "synthetic":
+            return "synthetic-practice-uuid-staging-v1"
+        if self.workspace_allocation_enabled and self.data_mode == "production":
+            return "practice-uuid-production-v1"
+        return "exact"
 
     def auth_errors(self) -> list[str]:
         errors: list[str] = []
@@ -190,9 +201,7 @@ class EnrollmentSettings(BaseSettings):
             "blockers": blockers, "billing_blockers": billing_errors + ([] if stripe_verified else ["Stripe catalog and portal have not been verified."]),
             "provisioning_enabled": self.provisioning_enabled,
             "allowed_workspace_origins": self.allowed_workspace_origins,
-            "workspace_origin_policy": ("synthetic-practice-uuid-staging-v1"
-                                        if self.workspace_allocation_enabled and self.data_mode == "synthetic"
-                                        else "exact"),
+            "workspace_origin_policy": self.workspace_origin_policy(),
             "baa": {"doc_id": BAA_DOC_ID, "version": BAA_VERSION, "sha256": BAA_SHA256, "pdf_url": BAA_PDF_URL},
             "pricing": {"currency": "usd", "interval": "month", "first_human_cents": FIRST_HUMAN_CENTS,
                         "additional_human_cents": ADDITIONAL_HUMAN_CENTS, "max_self_serve_humans": MAX_HUMANS,

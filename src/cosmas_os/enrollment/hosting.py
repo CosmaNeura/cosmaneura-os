@@ -1,7 +1,9 @@
 """Private automatic single-practice allocation; never a public ready endpoint.
 
-The worker executes only a host-reviewed release in dedicated synthetic staging.
-Runtime membership/native qualification and billing remain separate afterwards.
+The worker executes only a host-reviewed release, either in dedicated synthetic
+staging or in the separate production foundation where each practice runtime
+holds real practice data under its executed BAA. Runtime membership/native
+qualification and billing remain separate afterwards.
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ from .allocation import (
     WorkspaceAllocationRequest,
 )
 from .domain import EnrollmentError
+from .environments import HOSTING_ENVIRONMENTS
 from .models import Account, Membership, Practice
 from .provisioning import BOX_NAMESPACE, WorkspacePlan
 from .service import EnrollmentService
@@ -66,18 +69,22 @@ class HostingConfiguration:
                     "worker_client_id", "worker_object_id", "source_repository", "state_root", "cloudflare_zone_id",
                     "cloudflare_token_file", "native_origins"}
         if (not expected <= set(value) or set(value) - expected - {"google", "model"} or value["contract_version"] != HOSTING_CONTRACT
-                or type(value["enabled"]) is not bool or value["synthetic_only"] is not True):
-            raise ValueError("explicit dedicated synthetic hosting configuration required")
+                or type(value["enabled"]) is not bool or type(value["synthetic_only"]) is not bool):
+            raise ValueError("explicit dedicated hosting configuration required")
         self.value = json.loads(json.dumps(value))
         self.foundation, self.account, self.release = (self.value[name] for name in ("foundation", "account", "release"))
         f, a, release = self.foundation, self.account, self.release
         for name in ("subscription_id", "tenant_id"):
             if str(UUID(f[name])) != f[name]:
                 raise ValueError("canonical foundation identity required")
-        suffix = re.fullmatch(r"rg-cosmabot-enrollment-staging-([a-z0-9]{6,8})", f["resource_group_name"])
-        if (not suffix or f["contract_version"] != "enrollment-foundation.v1" or f["environment"] != "staging"
+        env = HOSTING_ENVIRONMENTS.get(f.get("environment"))
+        if env is None or value["synthetic_only"] is not env.synthetic_only:
+            raise ValueError("synthetic staging or separately reviewed production foundation required")
+        self.environment = env
+        suffix = re.fullmatch(r"rg-cosmabot-enrollment-" + env.name + r"-([a-z0-9]{6,8})", f["resource_group_name"])
+        if (not suffix or f["contract_version"] != "enrollment-foundation.v1"
                 or f["location"] not in {"eastus2", "centralus"}
-                or f["registry_server"] != "acrcbotenrstg" + suffix[1] + ".azurecr.io"):
+                or f["registry_server"] != "acrcbotenr" + env.short + suffix[1] + ".azurecr.io"):
             raise ValueError("dedicated enrollment foundation required")
         self.scope = f"/subscriptions/{f['subscription_id']}/resourceGroups/{f['resource_group_name']}/providers/"
         for name in ("vnet_id", "container_app_environment_id", "container_registry_id", "postgres_subnet_id",
@@ -90,17 +97,16 @@ class HostingConfiguration:
             raise ValueError("exact read-only private service DNS zones required")
         backend = f["state_backend"]
         if (backend["resource_group_name"] != f["resource_group_name"]
-                or backend["storage_account_name"] != "stcbotenrstg" + suffix[1]
+                or backend["storage_account_name"] != "stcbotenr" + env.short + suffix[1]
                 or backend["container_name"] != "enrollment-runtime-state" or backend["use_azuread_auth"] is not True):
             raise ValueError("independent per-practice state keys in owned backend required")
         if (set(a) != {"app_origin", "api_origin", "issuer", "publishable_key", "audience"}
-                or a["app_origin"] != "https://onboarding.staging.cosmas.ai"
-                or a["api_origin"] != "https://enrollment-api.staging.cosmas.ai"
-                or not re.fullmatch(r"https://[a-z0-9-]+[.]clerk[.]accounts[.]dev", a["issuer"])
-                or a["publishable_key"] != "pk_test_" + base64.b64encode((a["issuer"][8:] + "$").encode()).decode()
+                or a["app_origin"] != env.app_origin or a["api_origin"] != env.api_origin
+                or not isinstance(a["issuer"], str) or not env.issuer_allowed(a["issuer"])
+                or a["publishable_key"] != env.publishable_key(a["issuer"])
                 or not isinstance(a["audience"], str) or len(a["audience"]) > 255
                 or a["audience"] and not re.fullmatch(r"[\x21-\x7e]+", a["audience"])):
-            raise ValueError("selected development account identity required")
+            raise ValueError("selected environment account identity required")
         if set(release) != {"source_commit", "api_image", "job_image"} or not re.fullmatch(r"[a-f0-9]{40}", release["source_commit"]):
             raise ValueError("immutable reviewed release required")
         for name in ("api_image", "job_image"):
@@ -157,15 +163,17 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
 
     def destination(self, request: WorkspaceAllocationRequest) -> WorkspaceAllocationDestination:
         if (not self.configuration.value["enabled"] or not self.service.settings.workspace_allocation_enabled
-                or not self.service.settings.provisioning_enabled or self.service.settings.data_mode != "synthetic"):
+                or not self.service.settings.provisioning_enabled
+                or self.service.settings.data_mode != self.configuration.environment.enrollment_data_mode):
             raise EnrollmentError("workspace_allocation_disabled", "Private workspace allocation is unavailable.", 503)
         if (str(UUID(request.practice_id)) != request.practice_id
                 or request.box_id != str(uuid5(BOX_NAMESPACE, request.practice_id))
                 or request.issuer != self.configuration.account["issuer"]):
             raise EnrollmentError("workspace_allocation_conflict", "Registered practice identity changed.")
-        web = "https://" + request.practice_id + ".staging.cosmas.ai"
+        env = self.configuration.environment
+        web = env.workspace_origin(request.practice_id)
         release = self.configuration.release
-        return WorkspaceAllocationDestination("https://api." + request.practice_id + ".staging.cosmas.ai", web + "/chief",
+        return WorkspaceAllocationDestination(env.workspace_api_origin(request.practice_id), web + "/chief",
             release["source_commit"], release["api_image"].split("@sha256:")[1])
 
     def _deployment(self, plan: WorkspacePlan, operation_id: str) -> dict:
@@ -173,7 +181,7 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
 
         settings, c = self.service.settings, self.configuration
         if (not c.value["enabled"] or not settings.workspace_allocation_enabled or not settings.provisioning_enabled
-                or settings.data_mode != "synthetic" or not settings.native_account_enabled
+                or settings.data_mode != c.environment.enrollment_data_mode or not settings.native_account_enabled
                 or settings.clerk_issuer != c.account["issuer"] or settings.clerk_publishable_key != c.account["publishable_key"]
                 or settings.clerk_audience != c.account["audience"] or settings.native_authorized_origins != c.value["native_origins"]):
             raise EnrollmentError("workspace_allocation_disabled", "Private native workspace allocation is unavailable.", 503)
@@ -198,7 +206,10 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
                     or practice.box_id != plan.box_id or practice.organization_id != plan.organization_id
                     or not self.service._acceptance(session, practice)):
                 raise EnrollmentError("workspace_allocation_conflict", "Registered practice ownership changed.")
+            acceptance = self.service._acceptance(session, practice)
+            assert acceptance is not None
             names = (practice.display_name, owner.display_name)
+            baa = (acceptance.id, acceptance.doc_id, acceptance.version, acceptance.sha256)
         evidence = "cosmas-native-allocation.v1:" + operation_id
         manifest = {"schema_version": "cosmas-os/d3-beta-bootstrap/v1", "box_id": plan.box_id,
                     "clinic_display_name": names[0], "owner_display_name": names[1], "clerk_issuer": plan.issuer,
@@ -207,7 +218,8 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
         selected = urlsplit(plan.workspace_url)
         web = selected.scheme + "://" + selected.netloc
         origins = [c.account["app_origin"], web, *c.value["native_origins"]]
-        public = {"COSMAS_ENV": "early_adopter_beta", "DATA_MODE": "synthetic", "AUTH_MODE": "clerk_jwt",
+        env = c.environment
+        public = {"COSMAS_ENV": "early_adopter_beta", "DATA_MODE": env.runtime_data_mode, "AUTH_MODE": "clerk_jwt",
                   "SYNTH_SEED": "false", "SYNC_WORKER": "false", "BLOB_BACKEND": "azure", "BETA_BOX_ID": plan.box_id,
                   "CLERK_ISSUER": plan.issuer, "CLERK_JWKS_URL": plan.issuer + "/.well-known/jwks.json",
                   "CLERK_ORGANIZATION_ID": plan.organization_id, "CLERK_SESSION_POLICY": "enrollment_default",
@@ -221,7 +233,14 @@ class OpenTofuWorkspaceAllocator(ProductionWorkspaceAllocator):
                   "WORKSPACE_ENROLLMENT_ACCOUNT_ORIGIN": c.account["app_origin"],
                   "WORKSPACE_ENROLLMENT_ORIGIN_ALLOWLIST": c.account["api_origin"] + "," + c.account["app_origin"],
                   "WORKSPACE_RELEASE_SOURCE_COMMIT": plan.source_commit, "WORKSPACE_RELEASE_IMAGE_SHA256": plan.image_sha256}
-        deployment = {"contract_version": "cosmas-allocated-workspace.v1", "version": 1, "environment": "staging", "synthetic_only": True,
+        if not env.synthetic_only:
+            # Real practice data is admitted only by this practice's own executed
+            # BAA in the enrollment registry. References are identifiers, not copies.
+            public.update({"CLINIC_APPROVAL_REF": "cosmas-enrollment-practice:" + plan.practice_id,
+                           "BAA_EVIDENCE_REF": f"cosmas-baa:{baa[1]}:{baa[2]}:{baa[0]}",
+                           "PHI_AUTHORIZATION_REF": f"cosmas-baa-phi:{baa[0]}:{baa[3]}"})
+        deployment = {"contract_version": "cosmas-allocated-workspace.v1", "version": 1, "environment": env.name,
+                "synthetic_only": env.synthetic_only,
                 "namespace": plan.practice_id.replace("-", "")[:16], "operation_id": operation_id,
                 "allocator_object_id": c.value["worker_object_id"], "foundation": c.foundation, "account": c.account,
                 "release": c.release, "expected_schema_revision": EXPECTED_SCHEMA_REVISION,

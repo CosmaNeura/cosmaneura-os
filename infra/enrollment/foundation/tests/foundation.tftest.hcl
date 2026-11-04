@@ -117,9 +117,32 @@ run "reject_unsupported_region" {
   variables { location = "eastus" }
   expect_failures = [var.location]
 }
-run "reject_production" {
+run "production_foundation_is_separately_named_and_marked_clinical" {
+  command = plan
+  variables {
+    environment     = "production"
+    state_namespace = "cosmabot-enrollment/production/foundation-local-v1"
+  }
+  assert {
+    condition = (azurerm_resource_group.enrollment.name == "rg-cosmabot-enrollment-production-mock1234" &&
+      azurerm_container_registry.enrollment.name == "acrcbotenrprdmock1234" &&
+      azurerm_key_vault.enrollment.name == "kv-cbot-enr-prd-mock1234" &&
+      azurerm_storage_account.state.name == "stcbotenrprdmock1234" &&
+      azurerm_resource_group.enrollment.tags["environment"] == "production" &&
+      azurerm_resource_group.enrollment.tags["clinical_data"] == "true" &&
+      output.foundation.environment == "production" &&
+    output.foundation.state_backend.key == "cosmabot-enrollment/production/runtime-v1.tfstate")
+    error_message = "Production must use its own names, state key and clinical-data tag, never staging's."
+  }
+}
+run "production_refuses_staging_state_namespace" {
   command = plan
   variables { environment = "production" }
+  expect_failures = [var.state_namespace]
+}
+run "reject_unknown_environment" {
+  command = plan
+  variables { environment = "prod" }
   expect_failures = [var.environment]
 }
 run "reject_shared_state" {

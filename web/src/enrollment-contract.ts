@@ -1,6 +1,11 @@
 export const ENROLLMENT_CONTRACT = 'enrollment.v1' as const;
 export const ENROLLMENT_WORKSPACE_NAME_MAX = 120;
-export type EnrollmentWorkspaceOriginPolicy = 'exact' | 'synthetic-practice-uuid-staging-v1';
+export type EnrollmentWorkspaceOriginPolicy = 'exact' | 'synthetic-practice-uuid-staging-v1' | 'practice-uuid-production-v1';
+/** Server-managed practice-UUID workspace hosts. Each policy binds one domain to one enrollment data mode. */
+export const PRACTICE_UUID_POLICIES = {
+  'synthetic-practice-uuid-staging-v1': {domain: 'staging.cosmas.ai', dataMode: 'synthetic'},
+  'practice-uuid-production-v1': {domain: 'workspace.cosmas.ai', dataMode: 'production'},
+} as const;
 /** Existing public company contact, verified against the marketing source. */
 export const ENROLLMENT_CONTACT = 'mailto:john@cosmaneura.com?subject=CosmaBot%20practice%20setup';
 export const BAA = {
@@ -93,8 +98,8 @@ export function validateEnrollmentConfig(value: unknown): EnrollmentConfig {
       !Array.isArray(v.auth_methods) || v.auth_methods.length !== 3 ||
       !['google','microsoft','password'].every(method => (v.auth_methods as unknown[]).includes(method)) ||
       !Array.isArray(v.blockers) || v.blockers.length > 30 || !Array.isArray(v.allowed_workspace_origins) || v.allowed_workspace_origins.length>20 ||
-      typeof workspacePolicy !== 'string' || !['exact','synthetic-practice-uuid-staging-v1'].includes(workspacePolicy) ||
-      workspacePolicy === 'synthetic-practice-uuid-staging-v1' && v.data_mode !== 'synthetic') return invalid();
+      typeof workspacePolicy !== 'string' || workspacePolicy !== 'exact' && !Object.hasOwn(PRACTICE_UUID_POLICIES, workspacePolicy) ||
+      workspacePolicy !== 'exact' && PRACTICE_UUID_POLICIES[workspacePolicy as keyof typeof PRACTICE_UUID_POLICIES].dataMode !== v.data_mode) return invalid();
   const config = { ...v, enabled: bool(v.enabled), auth_configured: bool(v.auth_configured),
     billing_configured: bool(v.billing_configured), activation_available: bool(v.activation_available),
     checkout_recovery_available:v.checkout_recovery_available===undefined?false:bool(v.checkout_recovery_available),

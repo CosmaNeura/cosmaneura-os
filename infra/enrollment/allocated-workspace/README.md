@@ -25,6 +25,32 @@ existing authenticated confirmation flow must measure the native transport,
 verify the reserved owner binding, persist its exact proof, and then complete
 the card/trial gates. Existing beta users keep their existing enrollment bypass.
 
+## Staging and production
+
+The same module serves two fully separate environments. The hosting
+configuration's `foundation.environment` selects one, and every value below
+must match it; mixing them is refused by the Python renderer and again by this
+module's preconditions.
+
+| | Staging | Production |
+| --- | --- | --- |
+| Data | Synthetic only (`DATA_MODE=synthetic`) | Real practice data (`DATA_MODE=authorized_beta`) |
+| `synthetic_only` | `true` | `false` |
+| Enrollment registry `ENROLLMENT_DATA_MODE` | `synthetic` | `production` (with `production_qualified` and Stripe live mode) |
+| Foundation names | `rg-cosmabot-enrollment-staging-*`, `acrcbotenrstg*`, `stcbotenrstg*` | `rg-cosmabot-enrollment-production-*`, `acrcbotenrprd*`, `stcbotenrprd*` |
+| Account origins | `onboarding.staging.cosmas.ai`, `enrollment-api.staging.cosmas.ai` | `app.cosmas.ai`, `enrollment-api.cosmas.ai` |
+| Clerk | development `*.clerk.accounts.dev`, `pk_test_` | `https://clerk.cosmas.ai`, `pk_live_` |
+| Practice addresses | `https://<practice UUID>.staging.cosmas.ai/chief`, `https://api.<practice UUID>.staging.cosmas.ai` | `https://<practice UUID>.workspace.cosmas.ai/chief`, `https://api.<practice UUID>.workspace.cosmas.ai` |
+| Practice database backups | 7 days | 35 days |
+| State key | `cosmabot-enrollment/staging/allocated/<practice>.tfstate` | `cosmabot-enrollment/production/allocated/<practice>.tfstate` |
+
+In production, each practice runtime receives `CLINIC_APPROVAL_REF`,
+`BAA_EVIDENCE_REF` and `PHI_AUTHORIZATION_REF` derived from that practice's own
+executed BAA in the enrollment registry (identifiers only, never copies of the
+agreement). The practice web image is built with
+`VITE_WORKSPACE_DATA_MODE=authorized_beta` and must prove that data mode during
+its ACR validation step.
+
 ## Public input contract
 
 The private worker reads an owner-controlled, regular, mode `0600` JSON file
@@ -33,7 +59,7 @@ with `contract_version: "cosmas-private-hosting.v1"`. Its schema is validated by
 
 | Field | Required value or reference |
 | --- | --- |
-| `enabled`, `synthetic_only` | Explicit host enable switch; synthetic must be `true`. Leave `enabled` false until the held prerequisites are reviewed. |
+| `enabled`, `synthetic_only` | Explicit host enable switch; `synthetic_only` is `true` for staging and `false` for production. Leave `enabled` false until the held prerequisites are reviewed. |
 | `foundation` | The existing dedicated `enrollment-foundation.v1` staging output, including subscription, tenant, location, resource group, registry, VNet, Container Apps environment, PostgreSQL and endpoint subnet IDs, and the independent state backend. |
 | `foundation.blob_private_dns_zone_id`, `redis_private_dns_zone_id`, `vault_private_dns_zone_id` | Exact existing private service zone IDs inside that dedicated resource group. These are references only. This module owns its Box endpoint records, not the existing shared zones or links. |
 | `account` | Exact onboarding and enrollment API origins, development Clerk issuer, matching public key, and exact audience already selected by the enrollment host. |
