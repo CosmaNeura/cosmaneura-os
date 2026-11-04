@@ -55,6 +55,53 @@ it('starts a new synthetic account setup only after the explicit native sign-in 
   expect(vi.mocked(owner.plugin.enrollmentRequest).mock.calls.map(([input])=>input.operation)).toEqual(['config','status','config','practices']);
   expect(owner.plugin.accountToken).not.toHaveBeenCalled();expect(owner.plugin.activateRegisteredPractice).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
 });
+function readyPracticePort(){
+  const owner=port(account),snapshot=nativePracticeFixture();
+  let saved=enrollmentStatus('ready',7);saved.practice!.id=snapshot.profile.practice.practice_id;
+  saved.workspace={status:'ready',url:snapshot.profile.workspace.url,organization_id:snapshot.profile.nativeIdentity.organizationId,box_id:snapshot.profile.practice.box_id};
+  vi.mocked(owner.plugin.activateRegisteredPractice).mockResolvedValue(snapshot);
+  vi.mocked(owner.plugin.enrollmentRequest).mockImplementation(async({operation})=>({status:200,body:operation==='config'?enrollmentConfig():operation==='practices'?{
+    active_practice_id:saved.practice!.id,practices:[{id:saved.practice!.id,legal_name:saved.practice!.legal_name,display_name:'Invented Ready Practice',role:'owner',workspace_status:'ready'},
+      {id:'20000000-0000-4000-8000-000000000002',legal_name:'Invented Second Practice',display_name:'Invented Second Practice',role:'staff',workspace_status:'ready'}]}:structuredClone(saved)}));
+  return {...owner,changeCurrent:()=>{saved={...saved,revision:8,practice:{...saved.practice!,id:'20000000-0000-4000-8000-000000000002'}};}};
+}
+it('takes an existing synthetic ready account straight from verified practices to Chief without an agreement or card stepper',async()=>{
+  const owner=readyPracticePort();await act(async()=>root.render(<NativeEnrollmentEntry plugin={owner.plugin} available readyPractices onReturn={vi.fn()}/>));
+  expect(host.querySelector('[aria-label="Ready practices"]')?.textContent).toContain('Invented Ready PracticeCurrent practice');
+  expect(host.textContent).toContain('Invented Second Practice');expect(host.querySelector('select')).toBeNull();
+  expect(host.querySelector('#enrollment-name')).toBeNull();expect(host.textContent).not.toContain('Agreement');expect(host.textContent).not.toContain('14-day');
+  expect(owner.plugin.activateRegisteredPractice).not.toHaveBeenCalled();expect(owner.plugin.beginAccountSignIn).not.toHaveBeenCalled();
+  await click('Open Chief');expect(owner.plugin.activateRegisteredPractice).toHaveBeenCalledWith({expectedRevision:revision});
+  expect(host.textContent).toContain('Opening your practice');
+  expect(vi.mocked(owner.plugin.enrollmentRequest).mock.calls.map(([input])=>input.operation)).toEqual(['config','status','practices','status','practices']);
+  expect(owner.plugin.activatePracticeOrganization).not.toHaveBeenCalled();expect(owner.plugin.openCheckout).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
+});
+it('rechecks a saved current practice and refuses Chief when another selection is observed',async()=>{
+  const owner=readyPracticePort();await act(async()=>root.render(<NativeEnrollmentEntry plugin={owner.plugin} available readyPractices onReturn={vi.fn()}/>));
+  owner.changeCurrent();await click('Open Chief');expect(owner.plugin.activateRegisteredPractice).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('Your current practice changed');expect(host.querySelector('[aria-label="Ready practices"]')).toBeNull();
+  expect(host.querySelector('#enrollment-name')).toBeNull();
+});
+it('keeps returning locked during a ready-practice check and clears names on an owner change',async()=>{
+  const owner=readyPracticePort(),returned=vi.fn();let finish!:(value:unknown)=>void;
+  await act(async()=>root.render(<NativeEnrollmentEntry plugin={owner.plugin} available readyPractices onReturn={returned}/>));
+  vi.mocked(owner.plugin.enrollmentRequest).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  await click('Check practices');
+  for(const name of ['Return to existing workspace','Check practices']){
+    expect([...host.querySelectorAll('button')].find(button=>button.textContent===name)?.disabled).toBe(true);await click(name);
+  }
+  expect(returned).not.toHaveBeenCalled();expect(owner.plugin.returnToBeta).not.toHaveBeenCalled();
+  await act(async()=>owner.emit({phase:'unavailable',revision:'00000000-0000-4000-8000-000000000003',identity:null}));
+  expect(host.textContent).not.toContain('Invented Ready Practice');expect(host.querySelector('#enrollment-name')).toBeNull();
+  await act(async()=>finish({status:200,body:enrollmentStatus('ready',9)}));expect(host.textContent).not.toContain('Invented Ready Practice');
+  expect(owner.plugin.activateRegisteredPractice).not.toHaveBeenCalled();
+});
+it('starts the existing new-practice flow only through its separate explicit action',async()=>{
+  const owner=port(account);await act(async()=>root.render(<NativeEnrollmentEntry plugin={owner.plugin} available readyPractices onReturn={vi.fn()}/>));
+  expect(host.textContent).toContain('No ready practice');expect(host.querySelector('#enrollment-name')).toBeNull();
+  await click('Create a new practice');expect(host.querySelector('#enrollment-name')).not.toBeNull();
+  expect(owner.plugin.activateRegisteredPractice).not.toHaveBeenCalled();
+});
 it('takes a newly allocated UUID practice from native sign-in through membership confirmation to the owned Chief handoff',async()=>{
   const owner=port(),practiceId='20000000-0000-4000-8000-000000000001';
   let saved=enrollmentStatus('finishing_setup',4);saved.practice!.id=practiceId;saved.billing.status='trialing';

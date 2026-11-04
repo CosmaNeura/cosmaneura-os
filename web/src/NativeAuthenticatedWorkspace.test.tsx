@@ -8,6 +8,7 @@ import {teamFixture} from "./team-setup-test-fixture";
 import { REQUIRED_WORKSPACE_CONTRACTS } from "./workspace-protocol";
 import type {NativePracticeConnectionPlugin} from '../../clients/capture/src/native/practice-connection-plugin';
 import {enrollmentConfig} from './enrollment-test-fixture';
+import {useUnsavedWork} from './unsaved-work';
 
 const first: NativeAuthState = { phase: "ready", revision: "00000000-0000-4000-8000-000000000001",
   identity: { userId: "user_first", sessionId: "sess_first", organizationId: "org_test" } };
@@ -84,10 +85,25 @@ describe("native workspace session", () => {
     await act(async()=>root.render(<NativeAuthenticatedWorkspace plugin={native.plugin} available practicePlugin={practice} practiceConnectionAvailable
       createIdentity={(_state,isCurrent)=>{owners.push(isCurrent);return {mode:'clerk_jwt',getToken:async()=>token};}}/>));
     const old=owners.at(-1)!;expect(old()).toBe(true);expect(practice.accountStatus).not.toHaveBeenCalled();
-    await click('Team settings');await click('Connect practice');expect(container.textContent).toContain('Connect a practice');
+    await click('Team settings');await click('Connect practice');expect(container.textContent).toContain('Your practices');
     expect(old()).toBe(false);expect(practice.beginAccountSignIn).not.toHaveBeenCalled();
     await click('Return to existing workspace');expect(owners.at(-1)!()).toBe(true);expect(old()).toBe(false);
     expect(native.plugin.signIn).not.toHaveBeenCalled();expect(native.plugin.signOut).not.toHaveBeenCalled();
+  });
+  it('keeps the current identity and unfinished work reachable while practice connection is locked',async()=>{
+    const native=harness(),practice=practiceHarness(true),owners:(()=>boolean)[]=[];
+    function WorkFence({pending}:{pending:boolean}){useUnsavedWork(pending);return null;}
+    const screen=(pending:boolean)=><><WorkFence pending={pending}/><NativeAuthenticatedWorkspace plugin={native.plugin} available
+      practicePlugin={practice} practiceConnectionAvailable createIdentity={(_state,isCurrent)=>{owners.push(isCurrent);return {mode:'clerk_jwt',getToken:async()=>token};}}/></>;
+    await act(async()=>root.render(screen(true)));await click('Team settings');
+    const summary=container.querySelector<HTMLElement>('.native-account-controls summary');expect(summary).not.toBeNull();
+    await act(async()=>summary!.click());
+    const connect=[...container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Connect practice')!;
+    expect(connect.disabled).toBe(true);expect(container.textContent).toContain('Save your edits and finish pending work');
+    const old=owners.at(-1)!;await act(async()=>connect.click());expect(old()).toBe(true);expect(practice.accountStatus).not.toHaveBeenCalled();
+    await act(async()=>root.render(screen(false)));expect(connect.disabled).toBe(false);
+    await click('Connect practice');expect(old()).toBe(false);expect(container.textContent).toContain('Your practices');
+    expect(practice.beginAccountSignIn).not.toHaveBeenCalled();expect(native.plugin.signOut).not.toHaveBeenCalled();
   });
   it("logs out from Settings through the native owner and closes access before remote completion", async () => {
     const native=harness(),finished=deferred<void>();
