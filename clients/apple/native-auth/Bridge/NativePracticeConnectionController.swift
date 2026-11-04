@@ -104,7 +104,9 @@ import UIKit
         return driver?.identity
     }
     public func accountStatus() async throws -> NativePracticeAccountView {
-        if phase == .accountReady, currentAccount() != account { account = nil; changed(.unavailable) }
+        // Source retirement temporarily removes workspace identity. The owned
+        // transition's fresh identity/revision checks decide drift before commit.
+        if !transition, phase == .accountReady, currentAccount() != account { account = nil; changed(.unavailable) }
         return try view()
     }
     private func expect(_ expected: String, ready: Bool = true) throws -> NativeAccountIdentity? {
