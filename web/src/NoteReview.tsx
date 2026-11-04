@@ -5,13 +5,15 @@ import { captureGapKey, validateCaptureGapReview, type CaptureGapReview } from "
 import { useUnsavedWork } from "./unsaved-work";
 import { EditorRecoveryNotice, editorData, editorDraft, useEditorRecovery } from "./editor-recovery";
 import { DraftStoreError } from "./draft-store";
+import {canReviewChiefNote,supportsChiefNoteSource,type ChiefNoteOffer} from './chief-note-source';
 
-export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange,onTeamDrafts,compact=false,notebookDirty=false }: {
+export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange,onTeamDrafts,compact=false,notebookDirty=false,chiefNoteOffer }: {
   workspace: Workspace; locked: boolean; onSave: (operation: NoteOperation) => void; onSources: () => void; active?:boolean;
   onStateChange?:(state:'editing'|'review'|'saved')=>void;
   onTeamDrafts?:(noteId:string)=>void;
   compact?:boolean;
   notebookDirty?:boolean;
+  chiefNoteOffer?:ChiefNoteOffer;
 }) {
   const latest = workspace.note?.latest;
   const core = !!latest?.core_source;
@@ -31,6 +33,7 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
     latest?.core_source?.note_sha256, captureGapKey(gaps)]) : null;
   const gapsConfirmed = gapTarget !== null && acknowledgedGapTarget === gapTarget;
   const [replacement, setReplacement] = useState<WorkspaceEntry | null>(null);
+  const chiefReplacementToken=useRef<object|null>(null);
   const [detached, setDetached] = useState<{content:string;baseId:string|null;sourceId:string|null} | null>(null);
   const changingToCore = core && latest?.id !== baseId && !baseCore.current;
   const compare = changingToCore ? workspace.note?.history.find(note=>note.id === baseId) : latest;
@@ -68,17 +71,32 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
   const sourcesChanged = sourceId !== latest?.source_reply_id && sourceRevision !== undefined
     ? newestSource > sourceRevision : latest?.sources_changed ?? false;
   useEffect(()=>{onStateChange?.(!dirty&&!otherVersion&&!sourcesChanged&&latest?.review?'saved':content.trim()?'review':'editing');},[dirty,otherVersion,sourcesChanged,latest?.review,!!content.trim(),onStateChange]);
-  function useScribe(entry: WorkspaceEntry) {
+  function useReplyDraft(entry: WorkspaceEntry) {
     baseCore.current = false;
     setContent(entry.reply!.content); setSourceId(entry.id); setReconciled(false); setConfirmed(false); setReplacement(null);
+    chiefReplacementToken.current=null;
   }
+  const handledChiefOffer=useRef<object|null>(null);
+  useLayoutEffect(()=>{
+    if(!chiefNoteOffer||handledChiefOffer.current===chiefNoteOffer.token||!active||locked||core||otherVersion||!supportsChiefNoteSource(workspace))return;
+    const selected=workspace.entries.find(entry=>entry.id===chiefNoteOffer.entry.id);
+    if(!selected||!canReviewChiefNote(selected,workspace.note?.chief_source_min_revision)||selected.reply?.content!==chiefNoteOffer.entry.reply?.content||
+      selected.reply?.context_revision!==chiefNoteOffer.entry.reply?.context_revision)return;
+    handledChiefOffer.current=chiefNoteOffer.token;
+    if(content.trim()){chiefReplacementToken.current=chiefNoteOffer.token;setReplacement(selected);}else useReplyDraft(selected);
+  },[chiefNoteOffer,active,locked,core,otherVersion,workspace.entries,newestSource,content]);
   // Opening review can adopt an available draft only into a genuinely empty editor.
   // Recovery and saved-version conflicts take precedence over this convenience.
-  const initializingScribe=active&&!locked&&!latest&&!content&&sourceId===null&&!!scribe;
+  const initializingScribe=active&&!locked&&!chiefNoteOffer&&!latest&&!content&&sourceId===null&&!!scribe;
   useLayoutEffect(()=>{
-    if(initializingScribe)useScribe(scribe!);
+    if(initializingScribe)useReplyDraft(scribe!);
   },[initializingScribe,scribe]);
   const compactReview=compact&&!core;
+  const selectedChief=chiefNoteOffer&&workspace.entries.find(entry=>entry.id===chiefNoteOffer.entry.id);
+  const chiefReplacementCurrent=!!selectedChief&&chiefReplacementToken.current===chiefNoteOffer?.token&&
+    selectedChief.id===replacement?.id&&selectedChief.reply?.content===replacement?.reply?.content&&
+    selectedChief.reply?.context_revision===replacement?.reply?.context_revision&&supportsChiefNoteSource(workspace)&&
+    canReviewChiefNote(selectedChief,workspace.note?.chief_source_min_revision);
   const savedNotebook=workspace.entries.filter(entry=>entry.kind==='scratchpad').at(-1);
   const canUseSavedNotes=compactReview&&!latest&&!baseId&&!content&&sourceId===null&&!!savedNotebook?.content.trim();
   function useSavedNotes(){
@@ -139,9 +157,10 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
       {!core && <button disabled={locked} onClick={() => { baseCore.current = false; setBaseId(latest?.id ?? null);
         setSourceId(sourceId ?? latest?.source_reply_id ?? null); setConfirmed(false); setReconciled(false);
       }}>Keep my text as next version</button>}</div>}
-    {scribe && !core && <button disabled={locked || otherVersion} onClick={() => content.trim() ? setReplacement(scribe) : useScribe(scribe)}>Use latest Scribe draft</button>}
-    {replacement && !core && <div className="team-note-notice" role="status"><p>Replace the editor with Scribe's latest draft? Saved versions remain in history.</p>
-      <button disabled={locked} onClick={() => useScribe(replacement)}>Replace editor with draft</button>
+    {scribe && !core && <button disabled={locked || otherVersion} onClick={() => content.trim() ? setReplacement(scribe) : useReplyDraft(scribe)}>Use latest Scribe draft</button>}
+    {replacement && !core && <div className="team-note-notice" role="status"><p>{replacement.reply?.role==='chief'?"Replace the editor with this Chief answer?":"Replace the editor with Scribe's latest draft?"} Saved versions remain in history.</p>
+      {replacement.reply?.role==='chief'&&!chiefReplacementCurrent&&<p>The selected Chief answer is no longer available for this note. Your editor text is kept.</p>}
+      <button disabled={locked||otherVersion||replacement.reply?.role==='chief'&&!chiefReplacementCurrent} onClick={() => {if(!locked&&!otherVersion&&(replacement.reply?.role!=='chief'||chiefReplacementCurrent))useReplyDraft(replacement);}}>Replace editor with draft</button>
       <button disabled={locked} onClick={() => setReplacement(null)}>Keep my text</button></div>}
     {canUseSavedNotes&&<><button className="team-subtle" disabled={!active||locked||notebookDirty||otherVersion||initializingScribe} onClick={useSavedNotes}>Use my saved notes</button>
       {notebookDirty&&<p className="team-fine" role="status">Save your notebook changes first. Your review text stays separate.</p>}</>}

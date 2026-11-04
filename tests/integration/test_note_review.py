@@ -5,18 +5,20 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from cosmas_os.api import app as api_module
+from cosmas_os.application import model_work, provider_team
 from cosmas_os.application import note_review as notes
-from cosmas_os.application import provider_team
 from cosmas_os.application import services as svc
 from cosmas_os.application import workspace as ws
 from cosmas_os.models import (
     AppointmentObservation,
     Decision,
+    ModelWorkAdmission,
     Operation,
     PatientLink,
     Principal,
@@ -25,9 +27,10 @@ from cosmas_os.models import (
     WorkspaceNoteReview,
     WorkspaceReply,
 )
+from cosmas_os.ports.bot_capabilities import BotReply
 
 
-def prepare(session, seeded):
+def prepare(session, seeded, *, key="create-note"):
     box, actor = seeded["box_id"], seeded["owner_id"]
     link = PatientLink(
         box_id=box,
@@ -49,7 +52,7 @@ def prepare(session, seeded):
     )
     session.add(a)
     session.commit()
-    w = ws.create(session, box, actor, a.id, "create-note")
+    w = ws.create(session, box, actor, a.id, key)
     return box, actor, w, link.id
 
 
@@ -407,6 +410,119 @@ def test_scribe_lineage_keeps_original_source_context_until_human_reconciliation
     )
     assert not fixed["note"]["latest"]["sources_changed"]
     assert fixed["note"]["latest"]["source_reply_id"] == turn["entry_id"]
+
+
+def chief_turn(session, case, monkeypatch, *, reserve_only=False):
+    box, actor, w, _ = case
+    monkeypatch.setattr(provider_team.runtime_settings, "workspace_enabled", True)
+    monkeypatch.setattr(provider_team.runtime_settings, "workspace_llm_backend", "azure_gpt41")
+    monkeypatch.setattr(provider_team.runtime_settings, "workspace_llm_api_key", SecretStr("invented-no-network"))
+    team = provider_team.save(session, box, actor, expected=0, key="chief-note-team",
+                              configuration=provider_team.default_configuration())
+    command = {"expected": w["revision"], "team_revision": team["revision"],
+               "key": "chief-note-question", "role": "chief", "content": "Draft the invented saved notes."}
+    if reserve_only:
+        admission, _ = model_work.reserve_conversation(session, box, actor, w["id"], **command)
+        return session.get(ModelWorkAdmission, admission).request_entry_id
+    result = model_work.run_conversation(session, box, actor, w["id"],
+        dispatch=lambda _: BotReply("Invented Chief note for explicit human review.", (), "azure_gpt41", 20, 10),
+        **command)
+    return result["saved_entry"]["id"]
+
+
+def test_completed_chief_answer_can_seed_a_private_note_but_never_approve_it(session, case, monkeypatch):
+    entry_id = chief_turn(session, case, monkeypatch)
+    current = ws.read(session, case[0], case[1], case[2]["id"])
+    assert current["note"]["allowed_reply_roles"] == ["scribe", "chief"]
+    copied = save(session, case, expected=current["revision"], source_reply_id=entry_id)
+    note = copied["note"]["latest"]
+    assert note["source_reply_id"] == entry_id and note["source_revision"] == 1
+    assert note["review"] is None and not note["sources_changed"]
+    assert review(session, case, copied)["note"]["latest"]["review"] is not None
+    # Existing generated-note lineage still requires explicit reconciliation after source changes.
+    changed = ws.append(session, case[0], case[1], copied["id"], expected=copied["revision"] + 1,
+                        key="chief-note-correction", kind="scratchpad", content="Corrected invented facts.")["workspace"]
+    fixed = save(session, case, expected=changed["revision"], key="chief-note-reconcile",
+                 base_note_id=note["id"], source_reply_id=entry_id, sources_reconciled=True)
+    assert not fixed["note"]["latest"]["sources_changed"] and fixed["note"]["latest"]["review"] is None
+
+
+def test_older_chief_answer_keeps_same_visit_source_reconciliation_mandatory(session, case, monkeypatch):
+    entry_id = chief_turn(session, case, monkeypatch)
+    current = ws.read(session, case[0], case[1], case[2]["id"])
+    fresh = ws.append(session, case[0], case[1], current["id"], expected=current["revision"],
+                      key="new-chief-source", kind="scratchpad", content="New invented source context.")["workspace"]
+    copied = save(session, case, expected=fresh["revision"], source_reply_id=entry_id)
+    assert copied["note"]["latest"]["sources_changed"]
+    with pytest.raises(ws.WorkspaceError, match="sources_or_content_changed"):
+        review(session, case, copied)
+
+
+def test_chief_answer_before_explicit_visit_binding_is_not_a_current_visit_source(session, case, monkeypatch):
+    chief_turn(session, case, monkeypatch)
+    private = ws.create_private_draft(session, case[0], case[1], "Invented unlinked notebook", "prelink-chief-note")
+    assert private["note"]["allowed_reply_roles"] == []
+    turn = ws.append(session, case[0], case[1], private["id"], expected=1, key="prelink-chief-question",
+                     kind="conversation", content="Invented private question.")
+    version = provider_team.current(session, case[0], case[1])
+    team = provider_team.read(session, case[0], case[1])
+    session.add(WorkspaceReply(entry_id=turn["entry_id"], workspace_id=private["id"], box_id=case[0], owner_id=case[1],
+        agent_id=next(m["agent_id"] for m in team["members"] if m["role"] == "chief"),
+        team_revision_id=version.id, agent_name="Chief", role="chief", backend="azure_gpt41",
+        content="Invented answer before visit selection.", context_revision=1, citations=[]))
+    appointment = AppointmentObservation(box_id=case[0], patient_link_id=case[3], external_id=str(uuid4()),
+        source="synthetic", start_at=datetime.now(UTC), patient_label="Invented newly selected visit")
+    session.add(appointment)
+    session.commit()
+    linked = ws.link_appointment(session, case[0], case[1], private["id"], expected=2, key="bind-chief-note",
+                                 appointment=appointment.id, confirmed=True)["workspace"]
+    assert linked["note"]["allowed_reply_roles"] == ["scribe", "chief"]
+    assert linked["note"]["chief_source_min_revision"] == 3
+    with pytest.raises(ws.WorkspaceError, match="note_source_context_changed"):
+        save(session, (case[0], case[1], linked, case[3]), expected=3, source_reply_id=turn["entry_id"])
+
+
+def test_chief_answer_import_rejects_an_uncompleted_admission(session, case, monkeypatch):
+    entry_id = chief_turn(session, case, monkeypatch, reserve_only=True)
+    admission = session.scalar(select(ModelWorkAdmission).where(ModelWorkAdmission.request_entry_id == entry_id))
+    session.add(WorkspaceReply(entry_id=entry_id, workspace_id=case[2]["id"], box_id=case[0], owner_id=case[1],
+        agent_id=admission.agent_id, team_revision_id=admission.team_revision_id, agent_name="Chief",
+        role="chief", backend="azure_gpt41", content="Invented unconfirmed output.", context_revision=1, citations=[]))
+    session.commit()
+    with pytest.raises(ws.WorkspaceError, match="note_source_unavailable"):
+        save(session, case, expected=2, source_reply_id=entry_id)
+
+
+@pytest.mark.parametrize("kind,backend", [("evidence", "azure_gpt41"), ("conversation", "azure_gpt41_unavailable")])
+def test_chief_answer_import_rejects_nonconversation_or_unavailable_output(session, case, kind, backend):
+    team = provider_team.save(session, case[0], case[1], expected=0, key="invalid-chief-team",
+                              configuration=provider_team.default_configuration())
+    turn = ws.append(session, case[0], case[1], case[2]["id"], expected=1, key="invalid-chief-source",
+                     kind=kind, content="Invented source.", source_label="Invented source" if kind == "evidence" else None)
+    session.add(WorkspaceReply(entry_id=turn["entry_id"], workspace_id=case[2]["id"], box_id=case[0], owner_id=case[1],
+        agent_id=next(m["agent_id"] for m in team["members"] if m["role"] == "chief"),
+        team_revision_id=provider_team.current(session, case[0], case[1]).id, agent_name="Chief",
+        role="chief", backend=backend, content="Invented invalid note output.", context_revision=1, citations=[]))
+    session.commit()
+    with pytest.raises(ws.WorkspaceError, match="note_source_unavailable"):
+        save(session, case, expected=2, source_reply_id=turn["entry_id"])
+
+
+@pytest.mark.parametrize("scope", ["workspace", "owner", "box"])
+def test_chief_answer_import_is_scoped_to_server_workspace_owner_and_box(session, case, monkeypatch, scope):
+    entry_id = chief_turn(session, case, monkeypatch)
+    if scope == "workspace":
+        target = prepare(session, {"box_id": case[0], "owner_id": case[1]}, key="other-chief-note")
+    elif scope == "owner":
+        owner = Principal(box_id=case[0], principal_type="human", display_name="Other invented owner", is_owner=True)
+        session.add(owner)
+        session.commit()
+        target = prepare(session, {"box_id": case[0], "owner_id": owner.id}, key="other-chief-note")
+    else:
+        seed = svc.provision_box(svc.Container(session), "Other invented Chief-note practice")
+        target = prepare(session, seed)
+    with pytest.raises(ws.WorkspaceError, match="note_source_unavailable"):
+        save(session, target, source_reply_id=entry_id)
 
 
 def test_concurrent_note_saves_have_one_winner_and_reopen_from_new_session(engine):

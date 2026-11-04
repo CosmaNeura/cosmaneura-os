@@ -10,6 +10,7 @@ from cosmas_os.application import workspace as ws
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import (
     ModelWorkAdmission,
+    WorkspaceAppointmentLink,
     WorkspaceEntry,
     WorkspaceNote,
     WorkspaceNoteReview,
@@ -67,6 +68,45 @@ def _require_note_lineage(s: Session, w, reply_id):
             raise ws.WorkspaceError(entry.kind + "_note_import_unavailable", 409)
 
 
+def _note_source_reply(s: Session, w, reply_id: str) -> WorkspaceReply:
+    """Resolve server-owned output; Chief also needs a completed scoped conversation."""
+    reply = s.scalar(select(WorkspaceReply).where(
+        WorkspaceReply.entry_id == reply_id, WorkspaceReply.workspace_id == w.id,
+        WorkspaceReply.box_id == w.box_id, WorkspaceReply.owner_id == w.owner_id,
+        WorkspaceReply.role.in_(("scribe", "chief")),
+    ))
+    if reply is None or not reply.backend.startswith("azure_gpt41") or reply.backend.endswith("unavailable"):
+        raise ws.WorkspaceError("note_source_unavailable", 404)
+    if reply.role == "chief":
+        entry = s.scalar(select(WorkspaceEntry).where(
+            WorkspaceEntry.id == reply_id, WorkspaceEntry.workspace_id == w.id,
+            WorkspaceEntry.box_id == w.box_id, WorkspaceEntry.actor_id == w.owner_id,
+            WorkspaceEntry.kind == "conversation",
+        ))
+        admission = s.scalar(select(ModelWorkAdmission).where(ModelWorkAdmission.request_entry_id == reply_id))
+        if (entry is None or not reply.content.strip() or not 1 <= reply.context_revision < entry.revision
+            or entry.revision > w.revision or admission is not None and (
+                admission.workspace_id != w.id or admission.box_id != w.box_id or admission.owner_id != w.owner_id
+                or admission.kind != "conversation" or admission.state != "completed"
+                or admission.agent_id != reply.agent_id or admission.context_revision != reply.context_revision
+                or admission.result_entry_id != reply_id
+            )):
+            raise ws.WorkspaceError("note_source_unavailable", 404)
+        if admission is not None:
+            frozen = admission.prepared_envelope.get("context", {})
+            if (frozen.get("workspace_id") != w.id or frozen.get("role") != "chief"
+                or frozen.get("context_revision") != reply.context_revision):
+                raise ws.WorkspaceError("note_source_unavailable", 404)
+        link = s.scalar(select(WorkspaceAppointmentLink).where(WorkspaceAppointmentLink.workspace_id == w.id))
+        if link is not None and (link.box_id != w.box_id or link.owner_id != w.owner_id
+            or link.appointment_id != w.appointment_id or link.patient_link_id != w.patient_link_id
+            or reply.context_revision < link.workspace_revision):
+            raise ws.WorkspaceError("note_source_context_changed", 409)
+        # Older sources within this same bound visit retain the established
+        # sourcesChanged -> human reconciliation -> exact saved review flow.
+    return reply
+
+
 def read(s: Session, w, revision: int) -> dict:
     notes = list(
         s.scalars(
@@ -121,7 +161,11 @@ def read(s: Session, w, revision: int) -> dict:
                 else None,
             }
         )
-    return {"latest": history[-1] if history else None, "history": history}
+    link = s.scalar(select(WorkspaceAppointmentLink).where(WorkspaceAppointmentLink.workspace_id == w.id))
+    editable = w.appointment_id is not None and not (history and history[-1]["core_source"])
+    return {"latest": history[-1] if history else None, "history": history,
+            "allowed_reply_roles": ["scribe", "chief"] if editable else [],
+            "chief_source_min_revision": link.workspace_revision if link else 1}
 
 
 def _response(s, w, revision):
@@ -194,21 +238,7 @@ def save(
     source_revision = previous.source_revision if previous else w.revision
     _require_note_lineage(s, w, source_reply_id)
     if source_reply_id:
-        reply = s.scalar(
-            select(WorkspaceReply).where(
-                WorkspaceReply.entry_id == source_reply_id,
-                WorkspaceReply.workspace_id == wid,
-                WorkspaceReply.box_id == box,
-                WorkspaceReply.owner_id == actor,
-                WorkspaceReply.role == "scribe",
-            )
-        )
-        if (
-            reply is None
-            or not reply.backend.startswith("azure_gpt41")
-            or reply.backend.endswith("unavailable")
-        ):
-            raise ws.WorkspaceError("note_source_unavailable", 404)
+        reply = _note_source_reply(s, w, source_reply_id)
         if not previous or previous.source_reply_id != source_reply_id:
             source_revision = reply.context_revision
     elif previous and previous.source_reply_id:

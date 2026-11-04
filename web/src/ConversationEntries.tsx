@@ -7,6 +7,7 @@ import {MessageRequestStatus,messageRequestStatusId} from './MessageRequestStatu
 import {CopyAnswer} from './CopyAnswer';
 import {AnswerCopyEditor} from './AnswerCopyEditor';
 import {canEditAnswerCopy} from './answer-copy-contract';
+import {canReviewChiefNote} from './chief-note-source';
 import {EditorRecoveryContext} from './editor-recovery';
 import type {WorkspaceEntry} from './workspace-api';
 import type {ConversationAction,ConversationProjection} from './session/entries';
@@ -14,11 +15,13 @@ import type {ConversationAction,ConversationProjection} from './session/entries'
 const entryTime=(time:Date)=>time.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
 
 /** Both presentations display the same entries and invoke the same actions. */
-export function ConversationEntries({presentation='workspace',projection,latestSourceRevision,busy,recoveryBlocked,locked,onWork,onSource,onCheck,onAction,canRestoreFocus,onBusyChange}:{
+export function ConversationEntries({presentation='workspace',projection,latestSourceRevision,busy,recoveryBlocked,locked,onWork,onSource,onCheck,onAction,canRestoreFocus,onBusyChange,onReviewNote,noteSourceMinimumRevision}:{
   presentation?:'messages'|'workspace';
   projection:ConversationProjection;latestSourceRevision:number;busy:boolean;recoveryBlocked:boolean;locked:boolean;
   onWork:()=>void;onSource:(id:string)=>void;onCheck:(entry:WorkspaceEntry)=>Promise<void>;onAction:(action:ConversationAction)=>void;
   canRestoreFocus?:()=>boolean;onBusyChange?:(blocked:boolean)=>void;
+  onReviewNote?:(entry:WorkspaceEntry)=>void;
+  noteSourceMinimumRevision?:number;
 }){
   const messages=presentation==='messages',[details,setDetails]=useState<string|null>(null);
   const access=useContext(EditorRecoveryContext),[editing,setEditing]=useState(false),[answerBusy,setAnswerBusy]=useState(false),answerBusyNow=useRef(false);
@@ -69,6 +72,7 @@ export function ConversationEntries({presentation='workspace',projection,latestS
   {editing&&projection.workspaceId?<AnswerCopyEditor workspaceId={projection.workspaceId} entry={detailEntry} scope={detailEpisode} locked={locked||busy||recoveryBlocked} isCurrent={canRestoreMessageFocus} onBusyChange={reportAnswerBusy} onDone={()=>setEditing(false)}/>:<>
     {detailEntry.reply.content.trim()&&!detailEntry.reply.backend.endsWith('unavailable')&&<CopyAnswer content={detailEntry.reply.content} scope={detailEpisode} disabled={locked||busy||recoveryBlocked} isCurrent={canRestoreMessageFocus}/>}
     {canEditAnswerCopy(projection.workspaceId,detailEntry)&&<button type="button" disabled={locked||busy||recoveryBlocked||!access||access.workspaceId!==projection.workspaceId} onClick={()=>{if(locked||busy||recoveryBlocked||!access||access.workspaceId!==projection.workspaceId||!canRestoreMessageFocus())return;reportAnswerBusy(true);setEditing(true);}}>Edit a copy</button>}
+    {onReviewNote&&canReviewChiefNote(detailEntry,noteSourceMinimumRevision)&&<button type="button" disabled={locked||busy||recoveryBlocked} onClick={()=>{if(locked||busy||recoveryBlocked||!canRestoreMessageFocus()||!canReviewChiefNote(detailEntry,noteSourceMinimumRevision))return;leaveDetails(()=>onReviewNote(detailEntry));}}>Review as note</button>}
   </>}
   {latestSourceRevision>detailEntry.reply.context_revision&&<p role="status">Newer sources are available. Ask again to include them in a new answer.</p>}
   <h3>Saved sources</h3>{detailEntry.reply.citations.length?citations(detailEntry):<p>No individual source citations were attached to this answer.</p>}

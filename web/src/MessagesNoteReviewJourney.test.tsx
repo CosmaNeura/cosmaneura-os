@@ -75,3 +75,26 @@ it('uses saved jottings for private note review without an AI call, preserving t
  expect(host.querySelector('#team-question')).toBe(original);expect(original.value).toBe('Keep this invented Chief question unsent while I use my notes.');
  expect(ask).not.toHaveBeenCalled();expect(append).toHaveBeenCalledOnce();expect(save).toHaveBeenCalledOnce();expect(review).toHaveBeenCalledOnce();
 });
+
+it('offers only server-supported Chief answers to the same note editor, keeping text until replacement and requiring explicit save and review',async()=>{
+ const ask=vi.spyOn(workspaceApi,'ask'),save=vi.spyOn(workspaceApi,'saveNote'),review=vi.spyOn(workspaceApi,'reviewNote'),append=vi.spyOn(workspaceApi,'append');
+ const openChief=async()=>{const row=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(item=>item.textContent?.includes('Chief of Staff'));await wait(()=>expect(row()?.disabled).toBe(false));await act(async()=>row()!.click());await wait(()=>expect(host.querySelector<HTMLTextAreaElement>('#team-question')?.disabled).toBe(false));};
+ await openChief();await act(async()=>host.querySelector<HTMLButtonElement>('.messages-source-details')!.click());
+ expect(button('Review as note')).toBeUndefined();await click('Close message details');
+ const oldComposer=host.querySelector<HTMLTextAreaElement>('#team-question')!;await type(oldComposer,'Prepare a different invented draft.');await click('Send message');await wait(()=>expect(ask).toHaveBeenCalledOnce());await wait(()=>expect(oldComposer.disabled).toBe(false));
+ // An older API does not advertise support. Remount with the new server projection.
+ const read=workspaceApi.read;vi.spyOn(workspaceApi,'read').mockImplementation(async(...args)=>{const w=await read(...args);return {...w,note:{latest:w.note?.latest??null,history:w.note?.history??[],allowed_reply_roles:['scribe','chief']}};});
+ await act(async()=>root.unmount());history.replaceState(null,'','#cosmas/home');root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));await openChief();
+ const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!;
+ const selected=host.querySelector<HTMLElement>('.team-turn')!,selectedId=selected.dataset.entryId!,selectedAnswer=selected.querySelector<HTMLElement>('.team-bot-message .workspace-markdown')?.textContent??selected.querySelector<HTMLElement>('.team-bot-message p')!.textContent!;
+ await type(composer,'Keep this invented follow-up question unsent.');
+ await click('Details');await click('Visit note');const editor=host.querySelector<HTMLTextAreaElement>('#private-note-text')!;
+ await wait(()=>expect(editor.disabled).toBe(false));await type(editor,'Keep my existing invented working note.');await click('‹ Back to Chief of Staff');
+ const openSelected=async()=>{await act(async()=>selected.querySelector<HTMLButtonElement>('.messages-source-details')!.click());await click('Review as note');await wait(()=>expect(button('Replace editor with draft')).toBeTruthy());};
+ await openSelected();expect(host.querySelector('#private-note-text')).toBe(editor);expect(editor.value).toBe('Keep my existing invented working note.');
+ await click('Keep my text');expect(editor.value).toBe('Keep my existing invented working note.');await click('‹ Back to Chief of Staff');await openSelected();await click('Replace editor with draft');
+ expect(editor.value).toBe(selectedAnswer);expect(composer.value).toBe('Keep this invented follow-up question unsent.');expect(save).not.toHaveBeenCalled();expect(review).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();expect(ask).toHaveBeenCalledOnce();
+ await click('Save note');await wait(()=>expect(save).toHaveBeenCalledOnce());expect(save.mock.calls[0][2]).toMatchObject({source_reply_id:selectedId,content:selectedAnswer,sources_reconciled:false});
+ await wait(()=>expect(button('Confirm review')?.disabled).toBe(true));const acknowledgement=host.querySelector<HTMLInputElement>('.team-note-approval input[type="checkbox"]')!;await act(async()=>acknowledgement.click());await click('Confirm review');await wait(()=>expect(review).toHaveBeenCalledOnce());
+ await click('‹ Back to Chief of Staff');expect(host.querySelector('#team-question')).toBe(composer);expect(composer.value).toBe('Keep this invented follow-up question unsent.');expect(ask).toHaveBeenCalledOnce();expect(append).not.toHaveBeenCalled();
+});
