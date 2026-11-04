@@ -114,6 +114,21 @@ class NativeDataMode(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         target._navigation.validate_google(client, callback)
 
+    def test_microsoft_authority_is_explicit_and_identical_for_both_composers(self):
+        client = "10000000-0000-4000-8000-000000000002"
+        callback = "https://api.example.invalid/connections/microsoft/callback"
+        for target in (desktop, apple):
+            target._navigation.validate_microsoft("", "", "")
+            for authority in ("10000000-0000-4000-8000-000000000001", "organizations"):
+                target._navigation.validate_microsoft(authority, client, callback)
+            for authority in ("common", "consumers", "Organizations", "organizations/",
+                              "https://login.microsoftonline.com/organizations"):
+                with self.subTest(composer=target.__name__, authority=authority):
+                    with self.assertRaises(ValueError):
+                        target._navigation.validate_microsoft(authority, client, callback)
+            with self.assertRaises(ValueError):
+                target._navigation.validate_microsoft("organizations", client, "https://other.example.invalid/alternate")
+
     def invoke(self, client, web, identity, selected):
         target = desktop if client == "desktop" else apple
         validate = target._beta.validate_native

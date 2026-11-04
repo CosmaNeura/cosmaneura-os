@@ -42,6 +42,22 @@ test('explicit Microsoft overlay binds existing broker, client gates and protect
   }
 });
 
+test('organizations overlay declares required multitenant registration without performing it',()=>{
+  const value=candidate({owned:true});
+  value.beta_features.microsoft={tenant_id:'organizations',client_id:'10000000-0000-4000-8000-000000000002',
+    callback_uri:value.api_origin+'/connections/microsoft/callback',return_origin:value.web_origin};
+  const files=render(value),contract=files['host-preparation.json'];
+  assert.equal(files['api-public.json'].MICROSOFT_CONNECTION_TENANT_ID,'organizations');
+  assert.equal(contract.microsoft_registration.required_sign_in_audience,'AzureADMultipleOrgs');
+  assert.equal(contract.microsoft_registration.account_type,'any_work_or_school_tenant');
+  assert.equal(contract.microsoft_registration.provider_registration_performed,false);
+  assert.equal(contract.optional_runtime_features.live_provider_acceptance,false);
+  for(const authority of ['common','consumers','Organizations','organizations/','https://login.microsoftonline.com/organizations']){
+    const altered=structuredClone(value);altered.beta_features.microsoft.tenant_id=authority;
+    assert.throws(()=>render(altered));
+  }
+});
+
 test('optional public features bind server, clients, private field names and explicit egress',()=>{
   for(const model of [false,true])for(const google of [false,true]){
     const value=candidate({model,google}),files=render(value),env=files['api-public.json'];

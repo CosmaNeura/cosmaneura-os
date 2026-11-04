@@ -53,8 +53,10 @@ def validate_storage_profile(configuration, app):
         fields = ("microsoftConnectionTenantId", "microsoftConnectionClientId", "microsoftConnectionCallbackUri")
         identifier = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
         if microsoft_enabled:
-            if (any(not isinstance(configuration.get(key), str) or re.fullmatch(identifier, configuration[key]) is None
-                    for key in fields[:2])
+            tenant = configuration.get(fields[0])
+            client = configuration.get(fields[1])
+            if (not isinstance(tenant, str) or (tenant != "organizations" and re.fullmatch(identifier, tenant) is None)
+                    or not isinstance(client, str) or re.fullmatch(identifier, client) is None
                     or configuration.get(fields[2]) != configuration.get("apiOrigin", "") + "/connections/microsoft/callback"):
                 raise ValueError("Independent beta Microsoft inputs must match its selected capability and exact API callback.")
         elif any(configuration.get(key) for key in fields):

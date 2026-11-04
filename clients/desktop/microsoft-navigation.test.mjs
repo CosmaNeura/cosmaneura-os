@@ -22,3 +22,16 @@ test('the native proxy admits only the bounded authenticated Microsoft command',
  for(const method of ['GET','PUT','DELETE'])assert.equal(connectorApiRoute('/connections/microsoft/session',method),null);
  assert.equal(connectorApiRoute('/connections/microsoft/session?token=anything','POST'),null);
 });
+test('organizations is an explicit work-school authority with unchanged exact consent guards',()=>{
+ const work=microsoftNavigationConfig('organizations',client,config.callbackUri);
+ const workUrl=url(fields).replace(tenant,'organizations');
+ assert.equal(validMicrosoftNavigationUrl(workUrl,work),true);
+ assert.equal(validMicrosoftNavigationUrl(workUrl,config),false);
+ assert.equal(validMicrosoftNavigationUrl(url(fields),work),false);
+ for(const authority of ['common','consumers','Organizations',' organizations','organizations/','https://login.microsoftonline.com/organizations'])
+   assert.throws(()=>microsoftNavigationConfig(authority,client,config.callbackUri));
+ for(const bad of [workUrl.replace('/organizations/','/common/'),workUrl.replace('/organizations/','/consumers/'),
+   workUrl.replace('login.microsoftonline.com','login.microsoftonline.com.evil.invalid'),workUrl+'#fragment',
+   workUrl+'&state=duplicate',workUrl.replace('Mail.Read','Mail.Send'),workUrl.replace('S256','plain')])
+   assert.equal(validMicrosoftNavigationUrl(bad,work),false);
+});

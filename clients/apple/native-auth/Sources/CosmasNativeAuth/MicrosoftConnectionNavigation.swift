@@ -11,7 +11,7 @@ public struct MicrosoftConnectionNavigation {
     public init(tenantID: String = "", clientID: String = "", callbackURI: String = "") throws {
         self.tenantID = tenantID; self.clientID = clientID; self.callbackURI = callbackURI
         if tenantID.isEmpty && clientID.isEmpty && callbackURI.isEmpty { enabled = false; return }
-        guard Self.matches(tenantID, #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"#), Self.matches(clientID, #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"#),
+        guard (tenantID == "organizations" || Self.matches(tenantID, #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"#)), Self.matches(clientID, #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"#),
               callbackURI.hasSuffix(Self.callbackPath),
               Self.matches(String(callbackURI.dropLast(Self.callbackPath.count)), #"https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?"#) else { throw CosmaneuraNavigationError.unavailable }
         enabled = true

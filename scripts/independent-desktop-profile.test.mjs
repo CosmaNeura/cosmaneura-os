@@ -29,9 +29,10 @@ test('independent desktop Microsoft release requires the selected capability and
     microsoftConnectionClientId:'10000000-0000-4000-8000-000000000002',
     microsoftConnectionCallbackUri:identity.apiOrigin+'/connections/microsoft/callback'};
   assert.deepEqual(validateOperationalReleaseProfile({...config,...microsoft},manifest,info),identity);
+  assert.deepEqual(validateOperationalReleaseProfile({...config,...microsoft,microsoftConnectionTenantId:'organizations'},manifest,info),identity);
   assert.throws(()=>validateOperationalReleaseProfile(config,manifest,info));
   assert.throws(()=>validateOperationalReleaseProfile({...config,...microsoft},fixture().manifest,info));
-  for(const change of [{microsoftConnectionTenantId:'common'}, {microsoftConnectionClientId:undefined},
+  for(const change of [...['common','consumers','Organizations','organizations/','https://login.microsoftonline.com/organizations'].map(microsoftConnectionTenantId=>({microsoftConnectionTenantId})), {microsoftConnectionClientId:undefined},
     {microsoftConnectionCallbackUri:'https://other.example.invalid/connections/microsoft/callback'}])
     assert.throws(()=>validateOperationalReleaseProfile({...config,...microsoft,...change},manifest,info));
 });

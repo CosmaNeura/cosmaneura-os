@@ -108,7 +108,10 @@ class MicrosoftPersonalConnection:
             or not settings.workspace_microsoft_connection_enabled
         ):
             raise ValueError("Authenticated Microsoft connection must be enabled")
-        self.tenant = str(UUID(settings.microsoft_connection_tenant_id))
+        # Explicit work/school multitenant authority; all other values retain
+        # the existing fixed UUID behavior. Never accept common, consumers or URLs.
+        self.tenant = ("organizations" if settings.microsoft_connection_tenant_id == "organizations"
+                       else str(UUID(settings.microsoft_connection_tenant_id)))
         self.client_id = str(UUID(settings.microsoft_connection_client_id))
         self.return_origin = exact_origin(settings.microsoft_connection_return_origin)
         callback = urlsplit(settings.microsoft_connection_callback_uri)
