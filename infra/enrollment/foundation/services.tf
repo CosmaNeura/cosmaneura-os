@@ -1,5 +1,5 @@
 resource "azurerm_container_registry" "enrollment" {
-  name                          = "acrcbotenrstg${var.resource_name_suffix}"
+  name                          = "acrcbotenr${local.short}${var.resource_name_suffix}"
   resource_group_name           = azurerm_resource_group.enrollment.name
   location                      = var.location
   sku                           = "Basic"
@@ -12,7 +12,7 @@ resource "azurerm_container_registry" "enrollment" {
   lifecycle { prevent_destroy = true }
 }
 resource "azurerm_key_vault" "enrollment" {
-  name                          = "kv-cbot-enr-stg-${var.resource_name_suffix}"
+  name                          = "kv-cbot-enr-${local.short}-${var.resource_name_suffix}"
   resource_group_name           = azurerm_resource_group.enrollment.name
   location                      = var.location
   tenant_id                     = var.tenant_id
@@ -29,7 +29,7 @@ resource "azurerm_key_vault" "enrollment" {
   lifecycle { prevent_destroy = true }
 }
 resource "azurerm_storage_account" "state" {
-  name                              = "stcbotenrstg${var.resource_name_suffix}"
+  name                              = "stcbotenr${local.short}${var.resource_name_suffix}"
   resource_group_name               = azurerm_resource_group.enrollment.name
   location                          = var.location
   account_kind                      = "StorageV2"

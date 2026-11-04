@@ -1,6 +1,8 @@
 locals {
-  name = "cosmabot-enrollment-staging-${var.resource_name_suffix}"
-  tags = { product = "cosmabot", component = "customer-enrollment-foundation", environment = "staging", clinical_data = "false" }
+  # Production gets entirely separate names, state and resource group from staging.
+  short = var.environment == "production" ? "prd" : "stg"
+  name  = "cosmabot-enrollment-${var.environment}-${var.resource_name_suffix}"
+  tags  = { product = "cosmabot", component = "customer-enrollment-foundation", environment = var.environment, clinical_data = var.environment == "production" ? "true" : "false" }
 }
 resource "azurerm_resource_group" "enrollment" {
   name     = "rg-${local.name}"

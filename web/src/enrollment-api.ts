@@ -1,4 +1,4 @@
-import { ENROLLMENT_CONTRACT, EnrollmentError, validateEnrollmentCheckout, validateEnrollmentConfig, validateEnrollmentDocument,
+import { ENROLLMENT_CONTRACT, EnrollmentError, PRACTICE_UUID_POLICIES, validateEnrollmentCheckout, validateEnrollmentConfig, validateEnrollmentDocument,
   validateEnrollmentInvitation, validateEnrollmentPractices, validateEnrollmentQuote, validateEnrollmentReceipt, validateEnrollmentStatus,
   type AgreementInput, type EnrollmentConfig, type EnrollmentStatus, type PracticeInput, type ProfileInput } from './enrollment-contract';
 
@@ -114,21 +114,22 @@ export function stripeDestination(value: string, portal = false): string {
 }
 type RegisteredWorkspaceDestination = {config:EnrollmentConfig;current:EnrollmentStatus;ready:EnrollmentStatus};
 const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** Additional server-managed staging scope; reviewed exact legacy origins keep their existing behavior. */
+/** Additional server-managed practice-UUID scope (staging or production); reviewed exact legacy origins keep their existing behavior. */
 export function workspaceDestination(value: string, page = window.location.href, approved:readonly string[] = [],
   registered?:RegisteredWorkspaceDestination): string {
   try { const url = new URL(value,page), own = new URL(page);
     const policy=registered?.config.workspace_origin_policy??'exact';
-    if(!['exact','synthetic-practice-uuid-staging-v1'].includes(policy))throw new Error();
-    const uuidHost=url.hostname.endsWith('.staging.cosmas.ai')&&canonicalUuid.test(url.hostname.slice(0,-'.staging.cosmas.ai'.length));
-    if(registered&&policy==='synthetic-practice-uuid-staging-v1'&&uuidHost){
+    if(policy!=='exact'&&!Object.hasOwn(PRACTICE_UUID_POLICIES,policy))throw new Error();
+    const scope=policy==='exact'?null:PRACTICE_UUID_POLICIES[policy as keyof typeof PRACTICE_UUID_POLICIES],suffix=scope?'.'+scope.domain:'';
+    const uuidHost=!!scope&&url.hostname.endsWith(suffix)&&canonicalUuid.test(url.hostname.slice(0,-suffix.length));
+    if(registered&&scope&&uuidHost){
       const {config}=registered,current=validateEnrollmentStatus(registered.current),ready=validateEnrollmentStatus(registered.ready);
       const practice=ready.practice?.id,org=ready.workspace.organization_id,box=ready.workspace.box_id;
-      if(!config.enabled||!config.auth_configured||config.data_mode!=='synthetic'||current.stage!=='ready'||ready.stage!=='ready'||
+      if(!config.enabled||!config.auth_configured||config.data_mode!==scope.dataMode||current.stage!=='ready'||ready.stage!=='ready'||
         current.workspace.status!=='ready'||ready.workspace.status!=='ready'||!practice||!canonicalUuid.test(practice)||
         current.practice?.id!==practice||!org||!/^org_[A-Za-z0-9_]{1,251}$/.test(org)||current.workspace.organization_id!==org||
         !box||!canonicalUuid.test(box)||current.workspace.box_id!==box||ready.workspace.url!==value||
-        value!==`https://${practice}.staging.cosmas.ai/chief`)throw new Error();
+        value!==`https://${practice}${suffix}/chief`)throw new Error();
       return value;
     }
     if (url.username || url.password || url.hash || !(url.origin === own.origin || approved.includes(url.origin)) ||

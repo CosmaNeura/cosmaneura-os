@@ -171,7 +171,7 @@ class AzureAllocationBackend:
         for name in ("resource_group_name", "storage_account_name", "container_name"):
             arguments.append("-backend-config=" + name + "=" + backend[name])
         arguments += ["-backend-config=use_azuread_auth=true", "-backend-config=use_msi=true",
-                      "-backend-config=key=cosmabot-enrollment/staging/allocated/" + d["practice"]["plan"]["practice_id"] + ".tfstate"]
+                      "-backend-config=key=cosmabot-enrollment/" + self.config.environment.name + "/allocated/" + d["practice"]["plan"]["practice_id"] + ".tfstate"]
         self._command(arguments, env=environment)
         self._command(["tofu", "-chdir=" + str(module), "apply", "-input=false", "-auto-approve", "-no-color"], env=environment, timeout=2400)
         resources = self._json(["tofu", "-chdir=" + str(module), "output", "-json", "workspace_resources"], env=environment)["box"]

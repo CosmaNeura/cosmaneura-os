@@ -25,11 +25,13 @@ NAMES = {
 def foundation(path: Path) -> dict:
     f = json.loads(path.read_text())
     f = f.get("foundation", {}).get("value", f)
-    if (f.get("contract_version") != "enrollment-foundation.v1" or f.get("environment") != "staging"
-            or not re.fullmatch(r"rg-cosmabot-enrollment-staging-[a-z0-9]{6,8}", f.get("resource_group_name", ""))
-            or not re.fullmatch(r"https://kv-cbot-enr-stg-[a-z0-9]{6,8}\.vault\.azure\.net/", f.get("key_vault_uri", ""))
+    environment = f.get("environment")
+    short = {"staging": "stg", "production": "prd"}.get(environment)
+    if (f.get("contract_version") != "enrollment-foundation.v1" or short is None
+            or not re.fullmatch(rf"rg-cosmabot-enrollment-{environment}-[a-z0-9]{{6,8}}", f.get("resource_group_name", ""))
+            or not re.fullmatch(rf"https://kv-cbot-enr-{short}-[a-z0-9]{{6,8}}\.vault\.azure\.net/", f.get("key_vault_uri", ""))
             or f.get("key_vault_id") != f"/subscriptions/{f.get('subscription_id')}/resourceGroups/{f['resource_group_name']}/providers/Microsoft.KeyVault/vaults/{f['key_vault_uri'].split('//')[1].split('.')[0]}"):
-        raise ValueError("owned staging foundation required")
+        raise ValueError("owned enrollment foundation required")
     return f
 
 

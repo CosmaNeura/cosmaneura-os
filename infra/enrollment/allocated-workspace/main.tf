@@ -37,16 +37,22 @@ locals {
   f                = local.d.foundation
   practices        = { box = local.d.practice }
   names            = { for key in keys(local.practices) : key => "cbaw-${replace(local.d.practice.plan.practice_id, "-", "")}" }
-  tags             = { product = "cosmabot", component = "enrollment-practice-runtime", environment = "staging", clinical_data = "false" }
-  scope            = lower("/subscriptions/${local.f.subscription_id}/resourceGroups/${local.f.resource_group_name}/providers/")
-  google           = try(local.d.google, null)
-  google_keys      = ["GOOGLE_CONNECTION_CLIENT_SECRET", "GOOGLE_CONNECTION_ENCRYPTION_KEY"]
-  google_ready     = local.google != null && alltrue([for name in local.google_keys : contains(keys(local.d.practice.secret_references), name)])
-  model            = try(local.d.model, null)
-  model_keys       = ["WORKSPACE_LLM_API_KEY"]
-  model_ready      = local.model != null && alltrue([for name in local.model_keys : contains(keys(local.d.practice.secret_references), name)])
-  secret_keys      = merge({ DATABASE_URL = "database-url", REDIS_URL = "redis-url", WORKSPACE_ENROLLMENT_ADMISSION_SECRET = "enrollment-admission-key", DATABASE_ADMIN_URL = "database-admin-url", OWNER_MANIFEST = "owner-manifest" }, local.google == null ? {} : { GOOGLE_CONNECTION_CLIENT_SECRET = "google-connection-client-secret", GOOGLE_CONNECTION_ENCRYPTION_KEY = "google-connection-encryption-key" }, local.model == null ? {} : { WORKSPACE_LLM_API_KEY = "workspace-llm-api-key" })
-  runtime_secrets  = { for key, p in local.practices : key => { for name, reference in p.secret_references : name => reference if contains(concat(["DATABASE_URL", "REDIS_URL", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET"], local.google == null ? [] : local.google_keys, local.model == null ? [] : local.model_keys), name) } }
+  # Every environment-specific value. Staging is synthetic; production holds real practice data.
+  environments = {
+    staging    = { app_origin = "https://onboarding.staging.cosmas.ai", api_origin = "https://enrollment-api.staging.cosmas.ai", workspace_domain = "staging.cosmas.ai", data_mode = "synthetic", synthetic_only = true }
+    production = { app_origin = "https://app.cosmas.ai", api_origin = "https://enrollment-api.cosmas.ai", workspace_domain = "workspace.cosmas.ai", data_mode = "authorized_beta", synthetic_only = false }
+  }
+  env             = lookup(local.environments, local.d.environment, null)
+  tags            = { product = "cosmabot", component = "enrollment-practice-runtime", environment = local.d.environment, clinical_data = local.d.environment == "production" ? "true" : "false" }
+  scope           = lower("/subscriptions/${local.f.subscription_id}/resourceGroups/${local.f.resource_group_name}/providers/")
+  google          = try(local.d.google, null)
+  google_keys     = ["GOOGLE_CONNECTION_CLIENT_SECRET", "GOOGLE_CONNECTION_ENCRYPTION_KEY"]
+  google_ready    = local.google != null && alltrue([for name in local.google_keys : contains(keys(local.d.practice.secret_references), name)])
+  model           = try(local.d.model, null)
+  model_keys      = ["WORKSPACE_LLM_API_KEY"]
+  model_ready     = local.model != null && alltrue([for name in local.model_keys : contains(keys(local.d.practice.secret_references), name)])
+  secret_keys     = merge({ DATABASE_URL = "database-url", REDIS_URL = "redis-url", WORKSPACE_ENROLLMENT_ADMISSION_SECRET = "enrollment-admission-key", DATABASE_ADMIN_URL = "database-admin-url", OWNER_MANIFEST = "owner-manifest" }, local.google == null ? {} : { GOOGLE_CONNECTION_CLIENT_SECRET = "google-connection-client-secret", GOOGLE_CONNECTION_ENCRYPTION_KEY = "google-connection-encryption-key" }, local.model == null ? {} : { WORKSPACE_LLM_API_KEY = "workspace-llm-api-key" })
+  runtime_secrets = { for key, p in local.practices : key => { for name, reference in p.secret_references : name => reference if contains(concat(["DATABASE_URL", "REDIS_URL", "WORKSPACE_ENROLLMENT_ADMISSION_SECRET"], local.google == null ? [] : local.google_keys, local.model == null ? [] : local.model_keys), name) } }
 }
 provider "azurerm" {
   subscription_id                 = local.f.subscription_id
@@ -64,14 +70,15 @@ provider "azurerm" {
 resource "terraform_data" "guard" {
   lifecycle {
     precondition {
-      condition = (local.d.contract_version == "cosmas-allocated-workspace.v1" && local.d.version == 1 && local.d.environment == "staging" && local.d.synthetic_only &&
-        local.f.contract_version == "enrollment-foundation.v1" && local.f.environment == "staging" &&
-        local.d.account.app_origin == "https://onboarding.staging.cosmas.ai" && local.d.account.api_origin == "https://enrollment-api.staging.cosmas.ai" &&
+      condition = (local.d.contract_version == "cosmas-allocated-workspace.v1" && local.d.version == 1 && local.env != null &&
+        try(local.d.synthetic_only == local.env.synthetic_only, false) &&
+        local.f.contract_version == "enrollment-foundation.v1" && local.f.environment == local.d.environment &&
+        local.d.account.app_origin == local.env.app_origin && local.d.account.api_origin == local.env.api_origin &&
         can(regex("^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$", local.d.practice.plan.practice_id)) &&
-        local.d.practice.web_origin == "https://${local.d.practice.plan.practice_id}.staging.cosmas.ai" &&
-        local.d.practice.plan.api_origin == "https://api.${local.d.practice.plan.practice_id}.staging.cosmas.ai" &&
+        local.d.practice.web_origin == "https://${local.d.practice.plan.practice_id}.${local.env.workspace_domain}" &&
+        local.d.practice.plan.api_origin == "https://api.${local.d.practice.plan.practice_id}.${local.env.workspace_domain}" &&
       local.d.practice.plan.workspace_url == "${local.d.practice.web_origin}/chief")
-      error_message = "Only one registered canonical UUID practice in dedicated synthetic staging is supported."
+      error_message = "Only one registered canonical UUID practice in the matching staging (synthetic) or production foundation is supported."
     }
     precondition {
       condition     = alltrue([for id in [local.f.vnet_id, local.f.container_app_environment_id, local.f.container_registry_id, local.f.postgres_subnet_id, local.f.private_endpoint_subnet_id, local.f.vault_private_dns_zone_id, local.f.blob_private_dns_zone_id, local.f.redis_private_dns_zone_id] : startswith(lower(id), local.scope)])
@@ -104,7 +111,8 @@ resource "terraform_data" "guard" {
     precondition {
       condition = (local.d.practice.api_env.BETA_BOX_ID == local.d.practice.plan.box_id && local.d.practice.api_env.CLERK_ORGANIZATION_ID == local.d.practice.plan.organization_id &&
         local.d.practice.api_env.WORKSPACE_ENROLLMENT_PRACTICE_ID == local.d.practice.plan.practice_id && local.d.practice.api_env.COSMAS_ENV == "early_adopter_beta" &&
-        local.d.practice.api_env.DATA_MODE == "synthetic" && local.d.practice.api_env.AUTH_MODE == "clerk_jwt" && local.d.practice.api_env.WORKSPACE_ENROLLMENT_MANAGED == "true" &&
+        local.d.practice.api_env.DATA_MODE == local.env.data_mode && local.d.practice.api_env.AUTH_MODE == "clerk_jwt" && local.d.practice.api_env.WORKSPACE_ENROLLMENT_MANAGED == "true" &&
+        (local.env.synthetic_only || alltrue([for name in ["CLINIC_APPROVAL_REF", "BAA_EVIDENCE_REF", "PHI_AUTHORIZATION_REF"] : length(try(local.d.practice.api_env[name], "")) > 0])) &&
         local.d.practice.api_env.CLERK_SESSION_POLICY == "enrollment_default" && local.d.practice.api_env.CLERK_ISSUER == local.d.account.issuer && local.d.practice.api_env.CLERK_AUDIENCE == local.account_audience &&
       alltrue([for name in keys(local.d.practice.api_env) : !strcontains(name, "CORE") && !strcontains(name, "SECRET") && !contains(["DATABASE_URL", "REDIS_URL"], name)]))
       error_message = "This runtime must preserve registered Clerk/Box authority with no Core or secret public settings."
@@ -161,15 +169,16 @@ resource "azurerm_private_dns_zone_virtual_network_link" "postgres" {
   registration_enabled  = false
 }
 resource "azurerm_postgresql_flexible_server" "box" {
-  for_each                          = local.practices
-  name                              = "psql-${local.names[each.key]}"
-  resource_group_name               = local.f.resource_group_name
-  location                          = local.f.location
-  version                           = "16"
-  sku_name                          = "B_Standard_B1ms"
-  storage_mb                        = 32768
-  auto_grow_enabled                 = true
-  backup_retention_days             = 7
+  for_each            = local.practices
+  name                = "psql-${local.names[each.key]}"
+  resource_group_name = local.f.resource_group_name
+  location            = local.f.location
+  version             = "16"
+  sku_name            = "B_Standard_B1ms"
+  storage_mb          = 32768
+  auto_grow_enabled   = true
+  # Real practice data keeps the maximum point-in-time window; staging stays minimal.
+  backup_retention_days             = local.d.environment == "production" ? 35 : 7
   geo_redundant_backup_enabled      = false
   public_network_access_enabled     = false
   delegated_subnet_id               = local.f.postgres_subnet_id

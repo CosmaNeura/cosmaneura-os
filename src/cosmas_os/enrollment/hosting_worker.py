@@ -22,8 +22,9 @@ def create_worker(path: Path, settings: EnrollmentSettings | None = None):
     selected = settings or EnrollmentSettings()
     config = HostingConfiguration.from_path(path)
     if (not config.value["enabled"] or not selected.workspace_allocation_enabled or not selected.provisioning_enabled
-            or selected.registration_errors() or selected.billing_errors() or selected.data_mode != "synthetic"):
-        raise ValueError("private staging allocation is not enabled and qualified")
+            or selected.registration_errors() or selected.billing_errors()
+            or selected.data_mode != config.environment.enrollment_data_mode):
+        raise ValueError("private workspace allocation is not enabled and qualified for this environment")
     engine = create_engine(selected.database_url.get_secret_value(), pool_pre_ping=True, hide_parameters=True)
     if not schema_ready(engine):
         engine.dispose()

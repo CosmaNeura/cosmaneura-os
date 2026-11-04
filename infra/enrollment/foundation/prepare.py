@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private staging foundation bootstrap. No cloud command runs during prepare.
+"""Private enrollment foundation bootstrap (staging or production). No cloud command runs during prepare.
 
 Plan/apply are explicit operator subcommands. Passwords are read into a child's
 ephemeral environment, never arguments, JSON state, stdout or plan receipts.
@@ -23,6 +23,12 @@ PUBLIC_KEYS = {
     "subscription_id", "tenant_id", "resource_name_suffix", "vnet_address_prefix",
     "release_operator_object_id", "state_operator_ipv4",
 }
+# Production is opt-in by one extra reviewed input; omitting it keeps staging.
+ENVIRONMENTS = {"staging", "production"}
+
+
+def selected_environment(values: dict) -> str:
+    return values.get("environment", "staging")
 
 
 def private_read(path: Path, limit: int = 65536) -> bytes:
@@ -75,8 +81,11 @@ def prepare(inputs: Path, directory: Path) -> dict[str, object]:
     if directory.resolve().is_relative_to(repo):
         raise ValueError("bootstrap credentials/state must remain outside the repository")
     values = json.loads(private_read(inputs))
-    if not isinstance(values, dict) or set(values) != PUBLIC_KEYS or any(not isinstance(v, str) for v in values.values()):
-        raise ValueError("only the six reviewed public foundation inputs are accepted")
+    if (not isinstance(values, dict) or set(values) - {"environment"} != PUBLIC_KEYS
+            or any(not isinstance(v, str) for v in values.values()) or selected_environment(values) not in ENVIRONMENTS):
+        raise ValueError("only the six reviewed public foundation inputs and an optional environment are accepted")
+    if "environment" in values:
+        values["state_namespace"] = f"cosmabot-enrollment/{values['environment']}/foundation-local-v1"
     # Terraform validates actual CIDR, namespace and object IDs before planning.
     directory.mkdir(mode=0o700)
     module = directory / "module"
@@ -135,8 +144,9 @@ def execute(directory: Path, operation: str, plan_sha256: str | None = None, out
             raise ValueError("actual local state and a fresh protected output outside the repository required")
         response = subprocess.run([tofu, "output", "-json", "foundation"], cwd=module, env=env, check=True, capture_output=True, timeout=30)
         coordinates = json.loads(response.stdout)
-        if (coordinates.get("contract_version") != "enrollment-foundation.v1" or coordinates.get("environment") != "staging"
-                or coordinates.get("resource_group_name") != f"rg-cosmabot-enrollment-staging-{values['resource_name_suffix']}"
+        environment = selected_environment(values)
+        if (coordinates.get("contract_version") != "enrollment-foundation.v1" or coordinates.get("environment") != environment
+                or coordinates.get("resource_group_name") != f"rg-cosmabot-enrollment-{environment}-{values['resource_name_suffix']}"
                 or coordinates.get("subscription_id") != values["subscription_id"] or coordinates.get("tenant_id") != values["tenant_id"]):
             raise ValueError("local state does not match the reviewed enrollment foundation")
         private_write(output, json.dumps(coordinates, sort_keys=True).encode())
@@ -146,7 +156,7 @@ def execute(directory: Path, operation: str, plan_sha256: str | None = None, out
     if account_info != {"id": values["subscription_id"], "tenantId": values["tenant_id"], "state": "Enabled"}:
         raise ValueError("wrong Azure subscription/tenant")
     if not (directory / "foundation.tfstate").exists():
-        group = subprocess.run(["az", "group", "exists", "--subscription", values["subscription_id"], "--name", f"rg-cosmabot-enrollment-staging-{values['resource_name_suffix']}"], check=True, capture_output=True, timeout=30)
+        group = subprocess.run(["az", "group", "exists", "--subscription", values["subscription_id"], "--name", f"rg-cosmabot-enrollment-{selected_environment(values)}-{values['resource_name_suffix']}"], check=True, capture_output=True, timeout=30)
         if group.stdout.strip() != b"false":
             raise ValueError("initial enrollment resource group already exists; do not adopt it")
     if operation == "apply":

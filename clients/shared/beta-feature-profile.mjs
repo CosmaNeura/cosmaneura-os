@@ -106,7 +106,11 @@ function resolveProfile(input, checkPublishableKey) {
   const client = env.VITE_WORKSPACE_HOSTED_CLIENT;
   if (!['web', 'desktop', 'apple'].includes(client)) fail('select the web, desktop or apple client');
   if (staging && (client === 'web' || env.VITE_WORKSPACE_DATA_MODE !== 'synthetic')) fail('first-owner staging requires a native client and synthetic data');
-  if (standalone && env.VITE_WORKSPACE_DATA_MODE !== 'synthetic') fail('standalone practice requires explicit synthetic data');
+  if (standalone && !['synthetic', 'authorized_beta'].includes(env.VITE_WORKSPACE_DATA_MODE)) fail('standalone practice requires an explicit data mode');
+  // Real practice data only with the production identity: a development or test
+  // Clerk instance can never sign people in to a real-data practice workspace.
+  if (standalone && env.VITE_WORKSPACE_DATA_MODE === 'authorized_beta' && (checkPublishableKey || env.VITE_CLERK_PUBLISHABLE_KEY)
+      && !/^pk_live_\S+$/.test(env.VITE_CLERK_PUBLISHABLE_KEY ?? '')) fail('real practice data requires the production Clerk identity');
   set(env, 'VITE_WORKSPACE_NATIVE_AUTH_ENABLED', client === 'apple' ? 'true' : 'false');
   set(env, 'VITE_WORKSPACE_DESKTOP_AUTH_ENABLED', client === 'desktop' ? 'true' : 'false');
   const hosted = resolveHostedWorkspace(env);

@@ -50,13 +50,30 @@ from cosmas_os.enrollment.service import EnrollmentService
 from cosmas_os.enrollment.synthetic import SyntheticCommerce, synthetic_settings
 from cosmas_os.ports.bot_capabilities import BotContext
 
+ENVIRONMENT_FIXTURE = {
+    "staging": {"issuer": "https://hosting-fixture.clerk.accounts.dev", "key": "pk_test_", "short": "stg",
+                "app": "https://onboarding.staging.cosmas.ai", "api": "https://enrollment-api.staging.cosmas.ai"},
+    "production": {"issuer": "https://clerk.cosmas.ai", "key": "pk_live_", "short": "prd",
+                   "app": "https://app.cosmas.ai", "api": "https://enrollment-api.cosmas.ai"},
+}
+
 
 @pytest.fixture
 def hosted(tmp_path):
+    yield from _hosted(tmp_path, "staging")
+
+
+@pytest.fixture
+def production_hosted(tmp_path):
+    yield from _hosted(tmp_path, "production")
+
+
+def _hosted(tmp_path, environment):
+    e = ENVIRONMENT_FIXTURE[environment]
     source = Path(__file__).resolve().parents[2]
     settings = synthetic_settings()
-    settings.clerk_issuer = "https://hosting-fixture.clerk.accounts.dev"
-    settings.clerk_publishable_key = "pk_test_" + base64.b64encode(b"hosting-fixture.clerk.accounts.dev$").decode()
+    settings.clerk_issuer = e["issuer"]
+    settings.clerk_publishable_key = e["key"] + base64.b64encode((e["issuer"][8:] + "$").encode()).decode()
     settings.native_account_enabled = True
     settings.native_authorized_origins = ["capacitor://localhost", "app://cosmas"]
     settings.workspace_allocation_enabled = True
@@ -75,11 +92,13 @@ def hosted(tmp_path):
         "version": BAA_VERSION, "sha256": BAA_SHA256, "signature_name": "Invented Owner", "signature_title": "Owner",
         "authority_confirmed": True, "accepted": True})
     practice = service.status(human)["practice"]["id"]
+    # Registration ran under the synthetic fixture; allocation runs in the selected environment.
+    settings.data_mode = "production" if environment == "production" else "synthetic"
     box, org = str(uuid5(BOX_NAMESPACE, practice)), "org_host1"
     subscription, tenant = str(uuid4()), str(uuid4())
-    group, registry = "rg-cosmabot-enrollment-staging-fixture1", "acrcbotenrstgfixture1.azurecr.io"
+    group, registry = f"rg-cosmabot-enrollment-{environment}-fixture1", f"acrcbotenr{e['short']}fixture1.azurecr.io"
     scope = f"/subscriptions/{subscription}/resourceGroups/{group}/providers/"
-    foundation = {"contract_version": "enrollment-foundation.v1", "environment": "staging", "subscription_id": subscription,
+    foundation = {"contract_version": "enrollment-foundation.v1", "environment": environment, "subscription_id": subscription,
         "tenant_id": tenant, "resource_group_name": group, "location": "eastus2", "registry_server": registry,
         "vnet_id": scope + "Microsoft.Network/virtualNetworks/owned", "container_app_environment_id": scope + "Microsoft.App/managedEnvironments/owned",
         "container_registry_id": scope + "Microsoft.ContainerRegistry/registries/" + registry.split(".")[0],
@@ -87,13 +106,13 @@ def hosted(tmp_path):
         "private_endpoint_subnet_id": scope + "Microsoft.Network/virtualNetworks/owned/subnets/endpoints",
         **{kind + "_private_dns_zone_id": scope + "Microsoft.Network/privateDnsZones/" + name for kind, name in
            (("vault", "privatelink.vaultcore.azure.net"), ("blob", "privatelink.blob.core.windows.net"), ("redis", "privatelink.redis.azure.net"))},
-        "state_backend": {"resource_group_name": group, "storage_account_name": "stcbotenrstgfixture1", "container_name": "enrollment-runtime-state", "use_azuread_auth": True}}
+        "state_backend": {"resource_group_name": group, "storage_account_name": f"stcbotenr{e['short']}fixture1", "container_name": "enrollment-runtime-state", "use_azuread_auth": True}}
     token = tmp_path / "invented-dns-token"
     token.write_text("invented-provider-boundary-only")
     token.chmod(0o600)
-    value = {"contract_version": "cosmas-private-hosting.v1", "enabled": True, "synthetic_only": True,
-        "foundation": foundation, "account": {"app_origin": "https://onboarding.staging.cosmas.ai",
-            "api_origin": "https://enrollment-api.staging.cosmas.ai", "issuer": settings.clerk_issuer,
+    value = {"contract_version": "cosmas-private-hosting.v1", "enabled": True, "synthetic_only": environment == "staging",
+        "foundation": foundation, "account": {"app_origin": e["app"],
+            "api_origin": e["api"], "issuer": settings.clerk_issuer,
             "publishable_key": settings.clerk_publishable_key, "audience": settings.clerk_audience},
         "release": {"source_commit": "2" * 40, "api_image": registry + "/api@sha256:" + "3" * 64,
                     "job_image": registry + "/allocated-job@sha256:" + "4" * 64},
@@ -808,3 +827,80 @@ def test_all_allocated_role_requests_declare_service_principals_for_constrained_
         assert principal_type and principal_type[1] == "ServicePrincipal"
         assert principal and (principal[1].startswith("azurerm_user_assigned_identity.")
                               or principal[1] == "local.d.allocator_object_id")
+
+
+def test_production_practice_runtime_holds_real_data_under_its_own_executed_baa(production_hosted):
+    c = production_hosted
+    d, public = c.deployment, c.deployment["practice"]["api_env"]
+    practice = c.plan.practice_id
+    assert c.plan.workspace_url == f"https://{practice}.workspace.cosmas.ai/chief"
+    assert c.plan.api_origin == f"https://api.{practice}.workspace.cosmas.ai"
+    assert d["environment"] == "production" and d["synthetic_only"] is False
+    assert public["DATA_MODE"] == "authorized_beta" and public["CLERK_ISSUER"] == "https://clerk.cosmas.ai"
+    with c.service.sessions() as session:
+        practice_row = session.get(Practice, practice)
+        assert practice_row is not None
+        acceptance = c.service._acceptance(session, practice_row)
+        assert acceptance is not None
+    assert public["CLINIC_APPROVAL_REF"] == "cosmas-enrollment-practice:" + practice
+    assert public["BAA_EVIDENCE_REF"] == f"cosmas-baa:{BAA_DOC_ID}:{BAA_VERSION}:{acceptance.id}"
+    assert public["PHI_AUTHORIZATION_REF"] == f"cosmas-baa-phi:{acceptance.id}:{BAA_SHA256}"
+    assert not any("SECRET" in name or "CORE" in name for name in public)
+    # The runtime's own startup validation accepts exactly this public configuration.
+    selected = Settings.model_validate({name.lower(): value for name, value in public.items()})
+    assert selected.data_mode == "authorized_beta"
+    assert not [error for error in selected.runtime_configuration_errors() if "authorized_beta" in error or "DATA_MODE" in error]
+
+
+def test_staging_practice_runtime_stays_synthetic_without_baa_references(hosted):
+    public = hosted.deployment["practice"]["api_env"]
+    assert hosted.deployment["environment"] == "staging" and hosted.deployment["synthetic_only"] is True
+    assert public["DATA_MODE"] == "synthetic"
+    assert not {"CLINIC_APPROVAL_REF", "BAA_EVIDENCE_REF", "PHI_AUTHORIZATION_REF"} & set(public)
+    assert hosted.plan.workspace_url.endswith(".staging.cosmas.ai/chief")
+
+
+@pytest.mark.parametrize("mutation", ["synthetic_only", "staging_account", "development_issuer", "test_key",
+                                      "staging_names", "staging_storage"])
+def test_production_configuration_refuses_any_staging_or_development_input(production_hosted, mutation):
+    value = json.loads(json.dumps(production_hosted.value))
+    if mutation == "synthetic_only":
+        value["synthetic_only"] = True
+    elif mutation == "staging_account":
+        value["account"]["app_origin"] = "https://onboarding.staging.cosmas.ai"
+    elif mutation == "development_issuer":
+        issuer = "https://hosting-fixture.clerk.accounts.dev"
+        value["account"]["issuer"] = issuer
+        value["account"]["publishable_key"] = "pk_live_" + base64.b64encode((issuer[8:] + "$").encode()).decode()
+    elif mutation == "test_key":
+        value["account"]["publishable_key"] = "pk_test_" + base64.b64encode(b"clerk.cosmas.ai$").decode()
+    elif mutation == "staging_names":
+        value["foundation"]["registry_server"] = "acrcbotenrstgfixture1.azurecr.io"
+    else:
+        value["foundation"]["state_backend"]["storage_account_name"] = "stcbotenrstgfixture1"
+    with pytest.raises(ValueError):
+        HostingConfiguration(value)
+
+
+def test_production_hosting_refuses_a_synthetic_enrollment_registry(production_hosted):
+    c = production_hosted
+    c.service.settings.data_mode = "synthetic"
+    with pytest.raises(EnrollmentError, match="unavailable"):
+        c.allocator.destination(WorkspaceAllocationRequest(c.plan.practice_id, c.plan.box_id, "unused",
+                                                           c.plan.owner_subject, c.plan.issuer))
+    with pytest.raises(EnrollmentError, match="unavailable"):
+        c.allocator._deployment(c.plan, c.operation)
+
+
+def test_staging_hosting_refuses_a_production_enrollment_registry(hosted):
+    hosted.service.settings.data_mode = "production"
+    with pytest.raises(EnrollmentError, match="unavailable"):
+        hosted.allocator._deployment(hosted.plan, hosted.operation)
+
+
+def test_production_enrollment_registers_only_its_own_practice_uuid_workspace_hosts(production_hosted):
+    settings, practice = production_hosted.service.settings, production_hosted.plan.practice_id
+    assert settings.workspace_origin_policy() == "practice-uuid-production-v1"
+    assert settings.registered_workspace_origin(f"https://{practice}.workspace.cosmas.ai", practice)
+    assert not settings.registered_workspace_origin(f"https://{practice}.staging.cosmas.ai", practice)
+    assert not settings.registered_workspace_origin(f"https://{uuid4()}.workspace.cosmas.ai", practice)

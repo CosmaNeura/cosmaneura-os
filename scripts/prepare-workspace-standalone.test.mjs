@@ -42,12 +42,16 @@ test('standalone preparation emits every client and hosted build argument under 
 test('standalone public preparation does not hide conflicting inputs or promote data/identity',()=>{
   for(const change of [{coreWebOrigin:'https://app.cosmaneura.com'},
     {coreWebOrigin:'https://staging-app.cosmaneura.com'},{captureUploadOrigins:['https://uploads.example.invalid']},
-    {dataMode:'authorized_beta'},{dataMode:undefined},{nativeFeatureProfile:'first-owner-staging-v1'},
+    {dataMode:undefined},{dataMode:'production'},{nativeFeatureProfile:'first-owner-staging-v1'},
     {featureProfile:'unknown'},{webOrigin:'https://app.cosmaneura.com'}])
     assert.throws(()=>workspaceIdentityInputs(identity,{...options,...change}));
   assert.throws(()=>workspaceIdentityInputs({...identity,apiOrigin:'https://staging-app.cosmaneura.com'},options));
   assert.throws(()=>workspaceIdentityInputs({...identity,organizationId:''},options));
   assert.throws(()=>workspaceIdentityInputs({...identity,publishableKey:'pk_live_wrong'},options));
+  // Real practice data is an explicit choice with the production identity, never a default.
+  const real=workspaceIdentityInputs(identity,{...options,dataMode:'authorized_beta'});
+  for(const client of ['web','desktop','apple'])assert.equal(real[client+'-build-env.json'].VITE_WORKSPACE_DATA_MODE,'authorized_beta');
+  assert.throws(()=>workspaceIdentityInputs(identity,{...options,dataMode:undefined}));
 });
 
 test('standalone CLI accepts no Core/upload arguments and refuses ambiguous selection before writing',async t=>{

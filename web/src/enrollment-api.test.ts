@@ -110,6 +110,23 @@ it('permits only the current authenticated ready practice UUID Chief destination
   const foreign='https://20000000-0000-4000-8000-000000000001.staging.cosmas.ai/chief';
   expect(()=>workspaceDestination(foreign,'https://account.example.invalid/onboarding',[new URL(foreign).origin],{...context,ready:{...ready,workspace:{...ready.workspace,url:foreign}}})).toThrow();
 });
+it('opens a production practice UUID workspace only under the production policy and production data mode',()=>{
+  const production={...enrollmentConfig(),data_mode:'production' as const,production_qualified:true,
+    clerk_publishable_key:'pk_live_invented_fixture',workspace_origin_policy:'practice-uuid-production-v1' as const};
+  expect(validateEnrollmentConfig(production).workspace_origin_policy).toBe('practice-uuid-production-v1');
+  expect(()=>validateEnrollmentConfig({...production,data_mode:'synthetic'})).toThrow();
+  expect(()=>validateEnrollmentConfig({...enrollmentConfig(),workspace_origin_policy:'synthetic-practice-uuid-staging-v1',data_mode:'production'})).toThrow();
+  const ready=enrollmentStatus('ready',5);ready.workspace.url=`https://${ready.practice!.id}.workspace.cosmas.ai/chief`;
+  const context={config:production,current:structuredClone(ready),ready};
+  expect(workspaceDestination(ready.workspace.url,'https://app.cosmas.ai/onboarding',[],context)).toBe(ready.workspace.url);
+  // A staging host is never opened from production enrollment, and vice versa.
+  const staging=structuredClone(ready);staging.workspace.url=`https://${ready.practice!.id}.staging.cosmas.ai/chief`;
+  expect(()=>workspaceDestination(staging.workspace.url!,'https://app.cosmas.ai/onboarding',[],{config:production,current:structuredClone(staging),ready:staging})).toThrow();
+  const stagingConfig={...enrollmentConfig(),workspace_origin_policy:'synthetic-practice-uuid-staging-v1' as const};
+  expect(()=>workspaceDestination(ready.workspace.url!,'https://onboarding.staging.cosmas.ai/onboarding',[],{...context,config:stagingConfig})).toThrow();
+  const foreign='https://20000000-0000-4000-8000-000000000001.workspace.cosmas.ai/chief';
+  expect(()=>workspaceDestination(foreign,'https://app.cosmas.ai/onboarding',[],{...context,ready:{...ready,workspace:{...ready.workspace,url:foreign}}})).toThrow();
+});
 it.each([
   ['noncanonical practice',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.practice!.id=ready.practice!.id.toUpperCase().replace(/^1/,'A');}],
   ['noncanonical Box',(ready:ReturnType<typeof enrollmentStatus>)=>{ready.workspace.box_id='box_browser';}],

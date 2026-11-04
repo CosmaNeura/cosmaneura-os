@@ -105,3 +105,16 @@ test('ordinary Vite build emits the standalone feature values and cannot accept 
     await assert.rejects(()=>build({root:join(root,'web'),configLoader:'runner',envDir:false,logLevel:'silent',build:{write:false}}),/conflicts/);
   }finally{for(const key of Object.keys(process.env))if(key.startsWith('VITE_'))delete process.env[key];Object.assign(process.env,saved);}
 });
+
+test('a practice workspace build admits real practice data only with the production Clerk identity',()=>{
+  const real={...standalone,VITE_WORKSPACE_DATA_MODE:'authorized_beta',VITE_CLERK_PUBLISHABLE_KEY:'pk_live_invented_fixture'};
+  const {env,manifest}=resolveBetaFeatureProfile(real);
+  assert.equal(manifest.dataMode,'authorized_beta');
+  assert.equal(env.VITE_WORKSPACE_DATA_MODE,'authorized_beta');
+  assert.equal(manifest.platformAccess,'disabled');
+  assert.equal(manifest.captureMode,'disabled');
+  assert.equal(validateBetaFeatureManifest(manifest),manifest);
+  for(const key of ['pk_test_invented_fixture','',undefined])
+    assert.throws(()=>resolveBetaFeatureProfile({...real,VITE_CLERK_PUBLISHABLE_KEY:key}),/production Clerk identity|Clerk public identity/);
+  assert.throws(()=>resolveBetaFeatureProfile({...real,VITE_WORKSPACE_DATA_MODE:'production'}));
+});

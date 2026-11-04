@@ -19,7 +19,7 @@ def prepare(f: dict, password_file: Path, directory: Path) -> dict:
     if not directory.is_absolute() or directory.exists() or directory.is_symlink() or directory.resolve().is_relative_to(Path(__file__).resolve().parents[3]):
         raise ValueError("fresh protected directory outside repository required")
     host = f.get("postgres_fqdn", "")
-    if (not re.fullmatch(r"psql-cosmabot-enrollment-staging-[a-z0-9]{6,8}\.postgres\.database\.azure\.com", host)
+    if (not re.fullmatch(rf"psql-cosmabot-enrollment-{f.get('environment')}-[a-z0-9]{{6,8}}\.postgres\.database\.azure\.com", host)
             or f.get("postgres_database") != "cosmabot_enrollment"):
         raise ValueError("owned dedicated PostgreSQL coordinates required")
     admin = private_read(password_file).decode()

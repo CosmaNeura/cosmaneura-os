@@ -13,10 +13,13 @@ export function identityDigest(identity) {
 }
 
 /** Reuse the existing native schema; all output values are public configuration. */
-export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile,microsoftConnectionEnabled=false}) {
+export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode,nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile,microsoftConnectionEnabled=false}) {
   if(![BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE].includes(nativeFeatureProfile))throw new Error('Unknown native feature profile');
   const standalone=[STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE].includes(featureProfile);
   if(featureProfile!==undefined&&(!standalone||nativeFeatureProfile!==BETA_FEATURE_PROFILE))throw new Error('Select one explicit standalone feature profile');
+  // A practice workspace never falls back to real data: its data mode is always explicit.
+  if(standalone&&dataMode===undefined)throw new Error('Standalone practice requires an explicit data mode');
+  if(dataMode===undefined)dataMode='authorized_beta';
   if(typeof microsoftConnectionEnabled!=='boolean'||microsoftConnectionEnabled&&featureProfile!==INDEPENDENT_BETA_FEATURE_PROFILE)
     throw new Error('Microsoft standalone work requires its explicit independent beta profile');
   const desktop=validateOperationalNativeIdentity(candidate,'desktop',candidate?.apiOrigin);
@@ -80,7 +83,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
   };
 }
 
-export async function prepareWorkspaceIdentity({identityPath,webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile,output}) {
+export async function prepareWorkspaceIdentity({identityPath,webOrigin,coreWebOrigin,captureUploadOrigins,dataMode,nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile,output}) {
   const info=await lstat(identityPath);
   if(!info.isFile()||info.isSymbolicLink()||info.size>8192)throw new Error('Use one bounded public native identity file');
   const raw=await readFile(identityPath,'utf8');

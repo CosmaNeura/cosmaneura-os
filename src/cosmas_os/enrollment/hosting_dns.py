@@ -17,7 +17,8 @@ def bind_allocated_dns(config: HostingConfiguration, deployment: dict, resources
         raise ValueError("private hosting DNS is disabled")
     plan = deployment["practice"]["plan"]
     practice = plan["practice_id"]
-    hosts = {"web": practice + ".staging.cosmas.ai", "api": "api." + practice + ".staging.cosmas.ai"}
+    domain = config.environment.workspace_domain
+    hosts = {"web": practice + "." + domain, "api": "api." + practice + "." + domain}
     if (plan["workspace_url"] != "https://" + hosts["web"] + "/chief"
             or plan["api_origin"] != "https://" + hosts["api"] or set(tokens) != {"web", "api"}):
         raise ValueError("only this registered practice's paired DNS hosts are allowed")

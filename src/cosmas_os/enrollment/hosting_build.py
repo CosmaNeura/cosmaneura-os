@@ -84,7 +84,7 @@ def build_allocated_web(backend, state: dict) -> str:
         (context / "allocated-web-profile.json").write_bytes(profile_raw)
         public = {"VITE_BUILD_SHA": source, "VITE_CLERK_PUBLISHABLE_KEY": account["publishable_key"],
                   "VITE_WORKSPACE_HOSTED_API_ORIGIN": plan["api_origin"], "VITE_WORKSPACE_WEB_ORIGIN": d["practice"]["web_origin"],
-                  "VITE_WORKSPACE_ORGANIZATION_ID": plan["organization_id"], "VITE_WORKSPACE_DATA_MODE": "synthetic",
+                  "VITE_WORKSPACE_ORGANIZATION_ID": plan["organization_id"], "VITE_WORKSPACE_DATA_MODE": config.environment.runtime_data_mode,
                   "VITE_WORKSPACE_FEATURE_PROFILE": feature_profile, "VITE_WORKSPACE_CAPTURE_MODE": "disabled",
                   "VITE_CAPTURE_UPLOAD_ORIGINS": "", "VITE_COSMANEURA_WEB_ORIGIN": "", "VITE_ENROLLMENT_API_BASE": account["api_origin"],
                   "VITE_MESSAGES_ENABLED": "true", "APP_IMAGE": config.release["api_image"]}
@@ -100,6 +100,7 @@ def build_allocated_web(backend, state: dict) -> str:
                 "f=json.loads(pathlib.Path('/app/practice-web/cosmas-beta-features.json').read_text());"
                 "assert f['organizationId']==" + repr(plan["organization_id"]) + ";"
                 "assert f['profile']==" + repr(feature_profile) + ";"
+                "assert f['dataMode']==" + repr(config.environment.runtime_data_mode) + ";"
                 "assert f['platformAccess']=='disabled' and f['captureMode']=='disabled';"
                 + ("assert all(n in f['enabledFlags'] for n in ['VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED']);" if google is not None else "") +
                 "print('COSMAS_ALLOCATED_WEB_VALIDATED:" + proof + "')")
