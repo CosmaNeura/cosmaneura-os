@@ -120,6 +120,7 @@ class Settings(BaseSettings):
     # Separate opt-in for explicit selected whole-message custody and review.
     workspace_google_message_enabled: bool = False
     workspace_microsoft_message_enabled: bool = False
+    workspace_microsoft_calendar_enabled: bool = False
     # Explicitly reviewed calendar snapshots; independent from whole-message consent.
     workspace_google_calendar_enabled: bool = False
     # Staff-supplied files only; no subscription or provider activation.
@@ -246,7 +247,15 @@ class Settings(BaseSettings):
     def workspace_microsoft_message_available(self) -> bool:
         return bool(self.workspace_microsoft_message_enabled and self.workspace_microsoft_connection_enabled
                     and self.workspace_available and self.workspace_authenticated_enabled
-                    and self.auth_mode == "clerk_jwt")
+                    and self.auth_mode == "clerk_jwt"
+                    and (self.cosmas_env != "standalone_clerk_synthetic" or not self._standalone_microsoft_errors()))
+
+    @property
+    def workspace_microsoft_calendar_available(self) -> bool:
+        return bool(self.workspace_microsoft_calendar_enabled and self.workspace_microsoft_connection_enabled
+                    and self.workspace_available and self.workspace_authenticated_enabled
+                    and self.auth_mode == "clerk_jwt"
+                    and (self.cosmas_env != "standalone_clerk_synthetic" or not self._standalone_microsoft_errors()))
 
     @property
     def workspace_google_calendar_available(self) -> bool:
@@ -694,7 +703,8 @@ class Settings(BaseSettings):
             "workspace_draft_recovery_required"}
         if real_clerk:
             enabled_allowlist.update({"workspace_google_connection_enabled", "workspace_google_message_enabled",
-                                      "workspace_google_calendar_enabled"})
+                                      "workspace_google_calendar_enabled", "workspace_microsoft_connection_enabled",
+                                      "workspace_microsoft_message_enabled", "workspace_microsoft_calendar_enabled"})
         enabled_allowlist.update({"workspace_hosted_enabled", "workspace_apple_hosted_transport_enabled",
             "workspace_desktop_hosted_transport_enabled"} if real_clerk else {
             "workspace_apple_local_transport_enabled", "workspace_desktop_local_transport_enabled"})
@@ -702,12 +712,14 @@ class Settings(BaseSettings):
             if name.endswith("_enabled") and name not in enabled_allowlist and getattr(self, name):
                 errors.append("Standalone external features and background workers must remain disabled")
                 break
-        empty_prefixes = ("core_", "azure_", "microsoft_connection_",
+        empty_prefixes = ("core_", "azure_",
             "scheduling_", "managed_services_config_")
         for name in type(self).model_fields:
             value = getattr(self, name)
-            reviewed_optional = real_clerk and name in {"workspace_llm_api_key", "google_connection_encryption_key"}
-            if ((name.startswith(empty_prefixes) or name.endswith("_api_key")
+            reviewed_optional = real_clerk and name in {"workspace_llm_api_key", "google_connection_encryption_key",
+                                                        "microsoft_connection_encryption_key"}
+            if ((name.startswith(empty_prefixes) or (not real_clerk and name.startswith("microsoft_connection_"))
+                 or name.endswith("_api_key")
                  or name.endswith("_encryption_key")) and value and not reviewed_optional):
                 errors.append("Standalone cannot contain external service addresses or credentials")
                 break
@@ -717,6 +729,7 @@ class Settings(BaseSettings):
         if real_clerk:
             errors.extend(self._standalone_model_errors())
             errors.extend(self._standalone_google_errors())
+            errors.extend(self._standalone_microsoft_errors())
         elif (self.workspace_llm_backend != "disabled" or self.workspace_llm_endpoint
               or self.standalone_model_origin_allowlist or any(getattr(self, name)
                     for name in type(self).model_fields if name.startswith("google_connection_"))):
@@ -762,6 +775,35 @@ class Settings(BaseSettings):
                 or not self.google_connection_client_secret or not self.google_connection_client_secret.get_secret_value()
                 or not valid_key):
             return ["Standalone Google requires its reviewed client, exact owned callback/return origins and custody key"]
+        return []
+
+    def _standalone_microsoft_errors(self) -> list[str]:
+        names = [name for name in type(self).model_fields if name.startswith("microsoft_connection_")]
+        if not self.workspace_microsoft_connection_enabled:
+            return (["Disabled standalone Microsoft connection must have no credentials or read flags"]
+                    if self.workspace_microsoft_message_enabled or self.workspace_microsoft_calendar_enabled
+                    or any(getattr(self, name) for name in names) else [])
+        callback = urlparse(self.microsoft_connection_callback_uri)
+        origin = callback.scheme + "://" + callback.netloc
+        hostname = callback.hostname or ""
+        valid_key = False
+        if self.microsoft_connection_encryption_key:
+            try:
+                key = base64.b64decode(self.microsoft_connection_encryption_key.get_secret_value(), altchars=b"-_", validate=True)
+                valid_key = len(key) == 32
+            except (ValueError, UnicodeError):
+                pass
+        identifier = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+        if (not re.fullmatch(identifier, self.microsoft_connection_tenant_id)
+                or not re.fullmatch(identifier, self.microsoft_connection_client_id)
+                or not self._is_exact_https_origin(origin) or origin != "https://" + hostname
+                or hostname == "cosmaneura.com" or hostname.endswith(".cosmaneura.com")
+                or callback.path != "/connections/microsoft/callback" or callback.query or callback.fragment or callback.params
+                or not self._is_exact_https_origin(self.microsoft_connection_return_origin)
+                or self.microsoft_connection_return_origin not in self.allowed_origins
+                or not self.microsoft_connection_client_secret or not self.microsoft_connection_client_secret.get_secret_value()
+                or not valid_key):
+            return ["Standalone Microsoft requires its reviewed tenant/client, exact owned callback/return origins and custody key"]
         return []
 
     def clerk_session_configuration_errors(self) -> list[str]:

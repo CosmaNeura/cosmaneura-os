@@ -140,7 +140,7 @@ class IndependentDesktopProfile(unittest.TestCase):
                     contextlib.redirect_stderr(error):
                 with self.assertRaises(SystemExit):
                     composer.main()
-            self.assertIn("Independent beta permits only the approved Google account connection.", error.getvalue())
+            self.assertIn("Independent beta", error.getvalue())
         self.assertFalse(output.exists())
 
     def test_independent_google_preflight_requires_its_own_api_callback(self):

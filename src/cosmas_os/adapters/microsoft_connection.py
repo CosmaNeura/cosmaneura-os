@@ -704,7 +704,7 @@ class MicrosoftPersonalConnection:
                     pass
             raise ConnectorUnavailable(self.provider + "_connection_unavailable") from None
 
-    def _read(self, identity, kind):
+    def _read(self, identity, kind, *, window=None):
         private, binding, account_id = self.credential(identity)
         now = self.now()
         if kind == "mail":
@@ -720,8 +720,8 @@ class MicrosoftPersonalConnection:
                 "$top": "25",
                 "$select": "id,subject,start,end,isCancelled,isAllDay",
                 "$orderby": "start/dateTime",
-                "startDateTime": now.isoformat(),
-                "endDateTime": (now + timedelta(days=7)).isoformat(),
+                "startDateTime": (window.starts_at if window is not None else now).isoformat(),
+                "endDateTime": (window.ends_at if window is not None else now + timedelta(days=7)).isoformat(),
             }
         data = self._request("GET", GRAPH_ORIGIN + path, token=private["token"], params=params)
         rows = data.get("value")
@@ -805,9 +805,12 @@ class MicrosoftPersonalConnection:
         if not self.settings.workspace_microsoft_message_available:
             raise ws.WorkspaceError("microsoft_message_unavailable", 404)
 
-    def _message_account(self, session, identity):
+    def _message_account(self, session, identity, *, calendar=False):
         """Read current caller custody without upgrading workspace shared locks."""
-        self._full_message_enabled()
+        if calendar:
+            self._calendar_enabled()
+        else:
+            self._full_message_enabled()
         if identity.auth_mode != "clerk_jwt" or not identity.external_identity_id:
             raise ws.WorkspaceError("microsoft_message_unavailable", 403)
         ws._human(session, identity.box_id, identity.principal_id)
@@ -860,6 +863,66 @@ class MicrosoftPersonalConnection:
             private = self._open(credential.sealed, "credential", account.id, binding)
             return {"contract_version": 1, "state": "connected", "full_mail_read": True,
                     "account": {"label": self._text(private["label"], 256), "email": self._text(private["email"], 320)}}
+
+    def _calendar_enabled(self):
+        try:
+            self._enabled()
+        except ConnectorUnavailable:
+            raise ws.WorkspaceError("microsoft_calendar_unavailable", 404) from None
+        if not self.settings.workspace_microsoft_calendar_available:
+            raise ws.WorkspaceError("microsoft_calendar_unavailable", 404)
+
+    def calendar_binding(self, identity, *, session=None):
+        """DB-only current calendar custody; token bytes are never commitments."""
+        from cosmas_os.ports.microsoft_calendar import MicrosoftCalendarBinding
+
+        self._calendar_enabled()
+        with self._session() if session is None else nullcontext(session) as current:
+            account, binding = self._message_account(current, identity, calendar=True)
+            credential = current.scalar(select(self.Credential).where(self.Credential.account_id == account.id)
+                .with_for_update(read=True).execution_options(populate_existing=True))
+            pending = current.scalar(select(self.Attempt.id).where(self.Attempt.account_id == account.id,
+                self.Attempt.status.in_(["pending", "exchanging"]), self.Attempt.expires_at > self.now()))
+            if (pending is not None or credential is None or credential.status != "ready" or credential.sealed is None
+                    or credential.binding_digest != binding or credential.expires_at <= self.now()):
+                raise ws.WorkspaceError("microsoft_calendar_grant_unavailable")
+            private = self._open(credential.sealed, "credential", account.id, binding)
+            connected_at = credential.connected_at.astimezone(UTC)
+            # Exchange and refresh already require the exact existing Graph scopes.
+            return MicrosoftCalendarBinding(account_id=account.id, binding_digest=binding,
+                connected_at=connected_at, grant_sha256=digest(canonical([
+                    "cosmas-microsoft-calendar-grant.v1", account.id, binding,
+                    connected_at.isoformat(), private["subject"], sorted(SCOPES.split())])))
+
+    def calendar_status(self, identity, *, session=None):
+        self._calendar_enabled()
+        with self._session() if session is None else nullcontext(session) as current:
+            account, binding = self._message_account(current, identity, calendar=True)
+            try:
+                self.calendar_binding(identity, session=current)
+            except ws.WorkspaceError as error:
+                if error.code != "microsoft_calendar_grant_unavailable":
+                    raise
+                return {"contract_version": 1, "state": "sign_in_required", "calendar_read": False, "account": None}
+            credential = current.get(self.Credential, account.id)
+            private = self._open(credential.sealed, "credential", account.id, binding)
+            return {"contract_version": 1, "state": "connected", "calendar_read": True,
+                "account": {"label": self._text(private["label"], 256), "email": self._text(private["email"], 320)}}
+
+    def calendar_observation(self, identity, *, window):
+        from cosmas_os.ports.microsoft_calendar import (
+            MicrosoftCalendarObservation,
+            MicrosoftCalendarRead,
+        )
+
+        before = self.calendar_binding(identity)
+        value = self._read(identity, "calendar", window=window)
+        after = self.calendar_binding(identity)
+        if before != after:
+            raise ws.WorkspaceError("microsoft_calendar_grant_changed")
+        value["window"] = window.model_dump(mode="json")
+        observation = MicrosoftCalendarObservation.model_validate_json(canonical(value))
+        return MicrosoftCalendarRead(observation=observation, custody=after)
 
     def read_message(self, identity, selection):
         from cosmas_os.adapters.microsoft_message import read_message

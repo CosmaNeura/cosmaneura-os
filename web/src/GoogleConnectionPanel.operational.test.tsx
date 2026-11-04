@@ -135,7 +135,8 @@ it('opens email work without reading a body or requesting more permission',async
  const opened=vi.fn();vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected);
  await act(async()=>root.render(<GoogleConnectionPanel identity={identity} onAuthenticationLost={vi.fn()} onOpenMessageWork={opened}
   messageWork={<p>Selected email work area</p>}/>));
- expect(host.textContent).toContain('Full email work asks for separate access');
+ expect(host.textContent).toContain('Google shows the requested read access before you connect.');
+ expect(host.textContent).toContain('CosmaBot cannot send email or change calendar events.');
  await click('Work with email');expect(opened).toHaveBeenCalledTimes(1);
  expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status']);
 });

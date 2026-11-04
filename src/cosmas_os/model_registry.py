@@ -22,6 +22,7 @@ from cosmas_os import (  # noqa: F401 -- imports register declarative models
     inbox_handoff_models,
     inbox_models,
     membership_models,
+    microsoft_calendar_models,
     microsoft_connection_models,
     microsoft_message_models,
     models,

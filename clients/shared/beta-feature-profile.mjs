@@ -44,6 +44,11 @@ export const INDEPENDENT_BETA_FEATURE_FLAGS = Object.freeze([
   'VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED', 'VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED',
   'VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED',
 ]);
+// An existing independent build stays Google-only. Microsoft is a separately
+// selected account capability with matching server custody and native inputs.
+export const INDEPENDENT_MICROSOFT_FEATURE_FLAGS = Object.freeze([
+  'VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED', 'VITE_MICROSOFT_MESSAGE_ENABLED',
+]);
 // The same existing platform hosts are reserved by infra/beta/environment.
 // This rejects known collisions, not a claim that arbitrary public DNS proves
 // deployment isolation; resource ownership must also be reviewed before use.
@@ -72,7 +77,14 @@ function resolveProfile(input, checkPublishableKey) {
   const staging = input.VITE_WORKSPACE_FEATURE_PROFILE === NATIVE_STAGING_FEATURE_PROFILE;
   const independent = input.VITE_WORKSPACE_FEATURE_PROFILE === INDEPENDENT_BETA_FEATURE_PROFILE;
   const standalone = independent || input.VITE_WORKSPACE_FEATURE_PROFILE === STANDALONE_FEATURE_PROFILE;
-  const standaloneFlags = independent ? INDEPENDENT_BETA_FEATURE_FLAGS : STANDALONE_FEATURE_FLAGS;
+  if (independent) {
+    for (const key of INDEPENDENT_MICROSOFT_FEATURE_FLAGS) if (Object.hasOwn(input, key) &&
+        !['true', 'false'].includes(input[key])) fail(`select an explicit true or false for ${key}`);
+    if (input.VITE_MICROSOFT_MESSAGE_ENABLED === 'true' && input.VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED !== 'true')
+      fail('Microsoft sources require the explicitly selected Microsoft connection');
+  }
+  const standaloneFlags = independent ? [...INDEPENDENT_BETA_FEATURE_FLAGS,
+    ...INDEPENDENT_MICROSOFT_FEATURE_FLAGS.filter(key => input[key] === 'true')] : STANDALONE_FEATURE_FLAGS;
   if (!staging && !standalone && input.VITE_WORKSPACE_FEATURE_PROFILE !== BETA_FEATURE_PROFILE) fail(`select a supported VITE_WORKSPACE_FEATURE_PROFILE`);
   const env = {...input};
   // Catch stale recipes and misspelled gates instead of silently shipping partial UI.
@@ -158,6 +170,7 @@ export function validateBetaFeatureManifest(manifest) {
     VITE_CAPTURE_UPLOAD_ORIGINS: manifest.captureUploadOrigins.join(','),
     VITE_COSMANEURA_WEB_ORIGIN: manifest.coreWebOrigin,
     ...Object.fromEntries(pilotFlags.filter(key => manifest.enabledFlags.includes(key)).map(key => [key, 'true'])),
+    ...Object.fromEntries(INDEPENDENT_MICROSOFT_FEATURE_FLAGS.filter(key => manifest.enabledFlags.includes(key)).map(key => [key, 'true'])),
   }, false).manifest;
   const canonical = value => JSON.stringify(value, Object.keys(value).sort());
   // Arrays are ordered public configuration; no extra or omitted keys accepted.

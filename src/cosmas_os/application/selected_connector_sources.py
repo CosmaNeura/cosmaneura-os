@@ -11,6 +11,7 @@ SOURCE_STATE_FIELDS = {
     "google_message": "google_source_state",
     "microsoft_message": "microsoft_source_state",
     "google_calendar": "calendar_source_state",
+    "microsoft_calendar": "microsoft_calendar_source_state",
     "efax_inbound_source": "fax_source_state",
     "fax_inbound_source": "practice_fax_source_state",
     "ehr_read_source": "ehr_source_state",
@@ -23,6 +24,10 @@ def is_selected_connector(entry):
 
 
 def _service(kind):
+    if kind == "microsoft_calendar":
+        from cosmas_os.application import microsoft_calendar
+
+        return microsoft_calendar
     if kind == "microsoft_message":
         from cosmas_os.application import microsoft_message
 

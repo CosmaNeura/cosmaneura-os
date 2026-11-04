@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from tests.unit import test_standalone_runtime as offline
-from tests.unit.test_standalone_beta_features import google_values, model_values
+from tests.unit.test_standalone_beta_features import google_values, model_values, microsoft_values
 
 spec = importlib.util.spec_from_file_location("standalone_package_entrypoint", Path(__file__).with_name("entrypoint.py"))
 assert spec and spec.loader
@@ -149,22 +149,24 @@ def test_refuses_fifo_symlink_hardlink_and_oversize_before_parsing(mounted, tmp_
 def feature_inputs(mounted, feature, policy="audience"):
     public, private, values, secrets = mounted
     real_profile(values, policy)
-    changes = (model_values() if feature == "model" else google_values() if feature == "google"
-               else model_values() | google_values())
+    changes = {"model": model_values(), "google": google_values(), "microsoft": microsoft_values(),
+        "both": model_values() | google_values(), "all": model_values() | google_values() | microsoft_values()}[feature]
     for name, value in changes.items():
         if hasattr(value, "get_secret_value"):
             secrets[name.upper()] = value.get_secret_value()
         else:
             values[name.upper()] = value
-    if feature in {"google", "both"}:
+    if feature in {"google", "both", "all"}:
         values["GOOGLE_CONNECTION_RETURN_ORIGIN"] = values["CORS_ALLOWED_ORIGINS"]
+    if feature in {"microsoft", "all"}:
+        values["MICROSOFT_CONNECTION_RETURN_ORIGIN"] = values["CORS_ALLOWED_ORIGINS"]
     public.write_text(json.dumps(values))
     private.write_text(json.dumps(secrets))
     return public, private, values, secrets
 
 
 @pytest.mark.parametrize("policy", ["audience", "shared_staging"])
-@pytest.mark.parametrize("feature", ["model", "google", "both"])
+@pytest.mark.parametrize("feature", ["model", "google", "both", "microsoft", "all"])
 def test_only_selected_optional_credentials_enter_runtime(mounted, monkeypatch, policy, feature):
     public, private, values, secrets = feature_inputs(mounted, feature, policy)
     monkeypatch.setenv("CLERK_SECRET_KEY", "invented-unrelated")
@@ -176,14 +178,14 @@ def test_only_selected_optional_credentials_enter_runtime(mounted, monkeypatch, 
         if name in secrets:
             assert environment[name] == secrets[name]
     assert "CLERK_SECRET_KEY" not in environment
-    assert "MICROSOFT_CONNECTION_CLIENT_SECRET" not in environment
+    assert ("MICROSOFT_CONNECTION_CLIENT_SECRET" in environment) == (feature in {"microsoft", "all"})
     assert environment["COSMAS_ENV"] == "standalone_clerk_synthetic"
     assert environment["STANDALONE_INSTANCE_ID"] == values["STANDALONE_INSTANCE_ID"]
 
 
 @pytest.mark.parametrize("missing", sorted(entrypoint.OPTIONAL_PRIVATE_NAMES))
 def test_enabled_feature_requires_each_exact_private_input(mounted, missing):
-    public, private, _, secrets = feature_inputs(mounted, "both")
+    public, private, _, secrets = feature_inputs(mounted, "all")
     secrets.pop(missing)
     private.write_text(json.dumps(secrets))
     with pytest.raises(entrypoint.Refused):

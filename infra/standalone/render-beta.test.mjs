@@ -16,6 +16,32 @@ function candidate({model=true,google=true,owned=false,host='staging.cosmas.ai'}
   return value;
 }
 
+test('explicit Microsoft overlay binds existing broker, client gates and protected custody names',()=>{
+  const value=candidate({owned:true});
+  value.beta_features.microsoft={tenant_id:'10000000-0000-4000-8000-000000000001',client_id:'10000000-0000-4000-8000-000000000002',
+    callback_uri:value.api_origin+'/connections/microsoft/callback',return_origin:value.web_origin};
+  const files=render(value),env=files['api-public.json'],contract=files['host-preparation.json'];
+  for(const flag of ['WORKSPACE_MICROSOFT_CONNECTION_ENABLED','WORKSPACE_MICROSOFT_MESSAGE_ENABLED','WORKSPACE_MICROSOFT_CALENDAR_ENABLED']){
+    assert.equal(env[flag],'true');assert.equal(render(candidate({owned:true}))['api-public.json'][flag],'false');
+  }
+  for(const client of ['web','desktop','apple']){
+    assert.equal(files[`clients/${client}-build-env.json`].VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED,'true');
+    assert.equal(files[`clients/${client}-build-env.json`].VITE_MICROSOFT_MESSAGE_ENABLED,'true');
+  }
+  assert.equal(files['clients/web-build-arguments.json'].VITE_MICROSOFT_MESSAGE_ENABLED,'true');
+  for(const secret of ['MICROSOFT_CONNECTION_CLIENT_SECRET','MICROSOFT_CONNECTION_ENCRYPTION_KEY']){
+    assert.ok(contract.private_environment.exact_names.includes(secret));assert.equal(Object.hasOwn(env,secret),false);
+  }
+  assert.equal(contract.optional_runtime_features.microsoft,true);
+  assert.equal(contract.optional_runtime_features.live_provider_acceptance,false);
+  assert.deepEqual(files['network-requirements.json'].api_egress.slice(-2).map(item=>item.hostname),['login.microsoftonline.com','graph.microsoft.com']);
+  for(const change of [m=>{m.tenant_id='common';},m=>{m.client_id='not-a-uuid';},
+    m=>{m.callback_uri='https://api.cosmaneura.com/connections/microsoft/callback';},
+    m=>{m.return_origin='https://other.example.invalid';},m=>{m.client_secret='invented';}]){
+    const altered=structuredClone(value);change(altered.beta_features.microsoft);assert.throws(()=>render(altered));
+  }
+});
+
 test('optional public features bind server, clients, private field names and explicit egress',()=>{
   for(const model of [false,true])for(const google of [false,true]){
     const value=candidate({model,google}),files=render(value),env=files['api-public.json'];

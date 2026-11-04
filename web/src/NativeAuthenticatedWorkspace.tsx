@@ -17,6 +17,7 @@ import {hasUnsavedWork} from './unsaved-work';
 type Session = {
   plugin: WorkspaceAuthPlugin; active: boolean; epoch: number; pending: boolean;
   identityEpoch:number;
+  actionEpoch:number;
   current: NativeAuthState | null; refresh: () => Promise<void>;
   foreground:boolean; lastAction:"signIn"|"signOut"|null;
 };
@@ -29,7 +30,8 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
 }) {
   const [state, setState] = useState<NativeAuthState | null>(null);
   const [failed, setFailed] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<"signIn" | "signOut" | null>(null);
+  const busy = busyAction !== null;
   const [connectingPractice,setConnectingPractice]=useState(()=>nativeAccountEntryRequested(practiceConnectionAvailable));
   const [practiceCanConnect,setPracticeCanConnect]=useState(false);
   const session = useRef<Session | null>(null);
@@ -71,9 +73,9 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   },[identity]);
 
   useLayoutEffect(() => {
-    const scope: Session = { plugin, active: true, epoch: 0, identityEpoch:0,pending: false, current: null, refresh: async () => {},foreground:true,lastAction:null };
+    const scope: Session = { plugin, active: true, epoch: 0, identityEpoch:0,actionEpoch:0,pending: false, current: null, refresh: async () => {},foreground:true,lastAction:null };
     session.current = scope;
-    setState(null); setFailed(false); setBusy(false);
+    setState(null); setFailed(false); setBusyAction(null);
     let remove: (() => Promise<void>) | undefined;
     const invalidate = () => {
       if (!scope.active) return;
@@ -95,16 +97,19 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
       } catch { invalidate(); }
     };
     let reading:Promise<void>|null=null;
+    let readingEpoch:number|null=null;
     scope.refresh = () => {
       if (!scope.active || scope.pending || !scope.foreground) return Promise.resolve();
-      if(reading)return reading;
+      // A read begun before an account action cannot serve as its final check.
+      // Drain it, then obtain a fresh native state for the current owner.
+      if(reading)return readingEpoch === scope.epoch ? reading : reading.then(()=>scope.refresh());
       const started = scope.epoch;
       const read=async()=>{try {
         const value = await plugin.getState();
         if (scope.active && !scope.pending && scope.epoch === started) accept(value);
       } catch { if (scope.active && !scope.pending && scope.epoch === started) invalidate(); }};
-      const pending=read();reading=pending;
-      void pending.finally(()=>{if(reading===pending)reading=null;});return pending;
+      const pending=read();reading=pending;readingEpoch=started;
+      void pending.finally(()=>{if(reading===pending){reading=null;readingEpoch=null;}});return pending;
     };
     if (available) {
       void plugin.addListener("authStateChanged", accept).then(handle => {
@@ -163,16 +168,25 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
 
   async function act(action: "signIn" | "signOut") {
     const scope = session.current;
-    if (!scope?.active || scope.pending || !available || scope.plugin !== plugin) return;
+    if (!scope?.active || !available || scope.plugin !== plugin) return;
+    // The native owners already allow sign-out to fence an unfinished sign-in.
+    // This is the only overlapping action; neither late completion nor a second
+    // cancellation may clear the newer owner's pending state.
+    if (scope.pending && !(action === "signOut" && scope.lastAction === "signIn")) return;
+    const actionEpoch = ++scope.actionEpoch;
+    const ownsAction = () => scope.active && session.current === scope && scope.actionEpoch === actionEpoch;
     // Close access synchronously, including token promises already in flight.
     scope.lastAction = action;
     scope.pending = true; scope.epoch++; scope.current = null;
-    setState(null); setFailed(false); setBusy(true);
+    setState(null); setFailed(false); setBusyAction(action);
     try { await plugin[action](); }
-    catch { if (scope.active) setFailed(true); }
+    catch { if (ownsAction()) setFailed(true); }
     finally {
-      scope.pending = false;
-      if (scope.active) { await scope.refresh(); if (scope.active) setBusy(false); }
+      if (ownsAction()) {
+        scope.pending = false;
+        await scope.refresh();
+        if (ownsAction()) setBusyAction(null);
+      }
     }
   }
 
@@ -189,8 +203,14 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
 
   if (!available || state?.phase === "disabled") return <StatusScreen title="Sign-in isn't available in this build"
     detail="Use the approved test build to sign in to your workspace." />;
-  if (busy || state?.phase === "signingIn") return <StatusScreen title="Updating your secure session"
-    detail="Complete or cancel the sign-in window to return to Cosmas." role="status" />;
+  if (busy || state?.phase === "signingIn") {
+    const signingIn = busy ? busyAction === "signIn" : state?.phase === "signingIn";
+    return <StatusScreen title={signingIn ? "Finish signing in" : "Signing out"}
+      detail={signingIn ? "Complete sign-in in the secure window. If it has closed or stopped responding, cancel this attempt and try again." :
+        "Your workspace is closed while sign-out finishes."} role="status">
+      {signingIn && <button className="button secondary" onClick={() => void act("signOut")}>Cancel sign-in</button>}
+    </StatusScreen>;
+  }
 
   if (state?.phase === "ready" && identity) {
     const controls=<NativeAccountControls key={state.revision} onSignOut={()=>void act("signOut")}
@@ -213,7 +233,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   const pending = state.phase === "signOutPending";
   const signInRecovery = pending && session.current?.plugin === plugin && session.current.lastAction === "signIn";
   return <StatusScreen role={pending ? "alert" : "status"} title={signInRecovery ? "Sign-in didn’t finish" : pending ? "Finish signing out" : "Sign in to CosmaBot"}
-    detail={signInRecovery ? "Your workspace stays closed. Try signing in again to safely clear the unfinished attempt and verify your account." :
+    detail={signInRecovery ? "Close any unfinished sign-in window, then try again. Your workspace stays closed until your account is verified." :
       pending ? "Your workspace is closed. Reconnect and finish signing out before continuing." :
       "Sign in with your invited account to start a private note and meet your team."}>
     <button className="button" onClick={() => void act(pending && !signInRecovery ? "signOut" : "signIn")}>

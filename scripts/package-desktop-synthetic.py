@@ -47,9 +47,18 @@ def validate_storage_profile(configuration, app):
         if (installation.get("storageScope") != "identity-v1" or "nativeIdentity" not in configuration
                 or configuration.get("dataMode") != "synthetic" or configuration.get("nativeCaptureEnabled") is not False
                 or any(configuration.get(key) for key in (
-                    "microsoftConnectionTenantId", "microsoftConnectionClientId", "microsoftConnectionCallbackUri",
                     "schedulingGoogleClientId", "schedulingGoogleCallbackUri"))):
             raise ValueError("Independent beta requires isolated identity storage and only its approved capabilities.")
+        microsoft_enabled = "VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED" in manifest["enabledFlags"]
+        fields = ("microsoftConnectionTenantId", "microsoftConnectionClientId", "microsoftConnectionCallbackUri")
+        identifier = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+        if microsoft_enabled:
+            if (any(not isinstance(configuration.get(key), str) or re.fullmatch(identifier, configuration[key]) is None
+                    for key in fields[:2])
+                    or configuration.get(fields[2]) != configuration.get("apiOrigin", "") + "/connections/microsoft/callback"):
+                raise ValueError("Independent beta Microsoft inputs must match its selected capability and exact API callback.")
+        elif any(configuration.get(key) for key in fields):
+            raise ValueError("Independent beta Microsoft inputs require its explicitly selected capability.")
     elif "storageScope" in installation:
         raise ValueError("An existing beta profile must retain its original storage namespace.")
 

@@ -12,7 +12,8 @@ PRIVATE = Path("/run/cosmabot-standalone/api-private.json")
 PRIVATE_NAMES = {"DATABASE_URL", "HUMAN_DEPLOY_EVIDENCE_REF"}
 MODEL_PRIVATE_NAMES = {"WORKSPACE_LLM_API_KEY"}
 GOOGLE_PRIVATE_NAMES = {"GOOGLE_CONNECTION_CLIENT_SECRET", "GOOGLE_CONNECTION_ENCRYPTION_KEY"}
-OPTIONAL_PRIVATE_NAMES = MODEL_PRIVATE_NAMES | GOOGLE_PRIVATE_NAMES
+MICROSOFT_PRIVATE_NAMES = {"MICROSOFT_CONNECTION_CLIENT_SECRET", "MICROSOFT_CONNECTION_ENCRYPTION_KEY"}
+OPTIONAL_PRIVATE_NAMES = MODEL_PRIVATE_NAMES | GOOGLE_PRIVATE_NAMES | MICROSOFT_PRIVATE_NAMES
 
 
 class Refused(Exception):
@@ -90,6 +91,8 @@ def load_configuration(public_path=PUBLIC, private_path=PRIVATE):
             expected_private.update(MODEL_PRIVATE_NAMES)
         if checked.workspace_google_connection_enabled:
             expected_private.update(GOOGLE_PRIVATE_NAMES)
+        if checked.workspace_microsoft_connection_enabled:
+            expected_private.update(MICROSOFT_PRIVATE_NAMES)
     if set(private) != expected_private:
         raise Refused()
     checked.validate_runtime_configuration()

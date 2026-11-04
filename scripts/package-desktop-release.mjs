@@ -258,8 +258,14 @@ export function validateOperationalReleaseProfile(config, manifest, info) {
   }
   if (profile.captureMode==='disabled' && (config.nativeCaptureEnabled!==false || config.microphoneCaptureEnabled===true ||
       config.captureUploadOrigins?.length || config.cosmaneuraWebOrigin)) fail();
-  if (independent && ['microsoftConnectionTenantId','microsoftConnectionClientId','microsoftConnectionCallbackUri',
-    'schedulingGoogleClientId','schedulingGoogleCallbackUri'].some(key=>config[key])) fail();
+  if (independent) {
+    if (['schedulingGoogleClientId','schedulingGoogleCallbackUri'].some(key=>config[key])) fail();
+    const microsoft=profile.enabledFlags.includes('VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED');
+    const fields=['microsoftConnectionTenantId','microsoftConnectionClientId','microsoftConnectionCallbackUri'];
+    const identifier=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
+    if (microsoft ? !identifier(config.microsoftConnectionTenantId)||!identifier(config.microsoftConnectionClientId)||
+        config.microsoftConnectionCallbackUri!==config.apiOrigin+'/connections/microsoft/callback' : fields.some(key=>config[key])) fail();
+  }
   if (profile.captureMode==='disabled' && ![STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE].includes(profile.profile) &&
       ['googleConnectionClientId','googleConnectionCallbackUri',
         'microsoftConnectionTenantId','microsoftConnectionClientId','microsoftConnectionCallbackUri',

@@ -3,7 +3,7 @@ import {describe,expect,it,vi} from 'vitest';
 import {teamFixture,teamUuid} from '../team-setup-test-fixture';
 import {notebookDraft} from '../draft-journal';
 import type {Workspace} from '../workspace-api';
-import type {ComposerContext} from './composer';
+import {hasSavedBotContext,type ComposerContext} from './composer';
 import {WorkspaceSession} from './workspace-session';
 
 function fixture(){
@@ -28,4 +28,12 @@ describe('shared composer intent',()=>{
     const f=fixture();f.session.setThought('Retained directions');f.team.configuration.bots.find(bot=>bot.role==='chief')!.enabled=false;f.session.setTeam(f.team);
     f.session.composer.prepareChief('A starter',f.host);expect(f.session.getSnapshot().thought).toBe('Retained directions');expect(f.host.focus).not.toHaveBeenCalled();expect(f.host.save.saveModel).not.toHaveBeenCalled();
   });
+});
+
+it('allows current reviewed Outlook calendar evidence as Chief context and withholds revoked snapshots',()=>{
+ const f=fixture(),chief=f.team.configuration.bots.find(bot=>bot.role==='chief')!;chief.include_evidence=true;chief.include_notebook=false;
+ const calendar={id:teamUuid(239),kind:'microsoft_calendar' as const,revision:2,content:'Invented explicitly reviewed event snapshot',microsoft_calendar_source_state:'current' as const,origin:'human',created_at:'2026-11-04T12:00:00Z',source_label:'Outlook calendar: Invented event',ticket:null};
+ expect(hasSavedBotContext({...f.workspace,entries:[calendar]},chief)).toBe(true);
+ expect(hasSavedBotContext({...f.workspace,entries:[{...calendar,microsoft_calendar_source_state:'unavailable'}]},chief)).toBe(false);
+ expect(hasSavedBotContext({...f.workspace,entries:[{...calendar,microsoft_calendar_source_state:undefined}]},chief)).toBe(false);
 });

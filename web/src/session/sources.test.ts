@@ -24,12 +24,13 @@ async function fixture(deps:SourceDependencies={},kind:'google_message'|'microso
   return {session,context,source,workspace,journal,host};
 }
 describe('shared selected-source preparation',()=>{
-  it('verifies the selected saved source and appends editable directions without sending',async()=>{
-    const f=await fixture(),save=vi.spyOn(f.session.models,'save');f.session.setThought('Invented existing directions');await f.session.sources.prepareGoogle(f.context,f.source);
+  it.each([undefined,'reply'] as const)('verifies the selected saved source and appends editable directions without sending (%s)',async intent=>{
+    const f=await fixture(),save=vi.spyOn(f.session.models,'save');f.session.setThought('Invented existing directions');await f.session.sources.prepareGoogle(f.context,f.source,'google_message',intent);
     expect(f.session.getSnapshot()).toMatchObject({selected:'chief',selectedSource:f.source.entry_id});expect(f.session.getSnapshot().thought).toContain('Invented existing directions\n\nReview the human-selected email source');expect(save).not.toHaveBeenCalled();expect(f.context.focusQuestion).toHaveBeenCalledOnce();
+    if(intent==='reply')expect(f.session.getSnapshot().thought).toContain('draft a reply for my review');
   });
-  it('refuses a changed hash or a revoked selected source',async()=>{
-    const f=await fixture();await f.session.sources.prepareGoogle(f.context,{...f.source,content_sha256:'0'.repeat(64)});await f.session.sources.prepareGoogle(f.context,{...f.source,source_withheld:true});
+  it.each([undefined,'reply'] as const)('refuses a changed hash or a revoked selected source (%s)',async intent=>{
+    const f=await fixture();await f.session.sources.prepareGoogle(f.context,{...f.source,content_sha256:'0'.repeat(64)},'google_message',intent);await f.session.sources.prepareGoogle(f.context,{...f.source,source_withheld:true},'google_message',intent);
     expect(f.context.failure).toHaveBeenCalledTimes(2);expect(f.session.getSnapshot().thought).toBe('');expect(f.context.focusQuestion).not.toHaveBeenCalled();
   });
   it('does not apply a hash result after the session changes',async()=>{
@@ -43,24 +44,26 @@ describe('shared selected-source preparation',()=>{
   });
 });
 
-it('prepares a reviewed Outlook source in the retained Chief draft without moving specialist text or sending',async()=>{
+it.each([undefined,'reply'] as const)('prepares a reviewed Outlook source in the retained Chief draft without moving specialist text or sending (%s)',async intent=>{
  const f=await fixture({},'microsoft_message'),save=vi.spyOn(f.session.models,'save');f.session.models.updateThought('Existing Chief directions');await f.session.conversations.observe(f.host);
  await f.session.conversations.open(f.workspace.id,'follow_up',f.host);f.session.models.updateThought('Separate specialist directions');
- await f.session.sources.prepareMicrosoft(f.context,f.source);
- expect(f.session.getSnapshot().thought).toBe('Existing Chief directions\n\nReview the human-selected email source '+f.source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.');
+ await f.session.sources.prepareMicrosoft(f.context,f.source,'microsoft_message',intent);
+ expect(f.session.getSnapshot().thought).toContain('Existing Chief directions\n\nReview the human-selected email source '+f.source.entry_id);
+ if(intent==='reply')expect(f.session.getSnapshot().thought).toContain('draft a reply for my review');
+ else expect(f.session.getSnapshot().thought).toBe('Existing Chief directions\n\nReview the human-selected email source '+f.source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.');
  expect(await f.journal.load(editorAddress(f.workspace.id,'conversation:follow_up'))).toMatchObject({data:{text:'Separate specialist directions'}});expect(save).not.toHaveBeenCalled();expect(f.context.focusQuestion).toHaveBeenCalledOnce();
 });
-it('requires Microsoft source custody and refuses Gmail substitution or withdrawn Outlook content',async()=>{
- const gmail=await fixture();gmail.session.models.updateThought('Keep directions');await gmail.session.sources.prepareMicrosoft(gmail.context,gmail.source);
+it.each([undefined,'reply'] as const)('requires Microsoft source custody and refuses Gmail substitution or withdrawn Outlook content (%s)',async intent=>{
+ const gmail=await fixture();gmail.session.models.updateThought('Keep directions');await gmail.session.sources.prepareMicrosoft(gmail.context,gmail.source,'microsoft_message',intent);
  expect(gmail.session.getSnapshot().thought).toBe('Keep directions');expect(gmail.context.failure).toHaveBeenCalledOnce();
- const outlook=await fixture({},'microsoft_message');outlook.workspace.entries[0].microsoft_source_state='unavailable';await outlook.session.sources.prepareMicrosoft(outlook.context,outlook.source);
+ const outlook=await fixture({},'microsoft_message');outlook.workspace.entries[0].microsoft_source_state='unavailable';await outlook.session.sources.prepareMicrosoft(outlook.context,outlook.source,'microsoft_message',intent);
  expect(outlook.session.getSnapshot().thought).toBe('');expect(outlook.context.failure).toHaveBeenCalledOnce();
 });
-it('withholds Outlook draft preparation if access changes while authorization is pending',async()=>{
+it.each([undefined,'reply'] as const)('withholds Outlook draft preparation if access changes while authorization is pending (%s)',async intent=>{
  const f=await fixture({},'microsoft_message');f.session.models.updateThought('Keep directions');let release!:()=>void;
  // Observe/retain first, so this deferred authorization is the final source check.
  await f.session.conversations.observe(f.host);f.host.authorize=()=>new Promise<void>(resolve=>{release=resolve;});
- const work=f.session.sources.prepareMicrosoft(f.context,f.source);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+ const work=f.session.sources.prepareMicrosoft(f.context,f.source,'microsoft_message',intent);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
  f.session.sources.receive({...f.workspace,entries:f.workspace.entries.map(e=>({...e,microsoft_source_state:'unavailable' as const,content:''}))});release();await work;
  expect(f.session.getSnapshot().thought).toBe('Keep directions');expect(f.context.focusQuestion).not.toHaveBeenCalled();
 });
@@ -72,8 +75,8 @@ it('preserves a retained Chief saved-note task and the originating specialist dr
  expect(f.session.getSnapshot().thought).toBe('Chief saved-note directions');expect(f.session.getSnapshot().phoneNoteTask?.selection.note_id).toBe(task.note_id);expect(f.session.getSnapshot().error).toContain('Finish or close the saved-note draft');expect(f.context.focusQuestion).not.toHaveBeenCalled();expect(await f.journal.load(editorAddress(f.workspace.id,'conversation:follow_up'))).toMatchObject({data:{text:'Keep specialist directions'}});
 });
 it('requires the current conversation journal instead of silently transferring a specialist draft',async()=>{const f=await fixture();f.session.setSelected('follow_up');f.session.models.updateThought('Stay in Follow-up');await f.session.sources.prepareGoogle({...f.context,conversationHost:null},f.source);expect(f.session.getSnapshot()).toMatchObject({selected:'follow_up',thought:'Stay in Follow-up'});expect(f.context.failure).toHaveBeenCalledOnce();});
-it.each(['edit','navigation','identity'] as const)('fences a later %s while the saved email source is being checked',async change=>{
- let finish!:(value:string)=>void;const f=await fixture({hash:()=>new Promise(r=>{finish=r;})});f.session.models.updateThought('Original Chief');const work=f.session.sources.prepareGoogle(f.context,f.source);await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
+it.each((['edit','navigation','identity'] as const).flatMap(change=>[undefined,'reply' as const].map(intent=>[change,intent] as const)))('fences a later %s while the saved email source is being checked (%s)',async(change,intent)=>{
+ let finish!:(value:string)=>void;const f=await fixture({hash:()=>new Promise(r=>{finish=r;})});f.session.models.updateThought('Original Chief');const work=f.session.sources.prepareGoogle(f.context,f.source,'google_message',intent);await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
  if(change==='edit')f.session.models.updateThought('Newer Chief edit');else if(change==='navigation'){f.session.navigation.sequence.current++;f.session.setPracticePage('home');}else f.session.setIdentity({mode:'clerk_jwt',getToken:async()=>null});finish(f.source.content_sha256);await work;expect(f.session.getSnapshot().thought).toBe(change==='edit'?'Newer Chief edit':'Original Chief');expect(f.context.focusQuestion).not.toHaveBeenCalled();
 });
 it('does not focus a newer navigation when appended draft persistence settles',async()=>{
