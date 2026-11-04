@@ -4,6 +4,7 @@ import {WorkspaceMarkdown} from './WorkspaceMarkdown';
 import {canFocusWorkspaceControl,WorkspaceDialog} from './WorkspaceDialog';
 import {clinicalRequestDisplay} from './clinical-team-contract';
 import {MessageRequestStatus,messageRequestStatusId} from './MessageRequestStatus';
+import {CopyAnswer} from './CopyAnswer';
 import type {WorkspaceEntry} from './workspace-api';
 import type {ConversationAction,ConversationProjection} from './session/entries';
 
@@ -58,6 +59,7 @@ export function ConversationEntries({presentation='workspace',projection,latestS
             </div>;})}
 {detailEntry?.reply&&<WorkspaceDialog title="Message details" closeLabel="Close message details" onClose={()=>setDetails(null)} canRestoreFocus={canRestoreMessageFocus}>
   <p>From {detailEntry.reply.agent_name}</p>
+  {detailEntry.reply.content.trim()&&!detailEntry.reply.backend.endsWith('unavailable')&&<CopyAnswer content={detailEntry.reply.content} scope={detailEpisode} disabled={locked||busy||recoveryBlocked} isCurrent={canRestoreMessageFocus}/>}
   {latestSourceRevision>detailEntry.reply.context_revision&&<p role="status">Newer sources are available. Ask again to include them in a new answer.</p>}
   <h3>Saved sources</h3>{detailEntry.reply.citations.length?citations(detailEntry):<p>No individual source citations were attached to this answer.</p>}
   <p className="team-fine">Saved context through revision {detailEntry.reply.context_revision}</p>
