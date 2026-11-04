@@ -124,6 +124,7 @@ import { WorkspaceApiError, botAddress, type AppendInput,
   type AuthenticatedWorkspaceIdentity, type DraftHandoff, type ProviderTeam, type Workspace, type WorkspaceEntry, type WorkspaceIdentity } from "./workspace-api";
 import "./encounter-workspace.css";
 import "./messages-presentation.css";
+import {showDemoLabels} from './demo-labels';
 
 
 const MembershipAnalysisPanel=deferredWorkspacePanel(()=>import('./MembershipAnalysisPanel').then(module=>module.MembershipAnalysisPanel),'Membership review');
@@ -1496,7 +1497,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   </>;
   return <EditorRecoveryContext.Provider value={editorAccess}><main ref={workspaceFrame} className="team-workspace" data-messages-chat={messagesChat} data-recovery-ready={!recoveryBlocked} data-session-pending={pending?.type??''} data-session-conflict={conflict} data-editor-ready={editorReady} data-presentation={messagesMode?'messages':'workspace'} data-native-presentation={!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()} data-messages-task={messagesTask??''} style={{'--workspace-nav-height':`${navigationHeight}px`} as CSSProperties} data-page={practicePage} data-native-home={nativeHome} data-native-chat={nativeChat} data-native-workspace={nativeWorkspace} data-recording-open={!!privateRecordingEntry} data-recording-focused={!!privateRecordingEntry&&!recordingMinimized} data-settings-open={settingsOpen && !practiceOpen} data-settings-rendered={settingsOpen&&hasWorkspaceIdentity} data-settings-navigation-locked={connectionNavigationLocked}>
     <aside ref={sidebar} className="team-sidebar" hidden={nativeWorkspace&&!messagesMode}>
-      <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span><small className="team-phone-preview">Synthetic preview</small>{accountControls&&phoneLayout()&&!nativeHome&&!nativeWorkspace&&!nativeChat&&<div className="team-phone-account-controls">{accountControls}</div>}</div>
+      <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span>{showDemoLabels()&&<small className="team-phone-preview">Synthetic preview</small>}{accountControls&&phoneLayout()&&!nativeHome&&!nativeWorkspace&&!nativeChat&&<div className="team-phone-account-controls">{accountControls}</div>}</div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
       <nav ref={navigation} className="practice-navigation" aria-label="Workspace navigation">
         {authenticated&&<button className={`team-nav-item ${(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} aria-label={messagesMode?'Messages':undefined} onClick={goHome}><WorkspaceNavIcon page="home"/>{messagesMode?'Chats':'Home'}</button>}
@@ -1521,7 +1522,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             <small><i className={config.enabled && team.revision ? "ready" : "paused"} />{config.retired ? "Retired · history kept" : !team.revision ? "Set up your team" : !config.enabled ? "Paused" : config.blocked_capabilities?.includes("model_answer") ? "AI answers blocked" : "On"}</small></span>
         </button>;
       })}</nav>
-      <div className="team-sidebar-bottom"><p><span className="team-local-dot" />{authenticated ? "Signed-in workspace" : "Local workspace"}</p><small>Invented data · private to you</small></div>
+      <div className="team-sidebar-bottom"><p><span className="team-local-dot" />{authenticated ? "Signed-in workspace" : "Local workspace"}</p><small>{showDemoLabels()?'Invented data · private to you':'Private to you'}</small></div>
     </aside>
     <div className="team-main">
       {newMessage&&team&&<NewMessagePicker team={team} locked={conversationBusy||homeBusy||homePending||viewNavigationLocked} onChoose={address=>void chooseConversationContext(address)} onClose={()=>setNewMessage(false)} canRestoreFocus={canRestoreDialogFocus}/>}
@@ -1539,14 +1540,14 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           <button disabled={connectionNavigationLocked||busy||!!pending||captureDraftLocked||captureNavigationLocked}
             onClick={()=>leaveTeamSettings(()=>{setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);})}>Practice work</button>
           {accountControls}
-          <span className="team-fine">Synthetic preview</span>
+          {showDemoLabels()&&<span className="team-fine">Synthetic preview</span>}
         </nav></details></div>
       </header>:<header className={`team-topbar${accountControls ? " team-topbar-authenticated" : ""}`}><span>Provider workspace <span className="team-divider">/</span> {practiceOpen ? "Practice work" : settingsOpen ? "Settings" : practicePage==="home"?"Home":practicePage==="visits"?"Visits and notes":"Notebook"}</span>
         <div className="row">{(workspace||showExecutionProof||(settingsOpen||practiceOpen)&&hasWorkspaceIdentity)&&<button className={`team-subtle${showExecutionProof?' workspace-execution-proof':''}`} onClick={() => void exitWorkspace(false)}>{showExecutionProof ? "Open execution proof" : "Close notebook"}</button>}
           {(authenticated || identity) && <button disabled={connectionNavigationLocked} onClick={() => void openSettings()}>Team settings</button>}
           {(authenticated || identity) && <button disabled={connectionNavigationLocked || !practiceOpen && (busy || !!pending || captureDraftLocked || captureNavigationLocked)}
           onClick={() => leaveTeamSettings(()=>{setSettingsOpen(false);setPracticeOpen(!practiceOpen);setPracticeOpened(true);})}>{practiceOpen ? "Back to notebook" : "Practice work"}</button>}
-          <span className="team-pill">Synthetic preview</span>{!phoneLayout()&&accountControls}</div></header>}
+          {showDemoLabels()&&<span className="team-pill">Synthetic preview</span>}{!phoneLayout()&&accountControls}</div></header>}
       {confirmTeamExit&&<WorkspaceDialog title="Unsaved team changes" onClose={()=>{setConfirmTeamExit(false);setTeamSaveExit(false);}} canRestoreFocus={canRestoreDialogFocus}>
         <p>Your team has unsaved changes. Save them, discard this local draft, or keep editing.</p>
         {pending?.type==='team'?<p>The team save is unconfirmed. Its exact request is retained; check or retry it before discarding.</p>:null}
