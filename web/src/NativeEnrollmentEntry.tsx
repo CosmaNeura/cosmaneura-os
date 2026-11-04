@@ -5,7 +5,7 @@ import {AppleHostedStatus} from './AppleHostedStatus';
 import {EnrollmentFlow} from './EnrollmentFlow';
 import {EnrollmentError,type EnrollmentConfig,type EnrollmentStatus} from './enrollment-contract';
 import {stripeDestination,type EnrollmentIdentity} from './enrollment-api';
-import {createNativeEnrollmentApi,nativeEnrollmentCapabilities,nativeEnrollmentPort,parseNativeAccountState,type NativeAccountState} from './native-enrollment';
+import {createNativeEnrollmentApi,nativeEnrollmentCapabilities,nativeSelectedPracticeCapabilities,nativeEnrollmentPort,parseNativeAccountState,type NativeAccountState} from './native-enrollment';
 import {parseNativeToken} from './native-auth';
 import {NativeReadyPractices} from './NativeReadyPractices';
 
@@ -17,12 +17,13 @@ export function NativeEnrollmentEntry({plugin=NativePracticeConnection,available
   const [state,setState]=useState<NativeAccountState|null>(null),[config,setConfig]=useState<EnrollmentConfig|null>(null);
   const [failed,setFailed]=useState(false),[busy,setBusy]=useState(false),[supported,setSupported]=useState(false),[opening,setOpening]=useState(false);
   const readyPending=useRef(false),[readyBusy,setReadyBusy]=useState(false),[setupRevision,setSetupRevision]=useState<string|null>(null);
+  const [selectedAvailable,setSelectedAvailable]=useState(false);
   const markReadyPending=useCallback((pending:boolean)=>{readyPending.current=pending;setReadyBusy(pending);},[]);
   const port=useMemo(()=>nativeEnrollmentPort(plugin),[plugin]);
   const api=useMemo(()=>port?createNativeEnrollmentApi(port,()=>scope.current?.state??null,()=>scope.current?.active===true):null,[port]);
   useLayoutEffect(()=>{
     const owner={active:true,epoch:0,state:null as NativeAccountState|null,pending:false,accountStarted:false};scope.current=owner;
-    setState(null);setConfig(null);setFailed(false);setSupported(false);
+    setState(null);setConfig(null);setFailed(false);setSupported(false);setSelectedAvailable(false);
     let remove:(()=>Promise<void>)|undefined;
     const accept=(value:unknown)=>{
       if(!owner.active)return;
@@ -42,7 +43,11 @@ export function NativeEnrollmentEntry({plugin=NativePracticeConnection,available
         if(!owner.state)throw new Error();
         const configuration=await api.config();if(!owner.active)return;
         if(!configuration.enabled||!configuration.auth_configured||configuration.data_mode!=='synthetic')throw new Error();
-        setConfig(configuration);setSupported(true);
+        let selected=false;
+        if(typeof plugin.selectedPracticeCapabilities==='function'&&typeof plugin.activateSelectedPractice==='function'){
+          try{selected=nativeSelectedPracticeCapabilities(await plugin.selectedPracticeCapabilities());}catch{/* Older owned hosts retain current-practice discovery. */}
+        }
+        if(!owner.active)return;setSelectedAvailable(selected);setConfig(configuration);setSupported(true);
       })().catch(()=>{if(owner.active)setFailed(true);});
     }else setFailed(true);
     return()=>{owner.active=false;owner.epoch++;owner.state=null;void remove?.().catch(()=>{});};
@@ -74,7 +79,8 @@ export function NativeEnrollmentEntry({plugin=NativePracticeConnection,available
       if(owner.active){owner.active=false;owner.state=null;onReturn();}}
     catch{if(owner.active){setFailed(true);setBusy(false);owner.pending=false;}}
   }
-  const controls=<button className="button secondary" disabled={busy||readyBusy} onClick={()=>void returnToBeta()}>Return to existing workspace</button>;
+  const controls=<button className="button secondary" disabled={busy||readyBusy} onClick={()=>void returnToBeta()}>
+    {readyPractices?'Return to original beta workspace':'Return to existing workspace'}</button>;
   if(opening)return <AppleHostedStatus role="status" title="Opening your practice" detail="The native app is verifying and opening this practice’s private workspace."/>;
   if(busy)return <AppleHostedStatus role="status" title="Updating your practice account" detail="Complete or cancel the secure sign-in window to continue."/>;
   if(failed||!available||!port)return <AppleHostedStatus title="Practice connection is not available yet"
@@ -98,13 +104,23 @@ export function NativeEnrollmentEntry({plugin=NativePracticeConnection,available
     if(result.profile.session.subject!==expected.identity!.userId||result.profile.session.session_id!==expected.identity!.sessionId)throw new EnrollmentError(401);
     setOpening(true);
   }
+  async function openSelectedPractice(status:EnrollmentStatus){
+    if(!identity?.isCurrent()||!selectedAvailable||!plugin.activateSelectedPractice||!status.practice||status.stage!=='ready')throw new EnrollmentError(401);
+    const result=validateActiveNativeWorkspace(await plugin.activateSelectedPractice({expectedRevision:expected.revision,
+      expectedPracticeId:status.practice.id,expectedRegistryRevision:status.revision}));
+    if(result.profile.session.subject!==expected.identity!.userId||result.profile.session.session_id!==expected.identity!.sessionId||
+      result.profile.practice.practice_id!==status.practice.id||result.profile.practice.box_id!==status.workspace.box_id||
+      result.profile.nativeIdentity.organizationId!==status.workspace.organization_id)throw new EnrollmentError(401);
+    setOpening(true);
+  }
   function navigate(url:string){
     const destination=url.startsWith('https://billing.stripe.com/')?'portal':'checkout';stripeDestination(url,destination==='portal');
     // Native uses its last reviewed Checkout/Portal response, never this URL.
     void port!.openEnrollmentDestination({expectedRevision:expected.revision,destination}).catch(()=>setFailed(true));
   }
   if(readyPractices&&setupRevision!==state.revision)return <NativeReadyPractices key={state.revision} api={api!} identity={identity}
-    onOpenCurrent={openNativeWorkspace} onCreatePractice={()=>setSetupRevision(state.revision)} onPendingChange={markReadyPending} accountControls={controls}/>;
+    onOpenCurrent={openNativeWorkspace} onOpenSelected={selectedAvailable?openSelectedPractice:undefined}
+    onCreatePractice={()=>setSetupRevision(state.revision)} onPendingChange={markReadyPending} accountControls={controls}/>;
   return <EnrollmentFlow key={state.revision} api={api!} identity={identity} config={config} accountControls={controls}
     initialName={state.identity!.displayName} initialEmail={state.identity!.email} search="" navigate={navigate}
     brand={<span className="enrollment-brand">CosmaBot</span>} invitationOrigin="https://onboarding.staging.cosmas.ai"

@@ -137,6 +137,16 @@ import Foundation
     public func retire() { retired = true }
     public var hasUnsettledOperations: Bool { pending != 0 }
 
+    /// Same SDK/realm only, after the original native source has drained. No
+    /// configure, login, credential copy or new keychain slot is involved.
+    public func resumeAfterWorkspaceClose(_ runtime: NativePracticeRuntime, expected: NativeAccountIdentity) throws -> ClerkKitAccountDriver {
+        try NativeSelectedPracticeRequest.requireRetiredSource(runtime, account: expected)
+        guard retired, pending == 0, ClerkKitWorkspaceDriver.matches(clerk, configuration) else { throw NativePracticeProfileError.busy }
+        let resumed = ClerkKitAccountDriver(clerk: clerk, configuration: configuration, policy: policy)
+        guard resumed.identity == expected else { throw NativePracticeProfileError.sessionChanged }
+        return resumed
+    }
+
     public func signIn() async throws -> NativeAccountIdentity {
         guard !retired, pending == 0 else { throw NativeAuthError.busy }
         pending += 1; defer { pending -= 1 }

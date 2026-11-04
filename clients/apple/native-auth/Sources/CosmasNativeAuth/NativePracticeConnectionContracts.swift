@@ -1,4 +1,66 @@
 import Foundation
+import CoreFoundation
+
+/// Intent binding only. All account/Org/Box/API/profile authority is fetched by
+/// the host from the authenticated pinned service, never supplied by a renderer.
+public struct NativeSelectedPracticeRequest: Sendable {
+    public let expectedRevision: String
+    public let practiceID: UUID
+    public let registryRevision: Int
+    public init(options: [String: Any]) throws {
+        guard Set(options.keys) == ["expectedRevision", "expectedPracticeId", "expectedRegistryRevision"],
+              let revision = options["expectedRevision"] as? String,
+              UUID(uuidString: revision)?.uuidString.lowercased() == revision,
+              let id = options["expectedPracticeId"] as? String, let practice = UUID(uuidString: id),
+              practice.uuidString.lowercased() == id,
+              let number = options["expectedRegistryRevision"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              number.doubleValue >= 0, number.doubleValue < 2_147_483_648,
+              number.doubleValue.rounded(.down) == number.doubleValue else { throw NativePracticeProfileError.invalidBinding }
+        expectedRevision = revision; practiceID = practice; registryRevision = number.intValue
+    }
+    public func validate(_ receipt: NativeRegisteredPracticeReceipt, account: NativeAccountIdentity, revision: String) throws {
+        guard revision == expectedRevision, receipt.account == account, receipt.practiceID == practiceID,
+              receipt.registryRevision == registryRevision else { throw NativePracticeProfileError.sessionChanged }
+    }
+    @MainActor public static func requireRetiredSource(_ runtime: NativePracticeRuntime, account: NativeAccountIdentity) throws {
+        guard runtime.profile?.account == account else { throw NativePracticeProfileError.sessionChanged }
+        guard runtime.auth.isRetired, !runtime.auth.hasUnsettledOperations, runtime.resources.isIdle else {
+            throw NativePracticeProfileError.busy
+        }
+    }
+    public func validateFinal(candidate: NativePracticeProfile, fresh: NativePracticeProfile,
+                              receipt: NativeRegisteredPracticeReceipt, account: NativeAccountIdentity,
+                              revision: String, now: Date = Date()) throws {
+        try validate(receipt, account: account, revision: revision)
+        guard candidate.id == practiceID, fresh.id == practiceID, candidate.account == account, fresh.account == account,
+              candidate.organizationID == receipt.organizationID, fresh.organizationID == receipt.organizationID,
+              candidate.boxID == receipt.boxID, fresh.boxID == receipt.boxID, candidate.apiOrigin == fresh.apiOrigin,
+              candidate.configuration == fresh.configuration, candidate.audience == fresh.audience,
+              candidate.storageNamespace == fresh.storageNamespace,
+              candidate.expiresAt > now, fresh.expiresAt > now,
+              let original = candidate.bootstrap, let checked = fresh.bootstrap,
+              original.expiresAt > now, checked.expiresAt > now,
+              original.sourceCommit == checked.sourceCommit, original.imageSHA256 == checked.imageSHA256 else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        // Each bootstrap was freshly nonce/identity/Org/Box/API/proof validated.
+        // Qualification hashes cover retained measurements (including their
+        // verification session); a refreshed valid measurement need not hash
+        // identically. Nor are nonce/issued/expiry fields stable release identity.
+    }
+    /// Synchronous terminal gate: callers cannot suspend between validation and
+    /// marker/runtime installation. Native account/resource values only.
+    @MainActor public func commit<T>(runtime: NativePracticeRuntime, fresh: NativePracticeProfile,
+                                    receipt: NativeRegisteredPracticeReceipt, account: NativeAccountIdentity,
+                                    revision: String, currentAccount: NativeAccountIdentity?, admittedState: NativeAuthState,
+                                    install: () throws -> T) throws -> T {
+        guard let profile = runtime.profile else { throw NativePracticeProfileError.invalidBinding }
+        try validateFinal(candidate: profile, fresh: fresh, receipt: receipt, account: account, revision: revision)
+        guard currentAccount == account, runtime.auth.state() == admittedState, admittedState.phase == .ready,
+              !runtime.auth.isRetired, runtime.resources.apiOrigin == profile.apiOrigin else { throw NativePracticeProfileError.sessionChanged }
+        return try install()
+    }
+}
 
 public struct NativePracticeAccountView: Sendable {
     public enum Phase: String, Sendable { case signedOut, signingIn, accountReady, unavailable }

@@ -87,7 +87,7 @@ describe("native workspace session", () => {
     const old=owners.at(-1)!;expect(old()).toBe(true);expect(practice.accountStatus).not.toHaveBeenCalled();
     await click('Team settings');await click('Connect practice');expect(container.textContent).toContain('Your practices');
     expect(old()).toBe(false);expect(practice.beginAccountSignIn).not.toHaveBeenCalled();
-    await click('Return to existing workspace');expect(owners.at(-1)!()).toBe(true);expect(old()).toBe(false);
+    await click('Return to original beta workspace');expect(owners.at(-1)!()).toBe(true);expect(old()).toBe(false);
     expect(native.plugin.signIn).not.toHaveBeenCalled();expect(native.plugin.signOut).not.toHaveBeenCalled();
   });
   it('keeps the current identity and unfinished work reachable while practice connection is locked',async()=>{
