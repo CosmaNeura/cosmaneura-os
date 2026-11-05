@@ -49,7 +49,7 @@ and `keychainNamespace`. Choose exactly one closed environment:
 
 | Environment | `profile` | Clerk key / frontend | `audience` | `accountOrigin` | `registeredPracticeOrigins` |
 | --- | --- | --- | --- | --- | --- |
-| Synthetic staging (unchanged) | `operational-staging-v1` | `pk_test_` encoding its `.clerk.accounts.dev` frontend | empty | reviewed staging enrollment HTTPS origin | `exact` or `synthetic-practice-uuid-staging-v1` |
+| Synthetic staging | `operational-staging-v1` | `pk_test_` encoding its `.clerk.accounts.dev` frontend | empty | `https://enrollment-api.staging.cosmas.ai` | `exact` or `synthetic-practice-uuid-staging-v1` |
 | Real-data production | `operational-beta-v1` | `pk_live_` encoding `clerk.cosmas.ai` | non-empty Clerk session `aud` (same value as production `CLERK_AUDIENCE`) | `https://enrollment-api.cosmas.ai` | `practice-uuid-production-v1` |
 
 The reviewed stable `keychainNamespace` is 64 lowercase hexadecimal characters in
@@ -57,7 +57,9 @@ either environment. No credential or server secret belongs in this file.
 Callbacks and the native request origin derive from the unchanged bundle.
 Staging and production fields cannot be mixed: a production profile with a
 staging policy, empty audience, Development Clerk host, or non-enrollment
-account origin is refused.
+account origin is refused. Staging Infos also refuse any `accountOrigin` other
+than `https://enrollment-api.staging.cosmas.ai` (shared Python, Swift, and Mac
+Electron validators).
 
 Runtime acceptance of `practice-uuid-production-v1` (Swift origin policy,
 shared JS profile validator, bootstrap data-mode binding, and native
