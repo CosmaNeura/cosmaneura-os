@@ -4,7 +4,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {NativeEnrollmentEntry} from './NativeEnrollmentEntry';
 import {createNativeEnrollmentApi,parseNativeAccountState,nativeAccountEntryRequested,nativeSelectedPracticeCapabilities,type NativeAccountState,type NativeEnrollmentPort} from './native-enrollment';
 import {parseNativeAuthState} from './native-auth';
-import {enrollmentConfig,enrollmentStatus} from './enrollment-test-fixture';
+import {enrollmentConfig,nativeEnrollmentConfig,enrollmentStatus} from './enrollment-test-fixture';
 import {nativePracticeFixture} from './native-practice-test-fixture';
 import {useUnsavedWork} from './unsaved-work';
 const revision='00000000-0000-4000-8000-000000000001';
@@ -17,7 +17,7 @@ function port(initial:NativeAccountState={phase:'signedOut',revision,identity:nu
     activatePracticeOrganization:vi.fn(async()=>{throw new Error('Not qualified');}),activateRegisteredPractice:vi.fn(async()=>{throw new Error('Not qualified');}),
     returnToBeta:vi.fn(async()=>{current={phase:'signedOut',revision:'00000000-0000-4000-8000-000000000002',identity:null};}),signOut:vi.fn(async()=>{}),
     addListener:vi.fn(async(_event,listener)=>{listeners.add(listener);return {remove:async()=>{listeners.delete(listener);}};}),
-    openCheckout:vi.fn(async()=>{}),enrollmentRequest:vi.fn(async({operation})=>({status:200,body:operation==='config'?enrollmentConfig():operation==='status'?enrollmentStatus():
+    openCheckout:vi.fn(async()=>{}),enrollmentRequest:vi.fn(async({operation})=>({status:200,body:operation==='config'?nativeEnrollmentConfig():operation==='status'?enrollmentStatus():
       operation==='practices'?{active_practice_id:null,practices:[]}:null})),openEnrollmentDestination:vi.fn(async()=>{}),
   };
   return {plugin,emit:(value:unknown)=>{for(const listener of listeners)listener(value);}};
@@ -68,7 +68,7 @@ function readyPracticePort(){
   let saved=enrollmentStatus('ready',7);saved.practice!.id=snapshot.profile.practice.practice_id;
   saved.workspace={status:'ready',url:snapshot.profile.workspace.url,organization_id:snapshot.profile.nativeIdentity.organizationId,box_id:snapshot.profile.practice.box_id};
   vi.mocked(owner.plugin.activateRegisteredPractice).mockResolvedValue(snapshot);
-  vi.mocked(owner.plugin.enrollmentRequest).mockImplementation(async({operation})=>({status:200,body:operation==='config'?enrollmentConfig():operation==='practices'?{
+  vi.mocked(owner.plugin.enrollmentRequest).mockImplementation(async({operation})=>({status:200,body:operation==='config'?nativeEnrollmentConfig():operation==='practices'?{
     active_practice_id:saved.practice!.id,practices:[{id:saved.practice!.id,legal_name:saved.practice!.legal_name,display_name:'Invented Ready Practice',role:'owner',workspace_status:'ready'},
       {id:'20000000-0000-4000-8000-000000000002',legal_name:'Invented Second Practice',display_name:'Invented Second Practice',role:'staff',workspace_status:'ready'}]}:structuredClone(saved)}));
   return {...owner,changeCurrent:()=>{saved={...saved,revision:8,practice:{...saved.practice!,id:'20000000-0000-4000-8000-000000000002'}};}};
@@ -129,7 +129,7 @@ function namedPracticePort(interrupt:false|'before-save'|'after-save'=false,revi
         organization_id:second.profile.nativeIdentity.organizationId,box_id:second.profile.practice.box_id}};
       if(interrupt==='after-save'){interrupt=false;throw new Error('Synthetic reply lost after save');}
     }
-    return {status:200,body:input.operation==='config'?enrollmentConfig():input.operation==='practices'?{active_practice_id:saved.practice!.id,
+    return {status:200,body:input.operation==='config'?nativeEnrollmentConfig():input.operation==='practices'?{active_practice_id:saved.practice!.id,
       practices:[{id:first.profile.practice.practice_id,legal_name:'Invented First',display_name:'Invented First',role:'owner',workspace_status:'ready'},
         {id:practiceId,legal_name:'Invented Second',display_name:'Invented Second',role:'staff',workspace_status:'ready'},
         ...(otherCurrent?[{id:otherPracticeId,legal_name:'Invented Other',display_name:'Invented Other',role:'staff',workspace_status:'ready'}]:[])]}:structuredClone(saved)};
@@ -209,7 +209,7 @@ it('takes a newly allocated UUID practice from native sign-in through membership
       expect(input.body).toEqual({expected_revision:4,workspace_token:'invented.scoped.token'});
       saved={...saved,stage:'ready',revision:5,workspace:{...saved.workspace,url:snapshot.profile.workspace.url}};
     }
-    return {status:200,body:input.operation==='config'?enrollmentConfig():input.operation==='practices'?{
+    return {status:200,body:input.operation==='config'?nativeEnrollmentConfig():input.operation==='practices'?{
       active_practice_id:practiceId,practices:[{id:practiceId,legal_name:saved.practice!.legal_name,
         display_name:saved.practice!.display_name,role:'owner',workspace_status:'ready'}]}:structuredClone(saved)};
   });

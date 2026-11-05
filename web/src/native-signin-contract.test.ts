@@ -1,6 +1,9 @@
 import {describe, expect, it} from 'vitest';
 import {EnrollmentError} from './enrollment-contract';
-import {nativeSignInRecovery, nativeSignInRecoveryMessage} from './native-signin-contract';
+import {nativeEnrollmentConfig} from './enrollment-test-fixture';
+import {
+  nativeSignInRecovery, nativeSignInRecoveryMessage, validateNativeEnrollmentConfig,
+} from './native-signin-contract';
 
 describe('native sign-in contract recovery', () => {
   it('maps contract HTTP/code pairs to app actions', () => {
@@ -17,5 +20,19 @@ describe('native sign-in contract recovery', () => {
     const text = nativeSignInRecoveryMessage(new EnrollmentError(403, 'enrollment_agreement_required'));
     expect(text.toLowerCase()).not.toMatch(/token|secret|patient|mrn|stripe|clerk\.cosmas/);
     expect(text).toMatch(/setup|workspace/i);
+  });
+});
+
+describe('native /config account contract', () => {
+  it('requires Origin-matched native_account and strips host-only fields', () => {
+    const apple = validateNativeEnrollmentConfig(nativeEnrollmentConfig('capacitor://localhost'), 'capacitor://localhost');
+    expect(apple.enabled).toBe(true);
+    expect('native_account' in apple).toBe(false);
+    expect(() => validateNativeEnrollmentConfig(nativeEnrollmentConfig('app://cosmas'), 'capacitor://localhost'))
+      .toThrow(EnrollmentError);
+    expect(() => validateNativeEnrollmentConfig(nativeEnrollmentConfig('capacitor://localhost'), 'app://cosmas'))
+      .toThrow(EnrollmentError);
+    const {native_account: _omit, ...missing} = nativeEnrollmentConfig();
+    expect(() => validateNativeEnrollmentConfig(missing, 'capacitor://localhost')).toThrow(EnrollmentError);
   });
 });

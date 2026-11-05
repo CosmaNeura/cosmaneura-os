@@ -1,6 +1,7 @@
 import type {NativePracticeConnectionPlugin} from '../../clients/capture/src/native/practice-connection-plugin';
 import {EnrollmentError} from './enrollment-contract';
 import {enrollmentApiForOwnedTransport,type EnrollmentApi,type EnrollmentIdentity,type EnrollmentRequest} from './enrollment-api';
+import {validateNativeEnrollmentConfig,type NativeAccountOrigin} from './native-signin-contract';
 
 export type NativeAccountState=Readonly<{phase:'signedOut'|'signingIn'|'accountReady'|'unavailable';revision:string;
   identity:Readonly<{userId:string;sessionId:string;email:string;displayName:string}>|null}>;
@@ -64,7 +65,8 @@ export function nativeAccountEntryRequested(available:boolean):boolean {
 }
 
 /** No URL, issuer, Org, Box, browser fetch or credential is passed to this port. */
-export function createNativeEnrollmentApi(port:NativeEnrollmentPort,current:()=>NativeAccountState|null,isActive:()=>boolean):EnrollmentApi {
+export function createNativeEnrollmentApi(port:NativeEnrollmentPort,current:()=>NativeAccountState|null,isActive:()=>boolean,
+  expectedOrigin:NativeAccountOrigin='capacitor://localhost'):EnrollmentApi {
   const request:EnrollmentRequest=async<T,>(path:string,validate:(value:unknown)=>T,identity?:EnrollmentIdentity,body?:object,key?:string,signal?:AbortSignal,method=body?'POST':'GET')=>{
     const captured=current(),operation=NATIVE_ENROLLMENT_OPERATIONS[path as keyof typeof NATIVE_ENROLLMENT_OPERATIONS];
     if(!captured||!isActive()||!operation||operation[1]!==method)throw new EnrollmentError(503);
@@ -85,6 +87,8 @@ export function createNativeEnrollmentApi(port:NativeEnrollmentPort,current:()=>
         const code=detail&&typeof detail==='object'&&'code'in detail?detail.code:detail;
         throw new EnrollmentError(result.status as number,typeof code==='string'&&/^enrollment_[a-z_]{1,80}$/.test(code)?code:'enrollment_unavailable');
       }
+      // Contract: /config is /native/config and must carry Origin-matched native_account.
+      if(path==='/config')return validateNativeEnrollmentConfig(result.body,expectedOrigin) as T;
       return validate(result.body);
     }catch(error){if(error instanceof EnrollmentError)throw error;throw new EnrollmentError(503);}
     finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}

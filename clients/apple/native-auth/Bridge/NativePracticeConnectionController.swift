@@ -224,12 +224,14 @@ import UIKit
         guard let configuration else { throw NativePracticeProfileError.unavailable }
         let (receipt, status) = try await registry(for: captured)
         if let selected { try selected.validate(receipt, account: captured, revision: revision) }
+        // Contract practice web host is https://<practice>/chief only — never account web (app.cosmas.ai).
         guard status["stage"] as? String == "ready", let workspace = status["workspace"] as? [String: Any],
               let address = workspace["url"] as? String, let parsed = URLComponents(string: address), parsed.scheme == "https",
-              let host = parsed.host, parsed.user == nil, parsed.password == nil, parsed.port == nil, parsed.query == nil, parsed.fragment == nil else {
+              let host = parsed.host, parsed.user == nil, parsed.password == nil, parsed.port == nil,
+              parsed.query == nil, parsed.fragment == nil, parsed.path == "/chief" else {
             throw NativePracticeProfileError.unavailable
         }
-        let api = "https://" + (host == "app.cosmas.ai" ? "api.cosmas.ai" : "api." + host)
+        let api = "https://api." + host
         guard configuration.binding.allowsAPI(api, practiceID: receipt.practiceID) else { throw NativePracticeProfileError.invalidBinding }
         if let known {
             try known.validate(binding: configuration.binding)
@@ -420,6 +422,11 @@ import UIKit
         }
         let result = try await self.request(.enrollment(request.operation), captured: captured, body: request.body, key: request.idempotencyKey)
         guard revision == request.expectedRevision else { throw NativePracticeProfileError.sessionChanged }
+        // Contract: successful /native/config must match this build's pinned realm Origin/issuer/audience.
+        if request.operation == .config, (200...299).contains(result.status) {
+            guard let configuration else { throw NativePracticeProfileError.unavailable }
+            try configuration.binding.validateNativeAccountConfig(try successfulObject(result))
+        }
         if request.operation == .selectPractice || request.operation == .join || request.operation == .practice { destinations.removeAll() }
         if let destination, let captured, let priorPractice, (200...299).contains(result.status) {
             let object = try successfulObject(result)
