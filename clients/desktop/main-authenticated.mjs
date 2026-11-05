@@ -110,10 +110,21 @@ async function bootstrap() {
   installMicrophonePermissions(window.webContents, auth, config.microphoneCaptureEnabled,()=>captureHost?.allowsRendererMicrophone()===true);
   disposeIpc = installAuthIpc(ipcMain, window.webContents, auth);
   disposeSignInPresentation = installSignInPresentation(auth, window);
-  // Opt-in CosmasDesktopPractice (fake/local enrollment). Default omit keeps Connect dark.
-  if (config.nativePracticeConnectionEnabled === true) {
+  // Opt-in CosmasDesktopPractice. Fake/local by default; reviewed Infos binds HTTPS
+  // enrollment-api and fail-closes Clerk/Open Chief until a signed practice helper exists.
+  if (config.nativePracticeConnectionEnabled === true || config.nativePracticeConnection) {
+    const {validateNativePracticeInfos, isProductionNativePracticeInfos} =
+      await import('./practice-infos-config.mjs');
+    const infos = config.nativePracticeConnection === undefined
+      ? undefined
+      : validateNativePracticeInfos(config.nativePracticeConnection);
+    if (infos && isProductionNativePracticeInfos(infos) && config.dataMode === 'synthetic') {
+      throw new Error('Production native practice Infos cannot compose into a synthetic data-mode desktop build.');
+    }
     practice = await createDesktopPracticeSession({
       enabled: true,
+      infos,
+      signedPracticeHelperAvailable: config.signedNativePracticeHelperAvailable === true,
       admitWorkspace: async snapshot => {
         if (!window || window.isDestroyed()) throw new Error('Desktop practice connection unavailable');
         const encoded = JSON.stringify(snapshot).replace(/</g, '\\u003c');

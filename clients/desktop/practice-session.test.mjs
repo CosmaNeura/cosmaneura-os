@@ -1,7 +1,48 @@
 import assert from 'node:assert/strict';
+import {EventEmitter} from 'node:events';
 import test from 'node:test';
 import {createDesktopPracticeSession} from './practice-session.mjs';
 import {createFakePracticeAccountWire} from './practice-fake-wire.mjs';
+function productionInfos() {
+  const host = 'clerk.cosmas.ai';
+  return {
+    enabled: true,
+    accountOrigin: 'https://enrollment-api.cosmas.ai',
+    realm: {
+      publishableKey: 'pk_live_' + Buffer.from(`${host}$`).toString('base64'),
+      frontendOrigin: `https://${host}`,
+      audience: 'cosmabot-practice-api',
+      profile: 'operational-beta-v1',
+      keychainNamespace: 'c'.repeat(64),
+    },
+    apiOrigins: [],
+    registeredPracticeOrigins: 'practice-uuid-production-v1',
+  };
+}
+
+function mockConfigRequest() {
+  return (url, options, callback) => {
+    const req = new EventEmitter();
+    req.write = () => {};
+    req.end = () => {
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      queueMicrotask(() => {
+        callback(res);
+        res.emit('data', Buffer.from(JSON.stringify({
+          contract_version: 'enrollment.v1', enabled: true, data_mode: 'production',
+          native_account: {
+            issuer: 'https://clerk.cosmas.ai', audience: 'cosmabot-practice-api',
+            session_policy: 'practice-uuid-production-v1', native_origin: 'app://cosmas',
+          },
+        }), 'utf8'));
+        res.emit('end');
+      });
+    };
+    req.destroy = () => {};
+    return req;
+  };
+}
 
 test('disabled practice host stays dark and rejects sign-in', async () => {
   const practice = await createDesktopPracticeSession({enabled: false});
@@ -130,5 +171,39 @@ test('host method surface matches detector-required CosmasDesktopPractice keys',
   ];
   for (const name of required) assert.equal(typeof practice[name], 'function');
   assert.equal(typeof practice.getToken, 'undefined');
+  practice.close();
+});
+
+test('production Infos refuses fake wire and blocks Open Chief without signed helper', async () => {
+  await assert.rejects(
+    createDesktopPracticeSession({
+      enabled: true, infos: productionInfos(), wire: createFakePracticeAccountWire(),
+    }),
+    /cannot use a fake\/local/,
+  );
+
+  const {createHttpsPracticeAccountWire} = await import('./practice-https-wire.mjs');
+  const practice = await createDesktopPracticeSession({
+    enabled: true,
+    infos: productionInfos(),
+    wire: createHttpsPracticeAccountWire({
+      infos: productionInfos(),
+      requestImplementation: mockConfigRequest(),
+    }),
+  });
+  assert.deepEqual(await practice.capabilities(), {
+    contract_version: 'cosmabot.native-practice-connection.v1',
+    available: true, enrollment_available: true,
+  });
+  const config = await practice.enrollmentRequest({
+    expectedRevision: practice.snapshot().revision, operation: 'config',
+  });
+  assert.equal(config.status, 200);
+  assert.equal(config.body.native_account.issuer, 'https://clerk.cosmas.ai');
+  await assert.rejects(practice.beginAccountSignIn(), /signed CosmasNativePracticeConnection helper/);
+  await assert.rejects(
+    practice.activateRegisteredPractice({expectedRevision: practice.snapshot().revision}),
+    /signed CosmasNativePracticeConnection helper/,
+  );
   practice.close();
 });

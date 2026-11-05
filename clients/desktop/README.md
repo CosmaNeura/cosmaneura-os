@@ -138,9 +138,12 @@ Pass `--native-practice-connection` with `--native-auth-helper` to enable
 dark. Electron main owns a fake/local enrollment wire (Origin `app://cosmas`,
 client `desktop`); preload never exposes `getToken`. Open Chief admits a
 synthetic desktop workspace snapshot and reloads `app://cosmas/index.html`.
-This path does not sign a Swift practice helper, switch a production Clerk
-account realm, or call live enrollment-api. See
-`docs/operational-native-build.md`.
+
+Pass `--native-practice-config` with reviewed public production Infos to bind
+`enrollment-api.cosmas.ai` for Origin-only `/native/config`. Account sign-in and
+Open Chief fail closed until a signed CosmasNativePracticeConnection helper
+provides the Clerk account realm. Do not mix production Infos with the fake
+host flag. See `docs/operational-native-build.md`.
 
 The authenticated shell uses a persistent partition inside its isolated state
 directory. This retains the existing encrypted IndexedDB capture queue and its

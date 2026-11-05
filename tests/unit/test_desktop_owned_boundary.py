@@ -108,7 +108,10 @@ def test_native_practice_connection_opt_in_composes_practice_host(tmp_path, monk
     build = json.loads((output / "app" / "synthetic-build.json").read_text())
     assert build["nativeAuthEnabled"] is True
     assert build["nativePracticeConnectionEnabled"] is True
-    for name in ("practice-session.mjs", "practice-ipc.mjs", "practice-fake-wire.mjs"):
+    for name in (
+        "practice-session.mjs", "practice-ipc.mjs", "practice-fake-wire.mjs",
+        "practice-infos-config.mjs", "practice-https-wire.mjs",
+    ):
         assert (output / "app" / name).is_file()
     assert (output / "app" / "main.mjs").read_bytes() == (
         ROOT / "clients/desktop/main-authenticated.mjs"

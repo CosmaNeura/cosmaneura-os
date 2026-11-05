@@ -1,16 +1,24 @@
 /**
  * Main-process CosmasDesktopPractice host (Electron).
- * Implements the Capacitor practice-connection surface without a signed Swift helper.
+ * Fake/local L0 enrollment works without a signed Swift helper.
+ * Reviewed production Infos bind the HTTPS enrollment origin but fail closed on
+ * Clerk account-realm / Open Chief until a signed practice helper is available.
  * Tokens stay in this process; preload never exposes getToken.
  */
 
 import {randomUUID} from 'node:crypto';
 import {createFakePracticeAccountWire} from './practice-fake-wire.mjs';
+import {createHttpsPracticeAccountWire} from './practice-https-wire.mjs';
+import {
+  isProductionNativePracticeInfos,
+  productionPracticeHelperRequiredMessage,
+  validateNativePracticeInfos,
+} from './practice-infos-config.mjs';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CONTRACT = 'cosmabot.native-practice-connection.v1';
 const unavailable = () => new Error('Desktop practice connection unavailable');
-
+const productionBlocked = () => new Error(productionPracticeHelperRequiredMessage());
 function desktopSnapshot(identity, practiceMeta) {
   const stamp = Math.floor(Date.now() / 1000);
   const issuer = 'https://invented.clerk.accounts.dev';
@@ -53,20 +61,39 @@ function fakeToken() {
 }
 
 /**
- * @param {{enabled?: boolean, wire?: ReturnType<typeof createFakePracticeAccountWire>,
- *   admitWorkspace?: (snapshot: object) => Promise<void>}} options
+ * @param {{
+ *   enabled?: boolean,
+ *   infos?: object,
+ *   signedPracticeHelperAvailable?: boolean,
+ *   wire?: {enrollmentRequest: Function},
+ *   admitWorkspace?: (snapshot: object) => Promise<void>,
+ * }} options
  */
 export async function createDesktopPracticeSession({
   enabled = false,
-  wire = createFakePracticeAccountWire(),
+  infos = undefined,
+  signedPracticeHelperAvailable = false,
+  wire,
   admitWorkspace = async () => {},
 } = {}) {
+  const closedInfos = infos === undefined ? null : validateNativePracticeInfos(infos);
+  const productionInfos = closedInfos ? isProductionNativePracticeInfos(closedInfos) : false;
+  if (closedInfos && !closedInfos.enabled) {
+    throw new Error('Native practice Infos is disabled; omit Connect practice instead of wiring a dark host.');
+  }
+  if (productionInfos && wire !== undefined && 'PRACTICE_ID' in wire) {
+    throw new Error('Production Infos cannot use a fake/local practice enrollment wire.');
+  }
+  const activeWire = wire ?? (closedInfos
+    ? createHttpsPracticeAccountWire({infos: closedInfos})
+    : createFakePracticeAccountWire());  // Production Infos may expose Connect so /native/config can prove the Infos path,
+  // but account/Open Chief stay fail-closed without the signed helper.
+  const accountRealmReady = !productionInfos || signedPracticeHelperAvailable === true;
   let phase = enabled ? 'signedOut' : 'unavailable';
   let revision = randomUUID();
   let identity = null;
   let disposed = false;
   const listeners = new Set();
-
   function view() {
     return Object.freeze({
       phase, revision,
@@ -115,8 +142,9 @@ export async function createDesktopPracticeSession({
 
   async function beginAccountSignIn() {
     if (!enabled || disposed || phase === 'signingIn') throw unavailable();
+    if (!accountRealmReady) throw productionBlocked();
     change('signingIn');
-    // Local fake account — no Clerk helper reconfigure in this slice.
+    // Local fake account — no Clerk helper reconfigure in the L0 slice.
     const next = Object.freeze({
       userId: 'user_invented_desktop',
       sessionId: 'sess_invented_desktop',
@@ -129,6 +157,7 @@ export async function createDesktopPracticeSession({
 
   async function accountToken({expectedRevision} = {}) {
     expectRevision(expectedRevision);
+    if (!accountRealmReady) throw productionBlocked();
     if (phase !== 'accountReady' || !identity) throw unavailable();
     return Object.freeze({token: fakeToken(), revision});
   }
@@ -136,6 +165,7 @@ export async function createDesktopPracticeSession({
   async function enrollmentRequest(options = {}) {
     expectRevision(options.expectedRevision);
     if (options.operation !== 'config' && (phase !== 'accountReady' || !identity)) throw unavailable();
+    if (options.operation !== 'config' && !accountRealmReady) throw productionBlocked();
     const ops = new Set([
       'config', 'status', 'practices', 'selectPractice', 'profile', 'practice', 'join', 'document',
       'accept', 'receipt', 'quote', 'checkout', 'recover', 'confirmWorkspace', 'invitation', 'portal',
@@ -145,9 +175,10 @@ export async function createDesktopPracticeSession({
         (typeof options.idempotencyKey !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(options.idempotencyKey))) {
       throw unavailable();
     }
-    return wire.enrollmentRequest(options.operation, options.body);
+    return activeWire.enrollmentRequest(options.operation, options.body, {
+      idempotencyKey: options.idempotencyKey,
+    });
   }
-
   async function openEnrollmentDestination({expectedRevision, destination} = {}) {
     expectRevision(expectedRevision);
     if (phase !== 'accountReady' || !['checkout', 'portal'].includes(destination)) throw unavailable();
@@ -164,18 +195,20 @@ export async function createDesktopPracticeSession({
 
   async function activatePracticeOrganization({expectedRevision} = {}) {
     expectRevision(expectedRevision);
+    if (!accountRealmReady) throw productionBlocked();
     if (phase !== 'accountReady' || !identity) throw unavailable();
     return Object.freeze({token: fakeToken(), revision});
   }
 
   async function activateRegisteredPractice({expectedRevision} = {}) {
     expectRevision(expectedRevision);
+    if (!accountRealmReady) throw productionBlocked();
     if (phase !== 'accountReady' || !identity) throw unavailable();
-    const snapshot = desktopSnapshot(identity, wire);
+    if (productionInfos || !('PRACTICE_ID' in activeWire)) throw productionBlocked();
+    const snapshot = desktopSnapshot(identity, activeWire);
     await admitWorkspace(snapshot);
     return snapshot;
   }
-
   async function returnToBeta({expectedRevision} = {}) {
     expectRevision(expectedRevision);
     change('signedOut');
