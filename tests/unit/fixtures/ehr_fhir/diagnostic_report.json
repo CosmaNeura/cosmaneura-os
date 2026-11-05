@@ -1,0 +1,22 @@
+{
+  "resourceType": "DiagnosticReport",
+  "id": "synth-diagnosticreport-5001",
+  "meta": {
+    "profile": ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-diagnosticreport-lab"]
+  },
+  "status": "final",
+  "code": {
+    "coding": [
+      {
+        "system": "http://loinc.org",
+        "code": "24323-8",
+        "display": "Comprehensive metabolic 2000 panel - Serum or Plasma"
+      }
+    ],
+    "text": "SYNTHETIC Comprehensive metabolic panel"
+  },
+  "subject": {
+    "reference": "Patient/synth-patient-1001"
+  },
+  "effectiveDateTime": "2024-06-01T14:30:00Z"
+}

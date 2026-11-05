@@ -29,7 +29,9 @@ FIXTURE_FILES = {
     "Medication": "medication.json",
     "Condition": "condition.json",
     "Observation": "observation.json",
+    "DiagnosticReport": "diagnostic_report.json",
     "DocumentReference": "document_reference.json",
+    "Binary": "binary.json",
     "Practitioner": "practitioner.json",
     "Organization": "organization.json",
 }
@@ -94,7 +96,9 @@ def test_readable_resources_match_ticket_set():
         "Medication",
         "Condition",
         "Observation",
+        "DiagnosticReport",
         "DocumentReference",
+        "Binary",
         "Practitioner",
         "Organization",
     }
@@ -228,8 +232,9 @@ def test_write_verbs_are_refused_without_transport():
 
 def test_unknown_resource_type_is_malformed():
     harness = Harness(lambda request: pytest.fail("no transport"))
-    assert harness.client.read("Binary", "x").state == "malformed"
+    assert harness.client.read("Provenance", "x").state == "malformed"
     assert harness.client.search("Provenance").state == "malformed"
+    assert harness.client.search("Coverage").state == "malformed"
     assert harness.calls == []
 
 

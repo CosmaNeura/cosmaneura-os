@@ -13,7 +13,9 @@ ReadableResource = Literal[
     "Medication",
     "Condition",
     "Observation",
+    "DiagnosticReport",
     "DocumentReference",
+    "Binary",
     "Practitioner",
     "Organization",
 ]
@@ -28,7 +30,9 @@ READABLE_RESOURCES: Final[frozenset[str]] = frozenset(
         "Medication",
         "Condition",
         "Observation",
+        "DiagnosticReport",
         "DocumentReference",
+        "Binary",
         "Practitioner",
         "Organization",
     }

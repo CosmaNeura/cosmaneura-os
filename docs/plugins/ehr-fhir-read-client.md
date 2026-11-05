@@ -24,7 +24,9 @@ Only these FHIR R4 / US Core resource types, by instance read or search:
 | `Medication` | Medication catalog records referenced by orders |
 | `Condition` | Problem list |
 | `Observation` | Vitals and results |
+| `DiagnosticReport` | Lab and imaging report metadata |
 | `DocumentReference` | Clinical document metadata |
+| `Binary` | Document / report content bytes |
 | `Practitioner` | Clinician identity |
 | `Organization` | Practice or clinic organization |
 
@@ -69,10 +71,11 @@ issue code, the HTTP status mapping wins. Chart rows are returned only for
 - Base URLs must use an exact allowlisted sandbox host name
   (case-insensitive equality on the parsed hostname only). The allowlist is
   `fhir.sandbox.example.com`, `sandbox.fhir.example.org`, `synthetic.invalid`,
-  `mock.example.com`, `localhost`, and `127.0.0.1`. Look-alike hosts such as
+  `mock.example.com`, `localhost`, `127.0.0.1`, and athena Preview
+  `api.preview.platform.athenahealth.com`. Look-alike hosts such as
   `test.evil.com`, `mock-athena.example.net`, or `sandbox.attacker.io` are
   refused. Trailing-dot host names, plain HTTP to non-local hosts, and URLs
-  with userinfo are refused.
+  with userinfo are refused. Athena production hosts stay refused by default.
 - Production hosts (`prd`, `prod`, `production`, `live`) raise
   `PermissionError` unless `allow_production=True` is set explicitly. That
   opt-in is not wired to live credentials here. The real-data switch stays off.

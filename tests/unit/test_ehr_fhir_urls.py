@@ -19,6 +19,7 @@ SANDBOX_URLS = (
     "https://mock.example.com/r4",
     "http://localhost:8080/fhir",
     "http://127.0.0.1:9443/r4",
+    "https://api.preview.platform.athenahealth.com/fhir/r4",
 )
 
 # Case variants of allowlisted hosts must still pass (exact match is case-insensitive).

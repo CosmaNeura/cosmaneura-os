@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 
 # Exact host names that identify synthetic / sandbox FHIR bases.
 # Match is case-insensitive equality on the parsed hostname only.
+# Athena Preview (practice 195900) is the only vendor sandbox host allowlisted
+# here for C7; production athena hosts stay refused by default.
 _SANDBOX_HOSTS = frozenset(
     {
         "fhir.sandbox.example.com",
@@ -23,6 +25,7 @@ _SANDBOX_HOSTS = frozenset(
         "mock.example.com",
         "localhost",
         "127.0.0.1",
+        "api.preview.platform.athenahealth.com",
     }
 )
 
