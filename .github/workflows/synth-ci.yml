@@ -377,11 +377,16 @@ jobs:
       - name: Validate private enrollment database job
         working-directory: infra/enrollment/database-job
         run: tofu fmt -check && tofu init -backend=false -input=false && tofu validate -no-color && tofu test -no-color
+      - name: Validate held allocator-host identity recipe
+        working-directory: infra/enrollment/allocator-host
+        run: tofu fmt -check && tofu init -backend=false -input=false -lockfile=readonly && tofu validate -no-color && tofu test -no-color
       - uses: astral-sh/setup-uv@v4
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Protected staging credential preparation
         run: uv run --extra dev pytest infra/enrollment/foundation/tests/test_bootstrap.py -q
+      - name: Allocator-host activation hold flags
+        run: uv run --extra dev pytest infra/enrollment/allocator-host/tests/test_hold_flags.py -q
 
   enrollment-journey:
     name: enrollment-journey

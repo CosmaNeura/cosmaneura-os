@@ -114,6 +114,36 @@ test('production cannot inherit a staging key or enable registration without qua
   assert.throws(() => render(value));
 });
 
+test('production path render stays dark until production_qualified and never marks deployed', () => {
+  const value = sample();
+  value.environment = 'production';
+  value.app_origin = 'https://app.cosmas.ai';
+  value.api_origin = 'https://enrollment-api.cosmas.ai';
+  value.clerk.issuer = 'https://clerk.cosmas.ai';
+  value.clerk.publishable_key = `pk_live_${Buffer.from('clerk.cosmas.ai$').toString('base64')}`;
+  value.workspace_origins = ['https://11111111-1111-4111-8111-111111111111.workspace.cosmas.ai'];
+  value.readiness = {
+    enabled: false,
+    clerk_methods_verified: false,
+    stripe_integration_enabled: false,
+    stripe_acquisition_enabled: false,
+    commercial_terms_verified: false,
+    activation_available: false,
+    provisioning_enabled: false,
+    production_qualified: false,
+  };
+  const output = render(value);
+  assert.equal(output['deployment-contract.json'].rendered_only, true);
+  assert.equal(output['deployment-contract.json'].deployed, false);
+  assert.equal(output['public-env.json'].ENROLLMENT_ENABLED, 'false');
+  assert.equal(output['public-env.json'].ENROLLMENT_PRODUCTION_QUALIFIED, 'false');
+  assert.equal(output['public-env.json'].ENROLLMENT_STRIPE_ACQUISITION_ENABLED, 'false');
+  assert.equal(output['public-env.json'].ENROLLMENT_ACTIVATION_AVAILABLE, 'false');
+  value.qualification.journey_sha256 = '4'.repeat(64);
+  value.readiness.enabled = true;
+  assert.throws(() => render(value), /production qualification/i);
+});
+
 test('trial activation cannot precede provisioning or a complete admitted billing contract', () => {
   const value = sample(); value.readiness.activation_available = true;
   assert.throws(() => render(value));

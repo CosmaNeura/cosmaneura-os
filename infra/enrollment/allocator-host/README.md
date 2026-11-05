@@ -103,3 +103,38 @@ The host still needs:
 
 No Core, Scribe, Cosmaneura, existing a/b deployment, model name, or current
 runtime deployment name is imported or changed by these operators.
+
+## Activation hold flags (stay dark)
+
+Operators may record a separate `0600` receipt with contract
+`cosmabot.private-worker-hold-flags.v1` (see `hold_flags.py`). Review flags may
+become true after local checks. These activation holds **must remain false**:
+
+- `hosting_configuration_enabled`
+- `worker_started`
+- `p2_extra_box_authorized` (second Box / P2 never authorized here)
+- `stripe_live_mode`
+- `production_registration_qualified`
+
+`practice_uuid_limit` is fixed at `1` for the F1+P1 path. Validate optionally:
+
+```sh
+python infra/enrollment/allocator-host/hold_flags.py --hold-flags /absolute/protected/hold-flags.json
+python infra/enrollment/allocator-host/bootstrap.py validate ... --hold-flags /absolute/protected/hold-flags.json
+```
+
+Validation never emits a worker enable command and never applies Azure.
+
+## Held OpenTofu recipe (no bill until apply)
+
+`versions.tf` / `main.tf` define a non-delegated host subnet and user-assigned
+worker identity. `create_resources` defaults to **false**, so `tofu plan`
+creates **zero** Azure resources. Setting `create_resources=true` also requires
+`hold_release_sha256` (64-hex digest of a protected release receipt). Do not
+apply from CI or cloud agents; founder Codex apply only after cost yes.
+
+```sh
+cd infra/enrollment/allocator-host
+tofu init -backend=false
+tofu test
+```
