@@ -42,7 +42,9 @@ export function NativeEnrollmentEntry({plugin=NativePracticeConnection,available
         if(owner.epoch===epoch)accept(value);
         if(!owner.state)throw new Error();
         const configuration=await api.config();if(!owner.active)return;
-        if(!configuration.enabled||!configuration.auth_configured||configuration.data_mode!=='synthetic')throw new Error();
+        // Synthetic staging or qualified production enrollment; the contract already requires
+        // production to be qualified and to use the production Clerk key.
+        if(!configuration.enabled||!configuration.auth_configured||!['synthetic','production'].includes(configuration.data_mode))throw new Error();
         let selected=false;
         if(typeof plugin.selectedPracticeCapabilities==='function'&&typeof plugin.activateSelectedPractice==='function'){
           try{selected=nativeSelectedPracticeCapabilities(await plugin.selectedPracticeCapabilities());}catch{/* Older owned hosts retain current-practice discovery. */}
@@ -123,6 +125,6 @@ export function NativeEnrollmentEntry({plugin=NativePracticeConnection,available
     onCreatePractice={()=>setSetupRevision(state.revision)} onPendingChange={markReadyPending} accountControls={controls}/>;
   return <EnrollmentFlow key={state.revision} api={api!} identity={identity} config={config} accountControls={controls}
     initialName={state.identity!.displayName} initialEmail={state.identity!.email} search="" navigate={navigate}
-    brand={<span className="enrollment-brand">CosmaBot</span>} invitationOrigin="https://onboarding.staging.cosmas.ai"
+    brand={<span className="enrollment-brand">CosmaBot</span>} invitationOrigin={config?.data_mode==='production'?'https://app.cosmas.ai':'https://onboarding.staging.cosmas.ai'}
     prepareWorkspaceToken={prepareWorkspaceToken} openNativeWorkspace={openNativeWorkspace}/>;
 }

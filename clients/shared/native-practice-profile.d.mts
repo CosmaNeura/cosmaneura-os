@@ -2,7 +2,7 @@ export const REGISTERED_NATIVE_PROFILE_CONTRACT: 'cosmas-native-workspace-profil
 export const ACTIVE_NATIVE_WORKSPACE_CONTRACT: 'cosmabot.native-active-workspace.v1';
 export type RegisteredNativeProfile = Readonly<{
   contract_version: typeof REGISTERED_NATIVE_PROFILE_CONTRACT;
-  client:'apple'|'desktop'; nonce:string; native_origin:'capacitor://localhost'|'app://cosmas';data_mode:'synthetic';
+  client:'apple'|'desktop'; nonce:string; native_origin:'capacitor://localhost'|'app://cosmas';data_mode:'synthetic'|'authorized_beta';
   practice:Readonly<{practice_id:string;box_id:string}>;
   workspace:Readonly<{url:string;source_commit:string;image_sha256:string;workspace_proof_sha256:string;member_proof_sha256:string;native_qualification_sha256:string}>;
   issued_at:number;expires_at:number;

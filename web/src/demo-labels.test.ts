@@ -11,3 +11,10 @@ describe('showDemoLabels',()=>{
     expect(showDemoLabels({VITE_WORKSPACE_HOSTED_ENABLED:'false',VITE_WORKSPACE_DATA_MODE:'authorized_beta'})).toBe(true);
   });
 });
+describe('showDemoLabels for registered native practices',()=>{
+  it('hides demo labels for a real-data native practice and keeps them for synthetic or unknown',()=>{
+    expect(showDemoLabels({},()=> 'authorized_beta')).toBe(false);
+    expect(showDemoLabels({},()=> 'synthetic')).toBe(true);
+    expect(showDemoLabels({},()=> undefined)).toBe(true);
+  });
+});
