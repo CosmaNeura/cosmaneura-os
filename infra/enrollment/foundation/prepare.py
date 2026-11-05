@@ -25,10 +25,31 @@ PUBLIC_KEYS = {
 }
 # Production is opt-in by one extra reviewed input; omitting it keeps staging.
 ENVIRONMENTS = {"staging", "production"}
+# Written into inputs.tfvars.json after prepare; never accepted from the operator file.
+DERIVED_KEYS = {"environment", "state_namespace"}
 
 
 def selected_environment(values: dict) -> str:
     return values.get("environment", "staging")
+
+
+def reviewed_tfvars(values: dict) -> dict[str, str]:
+    """Public operator keys plus the exact environment/state pair Terraform requires."""
+    environment = selected_environment(values)
+    return {
+        **{key: values[key] for key in PUBLIC_KEYS},
+        "environment": environment,
+        "state_namespace": f"cosmabot-enrollment/{environment}/foundation-local-v1",
+    }
+
+
+def accept_tfvars(values: dict) -> None:
+    if set(values) != PUBLIC_KEYS | DERIVED_KEYS:
+        raise ValueError("bootstrap public inputs changed")
+    if values["state_namespace"] != f"cosmabot-enrollment/{values['environment']}/foundation-local-v1":
+        raise ValueError("bootstrap public inputs changed")
+    if values["environment"] not in ENVIRONMENTS:
+        raise ValueError("bootstrap public inputs changed")
 
 
 def private_read(path: Path, limit: int = 65536) -> bytes:
@@ -84,8 +105,9 @@ def prepare(inputs: Path, directory: Path) -> dict[str, object]:
     if (not isinstance(values, dict) or set(values) - {"environment"} != PUBLIC_KEYS
             or any(not isinstance(v, str) for v in values.values()) or selected_environment(values) not in ENVIRONMENTS):
         raise ValueError("only the six reviewed public foundation inputs and an optional environment are accepted")
-    if "environment" in values:
-        values["state_namespace"] = f"cosmabot-enrollment/{values['environment']}/foundation-local-v1"
+    # Always pin environment + matching state namespace so production plan/apply cannot
+    # fall through to the staging Terraform defaults after a reviewed production prepare.
+    tfvars = reviewed_tfvars(values)
     # Terraform validates actual CIDR, namespace and object IDs before planning.
     directory.mkdir(mode=0o700)
     module = directory / "module"
@@ -93,7 +115,7 @@ def prepare(inputs: Path, directory: Path) -> dict[str, object]:
     files = source_files()
     for p in files:
         private_write(module / p.name, p.read_bytes())
-    private_write(directory / "inputs.tfvars.json", json.dumps(values, sort_keys=True).encode())
+    private_write(directory / "inputs.tfvars.json", json.dumps(tfvars, sort_keys=True).encode())
     private_write(directory / "encryption.passphrase", secrets.token_urlsafe(64).encode())
     private_write(directory / "postgres-admin.password", (secrets.token_urlsafe(48) + "Aa1_").encode())
     private_write(directory / "backend.hcl", f"path = {json.dumps(str(directory / 'foundation.tfstate'))}\n".encode())
@@ -116,7 +138,8 @@ def child_environment(directory: Path) -> dict[str, str]:
     if receipt.get("source") != fingerprint(source_files()) or receipt.get("source") != fingerprint([directory / "module" / p.name for p in source_files()]):
         raise ValueError("source changed; prepare a new reviewed bootstrap")
     values = json.loads(private_read(directory / "inputs.tfvars.json"))
-    if set(values) != PUBLIC_KEYS or receipt.get("inputs_sha256") != hashlib.sha256(private_read(directory / "inputs.tfvars.json")).hexdigest():
+    accept_tfvars(values)
+    if receipt.get("inputs_sha256") != hashlib.sha256(private_read(directory / "inputs.tfvars.json")).hexdigest():
         raise ValueError("bootstrap public inputs changed")
     private_read(directory / "encryption.passphrase")
     password = private_read(directory / "postgres-admin.password").decode()
@@ -145,9 +168,16 @@ def execute(directory: Path, operation: str, plan_sha256: str | None = None, out
         response = subprocess.run([tofu, "output", "-json", "foundation"], cwd=module, env=env, check=True, capture_output=True, timeout=30)
         coordinates = json.loads(response.stdout)
         environment = selected_environment(values)
+        accept_tfvars(values)
+        scope = (f"/subscriptions/{values['subscription_id']}/resourceGroups/"
+                 f"rg-cosmabot-enrollment-{environment}-{values['resource_name_suffix']}/providers/"
+                 "Microsoft.Network/privateDnsZones/")
         if (coordinates.get("contract_version") != "enrollment-foundation.v1" or coordinates.get("environment") != environment
                 or coordinates.get("resource_group_name") != f"rg-cosmabot-enrollment-{environment}-{values['resource_name_suffix']}"
-                or coordinates.get("subscription_id") != values["subscription_id"] or coordinates.get("tenant_id") != values["tenant_id"]):
+                or coordinates.get("subscription_id") != values["subscription_id"] or coordinates.get("tenant_id") != values["tenant_id"]
+                or coordinates.get("vault_private_dns_zone_id") != scope + "privatelink.vaultcore.azure.net"
+                or coordinates.get("blob_private_dns_zone_id") != scope + "privatelink.blob.core.windows.net"
+                or coordinates.get("redis_private_dns_zone_id") != scope + "privatelink.redis.azure.net"):
             raise ValueError("local state does not match the reviewed enrollment foundation")
         private_write(output, json.dumps(coordinates, sort_keys=True).encode())
         return {"exported": True, "application_deployed": False, "qualified": False}

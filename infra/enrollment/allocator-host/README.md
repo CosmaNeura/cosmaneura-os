@@ -80,8 +80,8 @@ The host still needs:
   registry-only export is insufficient. `HostingConfiguration` requires the
   exact VNet, Container Apps environment, PostgreSQL and endpoint subnets,
   private Vault/Blob/Redis DNS zone IDs, subscription/tenant, and independent
-  state backend. The base foundation output currently includes Vault DNS but
-  does not provide the Blob/Redis DNS zone references.
+  state backend. The foundation export now includes the shared Vault, Blob and
+  Redis private DNS zone IDs inside the dedicated enrollment resource group.
 - A dedicated attached user-assigned worker identity, its actual client/object
   IDs, and scoped deployment/role-assignment, ACR build/push/lock, private state,
   vault-secret seeding, and hosting-receipt permissions. Public enrollment's

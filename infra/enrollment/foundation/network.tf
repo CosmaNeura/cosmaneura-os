@@ -42,7 +42,13 @@ resource "azurerm_subnet" "private_endpoints" {
   default_outbound_access_enabled   = false
 }
 locals {
-  private_dns = { vault = "privatelink.vaultcore.azure.net" }
+  # Shared read-only service zones for every Box private endpoint in this foundation.
+  # Allocated workspaces attach endpoint records only; they never own these zones.
+  private_dns = {
+    vault = "privatelink.vaultcore.azure.net"
+    blob  = "privatelink.blob.core.windows.net"
+    redis = "privatelink.redis.azure.net"
+  }
 }
 resource "azurerm_private_dns_zone" "service" {
   for_each            = local.private_dns

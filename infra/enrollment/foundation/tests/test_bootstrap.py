@@ -36,6 +36,9 @@ def test_private_bootstrap_has_no_cloud_calls_and_detects_input_tamper(tmp_path,
     receipt = json.loads((directory / "bootstrap.json").read_text())
     assert "password" not in json.dumps(receipt)
     assert (directory / "postgres-admin.password").read_text() not in json.dumps(receipt)
+    tfvars = json.loads((directory / "inputs.tfvars.json").read_text())
+    assert tfvars["environment"] == "staging"
+    assert tfvars["state_namespace"] == "cosmabot-enrollment/staging/foundation-local-v1"
     for key in list(os.environ):
         if key.startswith(("TF_", "ARM_")):
             monkeypatch.delenv(key)
@@ -45,6 +48,37 @@ def test_private_bootstrap_has_no_cloud_calls_and_detects_input_tamper(tmp_path,
     values = json.loads((directory / "inputs.tfvars.json").read_text())
     values["subscription_id"] = "00000000-0000-4000-8000-000000000004"
     (directory / "inputs.tfvars.json").write_text(json.dumps(values))
+    with pytest.raises(ValueError):
+        prepare.child_environment(directory)
+
+
+def test_production_prepare_pins_environment_and_survives_child_checks(tmp_path, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("prepare may not invoke a cloud process"))
+    path = tmp_path / "production.json"
+    path.write_text(json.dumps({
+        "subscription_id": "00000000-0000-4000-8000-000000000001",
+        "tenant_id": "00000000-0000-4000-8000-000000000002",
+        "resource_name_suffix": "mockprd1",
+        "vnet_address_prefix": "10.249.0.0/20",
+        "release_operator_object_id": "00000000-0000-4000-8000-000000000003",
+        "state_operator_ipv4": "198.51.100.10",
+        "environment": "production",
+    }))
+    path.chmod(0o600)
+    directory = tmp_path / "owned-production"
+    result = prepare.prepare(path, directory)
+    assert result["prepared"] and not result["applied"]
+    tfvars = json.loads((directory / "inputs.tfvars.json").read_text())
+    assert tfvars["environment"] == "production"
+    assert tfvars["state_namespace"] == "cosmabot-enrollment/production/foundation-local-v1"
+    assert set(tfvars) == prepare.PUBLIC_KEYS | prepare.DERIVED_KEYS
+    for key in list(os.environ):
+        if key.startswith(("TF_", "ARM_")):
+            monkeypatch.delenv(key)
+    child = prepare.child_environment(directory)
+    assert child["TF_VAR_bootstrap_key_file"].endswith("/encryption.passphrase")
+    tfvars["state_namespace"] = "cosmabot-enrollment/staging/foundation-local-v1"
+    (directory / "inputs.tfvars.json").write_text(json.dumps(tfvars))
     with pytest.raises(ValueError):
         prepare.child_environment(directory)
 
