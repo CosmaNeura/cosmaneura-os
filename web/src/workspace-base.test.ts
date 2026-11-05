@@ -1,5 +1,5 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
-import {validateRegisteredNativeProfile} from '../../clients/shared/native-practice-profile.mjs';
+import {validateActiveNativeWorkspace,validateRegisteredNativeProfile} from '../../clients/shared/native-practice-profile.mjs';
 import {NativeWorkspaceTransport,workspaceApiBase,configuredWorkspaceApiBase} from './workspace-base';
 import {nativePracticeFixture} from './native-practice-test-fixture';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
@@ -27,6 +27,26 @@ describe('registered native practice routing',()=>{
       identity.nativeSession={...identity.nativeSession!,[field]:'wrong'};
       expect(()=>routing.resolve(identity)).toThrow('Secure session unavailable');
     }
+  });
+  it('admits a Mac desktop identity only against a desktop registered practice revision',()=>{
+    const apple=nativePracticeFixture();
+    const stamp=1700000000,issuer='https://invented.clerk.accounts.dev',name='desktoppractice';
+    const desktop=validateActiveNativeWorkspace({contract_version:'cosmabot.native-active-workspace.v1',revision:apple.revision,
+      profile:{contract_version:'cosmas-native-workspace-profile.v1',client:'desktop',nonce:'00000000-0000-4000-8000-000000000002',
+        native_origin:'app://cosmas',data_mode:'synthetic',nativeIdentity:{version:1,profile:'operational-staging-v1',client:'desktop',
+          apiOrigin:`https://api.${name}.staging.cosmas.ai`,publishableKey:'pk_test_'+btoa('invented.clerk.accounts.dev$'),
+          frontendOrigin:issuer,organizationId:`org_${name}`,audience:''},
+        session:{issuer,subject:`user_${name}`,session_id:`sess_${name}`},
+        practice:{practice_id:'00000000-0000-4000-8000-000000000003',box_id:'00000000-0000-4000-8000-000000000004'},
+        workspace:{url:`https://${name}.staging.cosmas.ai/chief`,source_commit:'1'.repeat(40),image_sha256:'2'.repeat(64),
+          workspace_proof_sha256:'3'.repeat(64),member_proof_sha256:'4'.repeat(64),native_qualification_sha256:'5'.repeat(64)},
+        issued_at:stamp,expires_at:stamp+120}});
+    const routing=new NativeWorkspaceTransport(()=>desktop);
+    const ok:AuthenticatedWorkspaceIdentity={mode:'desktop_native',revision:desktop.revision,isCurrent:()=>true};
+    expect(routing.resolve(ok)).toBe(desktop);
+    expect(()=>routing.resolve({mode:'desktop_native',revision:desktop.revision,isCurrent:()=>false})).toThrow();
+    expect(()=>routing.resolve({mode:'desktop_native',revision:'00000000-0000-4000-8000-000000000099',isCurrent:()=>true})).toThrow();
+    expect(()=>new NativeWorkspaceTransport(()=>apple).resolve(ok)).toThrow();
   });
   it('never reroutes an old identity when the practice changes or disappears',()=>{
     let profile:ReturnType<typeof nativePracticeFixture>|null=nativePracticeFixture();
