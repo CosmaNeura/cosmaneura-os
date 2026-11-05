@@ -7,9 +7,9 @@ and must never share the other’s coordinates. Region defaults to `centralus`
 and only `centralus` or `eastus2` are accepted. Preparation and plan do not
 deploy an application or mark registration, billing, workspaces or a customer
 journey qualified. Applying either environment remains a separate
-owner-authorized step and is held until cost and credentials are reviewed. No
-existing VM, Core, clinical database, vault, state backend or VNet is consumed
-or changed.
+owner-authorized step (F1+P1 founder-approved; P2 and other billable lines
+held — see `../allocated-workspace/COST.md`). No existing VM, Core, clinical
+database, vault, state backend or VNet is consumed or changed.
 
 Authenticated staging capability checks rejected PostgreSQL provisioning in
 East US 2 and East US. Central US supports the selected PostgreSQL 16 /
@@ -34,10 +34,14 @@ The default footprint is one new
   outbound connectivity must be measured on the actual deployment.
 - Private PostgreSQL 16 (`B_Standard_B1ms`, 32 GiB, seven-day local backups,
   auto-grow, required TLS), one `cosmabot_enrollment` database and its private
-  DNS link. This is a staging sizing assumption; HA/geo-backup is not enabled.
+  DNS link. This is a bounded sizing assumption; HA/geo-backup is not enabled.
 - A private RBAC Key Vault, private endpoint/DNS, purge protection and 90-day
   soft deletion. Bootstrap/migration and application secrets share this owned
   vault, but their managed identities receive disjoint per-secret read scopes.
+- Shared private DNS zones for Vault (`privatelink.vaultcore.azure.net`), Blob
+  (`privatelink.blob.core.windows.net`) and Managed Redis
+  (`privatelink.redis.azure.net`), each linked to this VNet. Allocated practice
+  workspaces attach only their own endpoint records to these zones.
 - A dedicated Basic ACR with TLS and Entra/managed-identity authentication,
   administrator and anonymous access disabled. Its public endpoint contains
   code images only; credentials, data, tokens and `.env` files must never be
@@ -50,6 +54,9 @@ The default footprint is one new
   private route rather than a wider IP rule.
 - Log Analytics with 30-day retention and a 0.1 GiB/day cap. This limits cost,
   and does not promise logs beyond that cap.
+- Production sets `clinical_data=true` on resource tags and uses the `prd`
+  short name (`acrcbotenrprd*`, `kv-cbot-enr-prd-*`, `stcbotenrprd*`). Staging
+  stays synthetic (`stg`, `clinical_data=false`).
 
 Use a fresh 6–8 character suffix (Key Vault's 24-character name limit), a verified
 operator object ID/public IPv4 and a non-overlapping private `/20`. Names, tenant,
@@ -193,14 +200,23 @@ and authorizes only the actual rendered application secret names.
    are measured deployment work; this definition invents none of those proofs.
 
 The October 31, 2026 Azure price-metadata review, using 730 hours/month in Central
-US, estimates a **$31.55/month** fixed foundation footprint. The two isolated
-practice stores add **$134.73/month**, for **$166.28/month combined**. Container
+US, estimates a **$31.55/month** fixed foundation footprint for the original
+vault-only DNS shape. Adding the shared Blob and Redis private DNS zones adds
+about **$1.00/month** (two zones at ~$0.50 each, before query charges), for a
+revised foundation estimate of **~$32.55/month**. See
+[../allocated-workspace/COST.md](../allocated-workspace/COST.md) for the
+per-practice workspace lines and the combined founder approval table. Container
 Apps and manual-job Consumption usage is additional, as are variable Blob
 storage/transactions, vault operations, telemetry, egress, backup overage,
 third-party vendors and taxes. Free Consumption grants are shared at subscription
 level. No VM/NAT/Premium ACR or Dedicated compute is budgeted. These metadata
 estimates are not an Azure bill or allocation guarantee; retain the actual
 reviewed subscription/region/SKU metadata with the protected deployment receipt.
+
+**F1 (this foundation) and P1 (first Box) are founder-approved; P2 and other
+billable lines remain held — see `COST.md`.** Apply only via the Codex handoff
+on the founder’s Mac after the Beta Tester staging pass. This repository change
+only prepares IaC and documentation; cloud agents do not apply Azure.
 
 ## Local checks (synthetic only)
 

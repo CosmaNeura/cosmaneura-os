@@ -2,6 +2,10 @@
 
 For the independently built staging account web app, exact public DNS records
 and verified managed-certificate stage, use [STAGING-HOSTING.md](STAGING-HOSTING.md).
+For the separate production foundation and per-practice allocated workspaces
+(docs/IaC only; founder cost yes required before apply), use
+[PRODUCTION-HOSTING.md](PRODUCTION-HOSTING.md) and
+[allocated-workspace/COST.md](allocated-workspace/COST.md).
 
 This component serves customer account/practice setup, BAA receipts and SaaS
 subscription state. It stores no clinical records and grants no access to the

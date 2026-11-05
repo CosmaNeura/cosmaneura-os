@@ -9,6 +9,9 @@ the private worker performs the hosting steps without a per-customer command.
 The source is prepared locally. **Publishing images, enabling the worker,
 applying infrastructure, creating credentials, and changing DNS remain held.**
 The local tests use invented providers and do not qualify actual Azure hosting.
+Founder cost approval before any apply:
+[COST.md](COST.md). Production operator sequence (still held):
+[../PRODUCTION-HOSTING.md](../PRODUCTION-HOSTING.md).
 
 ## Result and boundary
 
