@@ -66,9 +66,10 @@ local state/plan in a fresh owner-only directory outside the repository. Never
 copy another application's state or backend. Preserve the encryption passphrase
 through rollback/backup; losing it makes this state unreadable.
 
-Create one owner-only `0600` JSON input file containing exactly these public keys:
+Create one owner-only `0600` JSON input file containing these public keys:
 `subscription_id`, `tenant_id`, `resource_name_suffix`, `vnet_address_prefix`,
-`release_operator_object_id`, `state_operator_ipv4`. Then:
+`release_operator_object_id`, `state_operator_ipv4`, and optionally
+`environment` (`staging` or `production`; omit to keep staging). Then:
 
 ```sh
 python infra/enrollment/foundation/prepare.py prepare --inputs /protected/foundation-inputs.json --directory /protected/new-enrollment-foundation
@@ -85,10 +86,12 @@ to AzureRM's `administrator_password_wo`; neither state nor saved plan contains
 that value. Keep debug logging disabled. The password file remains in protected
 operator custody for server bootstrap and any reviewed rotation.
 
-No apply was run during source preparation. For the eventual reviewed staging
-plan, the protected wrapper supports `apply --directory ... --plan-sha256 <exact
-encrypted-plan-hash>`. It rechecks source, inputs, executable and account; it
-supplies the ephemeral password again without putting it in command arguments.
+No apply was run during source preparation. For an eventual reviewed
+staging or production plan, the protected wrapper supports
+`apply --directory ... --plan-sha256 <exact encrypted-plan-hash>`. It rechecks
+source, inputs, executable and account; it supplies the ephemeral password
+again without putting it in command arguments. Do not apply until the owner
+reviews cost and credentials for that environment.
 Export the actual local state's public coordinates using the same private
 backend/key/provider configuration:
 
