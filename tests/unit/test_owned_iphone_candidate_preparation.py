@@ -35,6 +35,23 @@ def practice_configuration():
     }
 
 
+def production_practice_configuration():
+    host = "clerk.cosmas.ai"
+    return {
+        "enabled": True,
+        "accountOrigin": "https://enrollment-api.cosmas.ai",
+        "realm": {
+            "publishableKey": "pk_live_" + base64.b64encode((host + "$").encode()).decode(),
+            "frontendOrigin": "https://" + host,
+            "audience": "cosmabot-practice-api",
+            "profile": "operational-beta-v1",
+            "keychainNamespace": "c" * 64,
+        },
+        "apiOrigins": [],
+        "registeredPracticeOrigins": "practice-uuid-production-v1",
+    }
+
+
 def public_beta():
     host = "clerk.synthetic.example.invalid"
     native = {
@@ -175,9 +192,40 @@ def test_google_pair_is_preserved_as_omitted_or_disabled_but_partial_configurati
     lambda value: value.update(apiOrigins=[f"https://api-{index}.example.invalid" for index in range(33)]),
     lambda value: value.update(registeredPracticeOrigins="*"),
     lambda value: value.update(registeredPracticeOrigins="exact"),
+    lambda value: value.update(registeredPracticeOrigins="practice-uuid-production-v1"),
 ])
 def test_practice_config_rejects_unreviewed_account_callback_namespace_and_origin_inputs(change):
     value = practice_configuration()
+    change(value)
+    with pytest.raises(ValueError):
+        PREPARE.native_practice_configuration(value)
+
+
+def test_production_practice_config_is_accepted_and_embedded_without_changing_beta_identity():
+    identity, before = public_beta(), scaffold()
+    retained = retained_beta(identity)
+    default = PREPARE.configured_info(before, retained, identity, validate_google=NAVIGATION.validate_google)
+    config = production_practice_configuration()
+    assert PREPARE.native_practice_configuration(config) == config
+    result = PREPARE.configured_info(before, retained, identity, config, NAVIGATION.validate_google)
+    assert result.pop(PREPARE.PRACTICE_KEY) == config
+    assert result == default
+
+
+@pytest.mark.parametrize("change", [
+    lambda value: value.update(accountOrigin="https://enrollment.example.invalid"),
+    lambda value: value.update(registeredPracticeOrigins="synthetic-practice-uuid-staging-v1"),
+    lambda value: value.update(registeredPracticeOrigins="exact"),
+    lambda value: value["realm"].update(audience=""),
+    lambda value: value["realm"].update(profile="operational-staging-v1"),
+    lambda value: value["realm"].update(frontendOrigin="https://invented.clerk.accounts.dev"),
+    lambda value: value["realm"].update(
+        publishableKey="pk_test_" + base64.b64encode(b"clerk.cosmas.ai$").decode()),
+    lambda value: value["realm"].update(keychainNamespace="not-a-fixed-namespace"),
+    lambda value: value.update(apiOrigins=["https://api.example.invalid", "https://api.example.invalid"]),
+])
+def test_production_practice_config_rejects_staging_mix_and_unreviewed_inputs(change):
+    value = production_practice_configuration()
     change(value)
     with pytest.raises(ValueError):
         PREPARE.native_practice_configuration(value)
