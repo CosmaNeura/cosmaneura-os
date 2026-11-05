@@ -102,6 +102,23 @@ test('fake wire returns closed shapes for practices and unknown ops', async () =
   assert.equal(practices.body.active_practice_id, wire.PRACTICE_ID);
   const missing = await wire.enrollmentRequest('unknown');
   assert.equal(missing.status, 404);
+  assert.throws(
+    () => createFakePracticeAccountWire({nativeOrigin: 'https://evil.example'}),
+    /Origin app:\/\/cosmas/,
+  );
+});
+
+test('subscribe receives account events and close fences further calls', async () => {
+  const practice = await createDesktopPracticeSession({enabled: true});
+  const events = [];
+  const stop = practice.subscribe(state => { events.push(state.phase); });
+  await practice.beginAccountSignIn();
+  stop();
+  await practice.signOut({expectedRevision: practice.snapshot().revision});
+  assert.deepEqual(events, ['signingIn', 'accountReady']);
+  practice.close();
+  await assert.rejects(practice.capabilities(), /unavailable/);
+  await assert.rejects(practice.beginAccountSignIn(), /unavailable/);
 });
 
 test('host method surface matches detector-required CosmasDesktopPractice keys', async () => {
