@@ -224,15 +224,12 @@ import UIKit
         guard let configuration else { throw NativePracticeProfileError.unavailable }
         let (receipt, status) = try await registry(for: captured)
         if let selected { try selected.validate(receipt, account: captured, revision: revision) }
-        // Contract practice web host is https://<practice>/chief only — never account web (app.cosmas.ai).
         guard status["stage"] as? String == "ready", let workspace = status["workspace"] as? [String: Any],
-              let address = workspace["url"] as? String, let parsed = URLComponents(string: address), parsed.scheme == "https",
-              let host = parsed.host, parsed.user == nil, parsed.password == nil, parsed.port == nil,
-              parsed.query == nil, parsed.fragment == nil, parsed.path == "/chief" else {
+              let address = workspace["url"] as? String else {
             throw NativePracticeProfileError.unavailable
         }
-        let api = "https://api." + host
-        guard configuration.binding.allowsAPI(api, practiceID: receipt.practiceID) else { throw NativePracticeProfileError.invalidBinding }
+        // Contract: /chief practice host only; account-web / wrong api.<host> fail here (not at Open Chief rebuild).
+        let api = try configuration.binding.practiceAPIOrigin(fromWorkspaceURL: address, practiceID: receipt.practiceID)
         if let known {
             try known.validate(binding: configuration.binding)
             guard known.userID == captured.userID, known.practiceID == receipt.practiceID,

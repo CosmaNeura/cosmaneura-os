@@ -28,11 +28,36 @@ describe('native /config account contract', () => {
     const apple = validateNativeEnrollmentConfig(nativeEnrollmentConfig('capacitor://localhost'), 'capacitor://localhost');
     expect(apple.enabled).toBe(true);
     expect('native_account' in apple).toBe(false);
+    const desktop = validateNativeEnrollmentConfig(nativeEnrollmentConfig('app://cosmas'), 'app://cosmas');
+    expect(desktop.enabled).toBe(true);
+    expect('native_account' in desktop).toBe(false);
     expect(() => validateNativeEnrollmentConfig(nativeEnrollmentConfig('app://cosmas'), 'capacitor://localhost'))
       .toThrow(EnrollmentError);
     expect(() => validateNativeEnrollmentConfig(nativeEnrollmentConfig('capacitor://localhost'), 'app://cosmas'))
       .toThrow(EnrollmentError);
     const {native_account: _omit, ...missing} = nativeEnrollmentConfig();
     expect(() => validateNativeEnrollmentConfig(missing, 'capacitor://localhost')).toThrow(EnrollmentError);
+  });
+
+  it('fails at /native/config on Origin/native_account shape errors (before Open Chief)', () => {
+    const base = nativeEnrollmentConfig('capacitor://localhost');
+    let originMismatch: unknown;
+    try {
+      validateNativeEnrollmentConfig(nativeEnrollmentConfig('app://cosmas'), 'capacitor://localhost');
+    } catch (error) {
+      originMismatch = error;
+    }
+    expect(originMismatch).toBeInstanceOf(EnrollmentError);
+    expect((originMismatch as EnrollmentError).status).toBe(422);
+    expect((originMismatch as EnrollmentError).code).toBe('enrollment_invalid_native_identity');
+    for (const native_account of [
+      {...base.native_account, native_origin: 'https://app.cosmas.ai'},
+      {...base.native_account, session_policy: ''},
+      {issuer: base.native_account.issuer, audience: base.native_account.audience},
+      null,
+    ]) {
+      expect(() => validateNativeEnrollmentConfig({...base, native_account}, 'capacitor://localhost'))
+        .toThrow(EnrollmentError);
+    }
   });
 });

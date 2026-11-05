@@ -97,6 +97,54 @@ private func productionBinding() throws -> NativePracticeAccountServiceBinding {
             try NativePracticeBundleConfiguration.parse(simulator, bundleIdentifier: "com.cosmasos.beta.ios")
         }
     }
+
+    @Test func nativeConfigRejectsInfosRealmMismatchBeforeOpenChief() throws {
+        let binding = try productionBinding()
+        let matching: [String: Any] = ["native_account": [
+            "issuer": "https://" + productionHost, "audience": "cosmabot-practice-api",
+            "session_policy": "default_session", "native_origin": "capacitor://localhost",
+        ] as [String: Any]]
+        try binding.validateNativeAccountConfig(matching)
+        for broken in [
+            ["issuer": "https://invented.clerk.accounts.dev", "audience": "cosmabot-practice-api",
+             "session_policy": "default_session", "native_origin": "capacitor://localhost"],
+            ["issuer": "https://" + productionHost, "audience": "wrong-audience",
+             "session_policy": "default_session", "native_origin": "capacitor://localhost"],
+            ["issuer": "https://" + productionHost, "audience": "cosmabot-practice-api",
+             "session_policy": "default_session", "native_origin": "app://cosmas"],
+            ["issuer": "https://" + productionHost, "audience": "cosmabot-practice-api",
+             "session_policy": "", "native_origin": "capacitor://localhost"],
+        ] as [[String: String]] {
+            #expect(throws: NativePracticeProfileError.invalidBinding) {
+                try binding.validateNativeAccountConfig(["native_account": broken])
+            }
+        }
+        #expect(throws: NativePracticeProfileError.invalidBinding) {
+            try binding.validateNativeAccountConfig([:] as [String: Any])
+        }
+    }
+
+    @Test func practiceOpenRejectsAccountWebNonChiefAndWrongAPIHosts() throws {
+        let binding = try productionBinding(), practice = UUID()
+        let ok = "https://" + practice.uuidString.lowercased() + ".workspace.cosmas.ai/chief"
+        #expect(try binding.practiceAPIOrigin(fromWorkspaceURL: ok, practiceID: practice)
+            == "https://api." + practice.uuidString.lowercased() + ".workspace.cosmas.ai")
+        for bad in [
+            "https://app.cosmas.ai/chief",
+            "https://api.cosmas.ai/chief",
+            "https://" + practice.uuidString.lowercased() + ".workspace.cosmas.ai",
+            "https://" + practice.uuidString.lowercased() + ".workspace.cosmas.ai/chief/",
+            "https://" + practice.uuidString.lowercased() + ".workspace.cosmas.ai/chief?x=1",
+            "https://" + practice.uuidString.lowercased() + ".staging.cosmas.ai/chief",
+            "https://" + UUID().uuidString.lowercased() + ".workspace.cosmas.ai/chief",
+        ] {
+            #expect(throws: NativePracticeProfileError.invalidBinding) {
+                try binding.practiceAPIOrigin(fromWorkspaceURL: bad, practiceID: practice)
+            }
+        }
+        #expect(!binding.allowsAPI("https://api.cosmas.ai", practiceID: practice))
+        #expect(!binding.allowsAPI("https://api.app.cosmas.ai", practiceID: practice))
+    }
 }
 
 @Suite struct NativePracticeProductionBootstrapTests {
@@ -130,6 +178,35 @@ private func productionBinding() throws -> NativePracticeAccountServiceBinding {
         var synthetic = body; synthetic["data_mode"] = "synthetic"
         #expect(throws: (any Error).self) {
             try NativePracticeWorkspaceBootstrap.decode(encode(synthetic), expectation: expected, binding: binding)
+        }
+    }
+
+    @Test func productionBootstrapRejectsAccountWebAndNonChiefWorkspaceShapes() throws {
+        let (expected, binding, body) = try inputs()
+        var accountWeb = body
+        accountWeb["workspace"] = (body["workspace"] as! [String: Any]).merging([
+            "url": "https://app.cosmas.ai/chief",
+        ]) { $1 }
+        #expect(throws: (any Error).self) {
+            try NativePracticeWorkspaceBootstrap.decode(encode(accountWeb), expectation: expected, binding: binding)
+        }
+        var noChief = body
+        noChief["workspace"] = (body["workspace"] as! [String: Any]).merging([
+            "url": "https://" + expected.selectionID.uuidString.lowercased() + ".workspace.cosmas.ai",
+        ]) { $1 }
+        #expect(throws: (any Error).self) {
+            try NativePracticeWorkspaceBootstrap.decode(encode(noChief), expectation: expected, binding: binding)
+        }
+        var unpaired = body
+        let wrongAPI = "https://api.cosmas.ai"
+        let wrongExpected = try NativePracticeConnectionExpectation(
+            selectionID: expected.selectionID, nonce: expected.nonce, account: expected.account,
+            organizationID: expected.organizationID, boxID: expected.boxID, apiOrigin: wrongAPI)
+        var native = unpaired["nativeIdentity"] as! [String: Any]
+        native["apiOrigin"] = wrongAPI
+        unpaired["nativeIdentity"] = native
+        #expect(throws: (any Error).self) {
+            try NativePracticeWorkspaceBootstrap.decode(encode(unpaired), expectation: wrongExpected, binding: binding)
         }
     }
 

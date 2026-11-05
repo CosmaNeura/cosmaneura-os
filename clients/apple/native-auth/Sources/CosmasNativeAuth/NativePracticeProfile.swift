@@ -111,6 +111,22 @@ public struct NativePracticeAccountServiceBinding: Equatable, Sendable {
             throw NativePracticeProfileError.invalidBinding
         }
     }
+
+    /// Contract practice open: only `https://<practice-host>/chief` → `https://api.<practice-host>`.
+    /// Rejects account-web hosts, missing `/chief`, and API shapes this binding does not admit.
+    public func practiceAPIOrigin(fromWorkspaceURL address: String, practiceID: UUID) throws -> String {
+        guard address.utf8.count <= 2048, let parsed = URLComponents(string: address), parsed.scheme == "https",
+              let host = parsed.host, host == host.lowercased(),
+              parsed.user == nil, parsed.password == nil, parsed.port == nil,
+              parsed.query == nil, parsed.fragment == nil, parsed.path == "/chief",
+              address == "https://" + host + "/chief",
+              host != "app.cosmas.ai", host != "api.cosmas.ai" else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        let api = "https://api." + host
+        guard allowsAPI(api, practiceID: practiceID) else { throw NativePracticeProfileError.invalidBinding }
+        return api
+    }
 }
 
 /// Minted by native setup/selection after a trusted account-service discovery.
