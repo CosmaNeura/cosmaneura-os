@@ -201,18 +201,56 @@ class EnrollmentSettings(BaseSettings):
             return None
         return value if owned_https_url(value) else None
 
+    def synthetic_staging_self_serve_ready(
+        self,
+        *,
+        billing: bool,
+        registration_blockers: list[str],
+        workspace_confirmation_configured: bool = True,
+    ) -> bool:
+        """Admit synthetic staging trial finish without production acquisition flags.
+
+        Hosted staging already uses data_mode=synthetic with practice-UUID workspace
+        allocation. When provisioning, Stripe TEST billing, and workspace confirmation
+        are ready, self-serve Checkout must not stick on activation_available=false.
+        Production never uses this path.
+        """
+        return bool(
+            self.data_mode == "synthetic"
+            and self.workspace_allocation_enabled
+            and self.provisioning_enabled
+            and billing
+            and not registration_blockers
+            and workspace_confirmation_configured
+            and self.stripe_integration_enabled
+            and self.commercial_terms_verified
+            and not self.stripe_live_mode
+        )
+
     def activation_blockers(self, *, billing: bool, registration_blockers: list[str],
                             workspace_confirmation_configured: bool = True) -> list[str]:
         """Explain why public activation remains closed without granting access."""
+        if self.synthetic_staging_self_serve_ready(
+            billing=billing,
+            registration_blockers=registration_blockers,
+            workspace_confirmation_configured=workspace_confirmation_configured,
+        ):
+            return []
         reasons: list[str] = []
         if registration_blockers:
             reasons.append("Registration admission is incomplete.")
-        if not self.activation_available:
+        if not self.activation_available and not (
+            self.data_mode == "synthetic" and self.workspace_allocation_enabled
+        ):
             reasons.append("ENROLLMENT_ACTIVATION_AVAILABLE is false until the staged journey receipt admits trial activation.")
         if not self.provisioning_enabled:
             reasons.append("Workspace provisioning is not enabled.")
-        if not self.stripe_acquisition_enabled:
+        if not self.stripe_acquisition_enabled and not (
+            self.data_mode == "synthetic" and self.workspace_allocation_enabled
+        ):
             reasons.append("Stripe acquisition remains closed.")
+        if self.data_mode == "synthetic" and not self.workspace_allocation_enabled:
+            reasons.append("Synthetic staging self-serve trial needs practice workspace allocation.")
         if not billing:
             reasons.append("Stripe TEST catalog, portal, and webhook are not verified.")
         if not workspace_confirmation_configured:
@@ -229,9 +267,19 @@ class EnrollmentSettings(BaseSettings):
             blockers.append("Signed enrollment identity verification is unavailable.")
         billing_errors = self.billing_errors()
         billing = not billing_errors and stripe_verified
-        checkout_ready = bool(self.activation_available and self.provisioning_enabled
-                              and billing and not blockers and workspace_confirmation_configured)
-        activation = checkout_ready and self.stripe_acquisition_enabled
+        synthetic_ready = self.synthetic_staging_self_serve_ready(
+            billing=billing,
+            registration_blockers=blockers,
+            workspace_confirmation_configured=workspace_confirmation_configured,
+        )
+        checkout_ready = bool(
+            (self.activation_available or synthetic_ready)
+            and self.provisioning_enabled
+            and billing
+            and not blockers
+            and workspace_confirmation_configured
+        )
+        activation = checkout_ready and (self.stripe_acquisition_enabled or synthetic_ready)
         return {
             "contract_version": CONTRACT, "enabled": not blockers, "data_mode": self.data_mode,
             "auth_configured": not self.auth_errors() and auth_ready,

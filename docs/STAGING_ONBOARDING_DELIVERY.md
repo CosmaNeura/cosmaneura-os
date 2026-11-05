@@ -73,11 +73,12 @@ workspace/native build profiles keep their existing behavior.
    access. The protected private clock composition can then admit TEST Checkout
    for its one immutable saved owner/practice/BAA/Box/Org scope and separate
    durable journal; public acquisition stays closed.
-8. Complete the hosted acceptance gates below, then enable public staging
-   acquisition and activation using the full staged journey receipt.
-   Publish the companion marketing change only after its link reaches this
-   verified journey. Production remains on the owner's explicit hold and needs
-   a subsequent deployment decision after staging and production qualification.
+8. Synthetic staging self-serve (data_mode=synthetic with practice-UUID workspace
+   allocation and provisioning) may finish TEST Checkout after BAA without waiting
+   on `ENROLLMENT_ACTIVATION_AVAILABLE` / acquisition env flips or an operator
+   hosting bridge. Production acquisition and activation remain closed until the
+   staged journey receipt and an explicit owner decision. Publish the companion
+   marketing change only after its link reaches the verified journey.
 
 The October 31, 2026 Central US price-metadata review estimates **$31.55/month**
 for the fixed foundation and **$134.73/month** for two isolated practice stores:
