@@ -1,7 +1,10 @@
 FROM python:3.13-slim@sha256:bb2988715db2cf7ace7b53f38f3cffbef7c7046a656bee66245eb0ed386e2e81
-# Apply the verified Debian security fix omitted by this pinned base.
+# Apply the verified Debian security fixes omitted by this pinned base.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends libpcre2-8-0=10.46-1~deb13u3 \
+    && apt-get install --yes --no-install-recommends \
+        libpcre2-8-0=10.46-1~deb13u3 \
+        apt=3.0.4 \
+        libapt-pkg7.0=3.0.4 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
