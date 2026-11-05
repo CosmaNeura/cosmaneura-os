@@ -1,11 +1,15 @@
-# Independent enrollment staging foundation
+# Independent enrollment foundation (staging or production)
 
 This definition prepares the missing Azure foundation for the browser enrollment
-flow. It is fixed to `staging`, with `centralus` as the default region and only
-`centralus` or `eastus2` accepted; it cannot create production resources.
-It neither deploys an application nor marks registration, billing, workspaces or
-a customer journey qualified. No existing VM, Core, clinical database, vault,
-state backend or VNet is consumed or changed.
+flow. Set `environment` to `staging` (default, synthetic) or `production`
+(real practice data); each choice gets its own resource-group/ACR/state names
+and must never share the other’s coordinates. Region defaults to `centralus`
+and only `centralus` or `eastus2` are accepted. Preparation and plan do not
+deploy an application or mark registration, billing, workspaces or a customer
+journey qualified. Applying either environment remains a separate
+owner-authorized step and is held until cost and credentials are reviewed. No
+existing VM, Core, clinical database, vault, state backend or VNet is consumed
+or changed.
 
 Authenticated staging capability checks rejected PostgreSQL provisioning in
 East US 2 and East US. Central US supports the selected PostgreSQL 16 /
@@ -17,7 +21,10 @@ new resource group, regional services, network and private endpoints; DNS zones
 retain their global scope. Capability discovery does not qualify an actual
 deployment or customer journey.
 
-The default footprint is one new `rg-cosmabot-enrollment-staging-<suffix>` with:
+The default footprint is one new
+`rg-cosmabot-enrollment-<environment>-<suffix>` (for example
+`rg-cosmabot-enrollment-staging-<suffix>` or
+`rg-cosmabot-enrollment-production-<suffix>`) with:
 
 - A fresh private `/20` VNet, delegated `/23` Container Apps subnet, delegated
   `/26` PostgreSQL subnet and `/26` private-endpoint subnet. No peering, VM,
@@ -59,9 +66,10 @@ local state/plan in a fresh owner-only directory outside the repository. Never
 copy another application's state or backend. Preserve the encryption passphrase
 through rollback/backup; losing it makes this state unreadable.
 
-Create one owner-only `0600` JSON input file containing exactly these public keys:
+Create one owner-only `0600` JSON input file containing these public keys:
 `subscription_id`, `tenant_id`, `resource_name_suffix`, `vnet_address_prefix`,
-`release_operator_object_id`, `state_operator_ipv4`. Then:
+`release_operator_object_id`, `state_operator_ipv4`, and optionally
+`environment` (`staging` or `production`; omit to keep staging). Then:
 
 ```sh
 python infra/enrollment/foundation/prepare.py prepare --inputs /protected/foundation-inputs.json --directory /protected/new-enrollment-foundation
@@ -78,10 +86,12 @@ to AzureRM's `administrator_password_wo`; neither state nor saved plan contains
 that value. Keep debug logging disabled. The password file remains in protected
 operator custody for server bootstrap and any reviewed rotation.
 
-No apply was run during source preparation. For the eventual reviewed staging
-plan, the protected wrapper supports `apply --directory ... --plan-sha256 <exact
-encrypted-plan-hash>`. It rechecks source, inputs, executable and account; it
-supplies the ephemeral password again without putting it in command arguments.
+No apply was run during source preparation. For an eventual reviewed
+staging or production plan, the protected wrapper supports
+`apply --directory ... --plan-sha256 <exact encrypted-plan-hash>`. It rechecks
+source, inputs, executable and account; it supplies the ephemeral password
+again without putting it in command arguments. Do not apply until the owner
+reviews cost and credentials for that environment.
 Export the actual local state's public coordinates using the same private
 backend/key/provider configuration:
 
