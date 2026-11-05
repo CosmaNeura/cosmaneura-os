@@ -64,6 +64,12 @@ run "isolated_staging_foundation" {
       !azurerm_key_vault.enrollment.public_network_access_enabled &&
       azurerm_key_vault.enrollment.rbac_authorization_enabled && azurerm_key_vault.enrollment.purge_protection_enabled &&
       length(azurerm_private_endpoint.service) == 1 &&
+      toset(keys(azurerm_private_dns_zone.service)) == toset(["vault", "blob", "redis"]) &&
+      azurerm_private_dns_zone.service["blob"].name == "privatelink.blob.core.windows.net" &&
+      azurerm_private_dns_zone.service["redis"].name == "privatelink.redis.azure.net" &&
+      output.foundation.blob_private_dns_zone_id == azurerm_private_dns_zone.service["blob"].id &&
+      output.foundation.redis_private_dns_zone_id == azurerm_private_dns_zone.service["redis"].id &&
+      output.foundation.vault_private_dns_zone_id == azurerm_private_dns_zone.service["vault"].id &&
       length(azurerm_subnet.container_apps.address_prefixes) == 1 &&
     one(azurerm_subnet.container_apps.address_prefixes) == "10.248.0.0/23")
     error_message = "Database/vault must remain private in their own enrollment network/database."

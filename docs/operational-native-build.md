@@ -5,10 +5,14 @@
 Use `scripts/prepare-owned-iphone-candidate.py` on a Mac for the current owned
 project and renderer workflow. It uses the committed `clients/apple` and
 `clients/capture` sources with the frozen app scaffold; no external source
-checkout or private chat operator is needed. Commit the reviewed source first,
-keep the Git tree clean, and use the already installed Python environment,
-Node 24, and locked renderer dependencies. The build subprocesses cannot use
-the network and do not install dependencies.
+checkout or private chat operator is needed. Capacitor/Cordova 8.5.0 come from
+the owned mirror at `clients/apple/vendor/capacitor-swift-pm-8.5.0` (local path
+binary targets). Portable composition copies that mirror into the candidate and
+clears the historical remote Swift PM pin, so offline `xcodebuild` does not
+download Ionic release zips. Commit the reviewed source first, keep the Git
+tree clean, and use the already installed Python environment, Node 24, and
+locked renderer dependencies. The build subprocesses cannot use the network
+and do not install dependencies.
 
 Supply the retained public client input directory containing
 `apple-identity.json` and `apple-build-env.json`, plus either the original
@@ -41,11 +45,24 @@ That file contains the exact Info dictionary: `enabled` boolean,
 `accountOrigin`, `realm`, `apiOrigins`, and optional `registeredPracticeOrigins`
 and `googleConnection`.
 The realm contains only `publishableKey`, `frontendOrigin`, `audience`, `profile`,
-and `keychainNamespace`. The profile is `operational-staging-v1`, the audience
-is empty, the `pk_test_` public key encodes its exact Development
-`.clerk.accounts.dev` frontend, and the reviewed stable namespace is 64 lowercase
-hexadecimal characters. No credential or server secret belongs in this file.
+and `keychainNamespace`. Choose exactly one closed environment:
+
+| Environment | `profile` | Clerk key / frontend | `audience` | `accountOrigin` | `registeredPracticeOrigins` |
+| --- | --- | --- | --- | --- | --- |
+| Synthetic staging (unchanged) | `operational-staging-v1` | `pk_test_` encoding its `.clerk.accounts.dev` frontend | empty | reviewed staging enrollment HTTPS origin | `exact` or `synthetic-practice-uuid-staging-v1` |
+| Real-data production | `operational-beta-v1` | `pk_live_` encoding `clerk.cosmas.ai` | non-empty Clerk session `aud` (same value as production `CLERK_AUDIENCE`) | `https://enrollment-api.cosmas.ai` | `practice-uuid-production-v1` |
+
+The reviewed stable `keychainNamespace` is 64 lowercase hexadecimal characters in
+either environment. No credential or server secret belongs in this file.
 Callbacks and the native request origin derive from the unchanged bundle.
+Staging and production fields cannot be mixed: a production profile with a
+staging policy, empty audience, Development Clerk host, or non-enrollment
+account origin is refused.
+
+Runtime acceptance of `practice-uuid-production-v1` (Swift origin policy,
+shared JS profile validator, bootstrap data-mode binding, and native
+enrollment production path) is separate from this preparation script. Merge
+or rebase that native runtime work before signing a production candidate.
 
 The optional `googleConnection` is exactly `{ "clientID": "reviewed.apps.googleusercontent.com",
 "callbackURI": "<accountOrigin>/connections/google/callback" }`, using the
@@ -58,8 +75,9 @@ It does not borrow Beta's callback, enable scheduling/Microsoft/clinical
 navigation, or qualify any provider connection merely by building the app.
 
 The origin policy defaults to `exact`, requiring 1–32 distinct exact HTTPS API
-origins. Explicit `synthetic-practice-uuid-staging-v1` permits the native host's
-server-registered UUID staging policy and may use an empty exact-origin list.
+origins. Explicit `synthetic-practice-uuid-staging-v1` or
+`practice-uuid-production-v1` permits the native host's server-registered UUID
+policy for that environment and may use an empty exact-origin list.
 No wildcard, arbitrary profile URL, or automatic enrollment enable is accepted.
 A disabled dictionary still requires its complete schema; omission is the
 default. Existing public build inputs are consumed as supplied, without dotenv

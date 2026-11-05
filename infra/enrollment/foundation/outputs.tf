@@ -14,6 +14,8 @@ output "foundation" {
     postgres_subnet_id           = azurerm_subnet.postgres.id
     private_endpoint_subnet_id   = azurerm_subnet.private_endpoints.id
     vault_private_dns_zone_id    = azurerm_private_dns_zone.service["vault"].id
+    blob_private_dns_zone_id     = azurerm_private_dns_zone.service["blob"].id
+    redis_private_dns_zone_id    = azurerm_private_dns_zone.service["redis"].id
     vnet_address_prefix          = var.vnet_address_prefix
     container_app_environment_id = azurerm_container_app_environment.enrollment.id
     container_registry_id        = azurerm_container_registry.enrollment.id
