@@ -252,8 +252,15 @@ practice helper, also pass `--native-practice-connection`. That sets
 `nativePracticeConnectionEnabled` in `synthetic-build.json` and exposes
 `window.cosmasDesktopPractice` from Electron main (fake/local enrollment wire,
 Origin `app://cosmas`, client `desktop`). Default omit keeps Connect dark.
-Production Clerk account-realm switching and a signed CosmasDesktopPractice
-Swift host remain follow-ups.
+
+To bind reviewed public production Infos without signing a new helper, pass
+`--native-practice-config /absolute/path/to/reviewed-public-native-practice.json`
+(same closed schema as auth-helper Infos packaging). That pins
+`enrollment-api.cosmas.ai` for Origin-only `/native/config` and fail-closes
+account sign-in / Open Chief with an explicit signed-helper requirement.
+Do not combine production Infos with `--native-practice-connection` (fake) or
+`--data-mode synthetic`. A signed CosmasNativePracticeConnection Clerk
+account-realm helper remains required for real-data Mac Open Chief.
 
 The compiler wrapper checks the complete qualification inventory and copies it
 into its own output. It builds only `CosmasDesktopAuth` in debug configuration,
