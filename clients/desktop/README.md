@@ -143,7 +143,9 @@ Pass `--native-practice-config` with reviewed public production Infos to bind
 `enrollment-api.cosmas.ai` for Origin-only `/native/config`. Account sign-in and
 Open Chief fail closed until a signed CosmasNativePracticeConnection helper
 provides the Clerk account realm. Do not mix production Infos with the fake
-host flag. See `docs/operational-native-build.md`.
+host flag. For the one-command package layout (`package-manifest.json`), use
+`scripts/compose-mac-practice-helper.py` — see `docs/mac-practice-helper-package.md`
+and `docs/operational-native-build.md`.
 
 The authenticated shell uses a persistent partition inside its isolated state
 directory. This retains the existing encrypted IndexedDB capture queue and its
