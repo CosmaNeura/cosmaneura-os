@@ -71,6 +71,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--native-auth-helper", type=Path,
                         help="Separately packaged, disabled Swift helper for authenticated local composition")
+    parser.add_argument("--native-practice-connection", action="store_true",
+                        help="Enable CosmasDesktopPractice local/fake enrollment host in the authenticated app")
     parser.add_argument("--capture-upload-origin", action="append", default=[],
                         help="Exact HTTPS upload origin for authenticated capture; absent by default")
     parser.add_argument("--microphone-capture", action="store_true",
@@ -169,6 +171,8 @@ def main():
         parser.error("Keep installation storage separate from source, web and versioned build directories.")
     if args.microphone_capture and (not args.native_auth_helper or not args.capture_upload_origin):
         parser.error("Microphone capture requires authenticated composition and exact upload origins.")
+    if args.native_practice_connection and not args.native_auth_helper:
+        parser.error("Native practice connection requires the authenticated desktop composition.")
     if args.capture_upload_origin:
         if not args.native_auth_helper:
             parser.error("Capture upload origins require the authenticated desktop composition.")
@@ -265,7 +269,8 @@ def main():
                       for p in sorted(destination.rglob("*")) if p.is_file()},
         }, indent=2) + "\n")
         for filename in ("auth-helper-client.mjs", "auth-access-store.mjs", "auth-session.mjs",
-                         "auth-ipc.mjs", "sign-in-presentation.mjs", "auth-preload.cjs", "workspace-auth-proxy.mjs", "scribe-source-requests.mjs", "clinical-team-requests.mjs", "connector-api-routes.mjs",
+                         "auth-ipc.mjs", "practice-session.mjs", "practice-ipc.mjs", "practice-fake-wire.mjs",
+                         "sign-in-presentation.mjs", "auth-preload.cjs", "workspace-auth-proxy.mjs", "scribe-source-requests.mjs", "clinical-team-requests.mjs", "connector-api-routes.mjs",
                          "spawn-auth-helper.mjs", "local-auth-http.mjs", "hosted-auth-http.mjs", "capture-content-security.mjs",
                          "microphone-permissions.mjs", "installation-state.mjs", "native-capture-package.mjs"):
             shutil.copyfile(root / "clients/desktop" / filename, app / filename)
@@ -311,6 +316,7 @@ def main():
         }} if args.installation_profile else {"stateDirectory": str(output / "user-data")}),
         **({"installationRoot": str(installation_root)} if installation_root else {}),
         **({"nativeAuthEnabled": True} if args.native_auth_helper else {}),
+        **({"nativePracticeConnectionEnabled": True} if args.native_practice_connection else {}),
         **({"captureUploadOrigins": args.capture_upload_origin} if args.capture_upload_origin else {}),
         **({"microphoneCaptureEnabled": True} if args.microphone_capture else {}),
     }, indent=2) + "\n")

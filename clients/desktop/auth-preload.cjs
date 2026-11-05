@@ -78,3 +78,68 @@ contextBridge.exposeInMainWorld('cosmasDesktopAuth', Object.freeze({
     return () => { listeners.delete(listener); ipcRenderer.removeListener(channels.changed, listener); };
   },
 }));
+// CosmasDesktopPractice — enrollment/practice connection. Credentials never cross this bridge.
+const practiceChannels = Object.freeze({
+  capabilities: 'cosmas:desktop-practice:capabilities:v1',
+  accountStatus: 'cosmas:desktop-practice:account-status:v1',
+  beginAccountSignIn: 'cosmas:desktop-practice:begin-sign-in:v1',
+  accountToken: 'cosmas:desktop-practice:account-token:v1',
+  enrollmentRequest: 'cosmas:desktop-practice:enrollment-request:v1',
+  openCheckout: 'cosmas:desktop-practice:open-checkout:v1',
+  openEnrollmentDestination: 'cosmas:desktop-practice:open-destination:v1',
+  activatePracticeOrganization: 'cosmas:desktop-practice:activate-org:v1',
+  activateRegisteredPractice: 'cosmas:desktop-practice:activate-registered:v1',
+  returnToBeta: 'cosmas:desktop-practice:return-to-beta:v1',
+  signOut: 'cosmas:desktop-practice:sign-out:v1',
+  changed: 'cosmas:desktop-practice:account-changed:v1',
+});
+const practiceInvoke = (channel, extra = {}) => ipcRenderer.invoke(channel, {
+  schemaVersion: 1, requestId: globalThis.crypto.randomUUID(), ...extra,
+});
+const practiceListeners = new Set();
+contextBridge.exposeInMainWorld('cosmasDesktopPractice', Object.freeze({
+  version: 1,
+  capabilities: () => practiceInvoke(practiceChannels.capabilities),
+  accountStatus: () => practiceInvoke(practiceChannels.accountStatus),
+  beginAccountSignIn: () => practiceInvoke(practiceChannels.beginAccountSignIn),
+  accountToken: (options) => practiceInvoke(practiceChannels.accountToken, {
+    expectedRevision: options?.expectedRevision,
+  }),
+  enrollmentRequest: (options) => practiceInvoke(practiceChannels.enrollmentRequest, {
+    expectedRevision: options?.expectedRevision, operation: options?.operation,
+    ...(options && Object.hasOwn(options, 'body') ? {body: options.body} : {}),
+    ...(options && Object.hasOwn(options, 'idempotencyKey') ? {idempotencyKey: options.idempotencyKey} : {}),
+  }),
+  openCheckout: (options) => practiceInvoke(practiceChannels.openCheckout, {
+    expectedRevision: options?.expectedRevision, checkoutSessionId: options?.checkoutSessionId,
+  }),
+  openEnrollmentDestination: (options) => practiceInvoke(practiceChannels.openEnrollmentDestination, {
+    expectedRevision: options?.expectedRevision, destination: options?.destination,
+  }),
+  activatePracticeOrganization: (options) => practiceInvoke(practiceChannels.activatePracticeOrganization, {
+    expectedRevision: options?.expectedRevision,
+  }),
+  activateRegisteredPractice: (options) => practiceInvoke(practiceChannels.activateRegisteredPractice, {
+    expectedRevision: options?.expectedRevision,
+  }),
+  returnToBeta: (options) => practiceInvoke(practiceChannels.returnToBeta, {
+    expectedRevision: options?.expectedRevision,
+  }),
+  signOut: (options) => practiceInvoke(practiceChannels.signOut, {
+    expectedRevision: options?.expectedRevision,
+  }),
+  addListener(event, callback) {
+    if (event !== 'accountStateChanged' || typeof callback !== 'function' || practiceListeners.size >= 32) {
+      return Promise.reject(new Error('Desktop practice connection unavailable'));
+    }
+    const listener = (_event, state) => callback(state);
+    practiceListeners.add(listener);
+    ipcRenderer.on(practiceChannels.changed, listener);
+    return Promise.resolve({
+      remove: async () => {
+        practiceListeners.delete(listener);
+        ipcRenderer.removeListener(practiceChannels.changed, listener);
+      },
+    });
+  },
+}));

@@ -11,6 +11,8 @@ import {preparePackagedAuthHelper} from './spawn-auth-helper.mjs';
 import {createAuthAccessStore} from './auth-access-store.mjs';
 import {createDesktopAuthSession} from './auth-session.mjs';
 import {installAuthIpc} from './auth-ipc.mjs';
+import {createDesktopPracticeSession} from './practice-session.mjs';
+import {installPracticeIpc} from './practice-ipc.mjs';
 import {installSignInPresentation} from './sign-in-presentation.mjs';
 import {installCosmaneuraNavigation} from './cosmaneura-navigation.mjs';
 import {proxyAuthenticatedWorkspaceRequest} from './workspace-auth-proxy.mjs';
@@ -27,20 +29,24 @@ import {preparePackagedDesktopCapture} from './native-capture-package.mjs';
 import {validateOperationalNativeIdentity} from './native-identity-config.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
-let window, auth, captureHost, disposeIpc, disposeLifecycle, disposeNavigation, disposeSignInPresentation, failureClosing = false;
+let window, auth, practice, captureHost, disposeIpc, disposePracticeIpc, disposeLifecycle, disposeNavigation, disposeSignInPresentation, failureClosing = false;
 const cleanup = () => {
   // Failure cleanup retires acquisition immediately. Saved native proofs survive
   // unavailable credentials and are recovered before a later recording start.
   void captureHost?.close().catch(() => {});
-  const lifecycle = disposeLifecycle, ipc = disposeIpc, navigation = disposeNavigation, session = auth;
+  const lifecycle = disposeLifecycle, ipc = disposeIpc, practiceIpc = disposePracticeIpc,
+    navigation = disposeNavigation, session = auth, practiceSession = practice;
   const presentation = disposeSignInPresentation;
   disposeSignInPresentation = undefined;
-  disposeLifecycle = undefined; disposeIpc = undefined; disposeNavigation = undefined; auth = undefined;
+  disposeLifecycle = undefined; disposeIpc = undefined; disposePracticeIpc = undefined;
+  disposeNavigation = undefined; auth = undefined; practice = undefined;
   // Each capability closes independently even if another teardown fails.
   try { lifecycle?.(); } catch { /* No private diagnostics. */ }
   try { ipc?.(); } catch { /* Continue closing auth. */ }
+  try { practiceIpc?.(); } catch { /* Continue closing practice. */ }
   try { navigation?.(); } catch { /* Continue closing auth. */ }
   try { presentation?.(); } catch { /* Continue closing auth. */ }
+  try { practiceSession?.close(); } catch { /* Continue closing auth. */ }
   try { session?.close(); } catch { /* The failure path also destroys the renderer. */ }
 };
 const fail = createDesktopFailureHandler({app, dialog,
@@ -104,6 +110,22 @@ async function bootstrap() {
   installMicrophonePermissions(window.webContents, auth, config.microphoneCaptureEnabled,()=>captureHost?.allowsRendererMicrophone()===true);
   disposeIpc = installAuthIpc(ipcMain, window.webContents, auth);
   disposeSignInPresentation = installSignInPresentation(auth, window);
+  // Opt-in CosmasDesktopPractice (fake/local enrollment). Default omit keeps Connect dark.
+  if (config.nativePracticeConnectionEnabled === true) {
+    practice = await createDesktopPracticeSession({
+      enabled: true,
+      admitWorkspace: async snapshot => {
+        if (!window || window.isDestroyed()) throw new Error('Desktop practice connection unavailable');
+        const encoded = JSON.stringify(snapshot).replace(/</g, '\\u003c');
+        await window.webContents.executeJavaScript(
+          `(()=>{const freeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};` +
+          `Object.defineProperty(window,'__cosmasRegisteredWorkspace',{value:freeze(${encoded}),writable:false,configurable:false});})();`,
+          true);
+        await window.loadURL('app://cosmas/index.html');
+      },
+    });
+    disposePracticeIpc = installPracticeIpc(ipcMain, window.webContents, practice);
+  }
   if(config.nativeCaptureEnabled===true){
     if(config.mode!=='hosted-beta-authenticated'||!['synthetic','authorized_beta'].includes(config.dataMode))throw new Error('Desktop recording unavailable');
     validateOperationalNativeIdentity(config.nativeIdentity,'desktop',config.apiOrigin);
