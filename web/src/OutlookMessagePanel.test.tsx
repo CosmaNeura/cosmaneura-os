@@ -40,7 +40,7 @@ const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>('butto
 const useNative=()=>{props={...props,identity:{mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:uuid(901),isCurrent:()=>true}}};};
 const nativeHint=(active:boolean)=>act(async()=>notifyNativeWorkspaceForeground(props.identity,active));
 async function click(label:string){await wait(()=>{expect(button(label),label).toBeTruthy();expect(button(label)!.disabled,label).toBe(false);});await act(async()=>button(label)!.click());await idle();}
-async function selectRead(){await mount();await click('Check email access');await click('Select email');await act(async()=>host.querySelector<HTMLButtonElement>('.outlook-message-list button')!.click());await idle();await click('Read full email');}
+async function selectRead(){await mount();await click('Check email access');await click('Select email');await act(async()=>host.querySelector<HTMLButtonElement>('.outlook-message-list ul > li > button')!.click());await idle();await click('Read full email');}
 async function ack(){await act(async()=>host.querySelector<HTMLInputElement>('.outlook-message-check input')!.click());}
 async function prepareReview(){await selectRead();await click('Use for current visit');await ack();}
 it('opens private email storage only after an initially suspended native scene is revalidated',async()=>{
@@ -60,7 +60,7 @@ it('masks idle native email and confirmations until an explicit DB-only check af
  expect(host.querySelector<HTMLInputElement>('.outlook-message-check input')!.checked).toBe(false);expect(button('Save reviewed email for this visit')!.disabled).toBe(true);expect(saved).toEqual(prior);
 });
 it('fences a late native body result and reopens its exact journal without repeating Microsoft reads',async()=>{
- useNative();await mount();await click('Check email access');await click('Select email');await act(async()=>host.querySelector<HTMLButtonElement>('.outlook-message-list button')!.click());await idle();
+ useNative();await mount();await click('Check email access');await click('Select email');await act(async()=>host.querySelector<HTMLButtonElement>('.outlook-message-list ul > li > button')!.click());await idle();
  let release!:(r:OutlookMessageReceipt)=>void;vi.mocked(outlookMessageApi.read).mockReturnValueOnce(new Promise(r=>{release=r;}));
  await act(async()=>button('Read full email')!.click());await wait(()=>expect(saved?.pending?.kind).toBe('message'));const pending=structuredClone(saved!.pending!);
  const signal=vi.mocked(outlookMessageApi.read).mock.calls[0][2]!;await nativeHint(false);expect(signal.aborted).toBe(true);await nativeHint(true);
@@ -101,7 +101,7 @@ it('immediately withholds a saved email when its exact current visit source beco
  expect(host.querySelector('pre')).toBeNull();expect(host.querySelector('.outlook-message-list')).toBeNull();expect(host.textContent).not.toContain('sender@example.invalid');
  expect(button('Prepare Chief draft')).toBeUndefined();expect(host.textContent).toContain('contents are withheld');expect(saved).toEqual(before);expect(outlookMessageApi.inspect).toHaveBeenCalledTimes(calls);
  await click('Check email access');expect(host.querySelector('pre')).toBeNull();expect(button('Prepare Chief draft')).toBeUndefined();expect(saved).toEqual(before);
- await click('Refresh email list');await act(async()=>host.querySelector<HTMLButtonElement>('.outlook-message-list button')!.click());await idle();await click('Read full email');
+ await click('Refresh email list');await act(async()=>host.querySelector<HTMLButtonElement>('.outlook-message-list ul > li > button')!.click());await idle();await click('Read full email');
  expect(saved?.saved).toBeNull();expect(host.querySelector('pre')?.textContent).toBe(message.message!.content);
 });
 it.each(['different source','different workspace'] as const)('does not withhold a message for an unavailable projection belonging to a %s',async mismatch=>{
@@ -141,7 +141,7 @@ it('records each exact command locally before provider I/O and blocks I/O if per
  vi.mocked(outlookMessageApi.list).mockImplementation(async(_identity,body)=>{expect(saved?.pending?.request.idempotency_key).toBe(body.idempotency_key);return {...list,read_key:body.idempotency_key};});
  await mount();await click('Check email access');await click('Select email');
  vi.mocked(access.persist).mockRejectedValueOnce(new Error('private storage unavailable'));
-  await act(async()=>host.querySelector<HTMLButtonElement>('.outlook-message-list button')!.click());
+  await act(async()=>host.querySelector<HTMLButtonElement>('.outlook-message-list ul > li > button')!.click());
  await idle();
  expect(outlookMessageApi.read).not.toHaveBeenCalled();expect(host.textContent).toContain('result could not be confirmed');
 });

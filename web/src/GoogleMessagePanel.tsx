@@ -10,7 +10,7 @@ import {emptyGoogleMessageRecovery,validateGoogleMessageRecovery,type GoogleMess
   type GoogleMessageRecoveryScope,type GoogleMessageRecoveryRecord,type GoogleMessageVisit,type GoogleMessageSaved} from './google-message-recovery';
 import {ConnectorSignInBackup} from './ConnectorSignInBackup';
 import {EmailWorkHeader,type EmailWorkStep} from './EmailWorkHeader';
-import {EmailInboxFilter,filterLoadedEmail} from './EmailInboxFilter';
+import {EmailInboxFilter,filterLoadedEmail,nextLoadedUnreadEmail} from './EmailInboxFilter';
 import {EmailMessageText} from './EmailMessageText';
 import {SourceWorkReader} from './SourceWorkReader';
 import './google-message.css';
@@ -153,6 +153,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
   const filteredItems=filterLoadedEmail(inboxItems,inboxQuery,unreadOnly);
   const selectedOutside=inboxItems.find(item=>item.id===record.selected_message_id&&!filteredItems.some(match=>match.id===item.id));
   const visibleItems=selectedOutside?[selectedOutside,...filteredItems]:filteredItems;
+  const nextUnread=nextLoadedUnreadEmail(inboxItems,filteredItems,record.selected_message_id);
   const workStep:EmailWorkStep=!message||message.status!=='complete'||!sourceAllowed?'read':record.saved?
     workspace?.id===record.saved.workspace_id?'draft':'visit':visitConfirmed?'review':'visit';
   return <section className="google-message-panel email-work" aria-label="Work with Gmail">
@@ -196,8 +197,15 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
           {selectedOutside?.id===item.id&&<small>Selected email · outside filters</small>}</button></li>)}</ul>
         {record.list.observation!.more&&<p>This is a bounded list. More messages are available in Gmail.</p>}</div>}
       </>}>
+      {showSource&&record.list&&<div className="email-work-action-row">
+        <button type="button" disabled={blocked||!nextUnread} onClick={()=>{if(nextUnread)choose(nextUnread.id);}}>Next unread email</button>
+        <p role="status">{nextUnread?'Selects the next unread email matching your filters. Tap Read full email to open it.':
+          record.selected_message_id!==null&&!inboxItems.some(item=>item.id===record.selected_message_id)?
+          'The selected email is no longer in this list. Choose another email or refresh.':
+          'No later unread emails match your filters in this list. Choose another email or refresh.'}</p>
+      </div>}
       {!record.selected_message_id&&!message&&<p className="email-work-empty">Select an email to read its full message.</p>}
-      {showSource&&record.selected_message_id&&!message&&<><p>Selected: {record.list?.observation!.items.find(i=>i.id===record.selected_message_id)?.subject||'(No subject)'}</p>
+      {showSource&&record.selected_message_id&&!message&&<><p role="status">Selected: {record.list?.observation!.items.find(i=>i.id===record.selected_message_id)?.subject||'(No subject)'}</p>
         {status?.full_mail_read!==true&&<p>Add full email access before reading the selected message.</p>}
         <button disabled={blocked||status?.full_mail_read!==true} onClick={read}>Read full email</button></>}
       {message&&<article className="google-message-content"><h4>{message.subject||'(No subject)'}</h4><p>{message.sender||'Sender unavailable'} · {when(message.received_at)}</p>
