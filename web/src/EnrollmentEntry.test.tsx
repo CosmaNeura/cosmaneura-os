@@ -35,6 +35,7 @@ it('checks server admission before mounting Clerk signup for a person without an
   vi.mocked(fetch).mockResolvedValue(json(enrollmentConfig()));await act(async()=>root.render(<EnrollmentEntry apiBase="http://127.0.0.1:8910"/>));
   expect(fetch).toHaveBeenCalledOnce();expect(clerk.keys).toEqual(['pk_test_invented']);
   expect(host.textContent).toContain('Clerk Google Microsoft password signup');expect(host.textContent).toContain('Your trial starts when your workspace is ready');
+  expect(host.textContent).toContain('After setup, Open Chief continues into your practice workspace in the browser');
 });
 it('mounts returning account and password recovery on the matching enrollment route',async()=>{
   window.history.replaceState(null,'','/sign-in');vi.mocked(fetch).mockResolvedValue(json(enrollmentConfig()));await act(async()=>root.render(<EnrollmentEntry apiBase="http://127.0.0.1:8910"/>));

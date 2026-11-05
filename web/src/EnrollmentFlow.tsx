@@ -27,6 +27,8 @@ function failure(error:unknown):string {
     if (error.code==='enrollment_activation_unavailable') return 'Trial activation is not available yet. Your completed steps are saved. Check progress to try again.';
     if (error.code==='enrollment_configuration_changed') return 'The account configuration could not be confirmed. Your completed steps are saved. Check progress or contact us.';
     if (error.code==='enrollment_workspace_preparation_pending') return 'Your workspace is still being prepared. Your completed steps are saved. Check progress before continuing.';
+    if (error.code==='enrollment_destination_invalid') return 'Opening your practice was interrupted. Try Open Chief again.';
+    if (error.code==='enrollment_membership_preparation_required') return 'Your practice membership is still preparing. Check progress, then try Open Chief again.';
     if (error.status===401 || error.status===403) return 'Your account cannot access this enrollment. Sign in again or contact the practice owner.';
     if (error.status===409) return 'Your saved setup changed. Check progress before continuing.';
     if (error.status===422) return 'Review the information and required confirmations before continuing.';
@@ -239,7 +241,10 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
     const latest=await api.status(identity);if(latest.stage!=='ready')throw new EnrollmentError(403);
     if(openNativeWorkspace)await openNativeWorkspace();
     else{if(!latest.workspace.url)throw new EnrollmentError(403);
-      const url=workspaceDestination(latest.workspace.url,window.location.href,config.allowed_workspace_origins,{config,current:status,ready:latest});if(openWorkspace)await openWorkspace(latest,url);else navigate(url);}
+      // Use the last confirmed live config so staging practice-UUID destinations
+      // match the account host that admitted this session.
+      const url=workspaceDestination(latest.workspace.url,window.location.href,liveConfig.allowed_workspace_origins,{config:liveConfig,current:status,ready:latest});
+      if(openWorkspace)await openWorkspace(latest,url);else navigate(url);}
     return latest;
   },accept);};
   const formDisabled=busy||uncertain;
@@ -318,7 +323,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
         {stage==='payment'&&newTrial&&activationAvailable&&<><p>A card is required. Stripe handles card entry and verification. Your first subscription charge follows the confirmed 14-day trial unless you cancel before it ends.</p><p className="enrollment-hint">The hosted checkout confirms the final tax treatment and billing terms before you agree. No card details are saved in this browser.</p></>}
         {(stage==='payment'&&!activationAvailable||stage==='finishing_setup'&&status.billing.status==='pending'&&!checkoutRecoveryAvailable)&&newTrial&&<p role="status">Trial activation is not available yet. Your completed steps are saved. Check progress to see when you can continue.</p>}
         {stage==='payment_action_required'&&<p>Use your saved billing account to review payment details. Check setup after completing any required payment action. Your original trial dates are preserved.</p>}
-        {stage==='ready'&&<><p role="status">Your practice, agreement and subscription are confirmed. Install CosmaBot on Mac or iPhone for day-to-day use, then open Chief when you are ready for a supported practice task.</p>{status.billing.cancel_at_period_end&&<p>Cancellation is scheduled. Review its effective date in the billing portal.</p>}</>}
+        {stage==='ready'&&<><p role="status">Your practice, agreement and subscription are confirmed. Open Chief continues into your CosmaBot practice workspace in this browser.</p>{status.billing.cancel_at_period_end&&<p>Cancellation is scheduled. Review its effective date in the billing portal.</p>}</>}
         {status.action_required&&!preparingWorkspace&&<p className="enrollment-hint">An additional setup action is required. Check progress or contact your practice owner.</p>}
         <div className="enrollment-actions">
           {stage==='ready'&&<button className="primary" onClick={chief} disabled={formDisabled}>Open Chief</button>}
@@ -331,13 +336,14 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
           {['ready','payment_action_required','canceled'].includes(stage??'')&&ownsPractice&&status.billing.status!=='none'&&<button onClick={portal} disabled={formDisabled}>Manage billing or cancel</button>}
           <button onClick={()=>{stopProgressCheck();setReview('practice');}} disabled={formDisabled}>Review practice</button>
         </div>
-        {stage==='ready'&&<section className="enrollment-receipt" aria-label="Install CosmaBot"><h2>Install CosmaBot on Mac or iPhone</h2>
-          <p>Open Chief opens your practice workspace in the browser or an already-installed app. It is not the Mac or iPhone install step.</p>
-          <p>After you install the app, sign in with the same CosmaBot account you used here. Your practice organization and Box stay bound from this setup.</p>
-          <div className="enrollment-actions">
-            {liveConfig.client_install?.mac_download_url?<a className="primary" href={liveConfig.client_install.mac_download_url} target="_blank" rel="noopener noreferrer">Download for Mac</a>:<p className="enrollment-hint" role="status">Mac download will appear here when CosmaBot publishes the current desktop package.</p>}
-            {liveConfig.client_install?.iphone_download_url?<a className="primary" href={liveConfig.client_install.iphone_download_url} target="_blank" rel="noopener noreferrer">Get CosmaBot for iPhone</a>:<p className="enrollment-hint" role="status">iPhone download will appear here when CosmaBot publishes the current TestFlight or App Store build.</p>}
-          </div>
+        {stage==='ready'&&<section className="enrollment-receipt" aria-label="Open your practice workspace">
+          <h2>Open your practice workspace</h2>
+          <p>Open Chief is the browser path into CosmaBot for a supported practice task. It uses the same CosmaBot account you used here; your practice organization and Box stay bound from this setup.</p>
+          <p className="enrollment-hint">Mac and iPhone install links are separate from this browser handoff and appear below only when CosmaBot publishes them.</p>
+          {(liveConfig.client_install?.mac_download_url||liveConfig.client_install?.iphone_download_url)&&<div className="enrollment-actions">
+            {liveConfig.client_install?.mac_download_url&&<a href={liveConfig.client_install.mac_download_url} target="_blank" rel="noopener noreferrer">Download for Mac</a>}
+            {liveConfig.client_install?.iphone_download_url&&<a href={liveConfig.client_install.iphone_download_url} target="_blank" rel="noopener noreferrer">Get CosmaBot for iPhone</a>}
+          </div>}
         </section>}
         {stage==='ready'&&ownsPractice&&teamOpen&&<section className="enrollment-receipt" aria-label="Invite a teammate"><h2>Invite a teammate</h2><p>Every human needs a purchased seat, including office staff. Pending invitations reserve a seat. This joins the existing practice agreement and subscription.</p>
           <form className="enrollment-form" onSubmit={inviteTeammate} noValidate><Field name="team_email" label="Teammate’s email" type="email" value={teamEmail} onChange={setTeamEmail} error={errors.team_email} disabled={formDisabled}/>

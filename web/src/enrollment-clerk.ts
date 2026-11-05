@@ -33,3 +33,17 @@ export async function prepareEnrollmentWorkspaceToken(account:EnrollmentWorkspac
   const token=await account.identity.getToken({skipCache:true});current();
   if(!token)throw new EnrollmentError(401);return token;
 }
+
+/**
+ * Open Chief browser handoff. Membership prep is required for production data.
+ * Synthetic staging still assigns the registered workspace URL when Clerk membership
+ * proof is not bound yet — Open Chief is the browser path, not Mac/iPhone install.
+ */
+export async function openEnrollmentBrowserWorkspace(
+  url:string,prepare:()=>Promise<unknown>,dataMode:string,
+  assign:(destination:string)=>void=destination=>window.location.assign(destination),
+):Promise<void> {
+  try{await prepare();}
+  catch(error){if(dataMode!=='synthetic')throw error;}
+  assign(url);
+}

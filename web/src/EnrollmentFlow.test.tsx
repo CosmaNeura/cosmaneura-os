@@ -296,7 +296,7 @@ it('keeps the browser Chief handoff closed for a UUID practice outside its exact
   const openWorkspace=vi.fn();await act(async()=>root.render(<EnrollmentFlow api={api} identity={id}
     config={enrollmentConfig()} navigate={navigate} openWorkspace={openWorkspace}/>));
   await click('Open Chief');expect(openWorkspace).not.toHaveBeenCalled();expect(navigate).not.toHaveBeenCalled();
-  expect(host.textContent).toContain('The result could not be confirmed. Check saved progress before trying again.');
+  expect(host.textContent).toContain('Opening your practice was interrupted. Try Open Chief again.');
 });
 it('opens the newly allocated browser practice in Chief only after a fresh authenticated ready response',async()=>{
   current=enrollmentStatus('ready',5);current.workspace.url=`https://${current.practice!.id}.staging.cosmas.ai/chief`;
@@ -324,7 +324,22 @@ it.each(['practice','organization','box','inactive policy'])('holds the allocate
   if(change==='organization')current={...current,workspace:{...current.workspace,organization_id:'org_other'}};
   if(change==='box')current={...current,workspace:{...current.workspace,box_id:'20000000-0000-4000-8000-000000000003'}};
   await click('Open Chief');expect(openWorkspace).not.toHaveBeenCalled();expect(navigate).not.toHaveBeenCalled();
-  expect(host.textContent).toContain('The result could not be confirmed. Check saved progress before trying again.');
+  expect(host.textContent).toContain('Opening your practice was interrupted. Try Open Chief again.');
+});
+it('surfaces a membership-prep failure from Open Chief without navigating away',async()=>{
+  current=enrollmentStatus('ready',5);
+  const openWorkspace=vi.fn().mockRejectedValue(new EnrollmentError(403,'enrollment_membership_preparation_required'));
+  await act(async()=>root.render(<EnrollmentFlow api={api} identity={id} config={enrollmentConfig()} navigate={navigate} openWorkspace={openWorkspace}/>));
+  await click('Open Chief');expect(openWorkspace).toHaveBeenCalledOnce();expect(navigate).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('Your practice membership is still preparing. Check progress, then try Open Chief again.');
+});
+it('prioritizes the browser Open Chief handoff on ready without an install funnel heading',async()=>{
+  current=enrollmentStatus('ready',5);await render();
+  expect(host.textContent).toContain('Open Chief continues into your CosmaBot practice workspace in this browser');
+  expect(host.textContent).toContain('Open your practice workspace');
+  expect(host.textContent).toContain('Open Chief is the browser path into CosmaBot');
+  expect(host.textContent).not.toContain('Install CosmaBot on Mac or iPhone');
+  expect(button('Open Chief')).toBeDefined();
 });
 it('lets the accepted owner continue prebilling setup through the existing confirmation POST while keeping card and Chief held',async()=>{
   current=enrollmentStatus('activation_pending',3);current.workspace={status:'provisioning',url:null,organization_id:'org_invented',box_id:'10000000-0000-4000-8000-000000000003',confirmation_available:false};
@@ -389,7 +404,7 @@ it('creates an ordinary paid-seat teammate invitation with signing authority off
   await render();await click('Invite a teammate');await fill('team_email','staff@example.invalid');await click('Create teammate invitation');
   expect(api.invitation).toHaveBeenCalledWith(id,{expected_revision:4,email:'staff@example.invalid',role:'staff',can_sign:false},expect.any(String),expect.any(AbortSignal));
   expect(host.querySelector<HTMLInputElement>('input[readonly]')?.value).toContain('/onboarding?invite=');expect(host.textContent).toContain('No email was sent');
-  expect(host.textContent).toContain('Install CosmaBot on Mac or iPhone');expect(host.textContent).toContain('Open Chief opens your practice workspace');
+  expect(host.textContent).toContain('Open your practice workspace');expect(host.textContent).toContain('Open Chief is the browser path into CosmaBot');
 });
 it('reports when the invitation email was delivered and still keeps the shareable link',async()=>{
   current=enrollmentStatus('ready',4,5);currentConfig={...currentConfig,invitation_email_configured:true};
