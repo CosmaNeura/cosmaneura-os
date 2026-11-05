@@ -10,7 +10,7 @@ function stagingPractice() {
   const host = 'invented-practice.clerk.accounts.dev';
   return {
     enabled: true,
-    accountOrigin: 'https://enrollment.example.invalid',
+    accountOrigin: 'https://enrollment-api.staging.cosmas.ai',
     realm: {
       publishableKey: 'pk_test_' + Buffer.from(`${host}$`).toString('base64'),
       frontendOrigin: `https://${host}`,
@@ -53,7 +53,9 @@ test('staging rejects production mix', () => {
     value => { value.realm.audience = 'cosmas-os-beta'; },
     value => { value.registeredPracticeOrigins = 'practice-uuid-production-v1'; },
     value => { value.registeredPracticeOrigins = '*'; },
-    value => { value.accountOrigin = 'https://enrollment.example.invalid/path'; },
+    value => { value.accountOrigin = 'https://enrollment-api.staging.cosmas.ai/path'; },
+    value => { value.accountOrigin = 'https://enrollment-api.cosmas.ai'; },
+    value => { value.accountOrigin = 'https://enrollment.example.invalid'; },
   ]) {
     const value = stagingPractice();
     change(value);
