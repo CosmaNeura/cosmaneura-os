@@ -32,6 +32,8 @@ beforeEach(async()=>{
  window.matchMedia=vi.fn().mockReturnValue({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()});window.scrollTo=vi.fn();HTMLElement.prototype.scrollIntoView=vi.fn();await installFixtures(true);
  const fixtureFetch=window.fetch,fixtureRead=workspaceApi.read;
  workspaceApi.read=async(...args)=>saved&&args[1]===saved.id?structuredClone(saved):fixtureRead(...args);
+ // Events must sit inside the observation window [now, now+7d]. Near UTC midnight,
+ // now+1h can fall outside local "Today" agenda focus — open Next 7 days after load.
  const now=new Date(),end=new Date(now.getTime()+7*86400000),observation={kind:'calendar' as const,account:{label:'Invented Outlook clinic',email:'doctor@example.invalid'},items:[
   {id:'AAMk+/selected==',subject:'Invented exact follow-up event',starts_at:new Date(now.getTime()+3600000).toISOString(),ends_at:new Date(now.getTime()+7200000).toISOString(),all_day:false,cancelled:false},
   {id:'AAMk+/unrelated==',subject:'Invented unrelated planning',starts_at:new Date(now.getTime()+10800000).toISOString(),ends_at:new Date(now.getTime()+14400000).toISOString(),all_day:true,cancelled:true}],more:true,observed_at:now.toISOString(),window:{starts_at:now.toISOString(),ends_at:end.toISOString()}};
@@ -67,7 +69,9 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();history.replaceState(null,'','/');});
 it('chooses one Outlook event, reviews and saves it explicitly, then prepares Chief instructions while retaining the unsent question',async()=>{
  const ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append');await openChat();await type('Keep my unsent question about this invented visit.');await openTask();expect(calls).toHaveLength(0);
- await click('Check calendar access');expect(task()?.closest('[data-editor-task]')?.getAttribute('data-editor-task')).toBe('microsoft');expect(task()?.closest('.settings-hub')?.querySelector('nav[aria-label="Settings navigation"]')?.hasAttribute('hidden')).toBe(true);await click('Load next 7 days');await wait(()=>expect(task()?.querySelector<HTMLButtonElement>('[data-calendar-event="AAMk+/selected=="]')?.disabled).toBe(false));await act(async()=>task()!.querySelector<HTMLButtonElement>('[data-calendar-event="AAMk+/selected=="]')!.click());
+ await click('Check calendar access');expect(task()?.closest('[data-editor-task]')?.getAttribute('data-editor-task')).toBe('microsoft');expect(task()?.closest('.settings-hub')?.querySelector('nav[aria-label="Settings navigation"]')?.hasAttribute('hidden')).toBe(true);
+ await click('Load next 7 days');await click('Next 7 days');
+ await wait(()=>expect(task()?.querySelector<HTMLButtonElement>('[data-calendar-event="AAMk+/selected=="]')?.disabled).toBe(false));await act(async()=>task()!.querySelector<HTMLButtonElement>('[data-calendar-event="AAMk+/selected=="]')!.click());
  await wait(()=>expect(button('Use current visit')?.disabled).toBe(false));const exact=task()!.querySelector('pre')!.textContent!;expect(exact).toContain('Invented exact follow-up event');expect(exact).not.toContain('Invented unrelated planning');expect(calls.some(row=>row.action==='review')).toBe(false);
  await click('Use current visit');await wait(()=>expect(task()?.querySelectorAll('input[type="checkbox"]')).toHaveLength(3));expect(button('Save calendar summary to visit')?.disabled).toBe(true);
  for(const input of task()!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))await act(async()=>input.click());await click('Save calendar summary to visit');await wait(()=>expect(button('Ask Chief about this calendar summary')?.disabled,task()?.textContent+' Calls: '+calls.map(row=>row.action).join(',')+' saved:'+Boolean(saved)).toBe(false));
