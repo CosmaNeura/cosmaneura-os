@@ -333,9 +333,9 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
         </div>
         {stage==='ready'&&<section className="enrollment-receipt" aria-label="Install CosmaBot"><h2>Install CosmaBot on Mac or iPhone</h2>
           <p>Open Chief opens your practice workspace in the browser or an already-installed app. It is not the Mac or iPhone install step.</p>
-          <p>After you install the app, sign in with the same CosmaBot account you used here. Your practice organization and Box stay bound from this setup.</p>
+          <p>After you install the signed Mac helper (or iPhone build), sign in with the same CosmaBot account you used here, then Open Chief in the app. Your practice organization and Box stay bound from this setup.</p>
           <div className="enrollment-actions">
-            {liveConfig.client_install?.mac_download_url?<a className="primary" href={liveConfig.client_install.mac_download_url} target="_blank" rel="noopener noreferrer">Download for Mac</a>:<p className="enrollment-hint" role="status">Mac download will appear here when CosmaBot publishes the current desktop package.</p>}
+            {liveConfig.client_install?.mac_download_url?<a className="primary" href={liveConfig.client_install.mac_download_url} target="_blank" rel="noopener noreferrer">Download for Mac</a>:<p className="enrollment-hint" role="status">Mac download will appear here when CosmaBot publishes the current signed desktop helper package.</p>}
             {liveConfig.client_install?.iphone_download_url?<a className="primary" href={liveConfig.client_install.iphone_download_url} target="_blank" rel="noopener noreferrer">Get CosmaBot for iPhone</a>:<p className="enrollment-hint" role="status">iPhone download will appear here when CosmaBot publishes the current TestFlight or App Store build.</p>}
           </div>
         </section>}
