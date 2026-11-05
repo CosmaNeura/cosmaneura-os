@@ -14,7 +14,7 @@ const unavailable = () => new Error('Desktop practice connection unavailable');
 function desktopSnapshot(identity, practiceMeta) {
   const stamp = Math.floor(Date.now() / 1000);
   const issuer = 'https://invented.clerk.accounts.dev';
-  const name = 'invented';
+  const frontendHost = issuer.replace('https://', '');
   return Object.freeze({
     contract_version: 'cosmabot.native-active-workspace.v1',
     revision: randomUUID(),
@@ -27,7 +27,7 @@ function desktopSnapshot(identity, practiceMeta) {
       nativeIdentity: Object.freeze({
         version: 1, profile: 'operational-staging-v1', client: 'desktop',
         apiOrigin: `https://api.${practiceMeta.WORKSPACE_HOST}`,
-        publishableKey: 'pk_test_' + Buffer.from(`${issuer.replace('https://', '')}$`).toString('base64'),
+        publishableKey: 'pk_test_' + Buffer.from(`${frontendHost}$`).toString('base64'),
         frontendOrigin: issuer, organizationId: practiceMeta.ORG_ID, audience: '',
       }),
       session: Object.freeze({

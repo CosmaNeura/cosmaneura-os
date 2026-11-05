@@ -131,6 +131,17 @@ enum in the isolated app state directory persists explicit login/logout intent;
 it contains no token or account identifier. Native credential custody remains the
 SDK/Keychain responsibility and is not qualified by the offline tests.
 
+### CosmasDesktopPractice (opt-in, synthetic/local)
+
+Pass `--native-practice-connection` with `--native-auth-helper` to enable
+`window.cosmasDesktopPractice` (version 1). Default omit keeps Connect practice
+dark. Electron main owns a fake/local enrollment wire (Origin `app://cosmas`,
+client `desktop`); preload never exposes `getToken`. Open Chief admits a
+synthetic desktop workspace snapshot and reloads `app://cosmas/index.html`.
+This path does not sign a Swift practice helper, switch a production Clerk
+account realm, or call live enrollment-api. See
+`docs/operational-native-build.md`.
+
 The authenticated shell uses a persistent partition inside its isolated state
 directory. This retains the existing encrypted IndexedDB capture queue and its
 nonextractable keys after process restart, so an unconfirmed upload can be

@@ -65,6 +65,19 @@ def test_installation_storage_stays_outside_owned_source(tmp_path, monkeypatch):
     assert not output.exists()
 
 
+def test_native_practice_connection_requires_authenticated_helper(tmp_path, monkeypatch, capsys):
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "index.html").write_text("<html>Invented renderer</html>")
+    output = tmp_path / "never-created"
+    scope(monkeypatch, web, output)
+    monkeypatch.setattr(sys, "argv", [*sys.argv, "--native-practice-connection"])
+    with pytest.raises(SystemExit):
+        composer.main()
+    assert "Native practice connection requires the authenticated desktop composition" in capsys.readouterr().err
+    assert not output.exists()
+
+
 @pytest.mark.parametrize("damage", ["changed", "missing", "linked", "extra-manifest-file"])
 def test_unreviewed_boundary_is_rejected_before_output(tmp_path, monkeypatch, damage):
     owned = tmp_path / "owned"

@@ -73,3 +73,45 @@ test('revision fencing rejects stale activate and enrollment calls', async () =>
   );
   practice.close();
 });
+
+test('openCheckout aliases destination open and signOut clears account', async () => {
+  const practice = await createDesktopPracticeSession({enabled: true});
+  const ready = await practice.beginAccountSignIn();
+  assert.deepEqual(
+    await practice.openCheckout({
+      expectedRevision: ready.revision, checkoutSessionId: 'cs_invented',
+    }),
+    {status: 'opened'},
+  );
+  assert.deepEqual(
+    await practice.openEnrollmentDestination({
+      expectedRevision: ready.revision, destination: 'portal',
+    }),
+    {status: 'opened'},
+  );
+  const signedOut = await practice.signOut({expectedRevision: ready.revision});
+  assert.equal(signedOut.phase, 'signedOut');
+  assert.equal(signedOut.identity, null);
+  practice.close();
+});
+
+test('fake wire returns closed shapes for practices and unknown ops', async () => {
+  const wire = createFakePracticeAccountWire();
+  const practices = await wire.enrollmentRequest('practices');
+  assert.equal(practices.status, 200);
+  assert.equal(practices.body.active_practice_id, wire.PRACTICE_ID);
+  const missing = await wire.enrollmentRequest('unknown');
+  assert.equal(missing.status, 404);
+});
+
+test('host method surface matches detector-required CosmasDesktopPractice keys', async () => {
+  const practice = await createDesktopPracticeSession({enabled: true});
+  const required = [
+    'capabilities', 'accountStatus', 'beginAccountSignIn', 'accountToken', 'enrollmentRequest',
+    'openCheckout', 'openEnrollmentDestination', 'activatePracticeOrganization',
+    'activateRegisteredPractice', 'returnToBeta', 'signOut',
+  ];
+  for (const name of required) assert.equal(typeof practice[name], 'function');
+  assert.equal(typeof practice.getToken, 'undefined');
+  practice.close();
+});
