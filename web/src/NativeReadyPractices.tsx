@@ -2,6 +2,7 @@ import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {AppleHostedStatus} from './AppleHostedStatus';
 import type {EnrollmentApi,EnrollmentIdentity} from './enrollment-api';
 import {EnrollmentError,type EnrollmentPractices,type EnrollmentStatus} from './enrollment-contract';
+import {nativeSignInRecovery,nativeSignInRecoveryMessage} from './native-signin-contract';
 import './native-ready-practices.css';
 import {hasUnsavedWork,useUnsavedWorkPresent} from './unsaved-work';
 
@@ -32,11 +33,11 @@ export function NativeReadyPractices({api,identity,onOpenCurrent,onOpenSelected,
     try{await action(captured.controller.signal);}
     catch(error){if(owner.current===captured&&captured.active&&identity.isCurrent()){
       setSaved(null);
-      if(captured.selection&&!(error instanceof EnrollmentError&&[401,403,409,422].includes(error.status))){
+      const recovery=nativeSignInRecovery(error);
+      if(captured.selection&&recovery!=='clearSessionAndSignIn'&&recovery!=='resumeEnrollment'&&
+        recovery!=='rereadStatus'&&recovery!=='fixRequest'){
         setUncertain(true);setCheckedPending(false);setFailed('Your practice choice may be saved. Check the saved choice before retrying.');
-      }else{captured.selection=null;setUncertain(false);setFailed(error instanceof EnrollmentError&&error.code==='practice_selection_changed'
-          ?'Your current practice changed. Check your practices before opening Chief.'
-          :'Your practices could not be checked. Try again, or return to your existing workspace.');}
+      }else{captured.selection=null;setUncertain(false);setFailed(nativeSignInRecoveryMessage(error));}
     }}
     finally{if(owner.current===captured&&captured.active){captured.pending=false;captured.controller=null;onPendingChange(captured.selection!==null);setBusy(false);}}
   }

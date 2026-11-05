@@ -12,6 +12,9 @@ public enum NativeWorkspaceOrigin: String, Sendable {
     case appleWebView = "capacitor://localhost"
     case desktopApp = "app://cosmas"
 
+    /// Contract client label for POST /enrollment/v1/native/workspace-profile.
+    public var nativeClient: String { self == .desktopApp ? "desktop" : "apple" }
+
     public func accepts(bundleIdentifier: String, profile: NativeIdentityProfile = .synthetic) -> Bool {
         if profile == .simulatorStaging {
             guard self == .appleWebView else { return false }

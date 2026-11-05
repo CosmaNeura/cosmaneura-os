@@ -118,7 +118,8 @@ public enum NativePracticeEnrollmentOperation: String, Sendable {
     public var path: String {
         let prefix = "/enrollment/v1/native"
         switch self {
-        case .config: return "/enrollment/v1/config"
+        // Contract: prefer /native/* siblings; they enforce Origin and never fall back to browser azp.
+        case .config: return prefix + "/config"
         case .status: return prefix + "/status"
         case .practices: return prefix + "/practices"
         case .selectPractice: return prefix + "/select-practice"

@@ -240,7 +240,9 @@ import UIKit
         }
         let expected = try NativePracticeConnectionExpectation(selectionID: receipt.practiceID, nonce: UUID(), account: captured,
             organizationID: receipt.organizationID, boxID: receipt.boxID, apiOrigin: api)
-        let body = try JSONSerialization.data(withJSONObject: ["client": "apple", "nonce": expected.nonce.uuidString.lowercased(), "expected_revision": receipt.registryRevision])
+        // Contract: client must match Origin (apple ↔ capacitor://localhost, desktop ↔ app://cosmas).
+        let client = configuration.binding.realm.workspaceOrigin.nativeClient
+        let body = try JSONSerialization.data(withJSONObject: ["client": client, "nonce": expected.nonce.uuidString.lowercased(), "expected_revision": receipt.registryRevision])
         let reply = try await request(.workspaceProfile, captured: captured, body: body)
         guard reply.status == 200 else { throw NativePracticeProfileError.unavailable }
         let bootstrap = try NativePracticeWorkspaceBootstrap.decode(reply.body, expectation: expected, binding: configuration.binding)

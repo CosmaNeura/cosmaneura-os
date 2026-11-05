@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { NativeAuthenticatedWorkspace } from "./NativeAuthenticatedWorkspace";
 import type { WorkspaceAuthPlugin } from "../../clients/capture/src/native/workspace-auth-plugin";
+import {desktopPracticeConnectionPort} from "../../clients/capture/src/native/practice-connection-plugin";
 import type { NativeAuthState } from "./native-auth";
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
 
@@ -27,5 +28,9 @@ export function DesktopAuthenticatedWorkspace() {
       const remove = port.onStateChanged(listener); return { remove: async () => { remove(); } };
     },
   } : undefined, [port]);
-  return <NativeAuthenticatedWorkspace plugin={plugin} available={!!plugin} createIdentity={requestIdentity} />;
+  // Contract Mac host: Origin app://cosmas via CosmasDesktopPractice when the signed helper exposes it.
+  // Until that helper ships, capabilities stay dark and Connect practice is not offered.
+  const practicePlugin = useMemo(() => desktopPracticeConnectionPort() ?? undefined, []);
+  return <NativeAuthenticatedWorkspace plugin={plugin} available={!!plugin} createIdentity={requestIdentity}
+    practicePlugin={practicePlugin} practiceConnectionAvailable={!!practicePlugin} />;
 }
