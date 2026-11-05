@@ -201,6 +201,16 @@ class EnrollmentSettings(BaseSettings):
             return None
         return value if owned_https_url(value) else None
 
+    def synthetic_staging_host(self) -> bool:
+        """True only for the owned synthetic staging account host, never lab fixtures."""
+        env = hosting_environment_for_data_mode(self.data_mode)
+        return bool(
+            self.data_mode == "synthetic"
+            and env is not None
+            and env.synthetic_only
+            and self.public_app_origin.rstrip("/") == env.app_origin
+        )
+
     def synthetic_staging_self_serve_ready(
         self,
         *,
@@ -213,10 +223,10 @@ class EnrollmentSettings(BaseSettings):
         Hosted staging already uses data_mode=synthetic with practice-UUID workspace
         allocation. When provisioning, Stripe TEST billing, and workspace confirmation
         are ready, self-serve Checkout must not stick on activation_available=false.
-        Production never uses this path.
+        Lab fixtures and production never use this path.
         """
         return bool(
-            self.data_mode == "synthetic"
+            self.synthetic_staging_host()
             and self.workspace_allocation_enabled
             and self.provisioning_enabled
             and billing
@@ -239,17 +249,13 @@ class EnrollmentSettings(BaseSettings):
         reasons: list[str] = []
         if registration_blockers:
             reasons.append("Registration admission is incomplete.")
-        if not self.activation_available and not (
-            self.data_mode == "synthetic" and self.workspace_allocation_enabled
-        ):
+        if not self.activation_available and not self.synthetic_staging_host():
             reasons.append("ENROLLMENT_ACTIVATION_AVAILABLE is false until the staged journey receipt admits trial activation.")
         if not self.provisioning_enabled:
             reasons.append("Workspace provisioning is not enabled.")
-        if not self.stripe_acquisition_enabled and not (
-            self.data_mode == "synthetic" and self.workspace_allocation_enabled
-        ):
+        if not self.stripe_acquisition_enabled and not self.synthetic_staging_host():
             reasons.append("Stripe acquisition remains closed.")
-        if self.data_mode == "synthetic" and not self.workspace_allocation_enabled:
+        if self.synthetic_staging_host() and not self.workspace_allocation_enabled:
             reasons.append("Synthetic staging self-serve trial needs practice workspace allocation.")
         if not billing:
             reasons.append("Stripe TEST catalog, portal, and webhook are not verified.")

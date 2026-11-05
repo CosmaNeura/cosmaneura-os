@@ -602,7 +602,7 @@ class EnrollmentService:
 
     def _synthetic_staging_auto_ready_enabled(self) -> bool:
         return bool(
-            self.settings.data_mode == "synthetic"
+            self.settings.synthetic_staging_host()
             and self.settings.workspace_allocation_enabled
             and self.settings.provisioning_enabled
             and not self.settings.stripe_live_mode
