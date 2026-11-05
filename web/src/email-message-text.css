@@ -1,0 +1,5 @@
+.email-message-text{display:grid;gap:.65rem;min-width:0}
+.email-work .email-message-text>button{justify-self:start;box-sizing:border-box;min-height:44px;padding:.6rem .85rem;border:1px solid var(--team-line,#d9ddd9);border-radius:.5rem;background:var(--team-surface,#fff);color:inherit;font:inherit}
+.email-work .email-message-text>button:focus-visible{outline:3px solid var(--team-accent,#396750);outline-offset:2px}
+.email-message-text>pre[hidden]{display:none}
+@media(max-width:420px){.email-work .email-message-text>button{width:100%;justify-self:stretch}}

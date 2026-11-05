@@ -11,6 +11,7 @@ import {emptyOutlookMessageRecovery,validateOutlookMessageRecovery,type OutlookM
 import './outlook-message.css';
 import {EmailWorkHeader,type EmailWorkStep} from './EmailWorkHeader';
 import {EmailInboxFilter,filterLoadedEmail,nextLoadedUnreadEmail} from './EmailInboxFilter';
+import {EmailMessageText} from './EmailMessageText';
 import {SourceWorkReader} from './SourceWorkReader';
 
 export type OutlookMessagePanelProps={identity:AuthenticatedWorkspaceIdentity;scope:OutlookMessageRecoveryScope;recovery:OutlookMessageRecoveryAccess|null;
@@ -214,7 +215,7 @@ export function OutlookMessagePanel({identity,scope,recovery,workspace,locked=fa
         <button className="team-primary" disabled={blocked||status?.full_mail_read!==true} onClick={read}>Read full email</button></>}
       {message&&<article className="outlook-message-content"><h4>{message.subject||'(No subject)'}</h4><p>{message.sender||'Sender unavailable'} · {when(message.received_at)}</p>
         <p>Message text read at {when(message.observed_at)}. Check these outside details before relying on them.</p>
-        {message.status==='complete'?<pre aria-label="Complete selected email">{message.content}</pre>:<p role="alert">{reasons[message.reason!]}</p>}
+        {message.status==='complete'?<EmailMessageText key={record.message!.read_id} content={message.content} disabled={blocked}/>:<p role="alert">{reasons[message.reason!]}</p>}
         {message.status==='needs_human'&&<p>This incomplete message cannot be handed to Chief as a complete source.</p>}
         {message.status==='complete'&&!record.saved&&<>
           <div className="email-work-visit"><span className="email-work-eyebrow">Choose visit</span>
