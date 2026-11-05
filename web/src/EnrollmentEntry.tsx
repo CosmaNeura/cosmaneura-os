@@ -27,16 +27,18 @@ export function EnrollmentEntry({apiBase=import.meta.env.VITE_ENROLLMENT_API_BAS
   const [config,setConfig]=useState<EnrollmentConfig|null>(null),[failed,setFailed]=useState(connection.error),[retry,setRetry]=useState(0);
   useEffect(()=>{setConfig(null);setFailed(connection.error);if(!connection.api)return;
     let live=true;const controller=new AbortController();
+    const timer=window.setTimeout(()=>{controller.abort();if(live)setFailed(true);},8_000);
     void connection.api.config(controller.signal).then(value=>{
       if(!live)return;
       if(publishableKey&&value.clerk_publishable_key!==publishableKey)throw new EnrollmentError(503);
       setConfig(value);
-    }).catch(()=>{if(live)setFailed(true);});return()=>{live=false;controller.abort();};
+    }).catch(()=>{if(live)setFailed(true);}).finally(()=>{window.clearTimeout(timer);});
+    return()=>{live=false;window.clearTimeout(timer);controller.abort();};
   },[connection,publishableKey,retry]);
   if(failed||!config||!config.enabled||!config.auth_configured||!config.clerk_publishable_key||!connection.api)return <main className="enrollment-page">
     <header className="enrollment-header"><a className="enrollment-brand" href="/onboarding">CosmaBot</a></header>
     <section className="enrollment-card"><h1>{!failed&&!config?'Checking account availability…':'Account setup is not available yet'}</h1>
-      <p role={failed?'alert':'status'}>{!failed&&!config?'We are checking the account service before opening sign-in.':'Your account and trial have not been created. Return when account enrollment is available.'}</p>
+      <p role={failed?'alert':'status'}>{!failed&&!config?'We are checking the account service before opening sign-in. This usually finishes in a few seconds.':failed?'The account service did not respond in time or is unavailable. Your account and trial have not been created.':'Your account and trial have not been created. Return when account enrollment is available.'}</p>
       <button onClick={()=>setRetry(value=>value+1)}>Check availability</button></section></main>;
   return <ClerkProvider publishableKey={config.clerk_publishable_key} localization={enrollmentLocalization}>
     <EnrollmentClerkAccount api={connection.api} config={config}/>

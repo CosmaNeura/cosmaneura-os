@@ -48,6 +48,16 @@ it('refuses an enrollment key that differs from the supplied build identity',asy
   vi.mocked(fetch).mockResolvedValue(json(enrollmentConfig()));await act(async()=>root.render(<EnrollmentEntry apiBase="http://127.0.0.1:8910" publishableKey="pk_test_different"/>));
   expect(clerk.keys).toEqual([]);expect(host.textContent).toContain('Account setup is not available yet');
 });
+it('fails fast when the account availability check never returns',async()=>{
+  vi.useFakeTimers();
+  vi.mocked(fetch).mockImplementation((_input,init)=>new Promise((_resolve,reject)=>{init?.signal?.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});}));
+  await act(async()=>root.render(<EnrollmentEntry apiBase="http://127.0.0.1:8910"/>));
+  expect(host.textContent).toContain('Checking account availability');
+  await act(async()=>{await vi.advanceTimersByTimeAsync(8_000);});
+  expect(host.textContent).toContain('Account setup is not available yet');
+  expect(host.textContent).toContain('did not respond in time');
+  vi.useRealTimers();
+});
 it('does not take over existing beta bookmarks with unset flags, but opens an explicitly enabled new account route',async()=>{
   vi.stubEnv('VITE_ENROLLMENT_ENABLED',undefined);vi.stubEnv('VITE_ENROLLMENT_ACCOUNT_ONLY',undefined);
   for(const route of ['/','/sign-in','/onboarding']){

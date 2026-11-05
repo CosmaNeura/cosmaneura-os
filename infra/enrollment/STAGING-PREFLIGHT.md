@@ -8,6 +8,12 @@ distinct `enrollment-staging-intake-preflight.v1` operator attestation only for
 `https://enrollment-api.staging.cosmas.ai`, with synthetic data and a matching
 Development Clerk instance. `stripe_acquisition_enabled`,
 `activation_available` and `production_qualified` must all remain false.
+When those flags stay false, public `/enrollment/v1/config` reports
+`activation_available: false` plus `activation_blockers` explaining the closed
+gates. Flipping activation still requires the full staged `journey_sha256`
+receipt, provisioning, Stripe TEST verification, and a workspace confirmer —
+see [PRODUCTION-HOSTING.md](PRODUCTION-HOSTING.md) and
+`docs/STRIPE_TEST_QUALIFICATION.md`.
 The existing full journey gates for acquisition/activation and all production
 paths remain unchanged. The receipt grants no workspace entitlement, billing
 permission, provider authority or deployment by itself.

@@ -2,6 +2,10 @@
 
 For the independently built staging account web app, exact public DNS records
 and verified managed-certificate stage, use [STAGING-HOSTING.md](STAGING-HOSTING.md).
+Production account host wiring (`app.cosmas.ai` /
+`enrollment-api.cosmas.ai`) is documented in
+[PRODUCTION-HOSTING.md](PRODUCTION-HOSTING.md); DNS stays founder-operated and
+does not open acquisition by itself.
 
 This component serves customer account/practice setup, BAA receipts and SaaS
 subscription state. It stores no clinical records and grants no access to the

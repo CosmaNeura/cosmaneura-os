@@ -385,10 +385,17 @@ it.each(['active','past_due','unpaid','canceled'])('shows saved %s billing witho
   expect(button('Continue securely with Stripe')).toBeUndefined();expect(button('Manage billing or cancel')).toBeDefined();
 });
 it('creates an ordinary paid-seat teammate invitation with signing authority off by default',async()=>{
-  current=enrollmentStatus('ready',4,5);vi.spyOn(api,'invitation').mockImplementation(async()=>({id:'invitation',token:'invented_token',expires_at:'2026-11-07T12:00:00Z',role:'staff',can_sign:false,enrollment:{...current,revision:5}}));
+  current=enrollmentStatus('ready',4,5);vi.spyOn(api,'invitation').mockImplementation(async()=>({id:'invitation',token:'invented_token',expires_at:'2026-11-07T12:00:00Z',role:'staff',can_sign:false,email_sent:false,enrollment:{...current,revision:5}}));
   await render();await click('Invite a teammate');await fill('team_email','staff@example.invalid');await click('Create teammate invitation');
   expect(api.invitation).toHaveBeenCalledWith(id,{expected_revision:4,email:'staff@example.invalid',role:'staff',can_sign:false},expect.any(String),expect.any(AbortSignal));
   expect(host.querySelector<HTMLInputElement>('input[readonly]')?.value).toContain('/onboarding?invite=');expect(host.textContent).toContain('No email was sent');
+  expect(host.textContent).toContain('Install CosmaBot on Mac or iPhone');expect(host.textContent).toContain('Open Chief opens your practice workspace');
+});
+it('reports when the invitation email was delivered and still keeps the shareable link',async()=>{
+  current=enrollmentStatus('ready',4,5);currentConfig={...currentConfig,invitation_email_configured:true};
+  vi.spyOn(api,'invitation').mockImplementation(async()=>({id:'invitation',token:'invented_token',expires_at:'2026-11-07T12:00:00Z',role:'staff',can_sign:false,email_sent:true,enrollment:{...current,revision:5}}));
+  await render();await click('Invite a teammate');await fill('team_email','staff@example.invalid');await click('Create teammate invitation');
+  expect(host.textContent).toContain('Invitation email sent to the teammate');expect(host.querySelector<HTMLInputElement>('input[readonly]')?.value).toContain('/onboarding?invite=');
 });
 it('confirms a pre-ready member account with fresh proof and waits for server-ready admission',async()=>{
   current=enrollmentStatus('finishing_setup',4,5);current.practice!.role='staff';current.billing={...enrollmentStatus('ready',4,5).billing};current.workspace={...enrollmentStatus('ready',4,5).workspace,url:null,confirmation_available:true};

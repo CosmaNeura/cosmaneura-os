@@ -9,6 +9,11 @@ the `ENROLLMENT_` settings defined in `config.py`. All external/qualification
 flags default off. `/health` reports the process; `/ready` reports actual signup
 readiness separately from verified billing and activation. Configuration errors
 keep `/config.enabled` false and authenticated signup returns an actionable 503.
+Public `/enrollment/v1/config` includes `activation_blockers` when trial
+activation is closed, optional Mac/iPhone `client_install` download URLs, and
+`invitation_email_configured`. Invitation email stays dark until
+`ENROLLMENT_INVITATION_MAIL_*` webhook settings are configured; the invite API
+returns `email_sent` without exposing webhook secrets.
 
 Apply `python -m cosmas_os.enrollment.migration upgrade` to an independent empty
 PostgreSQL database, then run `check`. The additive migration refuses a database
