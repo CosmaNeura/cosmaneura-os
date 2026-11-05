@@ -50,7 +50,7 @@ class ProviderDouble:
             result = {"id": self.settings.stripe_account_id}
         elif path.startswith("/prices/"):
             price = path.rsplit("/", 1)[-1]
-            result = self._price(price, 30000 if price == self.settings.stripe_base_price_id else 10000)
+            result = self._price(price, 30000)
         elif path.startswith("/billing_portal/configurations/"):
             result = {"id": self.settings.stripe_portal_configuration_id, "livemode": False, "active": True,
                 "features": {"subscription_update": {"enabled": False}, "customer_update": {"enabled": False},
@@ -103,10 +103,8 @@ class ProviderDouble:
             return
         start = self.clock["frozen_time"]
         humans = int(checkout["metadata"]["human_seats"])
-        items = [{"quantity": qty, "current_period_end": start + int(TRIAL.total_seconds()),
-            "price": self._price(price, amount)} for price, qty, amount in [
-                (self.settings.stripe_base_price_id, 1, 30000),
-                (self.settings.stripe_additional_price_id, humans - 1, 10000)] if qty]
+        items = [{"quantity": humans, "current_period_end": start + int(TRIAL.total_seconds()),
+            "price": self._price(self.settings.stripe_base_price_id, 30000)}]
         sub_id = "sub_syntheticm3"
         self.subscriptions[sub_id] = {"id": sub_id, "customer": self.customer["id"], "livemode": False, "status": "trialing",
             "metadata": checkout["metadata"], "trial_start": start, "trial_end": start + int(TRIAL.total_seconds()),

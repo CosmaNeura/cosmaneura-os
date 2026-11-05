@@ -42,6 +42,7 @@ from .domain import (
     IdentityVerifier,
     document,
 )
+from .mail import DisabledInvitationNotifier, build_invitation_notifier
 from .migration import schema_ready
 from .service import EnrollmentService
 from .stripe import StripeCommerce
@@ -204,8 +205,17 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
             stripe_verified = True
         except EnrollmentError:
             pass
+    try:
+        invitation_notifier = (build_invitation_notifier(
+            enabled=settings.invitation_mail_enabled,
+            webhook_url=settings.invitation_mail_webhook_url,
+            webhook_secret=settings.invitation_mail_webhook_secret.get_secret_value(),
+        ) if settings.invitation_mail_configured() else DisabledInvitationNotifier())
+    except ValueError:
+        invitation_notifier = DisabledInvitationNotifier()
     service = EnrollmentService(sessionmaker(engine, expire_on_commit=False), settings, commerce,
-        native_workspace_authority=native_workspace_authority) if db_ready else None
+        native_workspace_authority=native_workspace_authority,
+        invitation_notifier=invitation_notifier) if db_ready else None
     if service is not None and settings.workspace_allocation_enabled:
         # Queue intent only. Hosting allocation remains a separately installed
         # private worker; this API never executes a customer deployment.
@@ -327,20 +337,29 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
         if len(origins) != 1 or not settings.native_origin_enabled(origins[0]) or request.scope.get("query_string"):
             raise EnrollmentError("native_identity_unavailable", "Native account sign-in is unavailable.", 503)
         value = current_config()
-        value["workspace_confirmation_configured"] = bool(workspace_confirmer and
+        native_ready = bool(workspace_confirmer and
             getattr(workspace_confirmer, "native_origin_supported", False) is True and native_workspace_authority is not None)
-        value["activation_available"] = bool(value["activation_available"] and value["workspace_confirmation_configured"])
-        value["checkout_recovery_available"] = bool(value["checkout_recovery_available"] and value["workspace_confirmation_configured"])
+        value["workspace_confirmation_configured"] = native_ready
+        value["activation_available"] = bool(value["activation_available"] and native_ready)
+        value["checkout_recovery_available"] = bool(value["checkout_recovery_available"] and native_ready)
+        if not value["activation_available"]:
+            value["activation_blockers"] = settings.activation_blockers(
+                billing=bool(value["billing_configured"]),
+                registration_blockers=list(value["blockers"]),
+                workspace_confirmation_configured=native_ready,
+            )
         return {**value, "native_account": {"issuer": settings.clerk_issuer, "audience": settings.clerk_audience,
                 "session_policy": settings.clerk_session_policy, "native_origin": origins[0]}}
 
     def current_config():
-        value = settings.public_config(database_ready=bool(db_ready and schema_ready(engine)),
-                                      auth_ready=bool(verifier and getattr(verifier, "ready", True)), stripe_verified=stripe_verified)
-        value["workspace_confirmation_configured"] = workspace_confirmer is not None
-        if workspace_confirmer is None:
-            value["activation_available"] = False
-            value["checkout_recovery_available"] = False
+        confirmation_ready = workspace_confirmer is not None
+        value = settings.public_config(
+            database_ready=bool(db_ready and schema_ready(engine)),
+            auth_ready=bool(verifier and getattr(verifier, "ready", True)),
+            stripe_verified=stripe_verified,
+            workspace_confirmation_configured=confirmation_ready,
+        )
+        value["workspace_confirmation_configured"] = confirmation_ready
         return value
 
     @app.get("/enrollment/v1/status")

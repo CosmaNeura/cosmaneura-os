@@ -212,9 +212,8 @@ def stripe_adapter():
             return httpx.Response(200, json={"id": settings.stripe_account_id})
         if path.startswith("/v1/prices/"):
             price_id = path.split("/")[-1]
-            amount = observed["price_amount"] if price_id == settings.stripe_base_price_id else 10000
             return httpx.Response(200, json={"id": price_id, "livemode": False, "active": True, "currency": "usd",
-                "unit_amount": amount, "type": "recurring", "billing_scheme": "per_unit",
+                "unit_amount": observed["price_amount"], "type": "recurring", "billing_scheme": "per_unit",
                 "recurring": {"interval": "month", "interval_count": 1, "usage_type": "licensed"}})
         if path.startswith("/v1/billing_portal/configurations/"):
             return httpx.Response(200, json={"id": settings.stripe_portal_configuration_id, "livemode": False, "active": True,
@@ -234,7 +233,7 @@ def stripe_adapter():
     adapter = StripeCommerce(settings, client=httpx.Client(transport=httpx.MockTransport(transport)))
     request = {"attempt_id": "attempt-example", "practice_id": "practice-example", "human_seats": 10,
                "email": "owner@example.invalid", "customer_id": None, "base_price_id": settings.stripe_base_price_id,
-               "additional_price_id": settings.stripe_additional_price_id, "account_id": settings.stripe_account_id,
+               "account_id": settings.stripe_account_id,
                "api_version": settings.stripe_api_version, "live_mode": False, "trial_days": 14,
                "app_origin": settings.public_app_origin}
     return adapter, request, observed
@@ -244,12 +243,13 @@ def test_real_stripe_transport_freezes_approved_price_total_exact_trial_and_card
     adapter, request, observed = stripe_adapter
     adapter.create_checkout(request, "saved-key")
     data = observed["posts"][0]["data"]
-    assert data["line_items[0][quantity]"] == ["1"]
-    assert data["line_items[1][quantity]"] == ["9"]
+    assert data["line_items[0][price]"] == [adapter.settings.stripe_base_price_id]
+    assert data["line_items[0][quantity]"] == ["10"]
+    assert "line_items[1][quantity]" not in data
     assert data["subscription_data[trial_period_days]"] == ["14"]
     assert data["payment_method_collection"] == ["always"]
     assert data["payment_method_types[0]"] == ["card"]
-    assert data["metadata[monthly_total_cents]"] == ["120000"]
+    assert data["metadata[monthly_total_cents]"] == ["300000"]
     assert data["automatic_tax[enabled]"] == ["false"]
     assert data["subscription_data[trial_settings][end_behavior][missing_payment_method]"] == ["pause"]
     assert observed["posts"][0]["key"] == "saved-key"

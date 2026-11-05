@@ -10,7 +10,7 @@ const SECRET_NAMES = new Set([
 ]);
 const PUBLIC_NAMES = new Set([
   'ENROLLMENT_STRIPE_ACCOUNT_ID', 'ENROLLMENT_STRIPE_BASE_PRICE_ID',
-  'ENROLLMENT_STRIPE_ADDITIONAL_PRICE_ID', 'ENROLLMENT_STRIPE_PORTAL_CONFIGURATION_ID',
+  'ENROLLMENT_STRIPE_PORTAL_CONFIGURATION_ID',
 ]);
 const FLAGS = new Set([
   'enabled', 'clerk_methods_verified', 'stripe_integration_enabled',
@@ -84,11 +84,6 @@ export function render(input, { preflightTrustFile } = {}) {
     requireValue(typeof value === 'string' && new RegExp(`^${prefix}[A-Za-z0-9_]+$`).test(value), 'Invalid Stripe catalog reference.');
     stripe[`ENROLLMENT_STRIPE_${name.toUpperCase()}`] = value;
   }
-  if (stripe.ENROLLMENT_STRIPE_BASE_PRICE_ID && stripe.ENROLLMENT_STRIPE_ADDITIONAL_PRICE_ID) {
-    requireValue(stripe.ENROLLMENT_STRIPE_BASE_PRICE_ID !== stripe.ENROLLMENT_STRIPE_ADDITIONAL_PRICE_ID,
-      'First and additional human seats need distinct price references.');
-  }
-
   exact(input.readiness, [...FLAGS], 'readiness');
   requireValue(Object.values(input.readiness).every(value => typeof value === 'boolean'), 'Readiness fields must be booleans.');
   const flags = Object.fromEntries([...FLAGS].map(name => [name, input.readiness[name] ?? false]));
@@ -157,8 +152,8 @@ export function render(input, { preflightTrustFile } = {}) {
     version: 1, environment, source_commit: input.source_commit, image: input.image,
     application_origin: app, enrollment_api_origin: api, api_prefix: '/enrollment/v1',
     signup_path: '/onboarding', sign_in_path: '/sign-in',
-    pricing: { currency: 'usd', interval: 'month', first_human_cents: 30000,
-      additional_human_cents: 10000, max_self_serve_humans: 10, trial_days: 14,
+    pricing: { currency: 'usd', interval: 'month', seat_cents: 30000,
+      max_self_serve_humans: 10, trial_days: 14,
       paid_roles: 'every_human_user', above_limit: 'negotiated' },
     qualification: { ...input.qualification, ...(stagingPreflight ? { staging_preflight_sha256: stagingPreflight } : {}) },
     startup_command: ['uvicorn', 'cosmas_os.enrollment.api:app', '--host', '0.0.0.0', '--port', '8000'],

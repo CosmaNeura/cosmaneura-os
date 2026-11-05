@@ -152,7 +152,7 @@ def test_immutable_document_receipt_stale_version_and_unchecked_authority(lab):
             session.execute(text("DELETE FROM enrollment_baa_acceptances"))
 
 
-@pytest.mark.parametrize(("humans", "total"), [(1, 30000), (2, 40000), (10, 120000), (11, None)])
+@pytest.mark.parametrize(("humans", "total"), [(1, 30000), (2, 60000), (5, 150000), (10, 300000), (11, None)])
 def test_human_pricing_includes_owner_admin_staff_and_negotiated_upper_bound(lab, humans, total):
     _, client = lab
     owner = signed(client)

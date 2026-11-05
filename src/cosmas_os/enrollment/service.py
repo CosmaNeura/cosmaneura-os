@@ -23,6 +23,7 @@ from .domain import (
     BAA_SHA256,
     BAA_VERSION,
     CONTRACT,
+    SEAT_CENTS,
     STRIPE_CONTRACT,
     TRIAL,
     CommercePort,
@@ -35,6 +36,7 @@ from .domain import (
     quote,
     utc,
 )
+from .mail import DisabledInvitationNotifier, InvitationNotifier
 from .models import (
     Acceptance,
     Account,
@@ -72,12 +74,14 @@ class EnrollmentService:
     def __init__(self, sessions: sessionmaker, settings: EnrollmentSettings, commerce: CommercePort,
                  *, period_time: PeriodTime | None = None,
                  native_workspace_authority: NativeWorkspaceAuthority | None = None,
-                 workspace_allocation_scheduler: WorkspaceAllocationSchedulerPort | None = None):
+                 workspace_allocation_scheduler: WorkspaceAllocationSchedulerPort | None = None,
+                 invitation_notifier: InvitationNotifier | None = None):
         self.sessions, self.settings, self.commerce = sessions, settings, commerce
         if period_time is not None and settings.data_mode != "synthetic":
             raise ValueError("Synthetic period time cannot be installed in production enrollment")
         self._period_time = period_time
         self.native_workspace_authority = native_workspace_authority
+        self.invitation_notifier = invitation_notifier or DisabledInvitationNotifier()
         self.workspace_allocation_scheduler = workspace_allocation_scheduler
 
     def _period_now(self) -> datetime:
@@ -607,6 +611,9 @@ class EnrollmentService:
         return invitation_id + "." + hmac.new(secret.encode(), invitation_id.encode(), hashlib.sha256).hexdigest()
 
     def invite(self, identity: HumanIdentity, key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        # Fresh creates only: idempotent replays skip the action, so mail is not resent.
+        created: dict[str, str] = {}
+
         def action(session, account):
             practice, _ = self._practice(session, account, owner=True)
             existing = session.scalar(select(Invitation).where(Invitation.practice_id == practice.id,
@@ -626,9 +633,28 @@ class EnrollmentService:
             session.add(Invitation(id=invitation_id, practice_id=practice.id, email=payload["email"].strip().lower(),
                                   role=payload["role"], can_sign=payload["can_sign"], token_sha256=hashlib.sha256(token.encode()).hexdigest(), expires_at=expiry))
             practice.revision += 1
-            return {"id": invitation_id, "expires_at": iso(expiry), "role": payload["role"], "can_sign": payload["can_sign"], "enrollment": self._view(session, account)}
+            created.update({
+                "practice_display_name": practice.display_name,
+                "email": payload["email"].strip().lower(),
+                "expires_at": iso(expiry) or "",
+                "role": payload["role"],
+            })
+            return {"id": invitation_id, "expires_at": iso(expiry), "role": payload["role"], "can_sign": payload["can_sign"],
+                    "enrollment": self._view(session, account)}
         response = self._run(identity, key, "invite", payload, action)
-        return {**response, "token": self._invite_token(response["id"])}
+        token = self._invite_token(response["id"])
+        email_sent = False
+        if created and self.settings.invitation_mail_configured():
+            invite_url = (self.settings.public_app_origin.rstrip("/")
+                          + "/onboarding?invite=" + token)
+            email_sent = bool(self.invitation_notifier.send_invitation(
+                to_email=created["email"],
+                practice_display_name=created["practice_display_name"],
+                invite_url=invite_url,
+                expires_at=created["expires_at"],
+                role=created["role"],
+            ))
+        return {**response, "token": token, "email_sent": email_sent}
 
     def join(self, identity: HumanIdentity, key: str, payload: dict[str, Any]) -> dict[str, Any]:
         def action(session, account):
@@ -831,7 +857,7 @@ class EnrollmentService:
                 attempt_id = identifier()
                 request = {"attempt_id": attempt_id, "practice_id": practice.id, "human_seats": practice.human_seats,
                            "email": identity.email, "customer_id": practice.stripe_customer_id,
-                           "base_price_id": self.settings.stripe_base_price_id, "additional_price_id": self.settings.stripe_additional_price_id,
+                           "base_price_id": self.settings.stripe_base_price_id,
                            "account_id": self.settings.stripe_account_id, "live_mode": self.settings.stripe_live_mode,
                            "api_version": self.settings.stripe_api_version, "trial_days": 14,
                            "app_origin": self.settings.public_app_origin.rstrip("/")}
@@ -863,15 +889,13 @@ class EnrollmentService:
         request = attempt.request
         statuses = {"trialing", "active", "past_due", "unpaid", "paused", "canceled", "incomplete", "incomplete_expired"}
         items = (sub.get("items") or {}).get("data")
-        quantities = {request["base_price_id"]: 1}
-        if request["human_seats"] > 1:
-            quantities[request["additional_price_id"]] = request["human_seats"] - 1
-        if (not isinstance(items, list) or len(items) != len(quantities)
+        seat_price = request["base_price_id"]
+        if (not isinstance(items, list) or len(items) != 1
                 or sub.get("livemode") is not request["live_mode"] or sub.get("status") not in statuses
                 or metadata.get("practice_id") != practice.id or metadata.get("attempt_id") != attempt.id
                 or metadata.get("contract") != STRIPE_CONTRACT or metadata.get("trial_days") != "14"
                 or metadata.get("human_seats") != str(practice.human_seats)
-                or metadata.get("monthly_total_cents") != str(30000 + 10000 * (practice.human_seats - 1))
+                or metadata.get("monthly_total_cents") != str(SEAT_CENTS * practice.human_seats)
                 or not isinstance(sub.get("customer"), str) or not sub["customer"].startswith("cus_")
                 or not isinstance(sub.get("id"), str) or not sub["id"].startswith("sub_")
                 or (practice.stripe_customer_id and practice.stripe_customer_id != sub["customer"])
@@ -879,15 +903,14 @@ class EnrollmentService:
             raise EnrollmentError("stripe_binding_invalid", "Subscription is not bound to this practice and offer.", 503)
         if sub.get("discounts") or sub.get("default_tax_rates") or (sub.get("automatic_tax") or {}).get("enabled") is True:
             raise EnrollmentError("stripe_price_invalid", "Subscription contains unapproved taxes or discounts.", 503)
-        for item in items:
-            price = item.get("price") or {}
-            expected_amount = 30000 if price.get("id") == request["base_price_id"] else 10000
-            recurring = price.get("recurring") or {}
-            if (price.get("id") not in quantities or item.get("quantity") != quantities.pop(price["id"])
-                    or isinstance(item.get("quantity"), bool) or price.get("unit_amount") != expected_amount
-                    or price.get("currency") != "usd" or recurring.get("interval") != "month"
-                    or recurring.get("interval_count") != 1 or recurring.get("usage_type") != "licensed"):
-                raise EnrollmentError("stripe_price_invalid", "Subscription charges do not match the approved human-seat total.", 503)
+        item = items[0]
+        price = item.get("price") or {}
+        recurring = price.get("recurring") or {}
+        if (price.get("id") != seat_price or item.get("quantity") != practice.human_seats
+                or isinstance(item.get("quantity"), bool) or price.get("unit_amount") != SEAT_CENTS
+                or price.get("currency") != "usd" or recurring.get("interval") != "month"
+                or recurring.get("interval_count") != 1 or recurring.get("usage_type") != "licensed"):
+            raise EnrollmentError("stripe_price_invalid", "Subscription charges do not match the approved human-seat total.", 503)
         start, end = sub.get("trial_start"), sub.get("trial_end")
         if (not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool)
                 or end - start != int(TRIAL.total_seconds())):

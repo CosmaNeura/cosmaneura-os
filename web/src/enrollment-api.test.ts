@@ -43,7 +43,7 @@ it('bounds a login provider that ignores abort and emits no later request',async
   expect(await result).toMatchObject({status:504});expect(fetch).not.toHaveBeenCalled();
 });
 it('fails closed for forged ready state, wrong BAA, wrong price, or unqualified production configuration',()=>{
-  const ready=enrollmentStatus('ready',5,5);expect(validateEnrollmentStatus(ready).quote?.monthly_total_cents).toBe(70000);
+  const ready=enrollmentStatus('ready',5,5);expect(validateEnrollmentStatus(ready).quote?.monthly_total_cents).toBe(150000);
   expect(()=>validateEnrollmentStatus({...ready,billing:{...ready.billing,status:'none'}})).toThrow();
   expect(()=>validateEnrollmentStatus({...ready,workspace:{...ready.workspace,organization_id:null}})).toThrow();
   expect(()=>validateEnrollmentStatus({...ready,quote:{...ready.quote,monthly_total_cents:30000}})).toThrow();

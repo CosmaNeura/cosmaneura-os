@@ -35,10 +35,10 @@ it.skipIf(!base)('runs signed account, legal practice, denied staff signer, pend
   const ownerFlow=()=>ownerRoot.render(<EnrollmentFlow api={api} identity={ownerId} config={config} initialName={owner.display_name} initialEmail={owner.email} search="?plan=small&seats=5&price=1" navigate={url=>navigations.push(url)}/>);
   await act(ownerFlow);await fill(ownerHost,'name','Invented Owner');await fill(ownerHost,'title','Owner');await click(ownerHost,'Save and continue');
   await wait(()=>expect(ownerHost.textContent).toContain('Set up your practice'));
-  expect(ownerHost.textContent).toContain('$700/month');
+  expect(ownerHost.textContent).toContain('$1,500/month');
   for(const [field,value]of Object.entries({legal_name:'Invented Onboarding Clinic',address_line1:'123 Invented Street',city:'Invented City',region:'NY',postal_code:'10001',administrative_email:'office@example.invalid'}))await fill(ownerHost,field,value);
   await checked(ownerHost,'covered');await click(ownerHost,'Save and continue');await wait(()=>expect(ownerHost.querySelector('iframe')).toBeTruthy());
-  const savedPractice=await api.status(ownerId);expect(savedPractice.practice?.human_seats).toBe(5);expect(savedPractice.quote?.monthly_total_cents).toBe(70000);
+  const savedPractice=await api.status(ownerId);expect(savedPractice.practice?.human_seats).toBe(5);expect(savedPractice.quote?.monthly_total_cents).toBe(150000);
   const invitation=await api.invitation(ownerId,{expected_revision:savedPractice.revision,email:staff.email,role:'staff',can_sign:false},crypto.randomUUID());
   await act(async()=>staffRoot.render(<EnrollmentFlow api={api} identity={staffId} config={config} initialName={staff.display_name} initialEmail={staff.email} search={'?invite='+encodeURIComponent(invitation.token)} navigate={url=>navigations.push(url)}/>));
   await wait(()=>expect(button(staffHost,'Join practice')||staffHost.querySelector('#enrollment-name')).toBeTruthy());
@@ -64,7 +64,7 @@ it.skipIf(!base)('runs signed account, legal practice, denied staff signer, pend
   await click(ownerHost,'Check setup and payment');await click(ownerHost,'Resume secure checkout');await wait(()=>expect(navigations).toHaveLength(2));expect(navigations[1]).toBe(firstCheckout);
   const checkoutNumber=new URL(firstCheckout).pathname.match(/^\/c\/synthetic([0-9]+)$/)?.[1];expect(checkoutNumber).toBeTruthy();await lab('/lab/checkout/complete',{session_id:'cs_synthetic'+checkoutNumber});
   await click(ownerHost,'Check setup and payment');await wait(()=>expect(button(ownerHost,'Open Chief')).toBeTruthy());
-  const ready=await api.status(ownerId);expect(ready.stage).toBe('ready');expect(ready.quote?.monthly_total_cents).toBe(70000);expect(ready.agreement?.accepted).toBe(true);
+  const ready=await api.status(ownerId);expect(ready.stage).toBe('ready');expect(ready.quote?.monthly_total_cents).toBe(150000);expect(ready.agreement?.accepted).toBe(true);
   await click(ownerHost,'Open Chief');await wait(()=>expect(navigations).toContain(ready.workspace.url));
   // Staff access is granted only after the real signed confirmation endpoint verifies membership proof.
   let staffConfirmations=0;

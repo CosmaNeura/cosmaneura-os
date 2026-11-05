@@ -165,7 +165,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
       if(result.config){setLiveConfig(result.config);setConfigChecked(true);}
       if(result.available){setPractices(result.available);setChosenPractice(result.enrollment.practice?.id??'');}
       if(result.joined)setInviteToken('');
-      if(result.invitation){setInvitation(result.invitation);setMessage(result.invitationPurpose==='team'?'The invitation is saved. Share this link with your teammate.':'Your progress is saved. Share this invitation with the authorized representative.');}
+      if(result.invitation){setInvitation(result.invitation);setMessage(result.invitationPurpose==='team'?(result.invitation.email_sent?'The invitation is saved and the email was sent. You can still share the link.':'The invitation is saved. Share this link with your teammate.'):'Your progress is saved. Share this invitation with the authorized representative.');}
       if(result.url){try{navigate(stripeDestination(result.url));}catch(error){setMessage(failure(error));}}
     });
   };
@@ -295,7 +295,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
         {needsSigner||status.practice?.can_sign===false?<><h2>Use an authorized representative</h2><p>An authorized representative must sign for this practice. Your completed steps are saved. The practice owner can invite someone authorized to bind the practice. An invitation reserves a purchased human seat.</p>
           {ownsPractice?<form className="enrollment-form" onSubmit={requestSigner} noValidate><Field name="signer_email" label="Representative’s email" type="email" value={signerEmail} onChange={setSignerEmail} error={errors.signer_email} disabled={formDisabled}/>
             <div className="enrollment-actions"><button className="primary" disabled={formDisabled}>Create representative invitation</button><button type="button" onClick={()=>setNeedsSigner(false)} disabled={formDisabled}>Return to agreement</button></div></form>:<p>Ask the practice owner to invite the authorized representative. Delegated signing permission does not grant billing or owner access.</p>}
-          {invitation&&<section className="enrollment-status"><label>Share this invitation<input className="enrollment-link-field" readOnly value={inviteLink}/></label><p>Expires {formatDate(invitation.expires_at)}. The recipient signs in with their own account.</p></section>}</>:
+          {invitation&&<section className="enrollment-status"><label>Share this invitation<input className="enrollment-link-field" readOnly value={inviteLink}/></label><p>Expires {formatDate(invitation.expires_at)}. {invitation.email_sent?'Invitation email sent. ':'No email was sent; share the link directly. '}The recipient signs in with their own account.</p></section>}</>:
           <form className="enrollment-form" onSubmit={sign} noValidate><Field name="signature_name" label="Signer’s full name" value={signatureName} onChange={setSignatureName} error={errors.signature_name} autoComplete="name" disabled={formDisabled}/>
             <Field name="signature_title" label="Signer’s title" value={signatureTitle} onChange={setSignatureTitle} error={errors.signature_title} autoComplete="organization-title" disabled={formDisabled}/>
             <p>Verified signer email: {status.profile?.email}</p>
@@ -318,7 +318,7 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
         {stage==='payment'&&newTrial&&activationAvailable&&<><p>A card is required. Stripe handles card entry and verification. Your first subscription charge follows the confirmed 14-day trial unless you cancel before it ends.</p><p className="enrollment-hint">The hosted checkout confirms the final tax treatment and billing terms before you agree. No card details are saved in this browser.</p></>}
         {(stage==='payment'&&!activationAvailable||stage==='finishing_setup'&&status.billing.status==='pending'&&!checkoutRecoveryAvailable)&&newTrial&&<p role="status">Trial activation is not available yet. Your completed steps are saved. Check progress to see when you can continue.</p>}
         {stage==='payment_action_required'&&<p>Use your saved billing account to review payment details. Check setup after completing any required payment action. Your original trial dates are preserved.</p>}
-        {stage==='ready'&&<><p role="status">Your practice, agreement and subscription are confirmed. Open Chief to begin a supported practice task.</p>{status.billing.cancel_at_period_end&&<p>Cancellation is scheduled. Review its effective date in the billing portal.</p>}</>}
+        {stage==='ready'&&<><p role="status">Your practice, agreement and subscription are confirmed. Install CosmaBot on Mac or iPhone for day-to-day use, then open Chief when you are ready for a supported practice task.</p>{status.billing.cancel_at_period_end&&<p>Cancellation is scheduled. Review its effective date in the billing portal.</p>}</>}
         {status.action_required&&!preparingWorkspace&&<p className="enrollment-hint">An additional setup action is required. Check progress or contact your practice owner.</p>}
         <div className="enrollment-actions">
           {stage==='ready'&&<button className="primary" onClick={chief} disabled={formDisabled}>Open Chief</button>}
@@ -331,12 +331,20 @@ export function EnrollmentFlow({api,identity,config,accountControls,initialName=
           {['ready','payment_action_required','canceled'].includes(stage??'')&&ownsPractice&&status.billing.status!=='none'&&<button onClick={portal} disabled={formDisabled}>Manage billing or cancel</button>}
           <button onClick={()=>{stopProgressCheck();setReview('practice');}} disabled={formDisabled}>Review practice</button>
         </div>
+        {stage==='ready'&&<section className="enrollment-receipt" aria-label="Install CosmaBot"><h2>Install CosmaBot on Mac or iPhone</h2>
+          <p>Open Chief opens your practice workspace in the browser or an already-installed app. It is not the Mac or iPhone install step.</p>
+          <p>After you install the app, sign in with the same CosmaBot account you used here. Your practice organization and Box stay bound from this setup.</p>
+          <div className="enrollment-actions">
+            {liveConfig.client_install?.mac_download_url?<a className="primary" href={liveConfig.client_install.mac_download_url} target="_blank" rel="noopener noreferrer">Download for Mac</a>:<p className="enrollment-hint" role="status">Mac download will appear here when CosmaBot publishes the current desktop package.</p>}
+            {liveConfig.client_install?.iphone_download_url?<a className="primary" href={liveConfig.client_install.iphone_download_url} target="_blank" rel="noopener noreferrer">Get CosmaBot for iPhone</a>:<p className="enrollment-hint" role="status">iPhone download will appear here when CosmaBot publishes the current TestFlight or App Store build.</p>}
+          </div>
+        </section>}
         {stage==='ready'&&ownsPractice&&teamOpen&&<section className="enrollment-receipt" aria-label="Invite a teammate"><h2>Invite a teammate</h2><p>Every human needs a purchased seat, including office staff. Pending invitations reserve a seat. This joins the existing practice agreement and subscription.</p>
           <form className="enrollment-form" onSubmit={inviteTeammate} noValidate><Field name="team_email" label="Teammate’s email" type="email" value={teamEmail} onChange={setTeamEmail} error={errors.team_email} disabled={formDisabled}/>
             <label className="enrollment-field">Practice role<select value={teamRole} disabled={formDisabled} onChange={event=>{setTeamRole(event.target.value as 'admin'|'staff');if(event.target.value==='staff')setTeamCanSign(false);}}><option value="staff">Staff</option><option value="admin">Administrator</option></select></label>
             <label className="enrollment-check"><input type="checkbox" checked={teamCanSign} disabled={formDisabled||teamRole!=='admin'} onChange={event=>setTeamCanSign(event.target.checked)}/>Allow this administrator to sign practice agreements. This does not grant owner or billing access.</label>
             <button className="primary" disabled={formDisabled}>Create teammate invitation</button>
-          </form>{invitation&&<label className="enrollment-field">Share invitation link<input className="enrollment-link-field" readOnly value={inviteLink}/><span className="enrollment-hint">Expires {formatDate(invitation.expires_at)}. No email was sent; share the link directly.</span></label>}
+          </form>{invitation&&<label className="enrollment-field">Share invitation link<input className="enrollment-link-field" readOnly value={inviteLink}/><span className="enrollment-hint">Expires {formatDate(invitation.expires_at)}. {invitation.email_sent?'Invitation email sent to the teammate. You can also share this link.':liveConfig.invitation_email_configured?'Invitation email could not be sent; share the link directly.':'No email was sent; share the link directly.'}</span></label>}
         </section>}{receipt&&<Receipt value={receipt}/>}</>}
     </section><footer className="enrollment-footer">Your sign-in, agreement and billing stay with your practice. <a href={BAA.pdf_url} target="_blank" rel="noopener noreferrer">BAA v2.3</a><a href={ENROLLMENT_CONTACT}>Contact us</a></footer>
   </main>;

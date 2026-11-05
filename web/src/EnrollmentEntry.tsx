@@ -27,16 +27,18 @@ export function EnrollmentEntry({apiBase=import.meta.env.VITE_ENROLLMENT_API_BAS
   const [config,setConfig]=useState<EnrollmentConfig|null>(null),[failed,setFailed]=useState(connection.error),[retry,setRetry]=useState(0);
   useEffect(()=>{setConfig(null);setFailed(connection.error);if(!connection.api)return;
     let live=true;const controller=new AbortController();
+    const timer=window.setTimeout(()=>{controller.abort();if(live)setFailed(true);},8_000);
     void connection.api.config(controller.signal).then(value=>{
       if(!live)return;
       if(publishableKey&&value.clerk_publishable_key!==publishableKey)throw new EnrollmentError(503);
       setConfig(value);
-    }).catch(()=>{if(live)setFailed(true);});return()=>{live=false;controller.abort();};
+    }).catch(()=>{if(live)setFailed(true);}).finally(()=>{window.clearTimeout(timer);});
+    return()=>{live=false;window.clearTimeout(timer);controller.abort();};
   },[connection,publishableKey,retry]);
   if(failed||!config||!config.enabled||!config.auth_configured||!config.clerk_publishable_key||!connection.api)return <main className="enrollment-page">
     <header className="enrollment-header"><a className="enrollment-brand" href="/onboarding">CosmaBot</a></header>
     <section className="enrollment-card"><h1>{!failed&&!config?'Checking account availability…':'Account setup is not available yet'}</h1>
-      <p role={failed?'alert':'status'}>{!failed&&!config?'We are checking the account service before opening sign-in.':'Your account and trial have not been created. Return when account enrollment is available.'}</p>
+      <p role={failed?'alert':'status'}>{!failed&&!config?'We are checking the account service before opening sign-in. This usually finishes in a few seconds.':failed?'The account service did not respond in time or is unavailable. Your account and trial have not been created.':'Your account and trial have not been created. Return when account enrollment is available.'}</p>
       <button onClick={()=>setRetry(value=>value+1)}>Check availability</button></section></main>;
   return <ClerkProvider publishableKey={config.clerk_publishable_key} localization={enrollmentLocalization}>
     <EnrollmentClerkAccount api={connection.api} config={config}/>
@@ -68,7 +70,7 @@ function EnrollmentClerkAccount({api,config}:{api:EnrollmentApi;config:Enrollmen
       {config.data_mode==='synthetic'&&<p className="enrollment-synthetic-note" role="note">Synthetic staging · Use invented information only.</p>}
       <section className="enrollment-card"><p className="enrollment-eyebrow">Account → Practice → Agreement → Trial → Chief</p><p>{signIn?'Continue to your saved practice setup.':'Create an account to save your practice setup and review the agreement.'}</p>
         <p>Use Google, Microsoft, or email and password. Connecting a mailbox or calendar is a separate choice after setup.</p>
-        <p>{config.activation_available?'A card is required for your 14-day free trial.':'Registration is available. Your trial starts when your workspace is ready.'} Solo is $300/month; 2–10 human users are $300 for the first user plus $100 for each additional user. 11+ users require an agreed quote.</p>
+        <p>{config.activation_available?'A card is required for your 14-day free trial.':'Registration is available. Your trial starts when your workspace is ready.'} CosmaBot is $300 per seat per month. Count every human user through ten seats; 11+ users require an agreed quote.</p>
         <div className="enrollment-auth">{signIn?<SignIn routing="hash" signUpUrl={destination} forceRedirectUrl={destination}/>:<SignUp routing="hash" signInUrl={'/sign-in'+window.location.search} forceRedirectUrl={destination}/>}</div>
       </section></main>;
   }

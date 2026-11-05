@@ -2,10 +2,12 @@
 
 For the independently built staging account web app, exact public DNS records
 and verified managed-certificate stage, use [STAGING-HOSTING.md](STAGING-HOSTING.md).
-For the separate production foundation and per-practice allocated workspaces
-(docs/IaC only; founder cost yes required before apply), use
-[PRODUCTION-HOSTING.md](PRODUCTION-HOSTING.md) and
-[allocated-workspace/COST.md](allocated-workspace/COST.md).
+Production account host DNS/TLS (`app.cosmas.ai` /
+`enrollment-api.cosmas.ai`) and the separate production foundation /
+per-practice allocated workspaces (docs/IaC only; founder cost yes required
+before apply) are documented in [PRODUCTION-HOSTING.md](PRODUCTION-HOSTING.md)
+and [allocated-workspace/COST.md](allocated-workspace/COST.md). DNS stays
+founder-operated and does not open acquisition by itself.
 
 This component serves customer account/practice setup, BAA receipts and SaaS
 subscription state. It stores no clinical records and grants no access to the
@@ -52,12 +54,12 @@ continues to obtain the default session token, with no named template. Existing
 Clerk default customization and Core's sign-in settings are not changed. Rendering configuration
 does not create or qualify that Clerk setup.
 
-`stripe` contains only `account_id`, `base_price_id`, `additional_price_id` and
-`portal_configuration_id`. The base is $300/month, additional humans are
-$100/month, USD, one through ten; eleven or more is negotiated. Every human
-role is paid. Base/extra line items preserve the reused Checkout API's trial
-behavior. The backend verifies catalog, currency, intervals, modes, portal
-configuration and resulting objects before it trusts billing.
+`stripe` contains only `account_id`, `base_price_id` and
+`portal_configuration_id`. The per-seat price is $300/month USD for one through
+ten humans; eleven or more is negotiated. Every human role is paid. Checkout
+uses one line item with quantity equal to human seats. The backend verifies
+catalog, currency, intervals, modes, portal configuration and resulting objects
+before it trusts billing.
 
 `secret_references` is an environment-name map of exact versioned
 `https://<owned-vault>.vault.azure.net/secrets/<name>/<32-hex-version>` references

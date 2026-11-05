@@ -14,8 +14,8 @@ BAA_VERSION = "2.3"
 BAA_SHA256 = "9bdc110b6b2ffcc9f5e7aee653af499357d2f35dccf43c57d8bbcf70094ed34e"
 BAA_PDF_URL = "https://cosmaneura.com/baa-v2-3.pdf"
 TRIAL = timedelta(days=14)
-FIRST_HUMAN_CENTS = 30_000
-ADDITIONAL_HUMAN_CENTS = 10_000
+# Flat SaaS: every human seat is $300/month (John, 2026-11-05).
+SEAT_CENTS = 30_000
 MAX_HUMANS = 10
 SEAT_POLICY = (
     "All human seats, including owners/admin/staff. Pending invites reserve a purchased "
@@ -82,7 +82,6 @@ def quote(humans: int) -> dict[str, Any]:
     if isinstance(humans, bool) or not isinstance(humans, int) or not 1 <= humans <= 1_000:
         raise EnrollmentError("invalid_human_seats", "Choose at least one human seat.", 422)
     return {"currency": "usd", "interval": "month", "human_seats": humans,
-            "monthly_total_cents": FIRST_HUMAN_CENTS + ADDITIONAL_HUMAN_CENTS * (humans - 1)
-            if humans <= MAX_HUMANS else None,
+            "monthly_total_cents": SEAT_CENTS * humans if humans <= MAX_HUMANS else None,
             "due_today_cents": 0, "trial_days": 14, "self_serve": humans <= MAX_HUMANS,
             "seat_policy": SEAT_POLICY, "tax_treatment": "No additional tax in this checkout."}

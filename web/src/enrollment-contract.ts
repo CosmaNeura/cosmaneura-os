@@ -14,16 +14,21 @@ export const BAA = {
   pdf_url: 'https://cosmaneura.com/baa-v2-3.pdf',
 } as const;
 
+export type EnrollmentClientInstall = {
+  mac_download_url: string | null; iphone_download_url: string | null; open_chief_is_not_install: true;
+};
 export type EnrollmentConfig = {
   contract_version: typeof ENROLLMENT_CONTRACT; enabled: boolean;
   data_mode: 'disabled' | 'synthetic' | 'production'; auth_configured: boolean;
   clerk_publishable_key: string | null; auth_methods: ('google' | 'microsoft' | 'password')[];
   billing_configured: boolean; activation_available: boolean; production_qualified: boolean;
   checkout_recovery_available?: boolean;
-  blockers: string[]; allowed_workspace_origins: string[];
+  blockers: string[]; activation_blockers?: string[];
+  invitation_email_configured?: boolean; client_install?: EnrollmentClientInstall;
+  allowed_workspace_origins: string[];
   workspace_origin_policy?: EnrollmentWorkspaceOriginPolicy; baa: typeof BAA;
-  pricing: { currency: 'usd'; interval: 'month'; first_human_cents: 30000;
-    additional_human_cents: 10000; max_self_serve_humans: 10; trial_days: 14; seat_policy: string };
+  pricing: { currency: 'usd'; interval: 'month'; seat_cents: 30000;
+    max_self_serve_humans: 10; trial_days: 14; seat_policy: string };
 };
 export type EnrollmentProfile = { display_name: string; title: string; email: string };
 export type EnrollmentPractice = {
@@ -51,7 +56,7 @@ export type EnrollmentReceipt = { receipt: { id: string; practice_id: string; co
   accepted_at: string; doc_id: string; version: string; sha256: string; authority_statement: string };
   document: EnrollmentDocument };
 export type EnrollmentInvitation = { id: string; token: string; expires_at: string;
-  role: 'admin' | 'staff'; can_sign: boolean; enrollment: EnrollmentStatus };
+  role: 'admin' | 'staff'; can_sign: boolean; email_sent: boolean; enrollment: EnrollmentStatus };
 export type EnrollmentCheckout = { url: string | null; status: 'open' | 'complete' | 'pending' | 'expired'; enrollment: EnrollmentStatus };
 export type EnrollmentPractices = {active_practice_id:string|null;practices:{id:string;legal_name:string;display_name:string;role:'owner'|'admin'|'staff';workspace_status:'pending'|'provisioning'|'ready'|'failed'}[]};
 export type ProfileInput = { expected_revision: number; display_name: string; title: string };
@@ -93,19 +98,38 @@ export function validateEnrollmentConfig(value: unknown): EnrollmentConfig {
   documentIdentity(baa);
   if (v.contract_version !== ENROLLMENT_CONTRACT || !['disabled','synthetic','production'].includes(String(v.data_mode)) ||
       baa.pdf_url !== BAA.pdf_url || pricing.currency !== 'usd' || pricing.interval !== 'month' ||
-      pricing.first_human_cents !== 30000 || pricing.additional_human_cents !== 10000 ||
+      pricing.seat_cents !== 30000 ||
       pricing.max_self_serve_humans !== 10 || pricing.trial_days !== 14 ||
       !Array.isArray(v.auth_methods) || v.auth_methods.length !== 3 ||
       !['google','microsoft','password'].every(method => (v.auth_methods as unknown[]).includes(method)) ||
       !Array.isArray(v.blockers) || v.blockers.length > 30 || !Array.isArray(v.allowed_workspace_origins) || v.allowed_workspace_origins.length>20 ||
       typeof workspacePolicy !== 'string' || workspacePolicy !== 'exact' && !Object.hasOwn(PRACTICE_UUID_POLICIES, workspacePolicy) ||
       workspacePolicy !== 'exact' && PRACTICE_UUID_POLICIES[workspacePolicy as keyof typeof PRACTICE_UUID_POLICIES].dataMode !== v.data_mode) return invalid();
+  const activationBlockers = v.activation_blockers === undefined ? [] : v.activation_blockers;
+  if (!Array.isArray(activationBlockers) || activationBlockers.length > 30) return invalid();
+  const installRaw = v.client_install === undefined ? null : object(v.client_install);
+  const httpsDownload = (value: unknown): string | null => {
+    if (value === null) return null;
+    const href = text(value, 2048);
+    try { const url = new URL(href); if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return invalid(); }
+    catch { return invalid(); }
+    return href;
+  };
+  const clientInstall: EnrollmentClientInstall = installRaw ? {
+    mac_download_url: httpsDownload(installRaw.mac_download_url),
+    iphone_download_url: httpsDownload(installRaw.iphone_download_url),
+    open_chief_is_not_install: installRaw.open_chief_is_not_install === true ? true : invalid(),
+  } : { mac_download_url: null, iphone_download_url: null, open_chief_is_not_install: true };
   const config = { ...v, enabled: bool(v.enabled), auth_configured: bool(v.auth_configured),
     billing_configured: bool(v.billing_configured), activation_available: bool(v.activation_available),
     checkout_recovery_available:v.checkout_recovery_available===undefined?false:bool(v.checkout_recovery_available),
     production_qualified: bool(v.production_qualified), clerk_publishable_key: nullableText(v.clerk_publishable_key, 1024),
     workspace_origin_policy: workspacePolicy as EnrollmentWorkspaceOriginPolicy,
-    blockers: v.blockers.map(item => text(item)), allowed_workspace_origins:v.allowed_workspace_origins.map(item=>{
+    blockers: v.blockers.map(item => text(item)),
+    activation_blockers: activationBlockers.map(item => text(item)),
+    invitation_email_configured: v.invitation_email_configured === undefined ? false : bool(v.invitation_email_configured),
+    client_install: clientInstall,
+    allowed_workspace_origins:v.allowed_workspace_origins.map(item=>{
       const origin=text(item,2048);try{const url=new URL(origin);if(url.origin!==origin||url.protocol!=='https:')return invalid();}catch{return invalid();}return origin;
     }),pricing: { ...pricing, seat_policy: text(pricing.seat_policy, 1000) },
   } as EnrollmentConfig;
@@ -117,7 +141,7 @@ export function validateEnrollmentConfig(value: unknown): EnrollmentConfig {
 export function validateEnrollmentQuote(value: unknown): EnrollmentQuote {
   const v = object(value), count = integer(v.human_seats, 1, 1000), self = bool(v.self_serve);
   if (v.currency !== 'usd' || v.interval !== 'month' || v.due_today_cents !== 0 || v.trial_days !== 14 ||
-      self !== (count <= 10) || self && v.monthly_total_cents !== 30000 + (count - 1) * 10000 ||
+      self !== (count <= 10) || self && v.monthly_total_cents !== 30000 * count ||
       !self && v.monthly_total_cents !== null) return invalid();
   return { currency: 'usd', interval: 'month', human_seats: count,
     monthly_total_cents: self ? v.monthly_total_cents as number : null, due_today_cents: 0, trial_days: 14, self_serve: self };
@@ -181,7 +205,9 @@ export function validateEnrollmentInvitation(value: unknown): EnrollmentInvitati
   const v = object(value);
   if (!['admin','staff'].includes(String(v.role))) return invalid();
   return { id: text(v.id), token: text(v.token, 1024), expires_at: timestamp(v.expires_at) ?? invalid(),
-    role: v.role as EnrollmentInvitation['role'], can_sign: bool(v.can_sign), enrollment: validateEnrollmentStatus(v.enrollment) };
+    role: v.role as EnrollmentInvitation['role'], can_sign: bool(v.can_sign),
+    email_sent: v.email_sent === undefined ? false : bool(v.email_sent),
+    enrollment: validateEnrollmentStatus(v.enrollment) };
 }
 export function validateEnrollmentReceipt(value: unknown): EnrollmentReceipt {
   const v = object(value), r = object(v.receipt); documentIdentity(r);

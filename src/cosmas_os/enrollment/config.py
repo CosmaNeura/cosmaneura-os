@@ -9,14 +9,13 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .domain import (
-    ADDITIONAL_HUMAN_CENTS,
     BAA_DOC_ID,
     BAA_PDF_URL,
     BAA_SHA256,
     BAA_VERSION,
     CONTRACT,
-    FIRST_HUMAN_CENTS,
     MAX_HUMANS,
+    SEAT_CENTS,
     SEAT_POLICY,
 )
 from .environments import hosting_environment_for_data_mode
@@ -26,6 +25,13 @@ def owned_origin(value: str) -> bool:
     p = urlparse(value)
     return bool(p.scheme == "https" and p.hostname and not p.username and not p.password
                 and not p.query and not p.fragment and p.path in ("", "/"))
+
+
+def owned_https_url(value: str) -> bool:
+    """HTTPS URL with an optional path for operator webhooks / download links."""
+    p = urlparse(value)
+    return bool(p.scheme == "https" and p.hostname and not p.username and not p.password
+                and not p.query and not p.fragment and (p.path == "" or p.path.startswith("/")))
 
 
 class EnrollmentSettings(BaseSettings):
@@ -69,6 +75,13 @@ class EnrollmentSettings(BaseSettings):
     invitation_secret: SecretStr = SecretStr("")
     # Central master only. Each Box receives a derived immutable-scope key.
     runtime_admission_secret: SecretStr = SecretStr("")
+    # Invitation email stays dark until the operator webhook is configured.
+    invitation_mail_enabled: bool = False
+    invitation_mail_webhook_url: str = ""
+    invitation_mail_webhook_secret: SecretStr = SecretStr("")
+    # Public Mac / iPhone distribution URLs. Empty means "not published yet".
+    mac_download_url: str = ""
+    iphone_download_url: str = ""
     google_callback_broker_enabled: bool = False
     google_callback_broker_origin: str = ""
     google_callback_client_id: str = ""
@@ -141,14 +154,14 @@ class EnrollmentSettings(BaseSettings):
             errors.append("Configure a Stripe key matching the selected mode.")
         for name, value, prefix in [
             ("account", self.stripe_account_id, "acct_"),
-            ("base price", self.stripe_base_price_id, "price_"),
-            ("additional human price", self.stripe_additional_price_id, "price_"),
+            ("per-seat price", self.stripe_base_price_id, "price_"),
             ("portal configuration", self.stripe_portal_configuration_id, "bpc_"),
         ]:
             if not value.startswith(prefix):
                 errors.append(f"Configure the Cosmas Stripe {name}.")
-        if self.stripe_base_price_id == self.stripe_additional_price_id:
-            errors.append("The first and additional human prices must be distinct.")
+        # Legacy additional-price env may still be present; flat $300/seat uses only the base price.
+        if self.stripe_additional_price_id and not self.stripe_additional_price_id.startswith("price_"):
+            errors.append("Clear or repair the unused legacy additional Stripe price reference.")
         if not self.stripe_webhook_secret.get_secret_value().startswith("whsec_"):
             errors.append("Configure the enrollment Stripe webhook signing secret.")
         if self.stripe_api_version != "2025-09-30.clover":
@@ -178,8 +191,37 @@ class EnrollmentSettings(BaseSettings):
             errors.append("Production enrollment qualification is incomplete.")
         return errors
 
+    def invitation_mail_configured(self) -> bool:
+        return bool(self.invitation_mail_enabled
+                    and owned_https_url(self.invitation_mail_webhook_url)
+                    and len(self.invitation_mail_webhook_secret.get_secret_value()) >= 32)
+
+    def _download_url(self, value: str) -> str | None:
+        if not value:
+            return None
+        return value if owned_https_url(value) else None
+
+    def activation_blockers(self, *, billing: bool, registration_blockers: list[str],
+                            workspace_confirmation_configured: bool = True) -> list[str]:
+        """Explain why public activation remains closed without granting access."""
+        reasons: list[str] = []
+        if registration_blockers:
+            reasons.append("Registration admission is incomplete.")
+        if not self.activation_available:
+            reasons.append("ENROLLMENT_ACTIVATION_AVAILABLE is false until the staged journey receipt admits trial activation.")
+        if not self.provisioning_enabled:
+            reasons.append("Workspace provisioning is not enabled.")
+        if not self.stripe_acquisition_enabled:
+            reasons.append("Stripe acquisition remains closed.")
+        if not billing:
+            reasons.append("Stripe TEST catalog, portal, and webhook are not verified.")
+        if not workspace_confirmation_configured:
+            reasons.append("Workspace confirmation is not configured.")
+        return reasons
+
     def public_config(self, *, database_ready: bool = False, auth_ready: bool = False,
-                      stripe_verified: bool = False) -> dict:
+                      stripe_verified: bool = False,
+                      workspace_confirmation_configured: bool = True) -> dict:
         blockers = self.registration_errors()
         if not database_ready:
             blockers.append("Enrollment schema is unavailable; apply its dedicated migration.")
@@ -188,22 +230,31 @@ class EnrollmentSettings(BaseSettings):
         billing_errors = self.billing_errors()
         billing = not billing_errors and stripe_verified
         checkout_ready = bool(self.activation_available and self.provisioning_enabled
-                              and billing and not blockers)
+                              and billing and not blockers and workspace_confirmation_configured)
+        activation = checkout_ready and self.stripe_acquisition_enabled
         return {
             "contract_version": CONTRACT, "enabled": not blockers, "data_mode": self.data_mode,
             "auth_configured": not self.auth_errors() and auth_ready,
             "clerk_publishable_key": self.clerk_publishable_key or None,
             "auth_methods": ["google", "microsoft", "password"],
             "billing_configured": billing, "production_qualified": self.production_qualified,
-            "activation_available": checkout_ready and self.stripe_acquisition_enabled,
+            "activation_available": activation,
             # Existing frozen attempts retain recovery while new acquisition is closed.
             "checkout_recovery_available": checkout_ready,
             "blockers": blockers, "billing_blockers": billing_errors + ([] if stripe_verified else ["Stripe catalog and portal have not been verified."]),
+            "activation_blockers": ([] if activation else self.activation_blockers(
+                billing=billing, registration_blockers=blockers,
+                workspace_confirmation_configured=workspace_confirmation_configured)),
             "provisioning_enabled": self.provisioning_enabled,
             "allowed_workspace_origins": self.allowed_workspace_origins,
             "workspace_origin_policy": self.workspace_origin_policy(),
+            "invitation_email_configured": self.invitation_mail_configured(),
+            "client_install": {
+                "mac_download_url": self._download_url(self.mac_download_url),
+                "iphone_download_url": self._download_url(self.iphone_download_url),
+                "open_chief_is_not_install": True,
+            },
             "baa": {"doc_id": BAA_DOC_ID, "version": BAA_VERSION, "sha256": BAA_SHA256, "pdf_url": BAA_PDF_URL},
-            "pricing": {"currency": "usd", "interval": "month", "first_human_cents": FIRST_HUMAN_CENTS,
-                        "additional_human_cents": ADDITIONAL_HUMAN_CENTS, "max_self_serve_humans": MAX_HUMANS,
-                        "trial_days": 14, "seat_policy": SEAT_POLICY},
+            "pricing": {"currency": "usd", "interval": "month", "seat_cents": SEAT_CENTS,
+                        "max_self_serve_humans": MAX_HUMANS, "trial_days": 14, "seat_policy": SEAT_POLICY},
         }

@@ -24,8 +24,7 @@ runtime-admission references. Do not print API responses containing secrets.
 
 | Operator action, TEST API v1 | Required configuration |
 | --- | --- |
-| `POST /v1/products`, then `POST /v1/prices` | CosmaBot first-human product; `currency=usd`, `unit_amount=30000`, `billing_scheme=per_unit`, recurring `interval=month`, `interval_count=1`, `usage_type=licensed`, active |
-| `POST /v1/products`, then `POST /v1/prices` | CosmaBot additional-human product; same fields, `unit_amount=10000`, a distinct active price ID |
+| `POST /v1/products`, then `POST /v1/prices` | CosmaBot per-seat product; `currency=usd`, `unit_amount=30000`, `billing_scheme=per_unit`, recurring `interval=month`, `interval_count=1`, `usage_type=licensed`, active. Checkout quantity equals human seats. |
 | `POST /v1/billing_portal/configurations` | Dedicated active TEST configuration: invoice history and payment-method update enabled; cancellation enabled at period end; subscription/quantity/plan edits and customer edits disabled; public portal login disabled; no retention coupon or proration |
 | `POST /v1/webhook_endpoints` | Exact selected enrollment API origin + `/enrollment/v1/webhooks/stripe`; account endpoint, not Connect; explicitly pin endpoint `api_version=2025-09-30.clover`; enable only the events below |
 
@@ -61,13 +60,14 @@ permissions. Webhook reception authenticates its signature, not that API key.
 
 ## 2. Admit only the prepared staging journey
 
-Set TEST mode (`ENROLLMENT_STRIPE_LIVE_MODE=false`) and pin the account, two
-prices, portal ID, API version and two Stripe secret references. The renderer
-uses `ENROLLMENT_DATA_MODE=synthetic` for staging; run the real enrollment API
-entrypoint, not the loopback lab/fake-provider entrypoint. Restart the API after
-changing the catalog/configuration: its public billing admission includes a
-startup catalog check. Confirm `/enrollment/v1/config.billing_configured=true`;
-`/ready` returning 200 alone proves only registration admission.
+Set TEST mode (`ENROLLMENT_STRIPE_LIVE_MODE=false`) and pin the account, one
+per-seat price (`ENROLLMENT_STRIPE_BASE_PRICE_ID`), portal ID, API version and
+two Stripe secret references. The renderer uses `ENROLLMENT_DATA_MODE=synthetic`
+for staging; run the real enrollment API entrypoint, not the loopback
+lab/fake-provider entrypoint. Restart the API after changing the
+catalog/configuration: its public billing admission includes a startup catalog
+check. Confirm `/enrollment/v1/config.billing_configured=true`; `/ready`
+returning 200 alone proves only registration admission.
 
 Enable the staged trial only after the independent DB,
 Clerk methods, exact BAA, provisioned Box, owner initial setup and actual scoped
@@ -78,11 +78,11 @@ and activation pending: no Checkout, subscription or trial clock.
 
 Every human consumes a purchased seat, including owner/admin/staff and pending
 invites; paused humans retain a seat until explicitly removed. Agents consume
-none. Total monthly USD is `300 + 100 * (humans - 1)`: 1 = $300, 2 = $400,
-5 = $700, 10 = $1,200. Eleven or more cannot open Checkout. Mid-cycle seat
-changes and portal plan/quantity changes are unavailable. The current offer
-adds no tax, discounts, fees or add-ons; approve that treatment and cancellation
-and notification terms before `commercial_terms_verified`.
+none. Total monthly USD is `300 * humans`: 1 = $300, 2 = $600, 5 = $1,500,
+10 = $3,000. Eleven or more cannot open Checkout. Mid-cycle seat changes and
+portal plan/quantity changes are unavailable. The current offer adds no tax,
+discounts, fees or add-ons; approve that treatment and cancellation and
+notification terms before `commercial_terms_verified`.
 
 ## 3. Run the bound owner/staff test journey
 
@@ -96,7 +96,7 @@ customer IDs, workspace destinations and trial dates never come from the client.
 | Case | Action and acceptance evidence |
 | --- | --- |
 | Account to readiness | Owner account → practice → exact v2.3 BAA/immutable receipt → actual owner setup/confirmation. Attempt `POST /enrollment/v1/checkout` while pending: denied, no provider object and no trial start. |
-| Correct price/card | At ready, inspect `GET /enrollment/v1/quote`, then `POST /enrollment/v1/checkout`. Hosted TEST Checkout requires a card, base quantity 1 plus extra quantity `humans-1`, zero due today, monthly USD total above, exactly 14 trial days, no added charge items. Use Stripe's documented TEST cards, never a real card. |
+| Correct price/card | At ready, inspect `GET /enrollment/v1/quote`, then `POST /enrollment/v1/checkout`. Hosted TEST Checkout requires a card, one line item with quantity `humans` at $300/seat, zero due today, monthly USD total above, exactly 14 trial days, no added charge items. Use Stripe's documented TEST cards, never a real card. |
 | Canceled or lost Checkout | Follow its cancel return before payment, reload and `POST /enrollment/v1/recover`. Same stored open session/attempt, no subscription/trial/access. Repeated `/checkout` recovers it; provider-confirmed expiry without a subscription permits a fresh attempt. An uncertain old attempt requires operator reconciliation, not another subscription. |
 | Successful activation | Complete hosted Checkout; recover/reconcile the saved session and subscription. Save exact IDs and UTC trial start/end; difference is `1,209,600` seconds. Redirect alone grants nothing. Owner and qualified invited staff use the same practice subscription and each pass the real runtime `/account/identity` gate. |
 | Portal/card update | Owner `POST /enrollment/v1/portal`; server chooses the stored customer, pinned portal and return origin. Invoice history/card update/cancellation work; no plan or seat editing. Card update preserves the saved trial start/end and creates no early nonzero invoice. Staff cannot open owner billing operations. |
@@ -127,7 +127,8 @@ registered practice's timed runtime-access transition.
 In a separate disposable TEST sandbox, recreate the identical catalog/portal
 policy and use an observation endpoint that does not target enrollment. Create a clock with
 `POST /v1/test_helpers/test_clocks`, then a **new** customer with its `test_clock`,
-and a subscription using the corresponding two prices/quantities and `trial_period_days=14`.
+and a subscription using the single per-seat price with quantity equal to human
+seats and `trial_period_days=14`.
 Use only Stripe TEST payment methods. Create separate canceled, successful-paid
 and failed-payment cohorts. Give these provider-only objects no enrollment
 contract/practice metadata. A second endpoint in the enrollment sandbox would

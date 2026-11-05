@@ -13,12 +13,12 @@ usable, and then sends the owner to card-only Stripe Checkout. A successful
 return URL alone never grants access. Canonical provider evidence and the
 registered workspace's signed admission contract determine access.
 
-The offer is USD monthly: $300 for the first human, $100 for each additional
-human through ten, and negotiated pricing above ten. Owners, providers, office
-staff and administrators each occupy a paid seat. Pending invitations reserve
-seats; paused members retain seats. Seat changes and proration remain closed.
-The original trial is exactly 14 usable UTC days and cannot be restarted by
-duplicate requests, webhook delivery or billing recovery.
+The offer is USD monthly: $300 per human seat through ten seats, and negotiated
+pricing above ten. A card is collected at signup Checkout. Owners, providers,
+office staff and administrators each occupy a paid seat. Pending invitations
+reserve seats; paused members retain seats. Seat changes and proration remain
+closed. The original trial is exactly 14 usable UTC days and cannot be
+restarted by duplicate requests, webhook delivery or billing recovery.
 
 The central account hostname is `onboarding.staging.cosmas.ai`; its API is
 `enrollment-api.staging.cosmas.ai`. Account-only builds route every unmatched

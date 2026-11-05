@@ -408,3 +408,27 @@ IMPLEMENTATION IMPACT:
   from customer accounts, payment references and clinical data. Trial feature,
   tax, seat-change and cancellation details must be explicitly represented;
   this entry does not invent negotiated terms or patient-data readiness.
+
+### DL-20261105-01
+
+- **Status:** ACCEPTED
+- **Date:** 2026-11-05
+- **Ruling:** CosmaBot self-serve pricing is **$300 per seat per month** with a
+  **14-day free trial**. Card is collected at signup via Stripe Checkout
+  (`payment_method_collection: always`, card-only), matching the existing
+  staging delivery contract. Eleven or more seats remain negotiated. Every
+  human user is a paid seat; agents are not seats. Cosmas/$89 pricing is
+  unchanged and out of scope.
+- **Rationale:** Owner replaced the October 31 tiered offer ($300 first human
+  plus $100 each additional) with flat per-seat pricing so signup UI, plan
+  picker, Stripe TEST catalog, enrollment copy and handoffs share one model.
+- **Supersedes:** The commercial-terms dollar amounts in
+  `DL-20261031-ONBOARDING-01` (tiered $300 + $100). That entry's Clerk/BAA/
+  trial-clock/isolation rulings remain in force.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Direct instruction from John Clemente on
+  Thursday, November 5, 2026, at 10:08am ET.
+- **Implementation impact:** One Stripe TEST price at `unit_amount=30000` with
+  Checkout quantity equal to human seats; public config exposes `seat_cents`
+  instead of `first_human_cents` / `additional_human_cents`. Stripe remains
+  TEST-only until an explicit founder live switch.
