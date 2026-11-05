@@ -16,8 +16,14 @@ const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 let root:Root,host:HTMLDivElement;
 const visible=(element:Element)=>!element.closest('[hidden]');
 const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(item=>visible(item)&&(item.textContent?.trim()===name||item.getAttribute('aria-label')===name));
-const click=async(name:string)=>{await vi.waitFor(()=>expect(button(name)).toBeTruthy());await act(async()=>button(name)!.click());};
+// Flush React updates while polling. Presence alone is not ready: Practice Home can
+// list notes before recovery sets ready, so the note button stays disabled until then.
+async function wait(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});check();});}
+const click=async(name:string)=>{await wait(()=>expect(button(name)?.disabled,name).toBe(false));await act(async()=>button(name)!.click());};
 const input=async(element:HTMLTextAreaElement,value:string)=>{await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});};
+const question=()=>host.querySelector<HTMLTextAreaElement>('#team-question');
+const noteRow=()=>[...host.querySelectorAll<HTMLButtonElement>('.notebook-list-row .practice-home-note')].find(visible);
+const messagesRow=()=>host.querySelector<HTMLButtonElement>('.messages-row');
 beforeEach(async()=>{
   vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);localStorage.clear();history.replaceState(null,'','#cosmas/home');
   window.matchMedia=vi.fn().mockReturnValue({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()});window.scrollTo=vi.fn();HTMLElement.prototype.scrollIntoView=vi.fn();
@@ -27,12 +33,13 @@ afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreA
 async function open(mode:'messages'|'workspace'){
   localStorage.setItem(PRESENTATION_KEY,mode);await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
   if(mode==='messages'){
-    await vi.waitFor(()=>expect(host.querySelector('.messages-row')).toBeTruthy());await act(async()=>(host.querySelector('.messages-row') as HTMLButtonElement).click());
+    await wait(()=>expect(messagesRow()?.disabled).toBe(false));await act(async()=>messagesRow()!.click());
   }else{
-    await vi.waitFor(()=>expect(host.querySelector('.notebook-list-row .practice-home-note')).toBeTruthy());await act(async()=>(host.querySelector('.notebook-list-row .practice-home-note') as HTMLButtonElement).click());
-    await vi.waitFor(()=>expect(host.querySelector('#team-question')).toBeTruthy());await act(async()=>{const chief=[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(item=>item.textContent?.includes('Chief of Staff'));chief!.click();});
+    await wait(()=>expect(noteRow()?.disabled).toBe(false));await act(async()=>noteRow()!.click());
+    await wait(()=>expect([...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(item=>item.textContent?.includes('Chief of Staff')&&!item.disabled)).toBeTruthy());
+    await act(async()=>{const chief=[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(item=>item.textContent?.includes('Chief of Staff'));chief!.click();});
   }
-  await vi.waitFor(()=>expect((host.querySelector('#team-question') as HTMLTextAreaElement)?.disabled).toBe(false));
+  await wait(()=>expect(question()?.disabled).toBe(false));
 }
 describe('presentation parity',()=>{
   it.each(['service unavailable','capability blocked'] as const)('retains an editable draft and notebook access when %s',async reason=>{
@@ -197,15 +204,15 @@ describe('presentation parity',()=>{
     const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!;
     await input(composer,chief);await click('‹ Messages');await click('New message');
     await act(async()=>{[...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(item=>item.querySelector('strong')?.textContent==='Follow-up')!.click();});
-    await vi.waitFor(()=>expect([...host.querySelectorAll<HTMLButtonElement>('.notebook-list-row .practice-home-note')].find(visible)).toBeTruthy());
-    await act(async()=>{[...host.querySelectorAll<HTMLButtonElement>('.notebook-list-row .practice-home-note')].find(visible)!.click();});
-    await vi.waitFor(()=>expect(composer.disabled).toBe(false));await input(composer,followUp);await click('‹ Messages');
+    await wait(()=>expect(noteRow()?.disabled).toBe(false));
+    await act(async()=>noteRow()!.click());
+    await wait(()=>expect(composer.disabled).toBe(false));await input(composer,followUp);await click('‹ Messages');
     const row=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(item=>item.querySelector('strong')?.textContent?.startsWith(name));
-    await vi.waitFor(()=>expect(row('Chief of Staff')).toBeTruthy());await act(async()=>row('Chief of Staff')!.click());
-    await vi.waitFor(()=>expect(composer.value).toBe(chief));await click('‹ Messages');
+    await wait(()=>expect(row('Chief of Staff')?.disabled).toBe(false));await act(async()=>row('Chief of Staff')!.click());
+    await wait(()=>expect(composer.value).toBe(chief));await click('‹ Messages');
     const load=DraftJournal.prototype.load,ask=vi.spyOn(workspaceApi,'ask');let release!:()=>void;
     const held=new Promise<void>(resolve=>{release=resolve;});vi.spyOn(DraftJournal.prototype,'load').mockImplementation(async function(this:DraftJournal,address){if(address.endsWith(':conversation:follow_up'))await held;return load.call(this,address);});
-    await vi.waitFor(()=>expect(row('Follow-up')).toBeTruthy());await act(async()=>row('Follow-up')!.click());
+    await wait(()=>expect(row('Follow-up')?.disabled).toBe(false));await act(async()=>row('Follow-up')!.click());
     try{
       await vi.waitFor(()=>expect(host.querySelector('.messages-thread-header h1')?.textContent).toBe('Follow-up'));
       expect(composer.disabled).toBe(true);expect(composer.value).toBe(chief);
