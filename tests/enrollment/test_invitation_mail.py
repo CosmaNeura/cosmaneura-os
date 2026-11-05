@@ -71,9 +71,11 @@ def test_public_config_exposes_activation_blockers_and_client_install():
     settings.stripe_acquisition_enabled = False
     value = settings.public_config(database_ready=True, auth_ready=True, stripe_verified=True)
     assert value["activation_available"] is False
-    assert value["pricing"]["first_human_cents"] == 30000
-    assert value["pricing"]["additional_human_cents"] == 10000
+    assert value["pricing"]["seat_cents"] == 30000
+    assert value["pricing"]["max_self_serve_humans"] == 10
     assert value["pricing"]["trial_days"] == 14
+    assert "first_human_cents" not in value["pricing"]
+    assert "additional_human_cents" not in value["pricing"]
     assert value["client_install"]["open_chief_is_not_install"] is True
     assert value["invitation_email_configured"] is False
     assert any("ACTIVATION_AVAILABLE" in item for item in value["activation_blockers"])

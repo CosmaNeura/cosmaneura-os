@@ -113,7 +113,8 @@ class ClockLabBinding(BaseModel):
     image_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     stripe_account_id: str = Field(pattern=r"^acct_[A-Za-z0-9]+$")
     stripe_base_price_id: str = Field(pattern=r"^price_[A-Za-z0-9]+$")
-    stripe_additional_price_id: str = Field(pattern=r"^price_[A-Za-z0-9]+$")
+    # Legacy optional field; flat $300/seat uses only stripe_base_price_id.
+    stripe_additional_price_id: str = Field(default="", pattern=r"^(|price_[A-Za-z0-9]+)$")
     stripe_portal_configuration_id: str = Field(pattern=r"^bpc_[A-Za-z0-9]+$")
     stripe_api_version: Literal["2025-09-30.clover"]
     customer_id: str = Field(pattern=r"^cus_[A-Za-z0-9]+$")
@@ -159,7 +160,7 @@ class ClockLabBinding(BaseModel):
                 or str(UUID(self.practice_id)) != self.practice_id
                 or self.box_id != str(uuid5(BOX_NAMESPACE, self.practice_id))
                 or any(getattr(self, key) != getattr(settings, key) for key in (
-                    "stripe_account_id", "stripe_base_price_id", "stripe_additional_price_id",
+                    "stripe_account_id", "stripe_base_price_id",
                     "stripe_portal_configuration_id", "stripe_api_version"))):
             raise refused()
 

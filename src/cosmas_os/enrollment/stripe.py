@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import httpx
 
 from .config import EnrollmentSettings
-from .domain import ADDITIONAL_HUMAN_CENTS, FIRST_HUMAN_CENTS, STRIPE_CONTRACT, EnrollmentError
+from .domain import SEAT_CENTS, STRIPE_CONTRACT, EnrollmentError
 
 EVENT_TYPES = {
     "checkout.session.completed", "checkout.session.expired",
@@ -108,28 +108,27 @@ class StripeCommerce:
         account = self._request("GET", "/account")
         if account.get("id") != self.settings.stripe_account_id:
             raise EnrollmentError("stripe_account_invalid", "Stripe merchant account did not match enrollment.", 503)
-        for price_id, amount in [(self.settings.stripe_base_price_id, FIRST_HUMAN_CENTS),
-                                 (self.settings.stripe_additional_price_id, ADDITIONAL_HUMAN_CENTS)]:
-            price = self._request("GET", "/prices/" + price_id)
-            self._mode(price)
-            recurring = price.get("recurring") or {}
-            if (price.get("id") != price_id or price.get("active") is not True
-                    or price.get("currency") != "usd" or price.get("unit_amount") != amount
-                    or price.get("type") != "recurring" or price.get("billing_scheme") != "per_unit"
-                    or recurring.get("interval") != "month" or recurring.get("interval_count") != 1
-                    or recurring.get("usage_type") != "licensed"):
-                raise EnrollmentError("stripe_price_invalid", "Stripe prices do not match the approved human-seat offer.", 503)
+        price_id = self.settings.stripe_base_price_id
+        price = self._request("GET", "/prices/" + price_id)
+        self._mode(price)
+        recurring = price.get("recurring") or {}
+        if (price.get("id") != price_id or price.get("active") is not True
+                or price.get("currency") != "usd" or price.get("unit_amount") != SEAT_CENTS
+                or price.get("type") != "recurring" or price.get("billing_scheme") != "per_unit"
+                or recurring.get("interval") != "month" or recurring.get("interval_count") != 1
+                or recurring.get("usage_type") != "licensed"):
+            raise EnrollmentError("stripe_price_invalid", "Stripe prices do not match the approved human-seat offer.", 503)
         self._portal_configuration()
         self.verified = True
 
     def create_checkout(self, request: dict[str, Any], key: str) -> dict[str, Any]:
         if (request.get("base_price_id") != self.settings.stripe_base_price_id
-                or request.get("additional_price_id") != self.settings.stripe_additional_price_id
                 or request.get("account_id") != self.settings.stripe_account_id
                 or request.get("api_version") != self.settings.stripe_api_version
                 or request.get("app_origin") != self.settings.public_app_origin.rstrip("/")
                 or request.get("live_mode") is not self.settings.stripe_live_mode
-                or request.get("trial_days") != 14):
+                or request.get("trial_days") != 14
+                or "additional_price_id" in request):
             raise EnrollmentError("checkout_configuration_changed", "Reconcile the saved Checkout terms before changing billing configuration.", 503)
         self.validate_configuration()
         humans = request["human_seats"]
@@ -139,7 +138,7 @@ class StripeCommerce:
             "mode": "subscription", "payment_method_collection": "always",
             "payment_method_types[0]": "card",
             "line_items[0][price]": self.settings.stripe_base_price_id,
-            "line_items[0][quantity]": "1",
+            "line_items[0][quantity]": str(humans),
             "client_reference_id": request["practice_id"],
             "success_url": request["app_origin"] + "/onboarding?checkout=return",
             "cancel_url": request["app_origin"] + "/onboarding?checkout=canceled",
@@ -147,12 +146,9 @@ class StripeCommerce:
             "subscription_data[trial_settings][end_behavior][missing_payment_method]": "pause",
             "automatic_tax[enabled]": "false", "allow_promotion_codes": "false",
         }
-        if humans > 1:
-            data["line_items[1][price]"] = self.settings.stripe_additional_price_id
-            data["line_items[1][quantity]"] = str(humans - 1)
         for name, value in {"practice_id": request["practice_id"], "attempt_id": request["attempt_id"],
                             "contract": STRIPE_CONTRACT, "human_seats": str(humans),
-                            "monthly_total_cents": str(FIRST_HUMAN_CENTS + ADDITIONAL_HUMAN_CENTS * (humans - 1)),
+                            "monthly_total_cents": str(SEAT_CENTS * humans),
                             "trial_days": "14"}.items():
             data[f"metadata[{name}]"] = value
             data[f"subscription_data[metadata][{name}]"] = value

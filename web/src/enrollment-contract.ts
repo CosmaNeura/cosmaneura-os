@@ -27,8 +27,8 @@ export type EnrollmentConfig = {
   invitation_email_configured?: boolean; client_install?: EnrollmentClientInstall;
   allowed_workspace_origins: string[];
   workspace_origin_policy?: EnrollmentWorkspaceOriginPolicy; baa: typeof BAA;
-  pricing: { currency: 'usd'; interval: 'month'; first_human_cents: 30000;
-    additional_human_cents: 10000; max_self_serve_humans: 10; trial_days: 14; seat_policy: string };
+  pricing: { currency: 'usd'; interval: 'month'; seat_cents: 30000;
+    max_self_serve_humans: 10; trial_days: 14; seat_policy: string };
 };
 export type EnrollmentProfile = { display_name: string; title: string; email: string };
 export type EnrollmentPractice = {
@@ -98,7 +98,7 @@ export function validateEnrollmentConfig(value: unknown): EnrollmentConfig {
   documentIdentity(baa);
   if (v.contract_version !== ENROLLMENT_CONTRACT || !['disabled','synthetic','production'].includes(String(v.data_mode)) ||
       baa.pdf_url !== BAA.pdf_url || pricing.currency !== 'usd' || pricing.interval !== 'month' ||
-      pricing.first_human_cents !== 30000 || pricing.additional_human_cents !== 10000 ||
+      pricing.seat_cents !== 30000 ||
       pricing.max_self_serve_humans !== 10 || pricing.trial_days !== 14 ||
       !Array.isArray(v.auth_methods) || v.auth_methods.length !== 3 ||
       !['google','microsoft','password'].every(method => (v.auth_methods as unknown[]).includes(method)) ||
@@ -141,7 +141,7 @@ export function validateEnrollmentConfig(value: unknown): EnrollmentConfig {
 export function validateEnrollmentQuote(value: unknown): EnrollmentQuote {
   const v = object(value), count = integer(v.human_seats, 1, 1000), self = bool(v.self_serve);
   if (v.currency !== 'usd' || v.interval !== 'month' || v.due_today_cents !== 0 || v.trial_days !== 14 ||
-      self !== (count <= 10) || self && v.monthly_total_cents !== 30000 + (count - 1) * 10000 ||
+      self !== (count <= 10) || self && v.monthly_total_cents !== 30000 * count ||
       !self && v.monthly_total_cents !== null) return invalid();
   return { currency: 'usd', interval: 'month', human_seats: count,
     monthly_total_cents: self ? v.monthly_total_cents as number : null, due_today_cents: 0, trial_days: 14, self_serve: self };

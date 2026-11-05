@@ -9,9 +9,10 @@ Scribe sources, services, identities and databases were not changed.
 
 ## Implemented customer flow
 
-- Equal public pricing choices: Solo one human $300/month; two through ten
-  humans $300 first plus $100 each additional; larger practices contact the
-  existing company contact. USD monthly; office staff and owners are paid seats.
+- Equal public pricing choices: $300 per human seat per month for one through
+  ten humans (14-day free trial; card at Checkout); larger practices contact
+  the existing company contact. USD monthly; office staff and owners are paid
+  seats.
 - Browser `/onboarding` and `/sign-in` enter before a practice organization
   exists. Clerk loads only after the selected enrollment API admits account
   creation. Existing native entry remains unchanged.

@@ -24,7 +24,7 @@ from sqlalchemy.pool import StaticPool
 
 from .api import create_app
 from .config import EnrollmentSettings
-from .domain import STRIPE_CONTRACT, TRIAL, EnrollmentError, HumanIdentity
+from .domain import SEAT_CENTS, STRIPE_CONTRACT, TRIAL, EnrollmentError, HumanIdentity
 from .migration import upgrade
 from .models import EnrollmentBase
 from .stripe import StripeCommerce
@@ -38,7 +38,7 @@ def synthetic_settings() -> EnrollmentSettings:
         clerk_secret_key=SecretStr("sk_test_synthetic"), clerk_issuer="https://enrollment.example.invalid",
         clerk_authorized_parties=["https://app.example.invalid"], clerk_methods_verified=True,
         stripe_integration_enabled=True, stripe_acquisition_enabled=True, stripe_secret_key=SecretStr("sk_test_synthetic"),
-        stripe_account_id="acct_synthetic", stripe_base_price_id="price_syntheticbase", stripe_additional_price_id="price_syntheticadditional",
+        stripe_account_id="acct_synthetic", stripe_base_price_id="price_syntheticbase",
         stripe_portal_configuration_id="bpc_synthetic", stripe_webhook_secret=SecretStr("whsec_synthetic"),
         commercial_terms_verified=True, activation_available=True, provisioning_enabled=True,
         invitation_secret=SecretStr("synthetic-invitation-key-never-production"),
@@ -124,8 +124,9 @@ class SyntheticCommerce:
         if key not in self.keys:
             self.create_count += 1
             session_id = "cs_synthetic" + str(self.create_count)
+            humans = int(request["human_seats"])
             metadata = {"practice_id": request["practice_id"], "attempt_id": request["attempt_id"], "contract": STRIPE_CONTRACT,
-                        "human_seats": str(request["human_seats"]), "monthly_total_cents": str(30000 + 10000 * (request["human_seats"] - 1)), "trial_days": "14"}
+                        "human_seats": str(humans), "monthly_total_cents": str(SEAT_CENTS * humans), "trial_days": "14"}
             self.sessions[session_id] = {"id": session_id, "livemode": False, "mode": "subscription", "status": "open",
                 "client_reference_id": request["practice_id"], "metadata": metadata, "payment_method_collection": "always",
                 "amount_total": 0,
@@ -160,12 +161,10 @@ class SyntheticCommerce:
         start = int(time.time())
         sub_id = "sub_synthetic" + session_id.removeprefix("cs_synthetic")
         customer = "cus_synthetic" + session_id.removeprefix("cs_synthetic")
-        items = []
-        for price, qty, amount in [(request["base_price_id"], 1, 30000), (request["additional_price_id"], request["human_seats"] - 1, 10000)]:
-            if qty:
-                items.append({"quantity": qty, "current_period_end": start + int(TRIAL.total_seconds()),
-                              "price": {"id": price, "unit_amount": amount, "currency": "usd",
-                                        "recurring": {"interval": "month", "interval_count": 1, "usage_type": "licensed"}}})
+        humans = int(request["human_seats"])
+        items = [{"quantity": humans, "current_period_end": start + int(TRIAL.total_seconds()),
+                  "price": {"id": request["base_price_id"], "unit_amount": SEAT_CENTS, "currency": "usd",
+                            "recurring": {"interval": "month", "interval_count": 1, "usage_type": "licensed"}}}]
         self.subscriptions[sub_id] = {"id": sub_id, "customer": customer, "livemode": False, "status": "trialing",
             "metadata": dict(checkout["metadata"]), "trial_start": start, "trial_end": start + int(TRIAL.total_seconds()),
             "cancel_at_period_end": False, "items": {"data": items}, "pause_collection": None}

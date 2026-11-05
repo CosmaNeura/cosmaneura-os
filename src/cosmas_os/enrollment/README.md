@@ -34,27 +34,27 @@ Enrollment uses a separate Clerk key/issuer policy and changes no shared Core
 claims. Google, Microsoft and password methods must be verified by the operator;
 the enum in public config alone proves no OAuth journey.
 
-The approved self-serve offer is $300 for the first human plus $100/additional
-human monthly, 1–10 humans. Every owner/admin/staff is a human seat. The initial
-selected number purchases that many human seats; pending invitations reserve
-one, and a paused member retains one until removal. Agents cannot use these
-human enrollment APIs. Seat growth above the purchased number, mid-cycle seat
-changes, removal/repricing and 11+ negotiated quotes stay unavailable until an
-explicit commercial/control implementation exists. The API never clamps an
-11-human practice to the ten-human price. Tax, notification and cancellation
-terms must be approved before `COMMERCIAL_TERMS_VERIFIED` enables billing.
-The current Checkout explicitly adds no tax, discounts, fees or add-ons.
+The approved self-serve offer is $300 per human seat per month for 1–10 humans,
+with a 14-day free trial and card collection at Checkout. Every owner/admin/staff
+is a human seat. The initial selected number purchases that many human seats;
+pending invitations reserve one, and a paused member retains one until removal.
+Agents cannot use these human enrollment APIs. Seat growth above the purchased
+number, mid-cycle seat changes, removal/repricing and 11+ negotiated quotes stay
+unavailable until an explicit commercial/control implementation exists. The API
+never clamps an 11-human practice to the ten-human price. Tax, notification and
+cancellation terms must be approved before `COMMERCIAL_TERMS_VERIFIED` enables
+billing. The current Checkout explicitly adds no tax, discounts, fees or add-ons.
 
-The two fixed recurring Stripe prices are independently verified: $300 × 1 and
-$100 × (humans − 1), USD monthly licensed/per-unit, with an exact 14-day trial
-and card-only payment-method collection always. Root deployment operators must
-create Cosmas-specific products/prices and a pinned portal configuration; the adapter
-performs no account/catalog mutation. The portal allows payment methods/invoices
-and cancellation at period end; plan/customer edits are disabled. Verify in a
-real Stripe test clock that trial cancellation prevents the first charge and
-that configured reminders are delivered. Mocked transports do not prove this.
-The [TEST operator procedure](../../../docs/STRIPE_TEST_QUALIFICATION.md) lists
-the exact setup and distinguishes provider clocks from the bound runtime journey.
+One fixed recurring Stripe price is verified: $300 × humans, USD monthly
+licensed/per-unit, with an exact 14-day trial and card-only payment-method
+collection always. Root deployment operators must create CosmaBot-specific
+products/prices and a pinned portal configuration; the adapter performs no
+account/catalog mutation. The portal allows payment methods/invoices and
+cancellation at period end; plan/customer edits are disabled. Verify in a real
+Stripe test clock that trial cancellation prevents the first charge and that
+configured reminders are delivered. Mocked transports do not prove this. The
+[TEST operator procedure](../../../docs/STRIPE_TEST_QUALIFICATION.md) lists the
+exact setup and distinguishes provider clocks from the bound runtime journey.
 
 Checkout starts only after the private provisioner records a qualified ready
 workspace. The browser cannot mark a workspace ready. Root's provisioner owns

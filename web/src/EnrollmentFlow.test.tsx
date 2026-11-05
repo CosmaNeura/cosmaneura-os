@@ -18,7 +18,7 @@ it('saves account and legal practice with every human seat counted at the approv
   vi.spyOn(api,'profile').mockImplementation(async()=>{current=enrollmentStatus('practice',1);return current;});
   vi.spyOn(api,'practice').mockImplementation(async()=>{current=enrollmentStatus('agreement',2,5);return current;});
   await render('?plan=small&seats=5&price=1');await fill('name','Invented Owner');await fill('title','Owner');await click('Save and continue');
-  expect(host.textContent).toContain('$700/month');
+  expect(host.textContent).toContain('$1,500/month');
   for(const [field,value]of Object.entries({legal_name:'Invented Legal Practice',address_line1:'123 Invented Street',city:'Invented City',region:'NY',postal_code:'10001',administrative_email:'office@example.invalid'}))await fill(field,value);
   await check('covered');await click('Save and continue');
   expect(api.practice).toHaveBeenCalledWith(id,expect.objectContaining({human_seats:5,country:'US',covered_entity:true}),expect.any(String),expect.any(AbortSignal));

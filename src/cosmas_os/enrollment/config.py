@@ -9,14 +9,13 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .domain import (
-    ADDITIONAL_HUMAN_CENTS,
     BAA_DOC_ID,
     BAA_PDF_URL,
     BAA_SHA256,
     BAA_VERSION,
     CONTRACT,
-    FIRST_HUMAN_CENTS,
     MAX_HUMANS,
+    SEAT_CENTS,
     SEAT_POLICY,
 )
 from .environments import hosting_environment_for_data_mode
@@ -155,14 +154,14 @@ class EnrollmentSettings(BaseSettings):
             errors.append("Configure a Stripe key matching the selected mode.")
         for name, value, prefix in [
             ("account", self.stripe_account_id, "acct_"),
-            ("base price", self.stripe_base_price_id, "price_"),
-            ("additional human price", self.stripe_additional_price_id, "price_"),
+            ("per-seat price", self.stripe_base_price_id, "price_"),
             ("portal configuration", self.stripe_portal_configuration_id, "bpc_"),
         ]:
             if not value.startswith(prefix):
                 errors.append(f"Configure the Cosmas Stripe {name}.")
-        if self.stripe_base_price_id == self.stripe_additional_price_id:
-            errors.append("The first and additional human prices must be distinct.")
+        # Legacy additional-price env may still be present; flat $300/seat uses only the base price.
+        if self.stripe_additional_price_id and not self.stripe_additional_price_id.startswith("price_"):
+            errors.append("Clear or repair the unused legacy additional Stripe price reference.")
         if not self.stripe_webhook_secret.get_secret_value().startswith("whsec_"):
             errors.append("Configure the enrollment Stripe webhook signing secret.")
         if self.stripe_api_version != "2025-09-30.clover":
@@ -256,7 +255,6 @@ class EnrollmentSettings(BaseSettings):
                 "open_chief_is_not_install": True,
             },
             "baa": {"doc_id": BAA_DOC_ID, "version": BAA_VERSION, "sha256": BAA_SHA256, "pdf_url": BAA_PDF_URL},
-            "pricing": {"currency": "usd", "interval": "month", "first_human_cents": FIRST_HUMAN_CENTS,
-                        "additional_human_cents": ADDITIONAL_HUMAN_CENTS, "max_self_serve_humans": MAX_HUMANS,
-                        "trial_days": 14, "seat_policy": SEAT_POLICY},
+            "pricing": {"currency": "usd", "interval": "month", "seat_cents": SEAT_CENTS,
+                        "max_self_serve_humans": MAX_HUMANS, "trial_days": 14, "seat_policy": SEAT_POLICY},
         }

@@ -70,7 +70,7 @@ function EnrollmentClerkAccount({api,config}:{api:EnrollmentApi;config:Enrollmen
       {config.data_mode==='synthetic'&&<p className="enrollment-synthetic-note" role="note">Synthetic staging · Use invented information only.</p>}
       <section className="enrollment-card"><p className="enrollment-eyebrow">Account → Practice → Agreement → Trial → Chief</p><p>{signIn?'Continue to your saved practice setup.':'Create an account to save your practice setup and review the agreement.'}</p>
         <p>Use Google, Microsoft, or email and password. Connecting a mailbox or calendar is a separate choice after setup.</p>
-        <p>{config.activation_available?'A card is required for your 14-day free trial.':'Registration is available. Your trial starts when your workspace is ready.'} Solo is $300/month; 2–10 human users are $300 for the first user plus $100 for each additional user. 11+ users require an agreed quote.</p>
+        <p>{config.activation_available?'A card is required for your 14-day free trial.':'Registration is available. Your trial starts when your workspace is ready.'} CosmaBot is $300 per seat per month. Count every human user through ten seats; 11+ users require an agreed quote.</p>
         <div className="enrollment-auth">{signIn?<SignIn routing="hash" signUpUrl={destination} forceRedirectUrl={destination}/>:<SignUp routing="hash" signInUrl={'/sign-in'+window.location.search} forceRedirectUrl={destination}/>}</div>
       </section></main>;
   }
