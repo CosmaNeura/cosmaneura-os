@@ -1,0 +1,3 @@
+.email-inbox-read-filter{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.5rem;flex:1 1 100%;min-width:0}
+.email-work .email-inbox-read-filter>button{width:100%;min-height:44px;box-sizing:border-box;padding:.6rem .7rem;border:1px solid var(--team-line,#d9ddd9);border-radius:.5rem;background:var(--team-surface,#fff);color:inherit;font:inherit;font-weight:600;white-space:normal;overflow-wrap:anywhere}
+.email-work .email-inbox-read-filter>button[aria-pressed=true]{border:1px solid var(--team-accent,#396750);background:var(--team-accent-soft,#edf4ef)}
