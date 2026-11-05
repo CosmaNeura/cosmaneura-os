@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import base64
 import copy
+import json
 import re
+from pathlib import Path
 
 PRACTICE_KEY = "CosmasNativePracticeConnection"
 ORIGIN_HOST = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}"
@@ -116,9 +118,6 @@ def native_practice_configuration(value: object) -> dict:
 
 def load_practice_config(path) -> dict:
     """Load and validate a reviewed public native-practice JSON file."""
-    from pathlib import Path
-    import json
-
     file = Path(path)
     if not file.is_file() or file.is_symlink():
         raise ValueError("Native practice configuration must be a regular reviewed public JSON file.")
