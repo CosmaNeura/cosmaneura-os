@@ -192,6 +192,21 @@ def main():
                           re.fullmatch(r"com\.cosmasos\.synthetic\.desktop\.auth\.w[1-9][0-9]*[a-z]?", info.get("CFBundleIdentifier", "")))
         if not valid_identity or info.get("CFBundleExecutable") != "CosmasDesktopAuth":
             parser.error("Use the separately packaged, disabled synthetic auth helper.")
+        # Optional CosmasNativePracticeConnection is packaging-only evidence; validate
+        # the closed schema when present and refuse it on synthetic helpers.
+        practice_key = "CosmasNativePracticeConnection"
+        if practice_key in info:
+            if not operational:
+                parser.error("Synthetic desktop helpers cannot carry native practice connection Infos.")
+            practice_spec = importlib.util.spec_from_file_location(
+                "native_practice_connection_info",
+                Path(__file__).with_name("native_practice_connection_info.py"))
+            practice_module = importlib.util.module_from_spec(practice_spec)
+            practice_spec.loader.exec_module(practice_module)
+            try:
+                practice_module.native_practice_configuration(info[practice_key])
+            except ValueError as error:
+                parser.error(str(error))
         for path in helper.rglob("*"):
             if path.is_symlink() or path.name.startswith(".env") or path.suffix == ".map":
                 parser.error("Native helper cannot contain links or environment/source-map files.")
