@@ -127,8 +127,15 @@ public struct NativePracticeBundleConfiguration: Sendable {
               let profile = NativeIdentityProfile(rawValue: profileName),
               profile == .operationalStaging || profile == .operationalBeta,
               let namespace = realm["keychainNamespace"] as? String else { throw NativePracticeProfileError.invalidBinding }
+        // Contract Origin must match this bundle (iPhone WebView vs Mac desktop auth helper).
+        let workspaceOrigin: NativeWorkspaceOrigin
+        if NativeWorkspaceOrigin.desktopApp.accepts(bundleIdentifier: bundleIdentifier, profile: profile) {
+            workspaceOrigin = .desktopApp
+        } else if NativeWorkspaceOrigin.appleWebView.accepts(bundleIdentifier: bundleIdentifier, profile: profile) {
+            workspaceOrigin = .appleWebView
+        } else { throw NativePracticeProfileError.invalidBinding }
         let configuration = try NativeClerkAccountConfiguration(publishableKey: key, frontendOrigin: frontend,
-            bundleIdentifier: bundleIdentifier, profile: profile, storageNamespace: namespace)
+            bundleIdentifier: bundleIdentifier, workspaceOrigin: workspaceOrigin, profile: profile, storageNamespace: namespace)
         let policy: NativeRegisteredPracticeOriginPolicy
         if let raw = value["registeredPracticeOrigins"] {
             guard let name = raw as? String, let parsed = NativeRegisteredPracticeOriginPolicy(rawValue: name) else {

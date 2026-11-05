@@ -23,9 +23,14 @@ export class NativeWorkspaceTransport {
       if(!previous)this.bindings.set(identity,{key:null});
       return null;
     }
+    if('mode'in identity&&identity.mode==='desktop_native'){
+      // Mac: host keeps desktop auth revision equal to the admitted snapshot revision.
+      if(!identity.isCurrent()||current.profile.client!=='desktop'||identity.revision!==current.revision)changed();
+      if(!previous)this.bindings.set(identity,{key:currentKey});
+      return current;
+    }
     const native='mode'in identity&&identity.mode==='clerk_jwt'?identity.nativeSession:undefined;
     if(native&&!native.isCurrent())changed();
-    if('mode'in identity&&identity.mode==='desktop_native'&&!identity.isCurrent())changed();
     const account=current.profile.session;
     if(!native||native.revision!==current.revision||native.userId!==account.subject||
         native.sessionId!==account.session_id||native.organizationId!==current.profile.nativeIdentity.organizationId)changed();
@@ -44,7 +49,8 @@ function ownedSnapshot():ActiveNativeWorkspace|null {
   if(!descriptor){captured=null;return null;}
   if(!Object.hasOwn(descriptor,'value')||descriptor.writable!==false||descriptor.configurable!==false)changed();
   const value=validateActiveNativeWorkspace(descriptor.value);
-  if(value.profile.client!=='apple')changed();
+  // Contract clients: apple (iPhone) or desktop (Mac). Never a browser-forged client.
+  if(value.profile.client!=='apple'&&value.profile.client!=='desktop')changed();
   captured=value;return value;
 }
 const transport=new NativeWorkspaceTransport(ownedSnapshot);

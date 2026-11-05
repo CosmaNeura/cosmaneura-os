@@ -1,9 +1,15 @@
 import { BAA, ENROLLMENT_CONTRACT, type EnrollmentConfig, type EnrollmentDocument, type EnrollmentStatus } from './enrollment-contract';
+import type {NativeAccountOrigin} from './native-signin-contract';
 export const enrollmentConfig = ():EnrollmentConfig => ({contract_version:ENROLLMENT_CONTRACT,enabled:true,data_mode:'synthetic',
   auth_configured:true,clerk_publishable_key:'pk_test_invented',auth_methods:['google','microsoft','password'],billing_configured:true,
   activation_available:false,checkout_recovery_available:false,production_qualified:false,blockers:[],allowed_workspace_origins:['https://workspace.example.invalid'],baa:BAA,
   pricing:{currency:'usd',interval:'month',first_human_cents:30000,additional_human_cents:10000,max_self_serve_humans:10,trial_days:14,
     seat_policy:'All humans consume a purchased seat; paused users retain their seat until removed.'}});
+/** Contract GET /native/config body: public enrollment config plus native_account. */
+export const nativeEnrollmentConfig = (native_origin:NativeAccountOrigin='capacitor://localhost') => ({
+  ...enrollmentConfig(),
+  native_account:{issuer:'https://invented.clerk.accounts.dev',audience:'',session_policy:'default_session',native_origin},
+});
 export const enrollmentDocument = ():EnrollmentDocument => ({...BAA,html:'<article><h1>CN-BAA-CUST-CW v2.3</h1><p>Invented render fixture only; this is not a signed agreement.</p></article>'});
 export const enrollmentStatus = (stage:EnrollmentStatus['stage']='account',revision=0,seats=1):EnrollmentStatus => ({contract_version:ENROLLMENT_CONTRACT,stage,revision,
   profile:stage==='account'?null:{display_name:'Invented Owner',title:'Owner',email:'owner@example.invalid'},

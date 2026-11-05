@@ -1,5 +1,5 @@
 import {useCallback,useLayoutEffect,useMemo,useRef,useState} from 'react';
-import {NativePracticeConnection,nativePracticeConnectionAvailable,type NativePracticeConnectionPlugin} from '../../clients/capture/src/native/practice-connection-plugin';
+import {NativePracticeConnection,desktopPracticeConnectionPort,nativePracticeConnectionAvailable,type NativePracticeConnectionPlugin} from '../../clients/capture/src/native/practice-connection-plugin';
 import {validateActiveNativeWorkspace} from '../../clients/shared/native-practice-profile.mjs';
 import {AppleHostedStatus} from './AppleHostedStatus';
 import {EnrollmentFlow} from './EnrollmentFlow';
@@ -20,7 +20,9 @@ export function NativeEnrollmentEntry({plugin=NativePracticeConnection,available
   const [selectedAvailable,setSelectedAvailable]=useState(false);
   const markReadyPending=useCallback((pending:boolean)=>{readyPending.current=pending;setReadyBusy(pending);},[]);
   const port=useMemo(()=>nativeEnrollmentPort(plugin),[plugin]);
-  const api=useMemo(()=>port?createNativeEnrollmentApi(port,()=>scope.current?.state??null,()=>scope.current?.active===true):null,[port]);
+  // Contract Origin: Mac desktop host vs iPhone Capacitor WebView.
+  const expectedOrigin=desktopPracticeConnectionPort(plugin)?'app://cosmas':'capacitor://localhost';
+  const api=useMemo(()=>port?createNativeEnrollmentApi(port,()=>scope.current?.state??null,()=>scope.current?.active===true,expectedOrigin):null,[port,expectedOrigin]);
   useLayoutEffect(()=>{
     const owner={active:true,epoch:0,state:null as NativeAccountState|null,pending:false,accountStarted:false};scope.current=owner;
     setState(null);setConfig(null);setFailed(false);setSupported(false);setSelectedAvailable(false);

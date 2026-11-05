@@ -7,7 +7,7 @@ import { accessPending } from "./practice-access-test-fixture";
 import {teamFixture} from "./team-setup-test-fixture";
 import { REQUIRED_WORKSPACE_CONTRACTS } from "./workspace-protocol";
 import type {NativePracticeConnectionPlugin} from '../../clients/capture/src/native/practice-connection-plugin';
-import {enrollmentConfig} from './enrollment-test-fixture';
+import {nativeEnrollmentConfig} from './enrollment-test-fixture';
 import {useUnsavedWork} from './unsaved-work';
 
 const first: NativeAuthState = { phase: "ready", revision: "00000000-0000-4000-8000-000000000001",
@@ -42,7 +42,7 @@ function practiceHarness(available:boolean):NativePracticeConnectionPlugin {
   return {capabilities:vi.fn(async()=>({contract_version:'cosmabot.native-practice-connection.v1',available,enrollment_available:available})),
     accountStatus:vi.fn(async()=>({phase:'signedOut',revision:signedOut.revision,identity:null})),beginAccountSignIn:vi.fn(async()=>{throw new Error('Not started');}),
     accountToken:vi.fn(async()=>{throw new Error('Not signed in');}),enrollmentRequest:vi.fn(async({operation})=>{
-      if(operation!=='config')throw new Error('Unexpected enrollment operation');return {status:200,body:enrollmentConfig()};}),
+      if(operation!=='config')throw new Error('Unexpected enrollment operation');return {status:200,body:nativeEnrollmentConfig()};}),
     openCheckout:vi.fn(async()=>{}),openEnrollmentDestination:vi.fn(async()=>{}),activatePracticeOrganization:vi.fn(async()=>{throw new Error('Not started');}),
     activateRegisteredPractice:vi.fn(async()=>{throw new Error('Not started');}),returnToBeta:vi.fn(async()=>{}),signOut:vi.fn(async()=>{}),
     addListener:vi.fn(async()=>({remove:async()=>{}}))};

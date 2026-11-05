@@ -22,12 +22,14 @@ public struct NativePracticeWorkspaceBootstrap: Equatable, Sendable {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               Set(root.keys) == ["contract_version", "client", "nonce", "native_origin", "data_mode", "nativeIdentity", "session", "practice", "workspace", "issued_at", "expires_at"],
               root["contract_version"] as? String == "cosmas-native-workspace-profile.v1",
-              root["client"] as? String == "apple", root["data_mode"] as? String == binding.dataMode,
+              // Contract: client matches Origin; data_mode follows the binding's registered environment.
+              root["client"] as? String == binding.realm.workspaceOrigin.nativeClient,
+              root["data_mode"] as? String == binding.dataMode,
               root["native_origin"] as? String == binding.realm.workspaceOrigin.rawValue,
               root["nonce"] as? String == expectation.nonce.uuidString.lowercased(),
               let native = root["nativeIdentity"] as? [String: Any],
               Set(native.keys) == ["version", "profile", "client", "apiOrigin", "publishableKey", "frontendOrigin", "organizationId", "audience"],
-              integer(native["version"]) == 1, native["client"] as? String == "apple",
+              integer(native["version"]) == 1, native["client"] as? String == binding.realm.workspaceOrigin.nativeClient,
               native["apiOrigin"] as? String == expectation.apiOrigin,
               binding.allowsAPI(expectation.apiOrigin, practiceID: expectation.selectionID),
               native["organizationId"] as? String == expectation.organizationID,
@@ -77,11 +79,16 @@ private func digest(_ value: String, length: Int = 64) -> Bool {
     value.count == length && value.unicodeScalars.allSatisfy { (48...57).contains($0.value) || (97...102).contains($0.value) }
 }
 private func pairedWorkspace(_ value: String, api: String) -> Bool {
+    // Contract practice URL is https://<host>/chief paired with https://api.<host> only.
     guard value.utf8.count <= 2048, let web = URLComponents(string: value), web.scheme == "https",
           let host = web.host, host == host.lowercased(), web.port == nil,
           web.user == nil, web.password == nil, web.query == nil, web.fragment == nil,
-          let target = URLComponents(string: api), target.scheme == "https" else { return false }
-    return target.host == (host == "app.cosmas.ai" ? "api.cosmas.ai" : "api." + host)
+          web.path == "/chief", value == "https://" + host + "/chief",
+          host != "app.cosmas.ai", host != "api.cosmas.ai",
+          let target = URLComponents(string: api), target.scheme == "https",
+          target.port == nil, target.user == nil, target.password == nil,
+          target.host == "api." + host else { return false }
+    return true
 }
 
 /// Reject duplicate (including escaped-equivalent) JSON keys before Foundation

@@ -35,6 +35,9 @@ describe('registered native profile for a real-data production practice',()=>{
     ['non-UUID host',(v:any)=>{v.workspace.url='https://clinic.workspace.cosmas.ai/chief';v.nativeIdentity.apiOrigin='https://api.clinic.workspace.cosmas.ai';}],
     ['reserved host',(v:any)=>{v.workspace.url='https://api.workspace.cosmas.ai/chief';v.nativeIdentity.apiOrigin='https://api.api.workspace.cosmas.ai';}],
     ['unpaired API',(v:any)=>{v.nativeIdentity.apiOrigin='https://api.cosmas.ai';}],
+    ['account-web workspace',(v:any)=>{v.workspace.url='https://app.cosmas.ai/chief';v.nativeIdentity.apiOrigin='https://api.cosmas.ai';}],
+    ['missing /chief path',(v:any)=>{v.workspace.url=`https://${host}`;}],
+    ['trailing slash on /chief',(v:any)=>{v.workspace.url=`https://${host}/chief/`;}],
     ['blank audience',(v:any)=>{v.nativeIdentity.audience='';}],
   ] as const)('refuses %s',(_name,change)=>{
     expect(()=>validateRegisteredNativeProfile(production(change))).toThrow();

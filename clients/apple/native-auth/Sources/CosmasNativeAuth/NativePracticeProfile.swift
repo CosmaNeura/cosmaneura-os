@@ -96,6 +96,37 @@ public struct NativePracticeAccountServiceBinding: Equatable, Sendable {
 
     /// The data mode the account service must report for this binding.
     public var dataMode: String { registeredPracticeOrigins.dataMode }
+
+    /// Contract step 2: GET /native/config must echo this binding's realm Origin/issuer/audience.
+    /// Mismatched Infos vs enrollment host force rebuild churn if left unchecked until Open Chief.
+    public func validateNativeAccountConfig(_ value: [String: Any]) throws {
+        guard let account = value["native_account"] as? [String: Any],
+              Set(account.keys) == ["issuer", "audience", "session_policy", "native_origin"],
+              account["issuer"] as? String == realm.frontendOrigin,
+              account["audience"] as? String == audience,
+              account["native_origin"] as? String == realm.workspaceOrigin.rawValue,
+              let policy = account["session_policy"] as? String,
+              !policy.isEmpty, policy.utf8.count <= 64,
+              policy.unicodeScalars.allSatisfy({ $0.isASCII && $0.value >= 33 && $0.value <= 126 }) else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+    }
+
+    /// Contract practice open: only `https://<practice-host>/chief` → `https://api.<practice-host>`.
+    /// Rejects account-web hosts, missing `/chief`, and API shapes this binding does not admit.
+    public func practiceAPIOrigin(fromWorkspaceURL address: String, practiceID: UUID) throws -> String {
+        guard address.utf8.count <= 2048, let parsed = URLComponents(string: address), parsed.scheme == "https",
+              let host = parsed.host, host == host.lowercased(),
+              parsed.user == nil, parsed.password == nil, parsed.port == nil,
+              parsed.query == nil, parsed.fragment == nil, parsed.path == "/chief",
+              address == "https://" + host + "/chief",
+              host != "app.cosmas.ai", host != "api.cosmas.ai" else {
+            throw NativePracticeProfileError.invalidBinding
+        }
+        let api = "https://api." + host
+        guard allowsAPI(api, practiceID: practiceID) else { throw NativePracticeProfileError.invalidBinding }
+        return api
+    }
 }
 
 /// Minted by native setup/selection after a trusted account-service discovery.

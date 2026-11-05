@@ -37,6 +37,34 @@ export const NativePracticeConnection = registerPlugin<NativePracticeConnectionP
   "CosmasNativePracticeConnection",
 );
 
+type DesktopPracticePort = NativePracticeConnectionPlugin & { version: 1 };
+
+declare global {
+  interface Window {
+    cosmasDesktopPractice?: DesktopPracticePort;
+  }
+}
+
+/** Exact preload shape only. Credentials never cross this boundary. */
+export function desktopPracticeConnectionPort(
+  value: unknown = typeof window !== "undefined" ? window.cosmasDesktopPractice : undefined,
+): NativePracticeConnectionPlugin | null {
+  if (!value || typeof value !== "object") return null;
+  const port = value as DesktopPracticePort & {getToken?: unknown};
+  const required: (keyof NativePracticeConnectionPlugin)[] = [
+    "capabilities", "accountStatus", "beginAccountSignIn", "accountToken", "enrollmentRequest",
+    "openCheckout", "openEnrollmentDestination", "activatePracticeOrganization",
+    "activateRegisteredPractice", "returnToBeta", "signOut", "addListener",
+  ];
+  // Optional selected-practice methods may exist; a getToken credential port must not.
+  if (port.version !== 1 || typeof port.getToken === "function" ||
+      !required.every((name) => typeof port[name] === "function")) return null;
+  return port;
+}
+
 /** Availability is a UI hint; the native host and server still authorize work. */
-export const nativePracticeConnectionAvailable = () => Capacitor.getPlatform() === "ios" &&
-  Capacitor.isPluginAvailable("CosmasNativePracticeConnection");
+export const nativePracticeConnectionAvailable = () => {
+  if (desktopPracticeConnectionPort()) return true;
+  return Capacitor.getPlatform() === "ios" &&
+    Capacitor.isPluginAvailable("CosmasNativePracticeConnection");
+};

@@ -25,6 +25,11 @@ import Testing
         let request = try NativePracticeEnrollmentRequest(expectedRevision: revision, operation: .practice,
             body: body, idempotencyKey: UUID().uuidString.lowercased())
         #expect(request.operation.method == "PUT" && request.operation.path == "/enrollment/v1/native/practice")
+        // Contract prefers /native/config (Origin-enforced) over browser /enrollment/v1/config.
+        #expect(NativePracticeEnrollmentOperation.config.path == "/enrollment/v1/native/config")
+        #expect(NativePracticeEnrollmentOperation.config.method == "GET")
+        #expect(NativeWorkspaceOrigin.appleWebView.nativeClient == "apple")
+        #expect(NativeWorkspaceOrigin.desktopApp.nativeClient == "desktop")
         #expect(NativePracticeEnrollmentOperation(rawValue: "https://other.invalid") == nil)
         #expect(throws: NativePracticeProfileError.invalidBinding) {
             try NativePracticeEnrollmentRequest(expectedRevision: revision, operation: .status, body: body, idempotencyKey: nil)

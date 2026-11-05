@@ -225,12 +225,11 @@ import UIKit
         let (receipt, status) = try await registry(for: captured)
         if let selected { try selected.validate(receipt, account: captured, revision: revision) }
         guard status["stage"] as? String == "ready", let workspace = status["workspace"] as? [String: Any],
-              let address = workspace["url"] as? String, let parsed = URLComponents(string: address), parsed.scheme == "https",
-              let host = parsed.host, parsed.user == nil, parsed.password == nil, parsed.port == nil, parsed.query == nil, parsed.fragment == nil else {
+              let address = workspace["url"] as? String else {
             throw NativePracticeProfileError.unavailable
         }
-        let api = "https://" + (host == "app.cosmas.ai" ? "api.cosmas.ai" : "api." + host)
-        guard configuration.binding.allowsAPI(api, practiceID: receipt.practiceID) else { throw NativePracticeProfileError.invalidBinding }
+        // Contract: /chief practice host only; account-web / wrong api.<host> fail here (not at Open Chief rebuild).
+        let api = try configuration.binding.practiceAPIOrigin(fromWorkspaceURL: address, practiceID: receipt.practiceID)
         if let known {
             try known.validate(binding: configuration.binding)
             guard known.userID == captured.userID, known.practiceID == receipt.practiceID,
@@ -240,7 +239,9 @@ import UIKit
         }
         let expected = try NativePracticeConnectionExpectation(selectionID: receipt.practiceID, nonce: UUID(), account: captured,
             organizationID: receipt.organizationID, boxID: receipt.boxID, apiOrigin: api)
-        let body = try JSONSerialization.data(withJSONObject: ["client": "apple", "nonce": expected.nonce.uuidString.lowercased(), "expected_revision": receipt.registryRevision])
+        // Contract: client must match Origin (apple ↔ capacitor://localhost, desktop ↔ app://cosmas).
+        let client = configuration.binding.realm.workspaceOrigin.nativeClient
+        let body = try JSONSerialization.data(withJSONObject: ["client": client, "nonce": expected.nonce.uuidString.lowercased(), "expected_revision": receipt.registryRevision])
         let reply = try await request(.workspaceProfile, captured: captured, body: body)
         guard reply.status == 200 else { throw NativePracticeProfileError.unavailable }
         let bootstrap = try NativePracticeWorkspaceBootstrap.decode(reply.body, expectation: expected, binding: configuration.binding)
@@ -418,6 +419,11 @@ import UIKit
         }
         let result = try await self.request(.enrollment(request.operation), captured: captured, body: request.body, key: request.idempotencyKey)
         guard revision == request.expectedRevision else { throw NativePracticeProfileError.sessionChanged }
+        // Contract: successful /native/config must match this build's pinned realm Origin/issuer/audience.
+        if request.operation == .config, (200...299).contains(result.status) {
+            guard let configuration else { throw NativePracticeProfileError.unavailable }
+            try configuration.binding.validateNativeAccountConfig(try successfulObject(result))
+        }
         if request.operation == .selectPractice || request.operation == .join || request.operation == .practice { destinations.removeAll() }
         if let destination, let captured, let priorPractice, (200...299).contains(result.status) {
             let object = try successfulObject(result)

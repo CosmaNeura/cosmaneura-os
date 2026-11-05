@@ -32,7 +32,7 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/native-auth/Sources/CosmasNativeAuth/MicrosoftConnectionNavigation.swift": "aecc572273fd6a83ba2f328273389c91f74368d781c31f7be8eb435e0d9a49b0",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/KeychainAccessBlock.swift": "9985767055e2e36e208dd7b2696029ac5d88f34257fa4fa44df6fe3d3502403c",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeAuthAwait.swift": "48f59a9ade9ceca9e30c82c13c4bccbea0c69a45d26c9fefa2d4eaabc9a8501d",
-    "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift": "fc1ecfc979fd051ae881ae8f8a3c7de3864ebedfb3cd40100346649bbc4ab492",
+    "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift": "f8717596f295e993c941c749ca30910d03f9d3dad6d286e3af136f4c29eb0caf",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeTokenPolicy.swift": "f951145dbfabb7bc7244633b60267ddd65ba31ff378613f1fb75360f9a890298",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeWorkspaceAuth.swift": "618a81673f050b438313660a621792c88923b5c4b9c1de898daaa46821443868",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/GoogleConnectionNavigationTests.swift": "f362d3569ee2c2194177d2f70e52ac908893c7fecd1a5dccbb43ee9731b1d73b",
