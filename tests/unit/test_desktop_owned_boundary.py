@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import plistlib
 import shutil
 import sys
 from pathlib import Path
@@ -63,6 +64,55 @@ def test_installation_storage_stays_outside_owned_source(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         composer.main()
     assert not output.exists()
+
+
+def test_native_practice_connection_requires_authenticated_helper(tmp_path, monkeypatch, capsys):
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "index.html").write_text("<html>Invented renderer</html>")
+    output = tmp_path / "never-created"
+    scope(monkeypatch, web, output)
+    monkeypatch.setattr(sys, "argv", [*sys.argv, "--native-practice-connection"])
+    with pytest.raises(SystemExit):
+        composer.main()
+    assert "Native practice connection requires the authenticated desktop composition" in capsys.readouterr().err
+    assert not output.exists()
+
+
+def _synthetic_disabled_helper(path: Path) -> Path:
+    """Minimal disabled synthetic auth helper accepted by prepare-desktop-synthetic."""
+    contents = path / "Contents"
+    (contents / "MacOS").mkdir(parents=True)
+    (contents / "MacOS" / "CosmasDesktopAuth").write_bytes(b"invented-helper-binary")
+    (contents / "Info.plist").write_bytes(plistlib.dumps({
+        "CFBundleExecutable": "CosmasDesktopAuth",
+        "CFBundleIdentifier": "com.cosmasos.synthetic.desktop.auth.w7",
+        "CosmasNativeAuth": {"enabled": False},
+    }))
+    return path
+
+
+def test_native_practice_connection_opt_in_composes_practice_host(tmp_path, monkeypatch):
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "index.html").write_text("<html><body>Invented local renderer</body></html>")
+    helper = _synthetic_disabled_helper(tmp_path / "CosmasDesktopAuth.app")
+    output = tmp_path / "composed-practice"
+    scope(monkeypatch, web, output)
+    monkeypatch.setattr(sys, "argv", [
+        *sys.argv,
+        "--native-auth-helper", str(helper),
+        "--native-practice-connection",
+    ])
+    composer.main()
+    build = json.loads((output / "app" / "synthetic-build.json").read_text())
+    assert build["nativeAuthEnabled"] is True
+    assert build["nativePracticeConnectionEnabled"] is True
+    for name in ("practice-session.mjs", "practice-ipc.mjs", "practice-fake-wire.mjs"):
+        assert (output / "app" / name).is_file()
+    assert (output / "app" / "main.mjs").read_bytes() == (
+        ROOT / "clients/desktop/main-authenticated.mjs"
+    ).read_bytes()
 
 
 @pytest.mark.parametrize("damage", ["changed", "missing", "linked", "extra-manifest-file"])

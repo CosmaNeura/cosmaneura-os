@@ -243,9 +243,17 @@ owned iPhone candidate (staging `operational-staging-v1` or production
 `operational-beta-v1` with `practice-uuid-production-v1`, non-empty audience,
 `https://enrollment-api.cosmas.ai`, and `https://clerk.cosmas.ai`). Omission is
 the default. Synthetic `--verification-variant` helpers cannot carry this key.
-Embedding the Info does not implement the Mac `CosmasDesktopPractice` host;
-runtime still needs that host (and production validators) before a paying
-practice can open a production workspace on Mac.
+Embedding the Info does not by itself implement the Mac `CosmasDesktopPractice`
+host.
+
+Pass the packaged helper to `prepare-desktop-synthetic.py` with
+`--native-auth-helper`. To enable Mac Connect practice without a signed Swift
+practice helper, also pass `--native-practice-connection`. That sets
+`nativePracticeConnectionEnabled` in `synthetic-build.json` and exposes
+`window.cosmasDesktopPractice` from Electron main (fake/local enrollment wire,
+Origin `app://cosmas`, client `desktop`). Default omit keeps Connect dark.
+Production Clerk account-realm switching and a signed CosmasDesktopPractice
+Swift host remain follow-ups.
 
 The compiler wrapper checks the complete qualification inventory and copies it
 into its own output. It builds only `CosmasDesktopAuth` in debug configuration,
