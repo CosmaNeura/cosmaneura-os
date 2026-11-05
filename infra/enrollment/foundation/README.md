@@ -1,11 +1,15 @@
-# Independent enrollment staging foundation
+# Independent enrollment foundation (staging or production)
 
 This definition prepares the missing Azure foundation for the browser enrollment
-flow. It is fixed to `staging`, with `centralus` as the default region and only
-`centralus` or `eastus2` accepted; it cannot create production resources.
-It neither deploys an application nor marks registration, billing, workspaces or
-a customer journey qualified. No existing VM, Core, clinical database, vault,
-state backend or VNet is consumed or changed.
+flow. Set `environment` to `staging` (default, synthetic) or `production`
+(real practice data); each choice gets its own resource-group/ACR/state names
+and must never share the other’s coordinates. Region defaults to `centralus`
+and only `centralus` or `eastus2` are accepted. Preparation and plan do not
+deploy an application or mark registration, billing, workspaces or a customer
+journey qualified. Applying either environment remains a separate
+owner-authorized step and is held until cost and credentials are reviewed. No
+existing VM, Core, clinical database, vault, state backend or VNet is consumed
+or changed.
 
 Authenticated staging capability checks rejected PostgreSQL provisioning in
 East US 2 and East US. Central US supports the selected PostgreSQL 16 /
@@ -17,7 +21,10 @@ new resource group, regional services, network and private endpoints; DNS zones
 retain their global scope. Capability discovery does not qualify an actual
 deployment or customer journey.
 
-The default footprint is one new `rg-cosmabot-enrollment-staging-<suffix>` with:
+The default footprint is one new
+`rg-cosmabot-enrollment-<environment>-<suffix>` (for example
+`rg-cosmabot-enrollment-staging-<suffix>` or
+`rg-cosmabot-enrollment-production-<suffix>`) with:
 
 - A fresh private `/20` VNet, delegated `/23` Container Apps subnet, delegated
   `/26` PostgreSQL subnet and `/26` private-endpoint subnet. No peering, VM,
