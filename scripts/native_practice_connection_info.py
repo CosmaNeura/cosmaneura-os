@@ -18,6 +18,7 @@ ORIGIN_HOST = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,6
 PRODUCTION_PRACTICE_FRONTEND = "https://clerk.cosmas.ai"
 PRODUCTION_PRACTICE_ACCOUNT = "https://enrollment-api.cosmas.ai"
 PRODUCTION_PRACTICE_POLICY = "practice-uuid-production-v1"
+STAGING_PRACTICE_ACCOUNT = "https://enrollment-api.staging.cosmas.ai"
 STAGING_PRACTICE_POLICIES = frozenset({"exact", "synthetic-practice-uuid-staging-v1"})
 
 
@@ -59,9 +60,14 @@ def _practice_realm_and_policy(value: dict) -> str:
     profile = realm["profile"]
     audience = realm["audience"]
     if profile == "operational-staging-v1":
+        # Staging Infos pin the reviewed enrollment API origin so a staging Clerk
+        # realm cannot quietly wire Connect to production enrollment-api.cosmas.ai.
         if (audience != "" or not host.endswith(".clerk.accounts.dev")
+                or value["accountOrigin"] != STAGING_PRACTICE_ACCOUNT
                 or not isinstance(policy, str) or policy not in STAGING_PRACTICE_POLICIES):
-            raise ValueError("Use the reviewed exact or synthetic practice UUID origin policy.")
+            raise ValueError(
+                "Staging native practice requires enrollment-api.staging.cosmas.ai "
+                "and the reviewed exact or synthetic practice UUID origin policy.")
         _practice_publishable_key(realm["publishableKey"], host, live=False)
         return policy
     if profile == "operational-beta-v1":
@@ -85,7 +91,8 @@ def native_practice_configuration(value: object) -> dict:
 
     This validates explicit public inputs; it neither enables a missing option
     nor changes the compiled Beta identity, callback or native request origin.
-    Staging keeps operational-staging-v1 with an empty audience. Production binds
+    Staging keeps operational-staging-v1 with an empty audience and pins
+    accountOrigin to enrollment-api.staging.cosmas.ai. Production binds
     operational-beta-v1 to enrollment-api.cosmas.ai, clerk.cosmas.ai, a non-empty
     audience, and practice-uuid-production-v1. Runtime acceptance of that
     production policy also requires the matching native-auth / shared-profile

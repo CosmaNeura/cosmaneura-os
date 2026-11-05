@@ -7,7 +7,7 @@ private func bootstrapInputs() throws -> (NativePracticeConnectionExpectation, N
     let realm = try NativeClerkAccountConfiguration(publishableKey: "pk_test_" + Data("invented.clerk.accounts.dev$".utf8).base64EncodedString(),
         frontendOrigin: issuer, bundleIdentifier: "com.cosmasos.beta.ios", profile: .operationalStaging,
         storageNamespace: String(repeating: "a", count: 64))
-    let binding = try NativePracticeAccountServiceBinding(accountOrigin: "https://accounts.example.invalid", realm: realm,
+    let binding = try NativePracticeAccountServiceBinding(accountOrigin: NativePracticeAccountServiceBinding.stagingAccountOrigin, realm: realm,
         audience: "", allowedAPIOrigins: ["https://api.practice.example.invalid"])
     let expected = try NativePracticeConnectionExpectation(selectionID: UUID(), nonce: UUID(),
         account: .init(issuer: issuer, userID: "user_one", sessionID: "sess_one"), organizationID: "org_one",

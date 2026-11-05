@@ -32,10 +32,11 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/native-auth/Sources/CosmasNativeAuth/MicrosoftConnectionNavigation.swift": "aecc572273fd6a83ba2f328273389c91f74368d781c31f7be8eb435e0d9a49b0",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/KeychainAccessBlock.swift": "9985767055e2e36e208dd7b2696029ac5d88f34257fa4fa44df6fe3d3502403c",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeAuthAwait.swift": "48f59a9ade9ceca9e30c82c13c4bccbea0c69a45d26c9fefa2d4eaabc9a8501d",
-    "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift": "f8717596f295e993c941c749ca30910d03f9d3dad6d286e3af136f4c29eb0caf",
+    "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift": "9c9d70eaa1f9d13e383bbf3ab492fce6901422d9b4cf813a1b2341a8f7c6fefb",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeTokenPolicy.swift": "f951145dbfabb7bc7244633b60267ddd65ba31ff378613f1fb75360f9a890298",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeWorkspaceAuth.swift": "618a81673f050b438313660a621792c88923b5c4b9c1de898daaa46821443868",
-    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/GoogleConnectionNavigationTests.swift": "f362d3569ee2c2194177d2f70e52ac908893c7fecd1a5dccbb43ee9731b1d73b",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/GoogleConnectionNavigationTests.swift": "7f25b506b325cfbf76e7fc4ad1082c2406ca238f5ef054793de8213dda3c8eba",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeClerkConfigurationTests.swift": "2aff431cbe3b8d80d9b8eb6da67e18d4a9c2326a29d49c5e14e732c33fb9dbac",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift": "6083e5b8619d13b1014a11ca625e5a1f6860f4068c0fb24ee42caf265bd56db8",
 }
 
@@ -256,6 +257,7 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
         "Tests/CosmasNativeAuthTests/NativePracticeBootstrapTests.swift",
         "Tests/CosmasNativeAuthTests/NativePracticeConnectionContractTests.swift",
         "Tests/CosmasNativeAuthTests/NativePracticeOriginAndSelectionTests.swift",
+        "Tests/CosmasNativeAuthTests/NativePracticeProductionTests.swift",
     )
     assert tuple(manifest["native_practice_additions"]) == additions
     vendor_files = [

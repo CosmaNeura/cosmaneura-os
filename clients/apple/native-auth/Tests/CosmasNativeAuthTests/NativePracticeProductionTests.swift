@@ -48,7 +48,8 @@ private func productionBinding() throws -> NativePracticeAccountServiceBinding {
                     registeredPracticeOrigins: policy)
             }
         }
-        let staging = try NativePracticeAccountServiceBinding(accountOrigin: "https://api.accounts.staging.cosmas.ai",
+        let staging = try NativePracticeAccountServiceBinding(
+            accountOrigin: NativePracticeAccountServiceBinding.stagingAccountOrigin,
             realm: stagingRealm(), audience: "", allowedAPIOrigins: [], registeredPracticeOrigins: .syntheticPracticeUUIDStaging)
         #expect(staging.dataMode == "synthetic")
     }
@@ -65,6 +66,32 @@ private func productionBinding() throws -> NativePracticeAccountServiceBinding {
         }
     }
 
+    @Test func productionInfosPinEnrollmentAndClerkHosts() throws {
+        for origin in ["https://enrollment-api.staging.cosmas.ai", "https://enrollment.example.invalid",
+                       "https://api.accounts.staging.cosmas.ai"] {
+            #expect(throws: NativePracticeProfileError.invalidBinding) {
+                try NativePracticeAccountServiceBinding(accountOrigin: origin, realm: productionRealm(),
+                    audience: "cosmabot-practice-api", allowedAPIOrigins: [], registeredPracticeOrigins: .practiceUUIDProduction)
+            }
+        }
+        #expect(throws: NativePracticeProfileError.invalidBinding) {
+            try NativePracticeAccountServiceBinding(accountOrigin: NativePracticeAccountServiceBinding.productionAccountOrigin,
+                realm: stagingRealm(), audience: "", allowedAPIOrigins: [],
+                registeredPracticeOrigins: .syntheticPracticeUUIDStaging)
+        }
+        #expect(throws: NativePracticeProfileError.invalidBinding) {
+            try NativePracticeAccountServiceBinding(accountOrigin: "https://accounts.example.invalid",
+                realm: stagingRealm(), audience: "", allowedAPIOrigins: ["https://api.a.staging.cosmas.ai"],
+                registeredPracticeOrigins: .exact)
+        }
+        #expect(throws: NativeAuthError.unavailable) {
+            try NativeClerkAccountConfiguration(
+                publishableKey: "pk_live_" + Data("clerk.example.invalid$".utf8).base64EncodedString(),
+                frontendOrigin: "https://clerk.example.invalid", bundleIdentifier: "com.cosmasos.beta.ios",
+                profile: .operationalBeta, storageNamespace: String(repeating: "c", count: 64))
+        }
+    }
+
     @Test func bundleConfigurationSelectsProductionRealm() throws {
         let value: [String: Any] = ["enabled": true, "accountOrigin": "https://enrollment-api.cosmas.ai", "apiOrigins": [String](),
             "registeredPracticeOrigins": "practice-uuid-production-v1",
@@ -73,6 +100,7 @@ private func productionBinding() throws -> NativePracticeAccountServiceBinding {
                       "profile": "operational-beta-v1", "keychainNamespace": String(repeating: "c", count: 64)]]
         let parsed = try #require(try NativePracticeBundleConfiguration.parse(value, bundleIdentifier: "com.cosmasos.beta.ios"))
         #expect(parsed.binding.realm.profile == .operationalBeta && parsed.binding.dataMode == "authorized_beta")
+        #expect(parsed.binding.accountOrigin == NativePracticeAccountServiceBinding.productionAccountOrigin)
         #expect(parsed.binding.realm.workspaceOrigin == .appleWebView)
         #expect(parsed.binding.realm.workspaceOrigin.nativeClient == "apple")
         let desktop = try #require(try NativePracticeBundleConfiguration.parse(value, bundleIdentifier: "com.cosmasos.beta.desktop.auth"))
@@ -92,9 +120,26 @@ private func productionBinding() throws -> NativePracticeAccountServiceBinding {
         #expect(throws: NativePracticeProfileError.invalidBinding) {
             try NativePracticeBundleConfiguration.parse(mismatched, bundleIdentifier: "com.cosmasos.beta.ios")
         }
+        var wrongAccount = value; wrongAccount["accountOrigin"] = NativePracticeAccountServiceBinding.stagingAccountOrigin
+        #expect(throws: NativePracticeProfileError.invalidBinding) {
+            try NativePracticeBundleConfiguration.parse(wrongAccount, bundleIdentifier: "com.cosmasos.beta.ios")
+        }
         var simulator = value; simulator["realm"] = (value["realm"] as! [String: Any]).merging(["profile": "simulator-staging-v1"]) { $1 }
         #expect(throws: NativePracticeProfileError.invalidBinding) {
             try NativePracticeBundleConfiguration.parse(simulator, bundleIdentifier: "com.cosmasos.beta.ios")
+        }
+        let stagingHost = "invented.clerk.accounts.dev"
+        let staging: [String: Any] = ["enabled": true,
+            "accountOrigin": NativePracticeAccountServiceBinding.stagingAccountOrigin, "apiOrigins": [String](),
+            "registeredPracticeOrigins": "synthetic-practice-uuid-staging-v1",
+            "realm": ["publishableKey": "pk_test_" + Data((stagingHost + "$").utf8).base64EncodedString(),
+                      "frontendOrigin": "https://" + stagingHost, "audience": "",
+                      "profile": "operational-staging-v1", "keychainNamespace": String(repeating: "b", count: 64)]]
+        let stagingParsed = try #require(try NativePracticeBundleConfiguration.parse(staging, bundleIdentifier: "com.cosmasos.beta.ios"))
+        #expect(stagingParsed.binding.accountOrigin == NativePracticeAccountServiceBinding.stagingAccountOrigin)
+        var stagingProdMix = staging; stagingProdMix["accountOrigin"] = NativePracticeAccountServiceBinding.productionAccountOrigin
+        #expect(throws: NativePracticeProfileError.invalidBinding) {
+            try NativePracticeBundleConfiguration.parse(stagingProdMix, bundleIdentifier: "com.cosmasos.beta.ios")
         }
     }
 

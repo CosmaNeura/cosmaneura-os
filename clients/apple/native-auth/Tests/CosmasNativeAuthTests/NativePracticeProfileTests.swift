@@ -12,7 +12,7 @@ private func practiceRealm() throws -> NativeClerkAccountConfiguration {
         profile: .operationalStaging, storageNamespace: String(repeating: "a", count: 64))
 }
 private func practiceBinding() throws -> NativePracticeAccountServiceBinding {
-    try .init(accountOrigin: "https://accounts.example.invalid", realm: practiceRealm(), audience: "",
+    try .init(accountOrigin: NativePracticeAccountServiceBinding.stagingAccountOrigin, realm: practiceRealm(), audience: "",
               allowedAPIOrigins: [practiceOne, practiceTwo])
 }
 private func account(_ suffix: String = "one") throws -> NativeAccountIdentity {
