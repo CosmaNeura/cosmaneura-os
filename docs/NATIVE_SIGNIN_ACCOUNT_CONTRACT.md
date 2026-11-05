@@ -314,26 +314,17 @@ This contract does **not**:
 | Production profile proof | `web/src/native-practice-production.test.ts` |
 | Swift production origin policy | `clients/apple/native-auth/.../NativePracticeProfile.swift` |
 
-## Related PR merge order (Mac / iPhone)
+## Related PR merge order (Mac / iPhone) — agreed
 
-Native production validator code also lives on draft
-[PR #305](https://github.com/CosmaNeura/cosmaneura-os/pull/305). This contract
-PR (#311) currently contains that same validator commit plus this document.
+**Agreed with Mac/iPhone Team 3** ([comment on #311](https://github.com/CosmaNeura/cosmaneura-os/pull/311#issuecomment-6658486488)):
+**option B — close #305 and take #311 alone.**
 
-**Recommended order (please confirm):**
-
-1. **Merge #305 first** — lands the shared/Swift/`NativeEnrollmentEntry`
-   production profile acceptance Mac and iPhone need to open
-   `authorized_beta` practices.
-2. **Then rebase #311 onto `main`** — drop the duplicate validator commit so
-   #311 is contract/docs (and host-pin text) only; merge #311 second.
-
-Why: #305 and #311 share the identical native-validator patch. Merging both
-without rebasing double-applies or conflicts. Splitting code (#305) then
-contract (#311) lets the mobile team build against validators while the
-account-contract wording stays reviewable. Alternative if preferred: close
-#305 and merge #311 alone (it already includes the same code). Do not merge
-both as currently stacked without the rebase step.
+Draft [PR #305](https://github.com/CosmaNeura/cosmaneura-os/pull/305) carried the
+same production native-validator patch (shared/Swift/`NativeEnrollmentEntry`).
+This contract PR (#311) includes that identical validator work **and** this
+document. **#305 is superseded by #311.** Do not merge #305. Keep #311 as the
+single draft for validators + account contract (still draft; do not merge until
+ready).
 
 ## Change control
 
