@@ -92,9 +92,11 @@ and telemetry. Reuse the already established Azure components and deploy
 identity pattern; do not share Core or clinical workspace state. Provision the
 central enrollment database and runtime role independently from per-Box data.
 
-The staging-only [foundation](foundation/README.md) and unscheduled
-[database job](database-job/README.md) now provide the concrete independent
-resource/role preparation. They do not deploy an app or qualify a journey.
+The [foundation](foundation/README.md) (`environment`: staging|production) and
+unscheduled [database job](database-job/README.md) provide the concrete
+independent resource/role preparation. They do not deploy an app or qualify a
+journey. Production foundation/runtime apply stays held until founder cost yes;
+registration remains dark until `production_qualified`.
 Staging browser testing uses `https://onboarding.staging.cosmas.ai` with
 `https://enrollment-api.staging.cosmas.ai`, leaving the current beta origin intact.
 

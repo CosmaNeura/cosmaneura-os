@@ -20,7 +20,12 @@ spec.loader.exec_module(prepare_module)
 
 @pytest.fixture
 def bootstrap_module(monkeypatch):
+    hold_spec = importlib.util.spec_from_file_location("hold_flags", HOST / "hold_flags.py")
+    assert hold_spec and hold_spec.loader
+    hold_module = importlib.util.module_from_spec(hold_spec)
+    hold_spec.loader.exec_module(hold_module)
     monkeypatch.setitem(sys.modules, "prepare", prepare_module)
+    monkeypatch.setitem(sys.modules, "hold_flags", hold_module)
     bootstrap_spec = importlib.util.spec_from_file_location("allocator_source_bootstrap", HOST / "bootstrap.py")
     assert bootstrap_spec and bootstrap_spec.loader
     module = importlib.util.module_from_spec(bootstrap_spec)
@@ -90,7 +95,8 @@ def test_snapshot_preserves_real_commit_without_history_or_config(snapshot, tmp_
     assert git(target, "config", "--local", "--get-regexp", "^core[.]")
     assert subprocess.run(["git", "-C", str(target), "config", "--local", "--get", "credential.helper"], capture_output=True).returncode != 0
     assert git(target, "remote") == ""
-    assert snapshot[4]["bootstrap_operators"]["bootstrap.py"]
+    assert set(snapshot[4]["bootstrap_operators"]) == {"prepare.py", "bootstrap.py", "hold_flags.py"}
+    assert (snapshot[3] / "bootstrap/hold_flags.py").is_file()
 
 
 @pytest.mark.parametrize("tamper", ["pack", "commit", "tree", "objects"])

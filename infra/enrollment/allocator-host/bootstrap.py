@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 
 from prepare import CONTRACT, OID, fresh_output, regular_directory, tree_objects
+from hold_flags import load_hold_flags
 
 
 def sha(path: Path) -> str:
@@ -46,7 +47,7 @@ def snapshot_value(path: Path) -> dict:
             or not isinstance(value["object_ids"], list) or not all(isinstance(oid, str) and OID.fullmatch(oid) for oid in value["object_ids"])
             or value["object_ids"] != sorted(set(value["object_ids"]))
             or not isinstance(value["bootstrap_operators"], dict)
-            or set(value["bootstrap_operators"]) != {"prepare.py", "bootstrap.py"}
+            or set(value["bootstrap_operators"]) != {"prepare.py", "bootstrap.py", "hold_flags.py"}
             or not all(isinstance(digest, str) and re.fullmatch(r"[a-f0-9]{64}", digest)
                        for digest in value["bootstrap_operators"].values())):
         raise ValueError("exact reviewed snapshot contract required")
@@ -122,7 +123,14 @@ def host_environment(paths: dict[str, str], source: Path, evidence: Path) -> dic
             "PYTHONPATH": str(source / "src")}
 
 
-def validate_host(source: Path, snapshot: Path, tools_file: Path, state_root: Path, evidence: Path) -> dict:
+def validate_host(
+    source: Path,
+    snapshot: Path,
+    tools_file: Path,
+    state_root: Path,
+    evidence: Path,
+    hold_flags: Path | None = None,
+) -> dict:
     value = snapshot_value(snapshot)
     regular_directory(source)
     regular_directory(state_root)
@@ -165,7 +173,14 @@ def validate_host(source: Path, snapshot: Path, tools_file: Path, state_root: Pa
     result.update(contract_version="cosmabot.private-worker-local-host-check.v1", tools=config,
                   python=python, azure_cli=azure["azure-cli"], tofu=tofu["terraform_version"],
                   git=local([paths["git"], "--version"]), state_root=str(state_root),
-                  allocation_qualified=False, managed_identity_qualified=False, private_network_qualified=False)
+                  allocation_qualified=False, managed_identity_qualified=False, private_network_qualified=False,
+                  worker_started=False, hosting_configuration_enabled=False,
+                  p2_extra_box_authorized=False, stripe_live_mode=False)
+    if hold_flags is not None:
+        holds = load_hold_flags(hold_flags)
+        if holds["activation_holds"]["worker_started"] or holds["worker_enable_command_emitted"]:
+            raise ValueError("hold-flags receipt cannot claim the worker is started")
+        result["hold_flags"] = holds
     (evidence / "local-host-check.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
 
@@ -183,12 +198,17 @@ def main() -> int:
     check.add_argument("--tools", type=Path, required=True)
     check.add_argument("--state-root", type=Path, required=True)
     check.add_argument("--evidence", type=Path, required=True)
+    check.add_argument("--hold-flags", type=Path, default=None,
+                       help="Optional cosmabot.private-worker-hold-flags.v1 receipt; activation holds must stay false.")
     arguments = parser.parse_args()
     os.umask(0o077)
     if arguments.operation == "materialize":
         result = materialize(arguments.snapshot, arguments.pack, arguments.output)
     else:
-        result = validate_host(arguments.source, arguments.snapshot, arguments.tools, arguments.state_root, arguments.evidence)
+        result = validate_host(
+            arguments.source, arguments.snapshot, arguments.tools, arguments.state_root, arguments.evidence,
+            hold_flags=arguments.hold_flags,
+        )
     print(json.dumps(result, sort_keys=True))
     return 0
 

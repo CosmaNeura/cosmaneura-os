@@ -71,7 +71,7 @@ def prepare(source: Path, commit: str, output: Path) -> dict:
     operators = output / "bootstrap"
     operators.mkdir(mode=0o700)
     operator_hashes = {}
-    for name in ("prepare.py", "bootstrap.py"):
+    for name in ("prepare.py", "bootstrap.py", "hold_flags.py"):
         content = Path(__file__).with_name(name).read_bytes()
         destination = operators / name
         destination.write_bytes(content)
