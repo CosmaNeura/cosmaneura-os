@@ -1,10 +1,12 @@
-FROM python:3.13-slim@sha256:bb2988715db2cf7ace7b53f38f3cffbef7c7046a656bee66245eb0ed386e2e81
-# Apply the verified Debian security fixes omitted by this pinned base.
+FROM python:3.13-slim@sha256:d0a9e379c0c588befb0e427db17ca9731751d281f32c6cb1a90a1277b680bdad
+# Apply verified Debian security fixes when the pinned base omits them.
+# CVE-2026-109518 (apt / libapt-pkg7.0) is fixed in 3.0.4; keep the
+# libpcre2 pin from the prior base refresh.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
-        libpcre2-8-0=10.46-1~deb13u3 \
         apt=3.0.4 \
         libapt-pkg7.0=3.0.4 \
+        libpcre2-8-0=10.46-1~deb13u3 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
