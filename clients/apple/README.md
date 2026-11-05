@@ -49,10 +49,14 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-The pinned shell uses Capacitor 8.5.0 and its official checksummed Swift binary
-packages. Dependency resolution is performed by Xcode when building, not by the
-composition script. The iOS 17 target records the product minimum; actual
-dependency support and build/device behavior must still be verified.
+Owned iPhone builds use Capacitor 8.5.0 from
+`clients/apple/vendor/capacitor-swift-pm-8.5.0` (local path binary targets;
+release-asset SHA-256 recorded in that directory's SOURCE_MANIFEST.json).
+`scripts/compose-portable-iphone.py` and
+`scripts/prepare-owned-iphone-candidate.py` copy that mirror into the composed
+project and do not download Ionic's remote XCFramework zips. The iOS 17 target
+records the product minimum; actual dependency support and build/device
+behavior must still be verified.
 
 First physical target supplied by the owner: likely **iPhone 12**, using its latest
 installed OS. Confirm the model and exact OS build at installation. Simulator

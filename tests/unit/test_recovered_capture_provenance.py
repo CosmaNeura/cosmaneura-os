@@ -39,6 +39,14 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift": "6083e5b8619d13b1014a11ca625e5a1f6860f4068c0fb24ee42caf265bd56db8",
 }
 
+# Owned Capacitor path pins in capture package manifests. Historical recovery
+# still records the remote binary package URL; current owners use the reviewed
+# local mirror under clients/apple/vendor/capacitor-swift-pm-8.5.0.
+REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256 = {
+    "clients/capture/native-configured/ios-pcm-capacitor/Package.swift": "37f8274fc2c5413f93e52524429407bafc92c2cd3df9a4b3bfe536ae4f655c96",
+    "clients/capture/native-configured/secure-queue/Package.swift": "b47bd6945b0f2d12908fa4a6f32bdff36b8345bdcd7860ff4a689520863a3e23",
+}
+
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -61,6 +69,7 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
 
     differed = []
     reviewed_current = set()
+    reviewed_capacitor = set()
     for item in record["files"]:
         recovered = ROOT / "apps/capture" / item["path"]
         assert _sha256(recovered) == item["repository_sha256"]
@@ -83,12 +92,18 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
             assert re.search(r"\bfstat(?:at)?\s*\(", iphone) is None
         else:
             expected = REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256.get(
-                equivalent["path"], equivalent["sha256"]
+                equivalent["path"],
+                REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256.get(
+                    equivalent["path"], equivalent["sha256"]
+                ),
             )
             assert _sha256(live) == expected
             if equivalent["path"] in REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256:
                 assert expected != equivalent["sha256"]
                 reviewed_current.add(equivalent["path"])
+            if equivalent["path"] in REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256:
+                assert expected != equivalent["sha256"]
+                reviewed_capacitor.add(equivalent["path"])
         same = equivalent["sha256"] == item["repository_sha256"]
         if equivalent["status"] == "byte-identical":
             assert same
@@ -98,6 +113,7 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
         else:
             raise AssertionError(equivalent["status"])
     assert reviewed_current == set(REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256)
+    assert reviewed_capacitor == set(REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256)
     assert differed == [
         "native-plugins/cosmas-native-auth/Package.swift",
         "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
@@ -118,6 +134,31 @@ def test_reviewed_native_counterpart_pins_cover_only_exact_modified_owned_source
         assert len(historical) == 1
         assert historical[0]["sha256"] != digest
         assert _sha256(ROOT / name) == digest
+
+
+def test_reviewed_owned_capacitor_package_pins_retire_remote_binary_urls():
+    record = json.loads(PROVENANCE.read_text(encoding="utf-8"))
+    counterparts = [item["tracked_equivalent"] for item in record["files"]
+                    if item["tracked_equivalent"] is not None]
+    vendor = ROOT / "clients/apple/vendor/capacitor-swift-pm-8.5.0"
+    assert (vendor / "Package.swift").is_file()
+    assert (vendor / "Capacitor.xcframework/Info.plist").is_file()
+    assert (vendor / "Cordova.xcframework/Info.plist").is_file()
+    manifest = json.loads((vendor / "SOURCE_MANIFEST.json").read_text(encoding="utf-8"))
+    assert manifest["remote_binary_targets_retired"] is True
+    assert manifest["version"] == "8.5.0"
+    for name, digest in REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256.items():
+        assert name.startswith("clients/capture/native-configured/")
+        assert name.endswith("Package.swift")
+        assert re.fullmatch(r"[0-9a-f]{64}", digest)
+        historical = [item for item in counterparts if item["path"] == name]
+        assert len(historical) == 1
+        assert historical[0]["sha256"] != digest
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert _sha256(ROOT / name) == digest
+        assert "https://github.com/ionic-team/capacitor-swift-pm.git" not in text
+        assert "clients/apple/vendor/capacitor-swift-pm-8.5.0" in text or \
+            "../../../apple/vendor/capacitor-swift-pm-8.5.0" in text
 
 
 def test_new_account_org_activation_uses_public_sdk_refresh_before_membership_and_fences_each_await():
@@ -194,6 +235,9 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     assert manifest["app_scaffold"] == "apps/capture"
     assert manifest["scaffold_role"] == "frozen-1107-evidence"
     assert manifest["external_snapshot_required"] is False
+    assert manifest["remote_capacitor_package_required"] is False
+    assert manifest["owned_capacitor_vendor"] == "clients/apple/vendor/capacitor-swift-pm-8.5.0"
+    assert manifest["composed_capacitor_vendor"] == "apps/capture/native-plugins/capacitor-swift-pm"
     assert manifest["qualified_install"] is False
     assert manifest["compiled_signed_or_installed"] is False
     assert manifest["generated_web_assets"] == "absent"
@@ -214,7 +258,25 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
         "Tests/CosmasNativeAuthTests/NativePracticeOriginAndSelectionTests.swift",
     )
     assert tuple(manifest["native_practice_additions"]) == additions
-    assert len(manifest["files"]) == frozen_count + 1 + len(additions)
+    vendor_files = [
+        item for item in manifest["files"]
+        if str(item["path"]).startswith("native-plugins/capacitor-swift-pm/")
+    ]
+    assert len(vendor_files) >= 4
+    assert len(manifest["files"]) == frozen_count + 1 + len(additions) + len(vendor_files)
+    assert "https://github.com/ionic-team/capacitor-swift-pm.git" not in manifest_text
+    assert "remoteSourceControl" not in manifest_text
+    capapp = (output / "apps/capture/ios/App/CapApp-SPM/Package.swift").read_text(encoding="utf-8")
+    assert 'path: "../../../native-plugins/capacitor-swift-pm"' in capapp
+    assert "https://github.com/ionic-team/capacitor-swift-pm.git" not in capapp
+    resolved = json.loads(
+        (output / "apps/capture/ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved")
+        .read_text(encoding="utf-8")
+    )
+    assert resolved["pins"] == []
+    assert (output / "apps/capture/native-plugins/capacitor-swift-pm/Package.swift").is_file()
+    assert (output / "apps/capture/native-plugins/capacitor-swift-pm/Capacitor.xcframework/Info.plist").is_file()
+    assert (output / "apps/capture/native-plugins/capacitor-swift-pm/Cordova.xcframework/Info.plist").is_file()
     for name in additions:
         destination = "native-plugins/cosmas-native-auth/" + name
         records = [item for item in manifest["files"] if item["path"] == destination]
@@ -273,12 +335,29 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
             privacy_lines = [line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" in line]
             assert len(privacy_lines) == 4
             assert "".join(line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" not in line) == original.read_text(encoding="utf-8")
+        elif item["role"] == "derived-capacitor-localization":
+            assert item["derivation_source"] == "scripts/compose-portable-iphone.py"
+            assert item["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)
+            assert item["scaffold_input_sha256"] == _sha256(ROOT / item["localization_input"])
+            assert "https://github.com/ionic-team/capacitor-swift-pm.git" not in placed.read_text(encoding="utf-8")
+            if item["path"].endswith("Package.resolved"):
+                assert json.loads(placed.read_text(encoding="utf-8"))["pins"] == []
+            else:
+                assert f'path: "{item["localized_capacitor_path"]}"' in placed.read_text(encoding="utf-8")
         elif item["role"] == "app-scaffold":
             assert item["owner"] == "apps/capture"
             assert placed.read_bytes() == (ROOT / "apps/capture" / item["path"]).read_bytes()
         else:
             raise AssertionError(item["role"])
     assert owners == {"clients/apple", "clients/capture"}
+    localized = [item["path"] for item in manifest["files"] if item["role"] == "derived-capacitor-localization"]
+    assert set(localized) == {
+        "ios/App/CapApp-SPM/Package.swift",
+        "native-plugins/cosmas-native-auth/Package.swift",
+        "native-plugins/ios-pcm-capacitor/Package.swift",
+        "native-plugins/secure-queue/Package.swift",
+        "ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
+    }
     apple = output / "apps/capture/ios/App/App/SceneDelegate.swift"
     capture = output / "apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/IOSPCMCore.swift"
     assert apple.read_bytes() == (ROOT / "clients/apple/startup-recovery/SceneDelegate.swift").read_bytes()

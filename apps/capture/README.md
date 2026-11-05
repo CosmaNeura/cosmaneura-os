@@ -22,8 +22,11 @@ baseline, not a new qualified build.
   `tracked_equivalent` mapping; do not evolve both copies independently.
 - Vendored ClerkKit 1.5.5: `native-plugins/cosmas-native-auth/vendor`, with its MIT
   LICENSE and SDK source retained.
-- Remote Swift dependency: Capacitor/Cordova 8.5.0, pinned revision
-  `4f71d0b979f2f957326f04353eca7604ee937e1e` in Package.resolved.
+- Capacitor/Cordova 8.5.0: frozen scaffold still records the historical remote
+  pin in Package.resolved. Owned builds use
+  `clients/apple/vendor/capacitor-swift-pm-8.5.0` (revision
+  `4f71d0b979f2f957326f04353eca7604ee937e1e`); portable composition copies that
+  mirror and retires the remote binary zip download.
 - Legacy `CosmaneuraScribe*` package names identify the already-consumed generic
   components. Keep their names and attribution; they are not Scribe server code.
 
@@ -35,14 +38,19 @@ Xcode source/config paths resolved in the recovery audit. Generated
 
 `scripts/compose-portable-iphone.py` builds a fresh iPhone project input from
 this frozen app scaffold plus the authoritative `clients/apple` and
-`clients/capture` implementations. It reads those owners and this scaffold
-only. It does not modify this directory, compile, sign, or install.
+`clients/capture` implementations, including the owned Capacitor 8.5.0 mirror.
+It reads those owners and this scaffold only. It does not modify this
+directory, compile, sign, or install. Prefer
+`scripts/prepare-owned-iphone-candidate.py` on a Mac for the full owned
+candidate (renderer + composition + public identity). That path does not need
+the historical external Scribe snapshot.
 
 This directory remains a composed release closure, not the historical raw
-source accepted by `scripts/prepare-apple-synthetic.py`. That script still
-expects an external snapshot at `ea7f99d0278a05706531ffb1288cb1df7acf507b`.
-Do not point it at this folder, fabricate that commit, or fetch/modify a
-separate Scribe repository.
+source accepted by `scripts/prepare-apple-synthetic.py`. That legacy script
+still expects an external snapshot at
+`ea7f99d0278a05706531ffb1288cb1df7acf507b`. Do not point it at this folder,
+fabricate that commit, or fetch/modify a separate Scribe repository for new
+owned builds.
 
 ## What a Mac must still do before a qualified install
 
