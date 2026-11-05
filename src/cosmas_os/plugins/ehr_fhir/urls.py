@@ -15,8 +15,8 @@ from urllib.parse import urlsplit
 
 # Exact host names that identify synthetic / sandbox FHIR bases.
 # Match is case-insensitive equality on the parsed hostname only.
-# Athena Preview (practice 195900) is the only vendor sandbox host allowlisted
-# here for C7; production athena hosts stay refused by default.
+# Vendor Preview hosts (for example athena) are NOT in this default set —
+# adapters pass them via ``extra_sandbox_hosts`` so other vendors stay closed.
 _SANDBOX_HOSTS = frozenset(
     {
         "fhir.sandbox.example.com",
@@ -25,7 +25,6 @@ _SANDBOX_HOSTS = frozenset(
         "mock.example.com",
         "localhost",
         "127.0.0.1",
-        "api.preview.platform.athenahealth.com",
     }
 )
 
@@ -74,16 +73,43 @@ def is_production_base_url(base_url: str) -> bool:
     return any(marker in host for marker in _PRODUCTION_MARKERS)
 
 
-def is_sandbox_base_url(base_url: str) -> bool:
+def _normalize_extra_sandbox_hosts(
+    extra_sandbox_hosts: frozenset[str] | set[str] | tuple[str, ...] | list[str] | None,
+) -> frozenset[str]:
+    if extra_sandbox_hosts is None:
+        return frozenset()
+    if type(extra_sandbox_hosts) not in {frozenset, set, tuple, list}:
+        raise ValueError("fhir_base_url_invalid")
+    cleaned: set[str] = set()
+    for host in extra_sandbox_hosts:
+        if type(host) is not str or not host or not host.isascii() or any(c in host for c in "/:\\ "):
+            raise ValueError("fhir_base_url_invalid")
+        if host.endswith("."):
+            raise ValueError("fhir_base_url_invalid")
+        cleaned.add(host.lower())
+    return frozenset(cleaned)
+
+
+def is_sandbox_base_url(
+    base_url: str,
+    *,
+    extra_sandbox_hosts: frozenset[str] | set[str] | tuple[str, ...] | list[str] | None = None,
+) -> bool:
     host = _hostname(base_url)
     if host is None:
         return False
     if is_production_base_url(base_url):
         return False
-    return host in _SANDBOX_HOSTS
+    extras = _normalize_extra_sandbox_hosts(extra_sandbox_hosts)
+    return host in _SANDBOX_HOSTS or host in extras
 
 
-def assert_allowed_base_url(base_url: str, *, allow_production: bool = False) -> str:
+def assert_allowed_base_url(
+    base_url: str,
+    *,
+    allow_production: bool = False,
+    extra_sandbox_hosts: frozenset[str] | set[str] | tuple[str, ...] | list[str] | None = None,
+) -> str:
     """Normalize and accept a FHIR base URL, or raise ValueError."""
     if type(base_url) is not str or not base_url.isascii() or any(c in base_url for c in " \t\r\n\\"):
         raise ValueError("fhir_base_url_invalid")
@@ -95,7 +121,7 @@ def assert_allowed_base_url(base_url: str, *, allow_production: bool = False) ->
     if any(part in {".", ".."} for part in path.split("/")):
         raise ValueError("fhir_base_url_invalid")
     normalized = f"{parts.scheme}://{parts.netloc}{path}"
-    if is_sandbox_base_url(normalized):
+    if is_sandbox_base_url(normalized, extra_sandbox_hosts=extra_sandbox_hosts):
         return normalized
     if allow_production is True and is_production_base_url(normalized):
         return normalized

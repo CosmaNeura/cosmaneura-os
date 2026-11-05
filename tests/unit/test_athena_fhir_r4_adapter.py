@@ -15,12 +15,14 @@ import httpx
 import pytest
 
 from cosmas_os.adapters.athena_fhir_r4 import (
+    ATHENA_FHIR_EXTRA_SANDBOX_HOSTS,
     ATHENA_FHIR_R4_BASE_URL,
     ATHENA_FHIR_RESOURCES,
     ATHENA_FHIR_SYSTEM_READ_SCOPES,
     ATHENA_FHIR_TOKEN_URL,
     ATHENA_PRACTICE_PARAM,
     ATHENA_PRACTICE_VALUE,
+    ATHENA_PREVIEW_HOST,
     ATHENA_PREVIEW_PRACTICE_ID,
     FORBIDDEN_FHIR_RESOURCES,
     AthenaFhirR4Adapter,
@@ -35,6 +37,8 @@ from cosmas_os.adapters.ehr_auth import (
     ClientCredentialsTokenClient,
     ManagedSecretEnvResolver,
 )
+from cosmas_os.ehr_real_data_gate import EhrRealDataGateError, assert_ehr_request_allowed
+from cosmas_os.plugins.ehr_fhir import READABLE_RESOURCES, FhirR4ReadClient
 from cosmas_os.ports import athena_fhir_ehr as port
 
 FIXTURES = Path(__file__).parent / "fixtures" / "ehr_fhir"
@@ -150,15 +154,83 @@ def test_preview_constants_and_port_surface():
     assert ATHENA_PRACTICE_VALUE == "Organization/a-1.Practice-195900"
     assert ATHENA_FHIR_R4_BASE_URL.endswith("/fhir/r4")
     assert "Appointment" not in ATHENA_FHIR_RESOURCES
+    assert "system/Appointment.read" not in ATHENA_FHIR_SYSTEM_READ_SCOPES
     assert FORBIDDEN_FHIR_RESOURCES == frozenset({"Appointment"})
     assert len(ATHENA_FHIR_SYSTEM_READ_SCOPES) == 12
     assert all(s.endswith(".read") and s.startswith("system/") for s in ATHENA_FHIR_SYSTEM_READ_SCOPES)
     assert "*" not in "".join(ATHENA_FHIR_SYSTEM_READ_SCOPES)
+    assert not any("write" in s.lower() for s in ATHENA_FHIR_SYSTEM_READ_SCOPES)
     cfg = athena_fhir_preview_client_credentials_config()
     assert cfg.token_url == ATHENA_FHIR_TOKEN_URL
     assert cfg.scopes == ATHENA_FHIR_SYSTEM_READ_SCOPES
+    assert cfg.client_id_ref.startswith("COSMAS_MANAGED_SECRET_")
+    assert cfg.client_secret_ref.startswith("COSMAS_MANAGED_SECRET_")
     assert port.ATHENA_PRACTICE_VALUE == ATHENA_PRACTICE_VALUE
     assert port.AthenaFhirR4Adapter is AthenaFhirR4Adapter
+
+
+def test_shared_c4_defaults_not_widened_for_other_vendors():
+    """Athena Preview host / DiagnosticReport / Binary require explicit opt-in."""
+    assert ATHENA_PREVIEW_HOST not in {
+        "fhir.sandbox.example.com",
+        "sandbox.fhir.example.org",
+        "synthetic.invalid",
+        "mock.example.com",
+        "localhost",
+        "127.0.0.1",
+    }
+    assert ATHENA_FHIR_EXTRA_SANDBOX_HOSTS == frozenset({ATHENA_PREVIEW_HOST})
+    with pytest.raises(PermissionError, match="fhir_base_url_not_sandbox"):
+        FhirR4ReadClient(ATHENA_FHIR_R4_BASE_URL)
+    assert "DiagnosticReport" not in READABLE_RESOURCES
+    assert "Binary" not in READABLE_RESOURCES
+    harness_refused = FhirR4ReadClient(
+        "https://fhir.sandbox.example.com/r4",
+        transport=httpx.MockTransport(lambda r: pytest.fail("no transport")),
+    )
+    assert harness_refused.search("DiagnosticReport").state == "malformed"
+    assert harness_refused.read("Binary", "x").state == "malformed"
+
+
+def test_c14_production_origin_still_refused_for_athena_even_with_mock_flag():
+    with pytest.raises(EhrRealDataGateError) as raised:
+        assert_ehr_request_allowed(
+            vendor="athena",
+            origin="https://api.platform.athenahealth.com",
+            sandbox_enabled=True,
+            real_data_enabled=False,
+            practice_baa_recorded=False,
+            mock_transport_only=True,
+        )
+    assert raised.value.code == "real_data_required"
+    with pytest.raises(EhrRealDataGateError) as raised:
+        assert_ehr_request_allowed(
+            vendor="athena",
+            origin="https://api.platform.athenahealth.com",
+            sandbox_enabled=True,
+            real_data_enabled=True,
+            practice_baa_recorded=False,
+            mock_transport_only=True,
+        )
+    assert raised.value.code == "real_data_required"
+
+
+def test_real_data_flag_alone_does_not_open_preview_without_sandbox(monkeypatch):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("gate must refuse first")
+
+    _bind_secrets(monkeypatch)
+    mock = CombinedMock(handler)
+    adapter = AthenaFhirR4Adapter(
+        token_client=_token_client(mock.transport),
+        transport=mock.transport,
+        sandbox_enabled=False,
+        real_data_enabled=True,
+        practice_baa_recorded=True,
+    )
+    with pytest.raises(AthenaFhirR4Error) as raised:
+        adapter.search("Patient")
+    assert raised.value.code == "sandbox_flag_required"
 
 
 def test_search_injects_practice_and_returns_synthetic_patient(monkeypatch):

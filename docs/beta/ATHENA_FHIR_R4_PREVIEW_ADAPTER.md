@@ -36,6 +36,9 @@ for the appointments UI path.
 - Narrowed token grants refuse resources whose `system/<Resource>.read` scope
   was not granted
 - Tokens and client secrets never appear in logs or exception text
+- Shared C4 defaults are not widened: athena Preview host is passed only via
+  `extra_sandbox_hosts=`, and DiagnosticReport/Binary only via
+  `allowed_resources=` on the athena adapter's FHIR client
 
 ## Not in this ticket
 

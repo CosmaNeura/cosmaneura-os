@@ -38,9 +38,12 @@ logger = logging.getLogger(__name__)
 
 ATHENA_FHIR_R4_BASE_URL = "https://api.preview.platform.athenahealth.com/fhir/r4"
 ATHENA_FHIR_TOKEN_URL = "https://api.preview.platform.athenahealth.com/oauth2/v1/token"
+ATHENA_PREVIEW_HOST = "api.preview.platform.athenahealth.com"
 ATHENA_PREVIEW_PRACTICE_ID = "195900"
 ATHENA_PRACTICE_PARAM = "ah-practice"
 ATHENA_PRACTICE_VALUE = "Organization/a-1.Practice-195900"
+# Opt-in only for the athena adapter — never added to the shared C4 default host set.
+ATHENA_FHIR_EXTRA_SANDBOX_HOSTS: frozenset[str] = frozenset({ATHENA_PREVIEW_HOST})
 
 # Exact SMART v1 system/<Resource>.read scopes for Cosmaneura CosmaBot FHIR.
 # No wildcards, no write, no Appointment (athena does not offer it for system apps).
@@ -295,6 +298,9 @@ class AthenaFhirR4Adapter:
             access_token=access_token,
             display_label="Athena",
             allow_production=False,
+            extra_sandbox_hosts=ATHENA_FHIR_EXTRA_SANDBOX_HOSTS,
+            # Explicit athena set: includes DiagnosticReport/Binary, excludes Appointment.
+            allowed_resources=ATHENA_FHIR_RESOURCES,
             max_pages=self._max_pages,
         )
 

@@ -19,7 +19,6 @@ SANDBOX_URLS = (
     "https://mock.example.com/r4",
     "http://localhost:8080/fhir",
     "http://127.0.0.1:9443/r4",
-    "https://api.preview.platform.athenahealth.com/fhir/r4",
 )
 
 # Case variants of allowlisted hosts must still pass (exact match is case-insensitive).
@@ -131,3 +130,25 @@ def test_invalid_base_urls_are_rejected():
     ):
         with pytest.raises(ValueError):
             assert_allowed_base_url(url)
+
+
+def test_athena_preview_host_refused_by_default_opt_in_only():
+    """C7 must not widen the shared sandbox host allowlist for other callers."""
+    url = "https://api.preview.platform.athenahealth.com/fhir/r4"
+    assert is_sandbox_base_url(url) is False
+    assert production_base_refused(url) is True
+    with pytest.raises(ValueError, match="fhir_base_url_not_sandbox"):
+        assert_allowed_base_url(url)
+    with pytest.raises(PermissionError, match="fhir_base_url_not_sandbox"):
+        FhirR4ReadClient(url)
+    assert is_sandbox_base_url(url, extra_sandbox_hosts={"api.preview.platform.athenahealth.com"})
+    assert (
+        assert_allowed_base_url(
+            url, extra_sandbox_hosts={"api.preview.platform.athenahealth.com"}
+        )
+        == url
+    )
+    client = FhirR4ReadClient(
+        url, extra_sandbox_hosts={"api.preview.platform.athenahealth.com"}
+    )
+    assert client.base_url == url

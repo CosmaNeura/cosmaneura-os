@@ -24,11 +24,13 @@ Only these FHIR R4 / US Core resource types, by instance read or search:
 | `Medication` | Medication catalog records referenced by orders |
 | `Condition` | Problem list |
 | `Observation` | Vitals and results |
-| `DiagnosticReport` | Lab and imaging report metadata |
 | `DocumentReference` | Clinical document metadata |
-| `Binary` | Document / report content bytes |
 | `Practitioner` | Clinician identity |
 | `Organization` | Practice or clinic organization |
+
+`DiagnosticReport` and `Binary` are in the extended universe but are **not** in
+the shared default. An adapter (athena C7) must pass an explicit
+`allowed_resources=` override to read them; other vendors stay on the default.
 
 Search returns Bundle `searchset` pages. The client follows `link.relation=next`
 only while the next URL stays on the same accepted base origin and path prefix.
@@ -69,10 +71,12 @@ issue code, the HTTP status mapping wins. Chart rows are returned only for
   `update` / `patch` / `delete` / `post` / `put` helpers) are refused before
   any transport call and return `refused`.
 - Base URLs must use an exact allowlisted sandbox host name
-  (case-insensitive equality on the parsed hostname only). The allowlist is
-  `fhir.sandbox.example.com`, `sandbox.fhir.example.org`, `synthetic.invalid`,
-  `mock.example.com`, `localhost`, `127.0.0.1`, and athena Preview
-  `api.preview.platform.athenahealth.com`. Look-alike hosts such as
+  (case-insensitive equality on the parsed hostname only). The default
+  allowlist is `fhir.sandbox.example.com`, `sandbox.fhir.example.org`,
+  `synthetic.invalid`, `mock.example.com`, `localhost`, and `127.0.0.1`.
+  Vendor Preview hosts such as athena's `api.preview.platform.athenahealth.com`
+  are **not** in the default set; adapters pass them via
+  `extra_sandbox_hosts=` so other vendors stay closed. Look-alike hosts such as
   `test.evil.com`, `mock-athena.example.net`, or `sandbox.attacker.io` are
   refused. Trailing-dot host names, plain HTTP to non-local hosts, and URLs
   with userinfo are refused. Athena production hosts stay refused by default.

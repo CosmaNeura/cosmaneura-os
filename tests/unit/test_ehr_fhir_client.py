@@ -29,9 +29,7 @@ FIXTURE_FILES = {
     "Medication": "medication.json",
     "Condition": "condition.json",
     "Observation": "observation.json",
-    "DiagnosticReport": "diagnostic_report.json",
     "DocumentReference": "document_reference.json",
-    "Binary": "binary.json",
     "Practitioner": "practitioner.json",
     "Organization": "organization.json",
 }
@@ -96,12 +94,13 @@ def test_readable_resources_match_ticket_set():
         "Medication",
         "Condition",
         "Observation",
-        "DiagnosticReport",
         "DocumentReference",
-        "Binary",
         "Practitioner",
         "Organization",
     }
+    # DiagnosticReport / Binary stay out of the shared default; adapters opt in.
+    assert "DiagnosticReport" not in READABLE_RESOURCES
+    assert "Binary" not in READABLE_RESOURCES
 
 
 @pytest.mark.parametrize("resource_type", sorted(FIXTURE_FILES))
@@ -235,7 +234,37 @@ def test_unknown_resource_type_is_malformed():
     assert harness.client.read("Provenance", "x").state == "malformed"
     assert harness.client.search("Provenance").state == "malformed"
     assert harness.client.search("Coverage").state == "malformed"
+    # Shared default still refuses athena-extended types unless opted in.
+    assert harness.client.read("Binary", "x").state == "malformed"
+    assert harness.client.search("DiagnosticReport").state == "malformed"
     assert harness.calls == []
+
+
+def test_allowed_resources_override_can_include_diagnostic_report_and_binary():
+    report = load("diagnostic_report.json")
+    binary = load("binary.json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/DiagnosticReport/" + report["id"]):
+            return response(report)
+        if request.url.path.endswith("/Binary/" + binary["id"]):
+            return response(binary)
+        raise AssertionError(request.url.path)
+
+    client = FhirR4ReadClient(
+        SANDBOX,
+        transport=httpx.MockTransport(handler),
+        access_token="invented-sandbox-token",
+        allowed_resources=READABLE_RESOURCES
+        | {
+            "DiagnosticReport",
+            "Binary",
+        },
+    )
+    assert client.read("DiagnosticReport", report["id"]).ok
+    assert client.read("Binary", binary["id"]).ok
+    with pytest.raises(ValueError, match="allowed_resources_invalid"):
+        FhirR4ReadClient(SANDBOX, allowed_resources={"Provenance"})
 
 
 def test_ready_result_dict_omits_rows_on_error_paths():

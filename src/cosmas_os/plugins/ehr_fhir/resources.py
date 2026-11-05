@@ -13,13 +13,15 @@ ReadableResource = Literal[
     "Medication",
     "Condition",
     "Observation",
-    "DiagnosticReport",
     "DocumentReference",
-    "Binary",
     "Practitioner",
     "Organization",
 ]
 
+# Default shared allowlist. Vendor adapters that need additional certified
+# types (for example athena's DiagnosticReport / Binary) must pass an explicit
+# ``allowed_resources`` override on ``FhirR4ReadClient``; they must not widen
+# this default for other vendors.
 READABLE_RESOURCES: Final[frozenset[str]] = frozenset(
     {
         "Patient",
@@ -30,11 +32,19 @@ READABLE_RESOURCES: Final[frozenset[str]] = frozenset(
         "Medication",
         "Condition",
         "Observation",
-        "DiagnosticReport",
         "DocumentReference",
-        "Binary",
         "Practitioner",
         "Organization",
+    }
+)
+
+# Closed universe of resource types the shared client may ever be configured to
+# read. Overrides must be a non-empty subset of this set.
+EXTENDED_READABLE_RESOURCES: Final[frozenset[str]] = frozenset(
+    {
+        *READABLE_RESOURCES,
+        "DiagnosticReport",
+        "Binary",
     }
 )
 

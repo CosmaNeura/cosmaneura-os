@@ -23,6 +23,7 @@ from cosmas_os.plugins.ehr_fhir.errors import (
 from cosmas_os.plugins.ehr_fhir.resources import (
     DEFAULT_MAX_PAGES,
     DEFAULT_MAX_RESPONSE_BYTES,
+    EXTENDED_READABLE_RESOURCES,
     READABLE_RESOURCES,
     WRITE_HTTP_METHODS,
     ReadableResource,
@@ -37,6 +38,7 @@ __all__ = [
     "DEFAULT_MAX_PAGES",
     "DEFAULT_MAX_RESPONSE_BYTES",
     "ERROR_STATES",
+    "EXTENDED_READABLE_RESOURCES",
     "FhirR4ReadClient",
     "FhirReadError",
     "FhirReadResult",
