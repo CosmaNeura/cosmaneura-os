@@ -36,6 +36,12 @@ list names only — never secret VALUES.
 Not part of this ticket. A later ticket may add private_key_jwt / JWKS. Until
 then CosmaBot does not sign JWT client assertions for EHR auth.
 
+## Used by
+
+- C2 token client (`adapters.ehr_auth`)
+- C7 athena Certified FHIR R4 Preview adapter (`adapters.athena_fhir_r4`) —
+  mock transport only; no live Preview call in CI; route wiring is C8
+
 ## What this code will not do
 
 - Call live athena or live Azure from CI

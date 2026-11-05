@@ -55,6 +55,7 @@ KNOWN_RESOURCE_TYPES: frozenset[str] = frozenset(
         "Observation",
         "DocumentReference",
         "DiagnosticReport",
+        "Binary",
         "Immunization",
         "Coverage",
         "Practitioner",
