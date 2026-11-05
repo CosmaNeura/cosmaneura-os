@@ -8,6 +8,7 @@ const ORIGIN_HOST = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-
 const PRODUCTION_FRONTEND = 'https://clerk.cosmas.ai';
 const PRODUCTION_ACCOUNT = 'https://enrollment-api.cosmas.ai';
 const PRODUCTION_POLICY = 'practice-uuid-production-v1';
+const STAGING_ACCOUNT = 'https://enrollment-api.staging.cosmas.ai';
 const STAGING_POLICIES = new Set(['exact', 'synthetic-practice-uuid-staging-v1']);
 
 function exactOrigin(value) {
@@ -61,9 +62,14 @@ function realmAndPolicy(value) {
   const policy = value.registeredPracticeOrigins ?? 'exact';
   const {profile, audience} = realm;
   if (profile === 'operational-staging-v1') {
+    // Match Python/Swift: staging Infos cannot wire Connect to production enrollment-api.
     if (audience !== '' || !host.endsWith('.clerk.accounts.dev') ||
+        value.accountOrigin !== STAGING_ACCOUNT ||
         typeof policy !== 'string' || !STAGING_POLICIES.has(policy)) {
-      throw new Error('Use the reviewed exact or synthetic practice UUID origin policy.');
+      throw new Error(
+        'Staging native practice requires enrollment-api.staging.cosmas.ai ' +
+        'and the reviewed exact or synthetic practice UUID origin policy.',
+      );
     }
     practicePublishableKey(realm.publishableKey, host, {live: false});
     return policy;
