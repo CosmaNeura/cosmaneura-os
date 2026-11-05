@@ -142,7 +142,9 @@ def retained_info(path, is_ipa=False):
 
 def load_module(repository, name):
     path = repository / "scripts" / (name + ".py")
-    spec = importlib.util.spec_from_file_location("owned_candidate_" + name, path)
+    spec = importlib.util.spec_from_file_location(
+        "owned_candidate_" + name.replace("-", "_"), path
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -270,6 +272,32 @@ def composition_bindings(repository, source, blueprint):
                     or without_privacy != original
                     or digest(repository / item["derivation_source"]) != item["derivation_source_sha256"]):
                 raise ValueError("Derived privacy wiring differs from the unchanged frozen source.")
+        elif item["role"] == "derived-capacitor-localization":
+            counterpart = item.get("localization_input")
+            if not isinstance(counterpart, str) or counterpart == "":
+                raise ValueError("Capacitor localization lost its committed input path.")
+            original = git(repository, "show", source["commit"] + ":" + counterpart)
+            if (hashlib.sha256(original).hexdigest() != item["scaffold_input_sha256"]
+                    or digest(repository / item["derivation_source"]) != item["derivation_source_sha256"]):
+                raise ValueError("Derived Capacitor localization drifted from the committed input.")
+            compose = load_module(repository, "compose-portable-iphone")
+            text = original.decode("utf-8")
+            if item["path"].endswith("Package.resolved"):
+                value = json.loads(text)
+                if (not isinstance(value.get("pins"), list) or len(value["pins"]) != 1
+                        or "capacitor-swift-pm" not in json.dumps(value)):
+                    raise ValueError("Frozen Package.resolved is not the reviewed Capacitor pin.")
+                expected = {"pins": [], "version": value.get("version", 2)}
+                if json.loads(destination.read_text(encoding="utf-8")) != expected:
+                    raise ValueError("Localized Package.resolved is not the owned empty pin set.")
+            else:
+                localized = compose._localize_capacitor_package_text(
+                    text, item["localized_capacitor_path"]
+                )
+                if destination.read_text(encoding="utf-8") != localized:
+                    raise ValueError("Localized Capacitor Package.swift differs from the owned rewrite.")
+            if "https://github.com/ionic-team/capacitor-swift-pm.git" in destination.read_text(encoding="utf-8"):
+                raise ValueError("Localized Capacitor inputs still name the remote package URL.")
         else:
             counterpart = ("apps/capture/" + item["path"]
                            if item["role"] in {"app-scaffold", "scaffold-package-wiring"}

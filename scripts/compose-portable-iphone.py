@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import plistlib
+import re
 import shutil
 from pathlib import Path
 
@@ -17,6 +18,24 @@ IMPLEMENTATION_OWNERS = ("clients/apple", "clients/capture")
 SUPPORTING_CLIENT = "clients/shared"
 APP_SCAFFOLD = "apps/capture"
 PROVENANCE_NAME = "SOURCE_PROVENANCE.json"
+OWNED_CAPACITOR_VENDOR = "clients/apple/vendor/capacitor-swift-pm-8.5.0"
+COMPOSED_CAPACITOR_VENDOR = "native-plugins/capacitor-swift-pm"
+REMOTE_CAPACITOR_PACKAGE_URL = "https://github.com/ionic-team/capacitor-swift-pm.git"
+OWNED_CAPACITOR_RELEASE_SHA256 = {
+    "Capacitor.xcframework.zip": "357220fe6dad73cb78bc1dc83e16e89d59c3d7dac8f9b17545a5be64bba25130",
+    "Cordova.xcframework.zip": "a3dc72b5a559948d548f0ee2926b989492acc1023a0c86a1bf85477587f83a10",
+}
+OWNED_CAPACITOR_FRAMEWORK_INFO_SHA256 = {
+    "Capacitor.xcframework/Info.plist": "713105ab60c0f696453457049eee406997bbe4435b8c48ae877101303c5272fe",
+    "Cordova.xcframework/Info.plist": "25ef8fe4b91042eaeb5a52cafa72ad1327ac35b194f265ffc53ab269a1d8a452",
+}
+# Package manifests rewritten from remote Capacitor URL to the owned local path.
+CAPACITOR_LOCALIZATION_TARGETS = (
+    "ios/App/CapApp-SPM/Package.swift",
+    "native-plugins/cosmas-native-auth/Package.swift",
+    "native-plugins/ios-pcm-capacitor/Package.swift",
+    "native-plugins/secure-queue/Package.swift",
+)
 # The frozen 1107 manifest cannot name later owned implementations. Place only
 # these reviewed additions; never glob an SDK, external checkout or generated app.
 NATIVE_PRACTICE_ADDITIONS = (
@@ -171,6 +190,187 @@ def _add_owned_app_privacy(repository: Path, output: Path, placed: list[dict[str
     )
 
 
+def _capacitor_local_path(package_swift: str) -> str:
+    if package_swift.startswith("ios/App/"):
+        return "../../../" + COMPOSED_CAPACITOR_VENDOR
+    if package_swift.startswith("native-plugins/"):
+        return "../capacitor-swift-pm"
+    raise ValueError(f"No owned Capacitor path for {package_swift}")
+
+
+def _localize_capacitor_package_text(text: str, local_path: str) -> str:
+    """Replace remote or clients-tree Capacitor pins with the composed local path."""
+    if local_path in text and text.count(f'path: "{local_path}"') == 1 and REMOTE_CAPACITOR_PACKAGE_URL not in text:
+        raise ValueError("Capacitor package already names the composed local path.")
+    clients_vendor = "../../../apple/vendor/capacitor-swift-pm-8.5.0"
+    replacement = f'.package(name: "capacitor-swift-pm", path: "{local_path}")'
+    candidates = [
+        f'.package(url: "{REMOTE_CAPACITOR_PACKAGE_URL}", exact: "8.5.0")',
+        f'.package(name: "capacitor-swift-pm", path: "{clients_vendor}")',
+    ]
+    multiline_remote = re.compile(
+        r'\.package\(\s*url:\s*"'
+        + re.escape(REMOTE_CAPACITOR_PACKAGE_URL)
+        + r'"\s*,\s*exact:\s*"8\.5\.0"\s*\)',
+        re.MULTILINE,
+    )
+    multiline_clients = re.compile(
+        r'\.package\(\s*name:\s*"capacitor-swift-pm"\s*,\s*path:\s*"'
+        + re.escape(clients_vendor)
+        + r'"\s*\)',
+        re.MULTILINE,
+    )
+    updated = None
+    for single in candidates:
+        if text.count(single) == 1:
+            updated = text.replace(single, replacement, 1)
+            break
+    if updated is None:
+        for pattern in (multiline_remote, multiline_clients):
+            matches = list(pattern.finditer(text))
+            if len(matches) == 1:
+                updated = pattern.sub(replacement, text, count=1)
+                break
+    if updated is None:
+        raise ValueError("Capacitor package declaration is not exactly one reviewed pin.")
+    if (
+        REMOTE_CAPACITOR_PACKAGE_URL in updated
+        or clients_vendor in updated
+        or updated.count(replacement) != 1
+    ):
+        raise ValueError("Failed to localize the Capacitor package to the owned path.")
+    return updated
+
+
+def _add_owned_capacitor_vendor(repository: Path, output: Path, placed: list[dict[str, object]]) -> None:
+    """Copy the owned Capacitor mirror and retire remote binary package URLs."""
+    vendor = repository / OWNED_CAPACITOR_VENDOR
+    manifest_path = vendor / "SOURCE_MANIFEST.json"
+    manifest = json.loads(_regular_file(repository, manifest_path).read_text(encoding="utf-8"))
+    if (
+        manifest.get("version") != "8.5.0"
+        or manifest.get("upstream_revision") != "4f71d0b979f2f957326f04353eca7604ee937e1e"
+        or manifest.get("remote_binary_targets_retired") is not True
+    ):
+        raise ValueError("Owned Capacitor vendor manifest is not the reviewed 8.5.0 mirror.")
+    assets = {
+        item["name"]: item["sha256"]
+        for item in manifest.get("release_assets", [])
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    if assets != OWNED_CAPACITOR_RELEASE_SHA256:
+        raise ValueError("Owned Capacitor release asset digests drifted from the reviewed mirror.")
+    for relative, digest in OWNED_CAPACITOR_FRAMEWORK_INFO_SHA256.items():
+        info = _regular_file(repository, vendor / relative)
+        if _digest(info) != digest:
+            raise ValueError(f"Owned Capacitor framework identity drifted: {relative}")
+
+    destination_root = output / APP_SCAFFOLD / COMPOSED_CAPACITOR_VENDOR
+    if destination_root.exists() or destination_root.is_symlink():
+        raise ValueError("Owned Capacitor vendor destination already exists.")
+    destination_root.mkdir(parents=True)
+    for path in sorted(vendor.rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"Owned Capacitor vendor contains a symlink: {path}")
+        if not path.is_file():
+            continue
+        relative = path.relative_to(vendor).as_posix()
+        if relative.startswith(".") or ".." in Path(relative).parts:
+            raise ValueError(f"Refusing an unsafe Capacitor vendor path: {relative}")
+        source = _regular_file(repository, path)
+        destination = destination_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+        if _digest(destination) != _digest(source):
+            raise ValueError(f"Owned Capacitor copy changed: {relative}")
+        placed.append(
+            {
+                "path": f"{COMPOSED_CAPACITOR_VENDOR}/{relative}",
+                "role": "implementation",
+                "owner": "clients/apple",
+                "sha256": _digest(destination),
+                "authoritative_counterpart": f"{OWNED_CAPACITOR_VENDOR}/{relative}",
+                "wiring_note": "Owned Capacitor 8.5.0 mirror; remote binary zip downloads retired.",
+            }
+        )
+
+    derivation_path = "scripts/compose-portable-iphone.py"
+    derivation = _regular_file(repository, repository / derivation_path)
+    for package_path in CAPACITOR_LOCALIZATION_TARGETS:
+        package = output / APP_SCAFFOLD / package_path
+        record = next(item for item in placed if item["path"] == package_path)
+        prior_role = record["role"]
+        if prior_role == "implementation" and isinstance(record.get("authoritative_counterpart"), str):
+            localization_input = record["authoritative_counterpart"]
+        elif prior_role in {"app-scaffold", "scaffold-package-wiring"}:
+            localization_input = f"{APP_SCAFFOLD}/{package_path}"
+        else:
+            raise ValueError(f"Capacitor localization lost its input owner: {package_path}")
+        original = package.read_text(encoding="utf-8")
+        original_sha256 = _digest(package)
+        if _digest(repository / localization_input) != original_sha256:
+            raise ValueError(f"Capacitor localization input drifted: {localization_input}")
+        local_path = _capacitor_local_path(package_path)
+        updated = _localize_capacitor_package_text(original, local_path)
+        package.write_text(updated, encoding="utf-8")
+        record.update(
+            {
+                "role": "derived-capacitor-localization",
+                "sha256": _digest(package),
+                "scaffold_input_sha256": original_sha256,
+                "localization_input": localization_input,
+                "localized_capacitor_path": local_path,
+                "derivation_source": derivation_path,
+                "derivation_source_sha256": _digest(derivation),
+                "wiring_note": (
+                    "Localized Capacitor dependency from remote or clients-tree pin "
+                    "to the owned composed Capacitor vendor path."
+                ),
+            }
+        )
+
+    resolved_path = "ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+    resolved = output / APP_SCAFFOLD / resolved_path
+    record = next(item for item in placed if item["path"] == resolved_path)
+    original_sha256 = _digest(resolved)
+    localization_input = f"{APP_SCAFFOLD}/{resolved_path}"
+    if _digest(repository / localization_input) != original_sha256:
+        raise ValueError("Package.resolved localization input drifted from the frozen scaffold.")
+    original = json.loads(resolved.read_text(encoding="utf-8"))
+    pins = original.get("pins")
+    if not isinstance(pins, list) or len(pins) != 1:
+        raise ValueError("Frozen Package.resolved must pin only Capacitor before localization.")
+    pin = pins[0]
+    if (
+        not isinstance(pin, dict)
+        or pin.get("identity") != "capacitor-swift-pm"
+        or pin.get("kind") != "remoteSourceControl"
+        or not isinstance(pin.get("location"), str)
+        or REMOTE_CAPACITOR_PACKAGE_URL not in pin["location"]
+    ):
+        raise ValueError("Frozen Package.resolved is not the reviewed Capacitor remote pin.")
+    localized = {"pins": [], "version": original.get("version", 2)}
+    resolved.write_text(json.dumps(localized, indent=2) + "\n", encoding="utf-8")
+    record.update(
+        {
+            "role": "derived-capacitor-localization",
+            "sha256": _digest(resolved),
+            "scaffold_input_sha256": original_sha256,
+            "localization_input": localization_input,
+            "derivation_source": derivation_path,
+            "derivation_source_sha256": _digest(derivation),
+            "wiring_note": "Cleared remote Capacitor pin; owned local package path supplies Capacitor/Cordova.",
+        }
+    )
+
+    composed_text = "\n".join(
+        (output / APP_SCAFFOLD / path).read_text(encoding="utf-8")
+        for path in (*CAPACITOR_LOCALIZATION_TARGETS, resolved_path)
+    )
+    if REMOTE_CAPACITOR_PACKAGE_URL in composed_text or "remoteSourceControl" in composed_text:
+        raise ValueError("Composed iPhone inputs still name the remote Capacitor package.")
+
+
 def compose(repository: Path, output: Path) -> Path:
     """Copy the frozen scaffold and overlay owned client implementations."""
     repository = repository.resolve()
@@ -286,11 +486,15 @@ def compose(repository: Path, output: Path) -> Path:
         if public.exists():
             raise ValueError("Generated web assets do not belong in this source composition.")
         _add_owned_app_privacy(repository, output, placed)
+        _add_owned_capacitor_vendor(repository, output, placed)
         manifest = {
             "purpose": "portable-iphone-project-inputs",
             "qualified_install": False,
             "compiled_signed_or_installed": False,
             "external_snapshot_required": False,
+            "remote_capacitor_package_required": False,
+            "owned_capacitor_vendor": OWNED_CAPACITOR_VENDOR,
+            "composed_capacitor_vendor": f"{APP_SCAFFOLD}/{COMPOSED_CAPACITOR_VENDOR}",
             "app_scaffold": APP_SCAFFOLD,
             "scaffold_role": "frozen-1107-evidence",
             "implementation_owners": list(IMPLEMENTATION_OWNERS),

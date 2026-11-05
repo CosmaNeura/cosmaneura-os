@@ -91,6 +91,21 @@ def prepare(
         else:
             shutil.copytree(root / "clients/capture/native-configured/secure-queue",
                             capture_root / "secure-queue")
+        capacitor_vendor = root / "clients/apple/vendor/capacitor-swift-pm-8.5.0"
+        if not (capacitor_vendor / "Package.swift").is_file():
+            raise ValueError("Owned Capacitor 8.5.0 mirror is missing.")
+        if (capture_root / "capacitor-swift-pm").exists():
+            raise ValueError("Owned Capacitor destination already exists.")
+        shutil.copytree(capacitor_vendor, capture_root / "capacitor-swift-pm")
+        queue_package = capture_root / "secure-queue/Package.swift"
+        queue_text = queue_package.read_text(encoding="utf-8")
+        queue_marker = 'path: "../../../apple/vendor/capacitor-swift-pm-8.5.0"'
+        if queue_text.count(queue_marker) != 1:
+            raise ValueError("Secure queue Capacitor dependency layout changed.")
+        queue_package.write_text(
+            queue_text.replace(queue_marker, 'path: "../capacitor-swift-pm"', 1),
+            encoding="utf-8",
+        )
         shutil.copytree(owned / "Bridge", output / "Bridge")
         shutil.copyfile(root / "clients/shared/cosmaneura-navigation-dom.js", output / "Bridge/cosmaneura-navigation-dom.js")
     if include_desktop:
@@ -126,7 +141,7 @@ let package = Package(
         .package(path: "__NATIVE_RECORDING__"),
         .package(path: "__NATIVE_RECORDING_PCM__"),
         .package(path: "__SECURE_QUEUE__"),
-        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0"),
+        .package(name: "capacitor-swift-pm", path: "__CAPACITOR_SWIFT_PM__"),
     ],''',
         ).replace(
             '        .testTarget(name: "CosmasNativeAuthTests",',
@@ -162,6 +177,9 @@ let package = Package(
     package = package.replace("__NATIVE_RECORDING__", f"{package_prefix}/native-recording")
     package = package.replace("__NATIVE_RECORDING_PCM__", f"{package_prefix}/native-recording-pcm")
     package = package.replace("__SECURE_QUEUE__", f"{package_prefix}/secure-queue")
+    package = package.replace("__CAPACITOR_SWIFT_PM__", f"{package_prefix}/capacitor-swift-pm")
+    if include_bridge and "https://github.com/ionic-team/capacitor-swift-pm.git" in package:
+        raise ValueError("Native auth bridge still names the remote Capacitor package.")
     (output / "Package.swift").write_text(package)
     (output / "qualification.json").write_text(json.dumps({
         "purpose": "local-synthetic-native-auth-core-qualification",

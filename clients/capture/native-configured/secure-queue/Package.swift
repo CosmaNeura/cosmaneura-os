@@ -14,8 +14,8 @@ let package = Package(
     dependencies: [
         .package(path: "../native-recording"),
         .package(
-            url: "https://github.com/ionic-team/capacitor-swift-pm.git",
-            exact: "8.5.0"
+            name: "capacitor-swift-pm",
+            path: "../../../apple/vendor/capacitor-swift-pm-8.5.0"
         ),
     ],
     targets: [
