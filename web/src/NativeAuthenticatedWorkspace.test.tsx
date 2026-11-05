@@ -7,7 +7,7 @@ import { accessPending } from "./practice-access-test-fixture";
 import {teamFixture} from "./team-setup-test-fixture";
 import { REQUIRED_WORKSPACE_CONTRACTS } from "./workspace-protocol";
 import type {NativePracticeConnectionPlugin} from '../../clients/capture/src/native/practice-connection-plugin';
-import {enrollmentConfig,nativeEnrollmentConfig} from './enrollment-test-fixture';
+import {nativeEnrollmentConfig} from './enrollment-test-fixture';
 import {useUnsavedWork} from './unsaved-work';
 
 const first: NativeAuthState = { phase: "ready", revision: "00000000-0000-4000-8000-000000000001",
