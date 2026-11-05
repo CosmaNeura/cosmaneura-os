@@ -7,7 +7,6 @@ or releases. A failed attempt retains its fresh output and .incomplete marker.
 
 import argparse
 import ast
-import base64
 import copy
 import datetime
 import hashlib
@@ -25,11 +24,17 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 OPERATOR = "scripts/prepare-owned-iphone-candidate.py"
-PRACTICE_KEY = "CosmasNativePracticeConnection"
 RETAINED_FIELDS = ("CosmasSourceAccessGroup", "GoogleConnectionClientID", "GoogleConnectionCallbackURI")
 INFO_LIMIT = 524288
-ORIGIN_HOST = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+"
 NETWORK_DENY = "(version 1)(allow default)(deny network*)"
+
+# One shared Infos schema with Mac auth-helper packaging; do not re-inline pins.
+_practice_spec = importlib.util.spec_from_file_location(
+    "native_practice_connection_info", Path(__file__).with_name("native_practice_connection_info.py"))
+_practice = importlib.util.module_from_spec(_practice_spec)
+_practice_spec.loader.exec_module(_practice)
+PRACTICE_KEY = _practice.PRACTICE_KEY
+native_practice_configuration = _practice.native_practice_configuration
 
 
 def digest(path):
@@ -56,106 +61,6 @@ def public_json(path, limit=16384):
     if not isinstance(value, dict):
         raise ValueError("Use one public configuration object.")
     return value
-
-
-def exact_origin(value):
-    if (not isinstance(value, str) or len(value.encode("utf-8")) > 253
-            or re.fullmatch("https://" + ORIGIN_HOST, value) is None
-            or value.endswith(".localhost") or re.fullmatch(r"https://[0-9.]+", value)):
-        raise ValueError("Use an exact canonical HTTPS origin without a path or port.")
-    return value
-
-
-PRODUCTION_PRACTICE_FRONTEND = "https://clerk.cosmas.ai"
-PRODUCTION_PRACTICE_ACCOUNT = "https://enrollment-api.cosmas.ai"
-PRODUCTION_PRACTICE_POLICY = "practice-uuid-production-v1"
-STAGING_PRACTICE_POLICIES = frozenset({"exact", "synthetic-practice-uuid-staging-v1"})
-
-
-def _practice_publishable_key(key, host, *, live):
-    prefix = "pk_live_" if live else "pk_test_"
-    if (not isinstance(key, str) or len(key.encode("utf-8")) > 1024 or not key.startswith(prefix)
-            or re.fullmatch(r"[A-Za-z0-9+/_-]+={0,2}", key[len(prefix):]) is None):
-        raise ValueError("The account realm requires its exact Clerk frontend and public key.")
-    encoded = key[len(prefix):].replace("-", "+").replace("_", "/")
-    try:
-        decoded = base64.b64decode(encoded + "=" * ((4 - len(encoded) % 4) % 4), validate=True).decode("utf-8")
-    except (ValueError, UnicodeError) as error:
-        raise ValueError("The account public key must encode its exact Clerk frontend.") from error
-    if decoded != host + "$":
-        raise ValueError("The account public key must encode its exact Clerk frontend.")
-
-
-def _practice_realm_and_policy(value):
-    """Admit one closed staging realm or the production practice realm, never a mix."""
-    realm = value["realm"]
-    if (not isinstance(realm, dict)
-            or set(realm) != {"publishableKey", "frontendOrigin", "audience", "profile", "keychainNamespace"}
-            or not isinstance(realm["keychainNamespace"], str)
-            or re.fullmatch(r"[a-f0-9]{64}", realm["keychainNamespace"]) is None):
-        raise ValueError("The explicit account realm requires a reviewed profile and namespace.")
-    frontend = exact_origin(realm["frontendOrigin"])
-    host = frontend.removeprefix("https://")
-    if len(host.encode("utf-8")) > 245:
-        raise ValueError("The account realm requires its exact Clerk frontend and public key.")
-    policy = value.get("registeredPracticeOrigins", "exact")
-    profile = realm["profile"]
-    audience = realm["audience"]
-    if profile == "operational-staging-v1":
-        if (audience != "" or not host.endswith(".clerk.accounts.dev")
-                or not isinstance(policy, str) or policy not in STAGING_PRACTICE_POLICIES):
-            raise ValueError("Use the reviewed exact or synthetic practice UUID origin policy.")
-        _practice_publishable_key(realm["publishableKey"], host, live=False)
-        return policy
-    if profile == "operational-beta-v1":
-        # Real-data production: one enrollment account origin, live Clerk, non-empty
-        # session audience, and the practice-UUID production origin policy only.
-        if (not isinstance(audience, str) or not audience or len(audience.encode("utf-8")) > 255
-                or any(ord(character) < 33 or ord(character) > 126 for character in audience)
-                or frontend != PRODUCTION_PRACTICE_FRONTEND
-                or value["accountOrigin"] != PRODUCTION_PRACTICE_ACCOUNT
-                or policy != PRODUCTION_PRACTICE_POLICY):
-            raise ValueError(
-                "Production native practice requires enrollment-api.cosmas.ai, clerk.cosmas.ai, "
-                "a non-empty Clerk audience, and practice-uuid-production-v1.")
-        _practice_publishable_key(realm["publishableKey"], host, live=True)
-        return policy
-    raise ValueError("The explicit account realm requires the native staging or production profile.")
-
-
-def native_practice_configuration(value):
-    """Match NativePracticeBundleConfiguration's closed staging or production schema.
-
-    This validates explicit public inputs; it neither enables a missing option
-    nor changes the compiled Beta identity, callback or native request origin.
-    Staging keeps operational-staging-v1 with an empty audience. Production binds
-    operational-beta-v1 to enrollment-api.cosmas.ai, clerk.cosmas.ai, a non-empty
-    audience, and practice-uuid-production-v1. Runtime acceptance of that
-    production policy also requires the matching native-auth / shared-profile
-    changes (PR #305).
-    """
-    required = {"enabled", "accountOrigin", "realm", "apiOrigins"}
-    if (not isinstance(value, dict) or not required <= value.keys()
-            or value.keys() - required - {"registeredPracticeOrigins", "googleConnection"}
-            or type(value["enabled"]) is not bool):
-        raise ValueError("Native practice configuration must match the owned Info schema.")
-    exact_origin(value["accountOrigin"])
-    policy = _practice_realm_and_policy(value)
-    origins = value["apiOrigins"]
-    if (not isinstance(origins, list) or len(origins) > 32
-            or policy == "exact" and not origins):
-        raise ValueError("Use the reviewed exact, synthetic staging, or production practice UUID origin policy.")
-    checked = [exact_origin(origin) for origin in origins]
-    if len(set(checked)) != len(checked):
-        raise ValueError("Duplicate native API origins are not permitted.")
-    if "googleConnection" in value:
-        pair = value["googleConnection"]
-        if (not isinstance(pair, dict) or set(pair) != {"clientID", "callbackURI"}
-                or not isinstance(pair["clientID"], str)
-                or re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", pair["clientID"]) is None
-                or pair["callbackURI"] != value["accountOrigin"] + "/connections/google/callback"):
-            raise ValueError("Native practice Google requires an exact public client and the pinned account-service callback.")
-    return copy.deepcopy(value)
 
 
 def retained_info(path, is_ipa=False):

@@ -33,26 +33,35 @@ private func configuration() throws -> NativeClerkConfiguration {
     }
 
     @Test func operationalIdentityRequiresProductionKeyAndSeparateBundle() throws {
-        let key = "pk_live_" + Data("clerk.example.invalid$".utf8).base64EncodedString()
+        let host = "clerk.cosmas.ai"
+        let key = "pk_live_" + Data((host + "$").utf8).base64EncodedString()
         let config = try NativeClerkConfiguration(publishableKey: key,
-            frontendOrigin: "https://clerk.example.invalid", organizationID: "org_beta",
+            frontendOrigin: "https://" + host, organizationID: "org_beta",
             bundleIdentifier: "com.cosmasos.beta.ios", profile: .operationalBeta)
         #expect(config.callbackURL == "com.cosmasos.beta.ios://callback")
         #expect(config.profile == .operationalBeta)
+        #expect(config.frontendOrigin == "https://clerk.cosmas.ai")
         for bundle in ["com.cosmasos.synthetic.w60", "com.cosmasos.beta.desktop.auth", "com.cosmasos.beta.ios.extra"] {
             #expect(throws: NativeAuthError.unavailable) {
                 try NativeClerkConfiguration(publishableKey: key,
-                    frontendOrigin: "https://clerk.example.invalid", organizationID: "org_beta",
+                    frontendOrigin: "https://" + host, organizationID: "org_beta",
                     bundleIdentifier: bundle, profile: .operationalBeta)
             }
         }
         #expect(throws: NativeAuthError.unavailable) {
             try NativeClerkConfiguration(publishableKey: key,
-                frontendOrigin: "https://clerk.example.invalid", organizationID: "org_beta",
+                frontendOrigin: "https://" + host, organizationID: "org_beta",
                 bundleIdentifier: "com.cosmasos.beta.ios")
         }
+        // Production Infos reject any non-pinned live Clerk frontend.
+        #expect(throws: NativeAuthError.unavailable) {
+            try NativeClerkConfiguration(
+                publishableKey: "pk_live_" + Data("clerk.example.invalid$".utf8).base64EncodedString(),
+                frontendOrigin: "https://clerk.example.invalid", organizationID: "org_beta",
+                bundleIdentifier: "com.cosmasos.beta.ios", profile: .operationalBeta)
+        }
         let desktop = try NativeClerkConfiguration(publishableKey: key,
-            frontendOrigin: "https://clerk.example.invalid", organizationID: "org_beta",
+            frontendOrigin: "https://" + host, organizationID: "org_beta",
             bundleIdentifier: "com.cosmasos.beta.desktop.auth", workspaceOrigin: .desktopApp, profile: .operationalBeta)
         var request = URLRequest(url: URL(string: "https://unrelated.example.invalid/v1/client")!)
         #expect(throws: NativeAuthError.unavailable) { try desktop.prepareFrontendRequest(&request) }

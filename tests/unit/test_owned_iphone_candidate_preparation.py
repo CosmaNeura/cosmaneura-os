@@ -22,7 +22,7 @@ def practice_configuration():
     host = "invented-practice.clerk.accounts.dev"
     return {
         "enabled": True,
-        "accountOrigin": "https://enrollment.example.invalid",
+        "accountOrigin": "https://enrollment-api.staging.cosmas.ai",
         "realm": {
             "publishableKey": "pk_test_" + base64.b64encode((host + "$").encode()).decode(),
             "frontendOrigin": "https://" + host,
@@ -181,7 +181,9 @@ def test_google_pair_is_preserved_as_omitted_or_disabled_but_partial_configurati
 @pytest.mark.parametrize("change", [
     lambda value: value.update(callbackURL="invented://callback"),
     lambda value: value.update(enabled="true"),
-    lambda value: value.update(accountOrigin="https://enrollment.example.invalid/path"),
+    lambda value: value.update(accountOrigin="https://enrollment-api.staging.cosmas.ai/path"),
+    lambda value: value.update(accountOrigin="https://enrollment-api.cosmas.ai"),
+    lambda value: value.update(accountOrigin="https://enrollment.example.invalid"),
     lambda value: value["realm"].update(profile="operational-beta-v1"),
     lambda value: value["realm"].update(audience="cosmas-os-beta"),
     lambda value: value["realm"].update(keychainNamespace="not-a-fixed-namespace"),

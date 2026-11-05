@@ -21,15 +21,24 @@ private let stagingOrganization = "org_invented_beta"
         #expect(variant.callbackURL == "com.cosmasos.synthetic.w8m://callback")
     }
 
-    @Test func deviceBundleKeepsTheDeviceCallbackOnTheSameStagingHost() throws {
+    @Test func deviceBundleKeepsProductionClerkPinnedAndSimulatorHostOnSimulatorProfile() throws {
+        // operationalBeta Infos pin clerk.cosmas.ai; clerk.staging.cosmas.ai stays on simulatorStaging.
+        #expect(throws: NativeAuthError.unavailable) {
+            try NativeClerkConfiguration(
+                publishableKey: stagingKey, frontendOrigin: "https://" + stagingHost,
+                organizationID: stagingOrganization, bundleIdentifier: "com.cosmasos.beta.ios",
+                profile: .operationalBeta)
+        }
+        let productionHost = "clerk.cosmas.ai"
+        let productionKey = "pk_live_" + Data((productionHost + "$").utf8).base64EncodedString()
         let device = try NativeClerkConfiguration(
-            publishableKey: stagingKey, frontendOrigin: "https://" + stagingHost,
+            publishableKey: productionKey, frontendOrigin: "https://" + productionHost,
             organizationID: stagingOrganization, bundleIdentifier: "com.cosmasos.beta.ios",
             profile: .operationalBeta)
         #expect(device.callbackURL == "com.cosmasos.beta.ios://callback")
         #expect(throws: NativeAuthError.unavailable) {
             try NativeClerkConfiguration(
-                publishableKey: stagingKey, frontendOrigin: "https://" + stagingHost,
+                publishableKey: productionKey, frontendOrigin: "https://" + productionHost,
                 organizationID: stagingOrganization, bundleIdentifier: "com.cosmasos.synthetic",
                 profile: .operationalBeta)
         }

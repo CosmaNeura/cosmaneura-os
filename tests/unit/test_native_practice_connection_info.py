@@ -20,7 +20,7 @@ def staging_practice():
     host = "invented-practice.clerk.accounts.dev"
     return {
         "enabled": True,
-        "accountOrigin": "https://enrollment.example.invalid",
+        "accountOrigin": "https://enrollment-api.staging.cosmas.ai",
         "realm": {
             "publishableKey": "pk_test_" + base64.b64encode((host + "$").encode()).decode(),
             "frontendOrigin": "https://" + host,
@@ -60,7 +60,9 @@ def test_staging_and_production_practice_configs_are_accepted():
     lambda value: value["realm"].update(audience="cosmas-os-beta"),
     lambda value: value.update(registeredPracticeOrigins="practice-uuid-production-v1"),
     lambda value: value.update(registeredPracticeOrigins="*"),
-    lambda value: value.update(accountOrigin="https://enrollment.example.invalid/path"),
+    lambda value: value.update(accountOrigin="https://enrollment-api.staging.cosmas.ai/path"),
+    lambda value: value.update(accountOrigin="https://enrollment-api.cosmas.ai"),
+    lambda value: value.update(accountOrigin="https://enrollment.example.invalid"),
 ])
 def test_staging_rejects_production_mix_and_unreviewed_inputs(change):
     value = staging_practice()

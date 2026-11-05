@@ -7,7 +7,7 @@ private func originBinding(dynamic: Bool = false, origins: Set<String> = ["https
     let realm = try NativeClerkAccountConfiguration(publishableKey: "pk_test_" + Data((host + "$").utf8).base64EncodedString(),
         frontendOrigin: "https://" + host, bundleIdentifier: "com.cosmasos.beta.ios",
         profile: .operationalStaging, storageNamespace: String(repeating: "b", count: 64))
-    return try .init(accountOrigin: "https://api.accounts.staging.cosmas.ai", realm: realm, audience: "",
+    return try .init(accountOrigin: NativePracticeAccountServiceBinding.stagingAccountOrigin, realm: realm, audience: "",
         allowedAPIOrigins: origins, registeredPracticeOrigins: dynamic ? .syntheticPracticeUUIDStaging : .exact)
 }
 

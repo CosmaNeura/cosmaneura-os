@@ -74,13 +74,11 @@ public struct NativeClerkAccountConfiguration: Sendable, Equatable {
               url.query == nil, url.fragment == nil else { throw NativeAuthError.unavailable }
         if profile == .simulatorStaging {
             guard host == "clerk.staging.cosmas.ai" else { throw NativeAuthError.unavailable }
-        } else if profile != .operationalBeta {
-            guard host.hasSuffix(".clerk.accounts.dev") else { throw NativeAuthError.unavailable }
+        } else if profile == .operationalBeta {
+            // Production Infos pin live Clerk to clerk.cosmas.ai (matches Python packaging).
+            guard host == "clerk.cosmas.ai" else { throw NativeAuthError.unavailable }
         } else {
-            guard !host.hasSuffix(".clerk.accounts.dev"), !host.hasSuffix(".localhost"),
-                  let last = host.split(separator: ".").last?.first, last.isASCII, last.isLetter else {
-                throw NativeAuthError.unavailable
-            }
+            guard host.hasSuffix(".clerk.accounts.dev") else { throw NativeAuthError.unavailable }
         }
         var encoded = String(publishableKey.dropFirst(prefix.count))
         guard encoded.range(of: "^[A-Za-z0-9+/_-]+={0,2}$", options: .regularExpression) != nil else {

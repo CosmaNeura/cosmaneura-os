@@ -60,6 +60,11 @@ public enum NativeRegisteredPracticeOriginPolicy: String, Sendable {
 }
 
 public struct NativePracticeAccountServiceBinding: Equatable, Sendable {
+    /// Reviewed staging enrollment HTTPS origin; staging Infos cannot wire production.
+    public static let stagingAccountOrigin = "https://enrollment-api.staging.cosmas.ai"
+    /// Reviewed production enrollment HTTPS origin; production Infos cannot use another host.
+    public static let productionAccountOrigin = "https://enrollment-api.cosmas.ai"
+
     public let accountOrigin: String
     public let realm: NativeClerkAccountConfiguration
     public let audience: String
@@ -73,6 +78,17 @@ public struct NativePracticeAccountServiceBinding: Equatable, Sendable {
               allowedAPIOrigins.count <= 32, allowedAPIOrigins.allSatisfy(exactPracticeOrigin),
               registeredPracticeOrigins.admits(realm.profile), realm.storageNamespace != nil else {
             throw NativePracticeProfileError.invalidBinding
+        }
+        // Fail closed at parse: staging↔prod enrollment API mix never lights Connect.
+        switch registeredPracticeOrigins {
+        case .practiceUUIDProduction:
+            guard accountOrigin == Self.productionAccountOrigin else {
+                throw NativePracticeProfileError.invalidBinding
+            }
+        case .exact, .syntheticPracticeUUIDStaging:
+            guard accountOrigin == Self.stagingAccountOrigin else {
+                throw NativePracticeProfileError.invalidBinding
+            }
         }
         _ = try NativeAccountTokenPolicy(configuration: realm, audience: audience)
         self.accountOrigin = accountOrigin; self.realm = realm

@@ -51,6 +51,7 @@ NATIVE_PRACTICE_ADDITIONS = (
     "Tests/CosmasNativeAuthTests/NativePracticeBootstrapTests.swift",
     "Tests/CosmasNativeAuthTests/NativePracticeConnectionContractTests.swift",
     "Tests/CosmasNativeAuthTests/NativePracticeOriginAndSelectionTests.swift",
+    "Tests/CosmasNativeAuthTests/NativePracticeProductionTests.swift",
 )
 # These composed manifests are scaffold wiring. The owned package files describe
 # a library layout, so replacing them would drop the iPhone target graph.
