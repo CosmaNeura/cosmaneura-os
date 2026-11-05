@@ -36,7 +36,11 @@ Account-service hosts (not practice workspaces):
 | Environment | Account web | Enrollment API |
 | --- | --- | --- |
 | Staging | `https://onboarding.staging.cosmas.ai` | `https://enrollment-api.staging.cosmas.ai` |
-| Production | `https://app.cosmas.ai` | production enrollment API origin configured for that release |
+| Production | `https://app.cosmas.ai` | `https://enrollment-api.cosmas.ai` |
+
+Production enrollment API host is pinned: **`enrollment-api.cosmas.ai`**. Native
+clients call that origin for `/enrollment/v1/native/*` in production. Do not
+substitute another hostname.
 
 Native request origins (exact `Origin` header on every native enrollment call):
 
@@ -309,6 +313,27 @@ This contract does **not**:
 | Focused backend proof | `tests/enrollment/test_native_practice_profile.py` |
 | Production profile proof | `web/src/native-practice-production.test.ts` |
 | Swift production origin policy | `clients/apple/native-auth/.../NativePracticeProfile.swift` |
+
+## Related PR merge order (Mac / iPhone)
+
+Native production validator code also lives on draft
+[PR #305](https://github.com/CosmaNeura/cosmaneura-os/pull/305). This contract
+PR (#311) currently contains that same validator commit plus this document.
+
+**Recommended order (please confirm):**
+
+1. **Merge #305 first** — lands the shared/Swift/`NativeEnrollmentEntry`
+   production profile acceptance Mac and iPhone need to open
+   `authorized_beta` practices.
+2. **Then rebase #311 onto `main`** — drop the duplicate validator commit so
+   #311 is contract/docs (and host-pin text) only; merge #311 second.
+
+Why: #305 and #311 share the identical native-validator patch. Merging both
+without rebasing double-applies or conflicts. Splitting code (#305) then
+contract (#311) lets the mobile team build against validators while the
+account-contract wording stays reviewable. Alternative if preferred: close
+#305 and merge #311 alone (it already includes the same code). Do not merge
+both as currently stacked without the rebase step.
 
 ## Change control
 
