@@ -1,8 +1,20 @@
-# Cost lines — production practice hosting (held)
+# Cost lines — production practice hosting (held apply)
 
-**Status:** documentation and IaC only. No Azure resource in this table has been
-applied by this change. The founder must approve every billable line before any
-`tofu apply`, image publish, DNS write, or worker enablement.
+**Status:** documentation and IaC only in this repository. No Azure resource is
+applied from CI or cloud agents. Apply runs only via the founder Codex handoff
+on John’s Mac after the Beta Tester staging pass.
+
+**Founder approval (≈7:50am ET via Chief of Staff):**
+
+| Line | Decision |
+| --- | --- |
+| **F1** production enrollment foundation (~$33–35/mo) | **YES — approved** |
+| **P1** first practice Box stores (~$72–78/mo) | **YES — approved** (exactly one Box) |
+| **P2** extra Boxes | **NOT approved — held** |
+| **U1 / U2** standing Consumption budgets / other billable | **NOT approved — held** |
+
+**Stripe remains test mode** for this F1+P1 pass. Do not seed live Stripe keys
+or enable live acquisition from this approval alone.
 
 Prices are public Azure PAYG metadata estimates for **Central US**, **730
 hours/month**, checked against the October 31, 2026 enrollment review and the
@@ -46,17 +58,17 @@ accepts the BAA. Production keeps **35-day** PostgreSQL backups; staging keeps 7
 | Manual jobs (migrate / reserve) | Consumption jobs | usage | Short-lived; not a standing cost |
 | **Per-practice store subtotal (fixed)** | | **~$72–78** | Before Consumption/traffic |
 
-## Combined example (founder yes required)
+## Combined example
 
-| Bundle | Resources | Est. monthly |
-| --- | --- | ---: |
-| Production foundation alone | table above | ~$33–35 |
-| Foundation + **1** practice Box | foundation + one allocated workspace | ~$105–113 |
-| Foundation + **2** practice Boxes | foundation + two Boxes | ~$177–191 |
+| Bundle | Resources | Est. monthly | Approval |
+| --- | --- | ---: | --- |
+| **F1** Production foundation alone | foundation table | ~$33–35 | **YES** |
+| **F1+P1** Foundation + **1** practice Box | foundation + one allocated workspace | ~$105–113 | **YES** |
+| **F1+P2** Foundation + **2** practice Boxes | foundation + two Boxes | ~$177–191 | **HELD — no apply** |
 
 Container Apps Consumption, Blob transactions, Key Vault operations, DNS
 queries, egress, Cloudflare, Clerk, Stripe, and model inference are **not** in
-the fixed subtotals.
+the fixed subtotals (**U1/U2 held**).
 
 ## Key Vault secret **names** (values entered by founder only)
 
@@ -73,8 +85,8 @@ ARM `seed_secret.py` path or the Box seed helpers after foundation/Box apply.
 | `enrollment-clerk-secret-key` | Production Clerk backend key (`sk_live_…`) |
 | `enrollment-invitation-secret` | Invitation signing key |
 | `enrollment-runtime-admission-secret` | Runtime admission master |
-| `enrollment-stripe-secret-key` | Stripe live secret |
-| `enrollment-stripe-webhook-secret` | Stripe webhook signing secret |
+| `enrollment-stripe-secret-key` | Stripe secret (**test mode** for F1+P1 pass) |
+| `enrollment-stripe-webhook-secret` | Stripe webhook signing secret (**test mode** for F1+P1 pass) |
 
 ### Per-practice Box vault (`kvca<practice-uuid-prefix>`)
 
