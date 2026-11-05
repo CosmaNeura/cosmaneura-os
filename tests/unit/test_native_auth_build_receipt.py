@@ -177,6 +177,57 @@ def test_operational_helper_keeps_auth_and_explicitly_controls_capture(tmp_path,
     assert info["CosmasNativeAuth"]["enabled"] is True
     assert info["CFBundleIdentifier"] == "com.cosmasos.beta.desktop.auth"
     assert info["CosmasConfiguredCapture"] == ({"enabled": True, "apiOrigin": "https://api.example.invalid"} if capture else {"enabled": False})
+    assert "CosmasNativePracticeConnection" not in info
+
+
+def _production_practice_json(path: Path) -> Path:
+    host = "clerk.cosmas.ai"
+    path.write_text(json.dumps({
+        "enabled": True,
+        "accountOrigin": "https://enrollment-api.cosmas.ai",
+        "realm": {
+            "publishableKey": "pk_live_" + base64.b64encode((host + "$").encode()).decode(),
+            "frontendOrigin": "https://" + host,
+            "audience": "cosmabot-practice-api",
+            "profile": "operational-beta-v1",
+            "keychainNamespace": "c" * 64,
+        },
+        "apiOrigins": [],
+        "registeredPracticeOrigins": "practice-uuid-production-v1",
+    }))
+    return path
+
+
+def test_operational_helper_embeds_reviewed_practice_connection_infos(tmp_path, compiler, monkeypatch):
+    qualified, output, receipt = compile_fixture(tmp_path, compiler)
+    identity = tmp_path / "identity.json"
+    identity.write_text(json.dumps({"version": 1, "profile": "operational-beta-v1", "client": "desktop",
+        "apiOrigin": "https://api.example.invalid", "frontendOrigin": "https://identity.example.invalid",
+        "publishableKey": "pk_live_" + base64.b64encode(b"identity.example.invalid$").decode(),
+        "organizationId": "org_fixture", "audience": "cosmas-beta-api"}))
+    practice = _production_practice_json(tmp_path / "native-practice.json")
+    app = tmp_path / "Practice.app"
+    monkeypatch.setattr(sys, "argv", ["package-desktop-auth-helper.py", "--qualification", str(qualified),
+        "--products", str(output / "products"), "--compiler-receipt", str(receipt), "--output", str(app),
+        "--native-identity-config", str(identity), "--native-practice-config", str(practice)])
+    packager.main()
+    info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    assert info["CosmasNativePracticeConnection"]["realm"]["profile"] == "operational-beta-v1"
+    assert info["CosmasNativePracticeConnection"]["registeredPracticeOrigins"] == "practice-uuid-production-v1"
+    assert info["CosmasNativeAuth"]["enabled"] is True
+
+
+def test_practice_connection_requires_operational_identity(tmp_path, compiler, monkeypatch, capsys):
+    qualified, output, receipt = compile_fixture(tmp_path, compiler)
+    practice = _production_practice_json(tmp_path / "native-practice.json")
+    app = tmp_path / "RejectedPractice.app"
+    monkeypatch.setattr(sys, "argv", ["package-desktop-auth-helper.py", "--qualification", str(qualified),
+        "--products", str(output / "products"), "--compiler-receipt", str(receipt), "--output", str(app),
+        "--verification-variant", "w100", "--native-practice-config", str(practice)])
+    with pytest.raises(SystemExit):
+        packager.main()
+    assert "operational desktop helper identity" in capsys.readouterr().err
+    assert not app.exists()
 
 
 @pytest.mark.parametrize("damage", ["binary", "resources", "extra-resource", "mode", "original-product", "source-copy", "log"])

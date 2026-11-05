@@ -18,6 +18,10 @@ _spec.loader.exec_module(_identity)
 _spec = importlib.util.spec_from_file_location("native_auth_build_receipt", Path(__file__).with_name("native_auth_build_receipt.py"))
 _binding = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_binding)
+_spec = importlib.util.spec_from_file_location(
+    "native_practice_connection_info", Path(__file__).with_name("native_practice_connection_info.py"))
+_practice = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_practice)
 
 
 def main():
@@ -28,6 +32,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--verification-variant", default="")
     parser.add_argument("--native-identity-config", type=Path, help="Explicit public operational identity; never read from the environment")
+    parser.add_argument(
+        "--native-practice-config", type=Path,
+        help="Optional reviewed CosmasNativePracticeConnection JSON; omitted by default")
     parser.add_argument("--native-feature-profile", choices=("operational-beta-v1", "first-owner-staging-v1", "standalone-practice-v1", "independent-beta-v1"), default="operational-beta-v1")
     args = parser.parse_args()
     products = _binding.directory(args.products)
@@ -35,8 +42,16 @@ def main():
     output = args.output.resolve()
     receipt = args.compiler_receipt.absolute()
     identity = _identity.load(args.native_identity_config, "desktop")
+    practice = None
+    if args.native_practice_config is not None:
+        try:
+            practice = _practice.load_practice_config(args.native_practice_config)
+        except ValueError as error:
+            parser.error(str(error))
     if identity and args.verification_variant:
         parser.error("Operational and synthetic helper identities cannot be combined.")
+    if practice is not None and (not identity or args.verification_variant):
+        parser.error("Native practice connection requires an operational desktop helper identity.")
     capture_disabled = args.native_feature_profile in ("first-owner-staging-v1", "standalone-practice-v1", "independent-beta-v1")
     if capture_disabled and not identity:
         parser.error("A capture-disabled profile requires an operational native identity.")
@@ -78,6 +93,11 @@ def main():
         info["CosmasConfiguredCapture"] = ({"enabled": False} if capture_disabled
                                            else {"enabled": True, "apiOrigin": identity["identity"]["apiOrigin"]})
         info["CFBundleURLTypes"] = [{"CFBundleURLName": identity["bundle"], "CFBundleURLSchemes": [identity["bundle"]]}]
+    if practice is not None:
+        # Optional reviewed enrollment practice-connection Info. Omitted by default.
+        # The Mac host that reads this key is separate (#315 renderer port is dark
+        # until CosmasDesktopPractice lands); packaging only embeds the closed schema.
+        info[_practice.PRACTICE_KEY] = practice
     info_bytes = plistlib.dumps(info, sort_keys=False)
     (output / "Contents/Info.plist").write_bytes(info_bytes)
     (output / "Contents/Info.plist").chmod(0o644)
@@ -99,7 +119,11 @@ def main():
     if _binding.inventory(output) != expected_output:
         raise ValueError("Packaged output inventory differs from the compiler products and generated metadata.")
     (output / ".incomplete").unlink()
-    print(f"Packaged native auth helper: {output}; identity {'configured' if identity else 'disabled'}; not launched")
+    practice_state = "practice-connection configured" if practice is not None else "practice-connection omitted"
+    print(
+        f"Packaged native auth helper: {output}; identity "
+        f"{'configured' if identity else 'disabled'}; {practice_state}; not launched"
+    )
 
 
 if __name__ == "__main__":

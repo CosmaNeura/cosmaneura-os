@@ -234,6 +234,19 @@ python3 scripts/package-desktop-auth-helper.py \
   --output /absolute/path/to/CosmasAuth.app
 ```
 
+The default desktop helper Info embeds `CosmasNativeAuth` and
+`CosmasNativeIdentity` only. To prepare a separately reviewed Mac enrollment
+practice-connection candidate, additionally supply
+`--native-practice-config /absolute/path/to/reviewed-public-native-practice.json`.
+That file uses the same closed `CosmasNativePracticeConnection` schema as the
+owned iPhone candidate (staging `operational-staging-v1` or production
+`operational-beta-v1` with `practice-uuid-production-v1`, non-empty audience,
+`https://enrollment-api.cosmas.ai`, and `https://clerk.cosmas.ai`). Omission is
+the default. Synthetic `--verification-variant` helpers cannot carry this key.
+Embedding the Info does not implement the Mac `CosmasDesktopPractice` host;
+runtime still needs that host (and production validators) before a paying
+practice can open a production workspace on Mac.
+
 The compiler wrapper checks the complete qualification inventory and copies it
 into its own output. It builds only `CosmasDesktopAuth` in debug configuration,
 using an owned child-process home and owned scratch, package, module and temporary
