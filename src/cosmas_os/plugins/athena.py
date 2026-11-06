@@ -906,6 +906,8 @@ EHR_CAPABILITY = CapabilityManifest(
         "Plugin tools call signed CosmaBot routes only. Athena Platform preview "
         "is treated as the sandbox class for this contract; production stays refused. "
         "oauth2_client_credentials is declared for the Cosmaneura CosmaBot FHIR "
-        "sandbox auth module; no live token exchange is enabled from this plugin yet."
+        "sandbox auth module. The C7 Certified FHIR R4 Preview adapter lives under "
+        "adapters.athena_fhir_r4 (practice 195900, mock transport only); CosmaBot "
+        "route wiring stays for C8 and is not enabled from this plugin."
     ),
 )

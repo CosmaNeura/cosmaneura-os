@@ -56,10 +56,10 @@ configured reminders are delivered. Mocked transports do not prove this. The
 [TEST operator procedure](../../../docs/STRIPE_TEST_QUALIFICATION.md) lists the
 exact setup and distinguishes provider clocks from the bound runtime journey.
 
-Checkout starts only after the private provisioner records a qualified ready
-workspace. The browser cannot mark a workspace ready. Root's provisioner owns
-Clerk Organization creation, owner membership, independent Box/data store setup,
-runtime owner reservation/completion and readiness evidence; it calls only
+Checkout starts only after a qualified ready workspace is recorded. The browser
+cannot mark a workspace ready. Root's provisioner owns Clerk Organization
+creation, owner membership, independent Box/data store setup, runtime owner
+reservation/completion and readiness evidence; it calls only
 `EnrollmentService.record_workspace(practice_id, box_id=..., organization_id=...,
 url=..., proof_sha256=..., status=...)`. Box and Org bindings are permanent and
 unique. URL origin must be explicitly approved. A ready Box is insufficient:
@@ -67,6 +67,12 @@ the status returns its destination only for current human membership, exact BAA,
 and recently authoritative trial/paid entitlement. The frontend activates the
 returned Clerk Organization; the selected runtime must independently reverify
 session and local membership. Enrollment does not bypass that runtime gate.
+
+Synthetic staging (`data_mode=synthetic` with practice-UUID workspace allocation
+and provisioning) auto-records a ready practice-UUID staging destination after
+BAA acceptance and admits TEST Checkout without requiring
+`ENROLLMENT_ACTIVATION_AVAILABLE` / `ENROLLMENT_STRIPE_ACQUISITION_ENABLED`.
+Production never uses that path and stays flag-gated.
 
 Checkout freezes the exact request before calling Stripe. Repeated keys with
 different payloads fail; lost responses reuse the same provider attempt. The

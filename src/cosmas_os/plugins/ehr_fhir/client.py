@@ -28,6 +28,7 @@ from cosmas_os.plugins.ehr_fhir.resources import (
     DEFAULT_MAX_PAGES,
     DEFAULT_MAX_RESPONSE_BYTES,
     DEFAULT_TIMEOUT_SECONDS,
+    EXTENDED_READABLE_RESOURCES,
     READABLE_RESOURCES,
     WRITE_HTTP_METHODS,
 )
@@ -76,6 +77,8 @@ class FhirR4ReadClient:
         access_token: str | None = None,
         display_label: str = "EHR",
         allow_production: bool = False,
+        extra_sandbox_hosts: frozenset[str] | set[str] | tuple[str, ...] | list[str] | None = None,
+        allowed_resources: frozenset[str] | set[str] | tuple[str, ...] | list[str] | None = None,
         max_pages: int = DEFAULT_MAX_PAGES,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
@@ -83,7 +86,11 @@ class FhirR4ReadClient:
         self._label = display_label
         self._messages = messages_for(display_label)
         try:
-            self._base_url = assert_allowed_base_url(base_url, allow_production=allow_production)
+            self._base_url = assert_allowed_base_url(
+                base_url,
+                allow_production=allow_production,
+                extra_sandbox_hosts=extra_sandbox_hosts,
+            )
         except ValueError as exc:
             code = str(exc)
             if code == "fhir_base_url_production_refused":
@@ -104,11 +111,23 @@ class FhirR4ReadClient:
                 raise ValueError("access_token_invalid")
             if any(ord(c) < 33 or ord(c) > 126 for c in access_token):
                 raise ValueError("access_token_invalid")
+        if allowed_resources is None:
+            resources: frozenset[str] = READABLE_RESOURCES
+        else:
+            if type(allowed_resources) not in {frozenset, set, tuple, list}:
+                raise ValueError("allowed_resources_invalid")
+            resources = frozenset(allowed_resources)
+            if not resources or not resources <= EXTENDED_READABLE_RESOURCES:
+                raise ValueError("allowed_resources_invalid")
+            if any(type(name) is not str for name in resources):
+                raise ValueError("allowed_resources_invalid")
         self._token = access_token
         self._transport = transport
         self._max_pages = max_pages
         self._max_bytes = max_response_bytes
         self._timeout = float(timeout_seconds)
+        self._allowed_resources = resources
+        self._extra_sandbox_hosts = frozenset(extra_sandbox_hosts or ())
 
     @property
     def base_url(self) -> str:
@@ -179,7 +198,7 @@ class FhirR4ReadClient:
         return FhirReadResult(state=err.state, message=err.message)
 
     def _refuse_resource(self, resource_type: str) -> FhirReadResult | None:
-        if type(resource_type) is not str or resource_type not in READABLE_RESOURCES:
+        if type(resource_type) is not str or resource_type not in self._allowed_resources:
             return self._error("malformed")
         return None
 
@@ -407,10 +426,19 @@ class FhirR4ReadClient:
         )
 
 
-def production_base_refused(base_url: str, *, allow_production: bool = False) -> bool:
+def production_base_refused(
+    base_url: str,
+    *,
+    allow_production: bool = False,
+    extra_sandbox_hosts: frozenset[str] | set[str] | tuple[str, ...] | list[str] | None = None,
+) -> bool:
     """True when constructing a client for ``base_url`` would refuse the host."""
     try:
-        assert_allowed_base_url(base_url, allow_production=allow_production)
+        assert_allowed_base_url(
+            base_url,
+            allow_production=allow_production,
+            extra_sandbox_hosts=extra_sandbox_hosts,
+        )
     except ValueError as exc:
         return str(exc) in {
             "fhir_base_url_production_refused",

@@ -217,6 +217,14 @@ continues to use `build:beta`. Existing synthetic compositions retain their
 previous defaults and cannot consume an operational identity file or silently
 inherit its data/storage profile.
 
+For the **one-path Mac practice-helper package** (signup finished → install →
+Open Chief, no zip scavenger hunt), use
+`scripts/compose-mac-practice-helper.py` and read
+[mac-practice-helper-package.md](mac-practice-helper-package.md). That command
+binds reviewed public Infos via `--native-practice-config`, writes
+`package-manifest.json` as the canonical artifact, and keeps production
+fail-closed without a signed helper. It does not sign or notarize.
+
 For desktop, first compose the current native auth helper with
 `prepare-native-auth-proof.py --include-desktop`. Compile and package it with
 Python 3.13, an explicit installed Swift toolchain and fresh output directories:

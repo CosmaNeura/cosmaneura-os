@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -36,6 +36,7 @@ from .domain import (
     quote,
     utc,
 )
+from .environments import hosting_environment_for_data_mode
 from .mail import DisabledInvitationNotifier, InvitationNotifier
 from .models import (
     Acceptance,
@@ -570,13 +571,20 @@ class EnrollmentService:
                     doc_id=BAA_DOC_ID, version=BAA_VERSION, sha256=BAA_SHA256, accepted_at=now_utc()))
                 practice.revision += 1
                 session.flush()
-            if (self.workspace_allocation_scheduler is not None and member.role == "owner"
+            # Synthetic staging finishes workspace readiness in-process. Skip the
+            # operator hosting queue so practices do not sit on activation_pending.
+            if (not self._synthetic_staging_auto_ready_enabled()
+                    and self.workspace_allocation_scheduler is not None and member.role == "owner"
                     and practice.owner_id == account.id):
                 # Agreement and stable allocation intent commit atomically.
                 # This borrowed transaction performs no hosting operation.
                 self.workspace_allocation_scheduler.request(identity, session=session)
             return self._view(session, account)
         result = self._run(identity, key, "accept", payload, action)
+        practice_id = result.get("practice", {}).get("id") if isinstance(result.get("practice"), dict) else None
+        if practice_id and self._synthetic_staging_auto_ready_enabled():
+            self._synthetic_staging_auto_ready(practice_id)
+            return self.status(identity)
         if self.workspace_allocation_scheduler is not None:
             # Only durable agreement acceptance queues owner intent. Retrying
             # the same accepted command repairs a lost queue reply; signing by
@@ -591,6 +599,43 @@ class EnrollmentService:
             if owner:
                 self.workspace_allocation_scheduler.request(identity)
         return result
+
+    def _synthetic_staging_auto_ready_enabled(self) -> bool:
+        return bool(
+            self.settings.synthetic_staging_host()
+            and self.settings.workspace_allocation_enabled
+            and self.settings.provisioning_enabled
+            and not self.settings.stripe_live_mode
+        )
+
+    def _synthetic_staging_auto_ready(self, practice_id: str) -> None:
+        """Mark a synthetic staging practice ready without the cloud hosting worker.
+
+        Invented Box/Org/proof values stay inside synthetic data_mode and the
+        practice-UUID staging origin policy. Production never enters this path.
+        """
+        env = hosting_environment_for_data_mode(self.settings.data_mode)
+        if env is None or not env.synthetic_only:
+            return
+        with self.sessions() as session:
+            practice = session.get(Practice, practice_id)
+            if (not practice or practice.workspace_status == "ready" or practice.box_id
+                    or self._acceptance(session, practice) is None):
+                return
+        box_id = str(uuid5(NAMESPACE_URL, "cosmas-synthetic-staging-box:" + practice_id))
+        org_id = "org_synthetic" + hashlib.sha256(practice_id.encode()).hexdigest()[:24]
+        proof = hashlib.sha256(("synthetic-staging-ready:" + practice_id).encode()).hexdigest()
+        self.record_workspace(
+            practice_id,
+            box_id=box_id,
+            organization_id=org_id,
+            url=env.workspace_origin(practice_id) + "/chief",
+            proof_sha256=proof,
+            status="ready",
+            workspace_api_origin=env.workspace_api_origin(practice_id),
+            source_commit="0" * 40,
+            image_sha256="0" * 64,
+        )
 
     def receipt(self, identity: HumanIdentity) -> dict[str, Any]:
         with self.sessions.begin() as session:
@@ -831,6 +876,14 @@ class EnrollmentService:
             member.workspace_ready, member.workspace_proof_sha256 = True, proof_sha256
             practice.revision += 1
 
+    def _admits_synthetic_staging_checkout(self) -> bool:
+        """Settings-level synthetic staging admit; practice readiness stays separate."""
+        return self.settings.synthetic_staging_self_serve_ready(
+            billing=not self.settings.billing_errors(),
+            registration_blockers=self.settings.registration_errors(),
+            workspace_confirmation_configured=True,
+        )
+
     def _checkout_guard(self, session: Session, practice: Practice) -> None:
         if not self._acceptance(session, practice):
             raise EnrollmentError("agreement_required", "Accept the practice agreement before payment setup.")
@@ -838,7 +891,9 @@ class EnrollmentService:
             raise EnrollmentError("negotiated_quote_required", "Contact us for negotiated pricing above ten humans.")
         if practice.workspace_status != "ready" or not practice.workspace_proof_sha256:
             raise EnrollmentError("activation_pending", "Your trial starts only when your workspace is ready.")
-        if not self.settings.activation_available or not self.settings.provisioning_enabled:
+        if not self.settings.provisioning_enabled:
+            raise EnrollmentError("activation_pending", "Workspace activation is not available yet.")
+        if not self.settings.activation_available and not self._admits_synthetic_staging_checkout():
             raise EnrollmentError("activation_pending", "Workspace activation is not available yet.")
 
     def checkout(self, identity: HumanIdentity, key: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -852,7 +907,7 @@ class EnrollmentService:
             if not attempt:
                 if practice.stripe_subscription_id or practice.trial_started_at:
                     raise EnrollmentError("trial_already_received", "Manage your saved subscription. A second trial requires support.")
-                if not self.settings.stripe_acquisition_enabled:
+                if not self.settings.stripe_acquisition_enabled and not self._admits_synthetic_staging_checkout():
                     raise EnrollmentError("billing_acquisition_disabled", "New trial checkout is currently unavailable.", 503)
                 attempt_id = identifier()
                 request = {"attempt_id": attempt_id, "practice_id": practice.id, "human_seats": practice.human_seats,
