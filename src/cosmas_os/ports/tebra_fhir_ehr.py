@@ -69,7 +69,7 @@ class FhirMedicationItem(FhirPatientItem):
 
 
 class FhirCommonObservation(Protected):
-    provider: Literal["tebra"]
+    provider: Literal["tebra", "athena"]
     protocol: Literal["fhir"]
     mode: Literal["synthetic"]
     workspace_id: UUID

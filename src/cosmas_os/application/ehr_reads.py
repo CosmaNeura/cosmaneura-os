@@ -169,7 +169,7 @@ def source_label(provider, kind=None):
     if kind == "core_allergies":
         return "Athena: reviewed allergy records"
     if kind == "fhir_medications":
-        return "Tebra: reviewed medication records"
+        return "Athena: reviewed medication records" if provider == "athena" else "Tebra: reviewed medication records"
     if kind == "verified_problems":
         return "Elation: reviewed problem list"
     if kind == "verified_medications":
@@ -338,10 +338,13 @@ def _commitment(read, digest):
         binding_sha256=read.binding_digest, payload_sha256=digest, valid_until=_stamp(read.valid_until)))
 
 
-def item_hash(kind, item):
+def item_hash(kind, item, *, vendor=None):
     value = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
     value.pop("sha256", None)
-    domain = "ehr_athena_medication_patient_item.v1" if kind == "core_medication_patients" else "ehr_athena_medications_item.v1" if kind == "core_medications" else "ehr_elation_lab_candidate_item.v1" if kind == "lab_reports" else "ehr_elation_lab_report_item.v1" if kind == "verified_lab_report" else "ehr_athena_core_patient_item.v1" if kind == "core_patients" else "ehr_athena_core_allergies_item.v1" if kind == "core_allergies" else "ehr_fhir_patient_item.v1" if kind == "fhir_patients" else "ehr_tebra_fhir_medications_item.v1" if kind == "fhir_medications" else "ehr_verified_medications_item.v1" if kind == "verified_medications" else "ehr_verified_problems_item.v1" if kind == "verified_problems" else "ehr_window_item.v1" if kind == "window" else "ehr_verified_item.v1"
+    if kind == "fhir_medications":
+        domain = "ehr_athena_fhir_medications_item.v1" if vendor == "athena" else "ehr_tebra_fhir_medications_item.v1"
+    else:
+        domain = "ehr_athena_medication_patient_item.v1" if kind == "core_medication_patients" else "ehr_athena_medications_item.v1" if kind == "core_medications" else "ehr_elation_lab_candidate_item.v1" if kind == "lab_reports" else "ehr_elation_lab_report_item.v1" if kind == "verified_lab_report" else "ehr_athena_core_patient_item.v1" if kind == "core_patients" else "ehr_athena_core_allergies_item.v1" if kind == "core_allergies" else "ehr_fhir_patient_item.v1" if kind == "fhir_patients" else "ehr_verified_medications_item.v1" if kind == "verified_medications" else "ehr_verified_problems_item.v1" if kind == "verified_problems" else "ehr_window_item.v1" if kind == "window" else "ehr_verified_item.v1"
     return payload_hash(dict(kind=domain, item=value))
 
 

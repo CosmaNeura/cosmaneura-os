@@ -1,0 +1,180 @@
+{
+  "resourceType": "Bundle",
+  "id": "synth-us-core-bundle-1",
+  "type": "collection",
+  "meta": {
+    "tag": [
+      {
+        "system": "https://invented.invalid/synthetic",
+        "code": "SYNTHETIC"
+      }
+    ]
+  },
+  "entry": [
+    {
+      "fullUrl": "https://synthetic.invalid/fhir/Patient/synth-patient-1001",
+      "resource": {
+        "resourceType": "Patient",
+        "id": "synth-patient-1001",
+        "meta": {
+          "profile": ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-patient"]
+        },
+        "identifier": [
+          {
+            "system": "https://invented.invalid/mrn",
+            "value": "SYNTH-MRN-1001"
+          }
+        ],
+        "name": [
+          {
+            "use": "official",
+            "family": "Northwind",
+            "given": ["Avery"]
+          }
+        ],
+        "gender": "female",
+        "birthDate": "1988-04-12"
+      }
+    },
+    {
+      "fullUrl": "https://synthetic.invalid/fhir/MedicationRequest/synth-medreq-5001",
+      "resource": {
+        "resourceType": "MedicationRequest",
+        "id": "synth-medreq-5001",
+        "meta": {
+          "profile": ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-medicationrequest"]
+        },
+        "status": "active",
+        "intent": "order",
+        "medicationCodeableConcept": {
+          "coding": [
+            {
+              "system": "http://www.nlm.nih.gov/research/umls/rxnorm",
+              "code": "197361",
+              "display": "Lisinopril 10 MG Oral Tablet"
+            }
+          ],
+          "text": "Invented lisinopril tablet"
+        },
+        "subject": {
+          "reference": "Patient/synth-patient-1001"
+        },
+        "authoredOn": "2026-09-01",
+        "dosageInstruction": [
+          {
+            "text": "Take 1 tablet by mouth daily"
+          }
+        ]
+      }
+    },
+    {
+      "fullUrl": "https://synthetic.invalid/fhir/Encounter/synth-encounter-2001",
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "synth-encounter-2001",
+        "meta": {
+          "profile": ["http://hl7.org/fhir/us/core/StructureDefinition/us-core-encounter"]
+        },
+        "status": "finished",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "type": [
+          {
+            "text": "Invented office visit"
+          }
+        ],
+        "subject": {
+          "reference": "Patient/synth-patient-1001"
+        },
+        "period": {
+          "start": "2026-10-15T14:00:00Z",
+          "end": "2026-10-15T14:30:00Z"
+        }
+      }
+    },
+    {
+      "fullUrl": "https://synthetic.invalid/fhir/AllergyIntolerance/synth-allergy-4001",
+      "resource": {
+        "resourceType": "AllergyIntolerance",
+        "id": "synth-allergy-4001",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/allergyintolerance-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "code": {
+          "text": "Invented penicillin allergy"
+        },
+        "patient": {
+          "reference": "Patient/synth-patient-1001"
+        },
+        "recordedDate": "2024-06-01"
+      }
+    },
+    {
+      "fullUrl": "https://synthetic.invalid/fhir/Condition/synth-condition-3001",
+      "resource": {
+        "resourceType": "Condition",
+        "id": "synth-condition-3001",
+        "clinicalStatus": {
+          "coding": [
+            {
+              "system": "http://terminology.hl7.org/CodeSystem/condition-clinical",
+              "code": "active"
+            }
+          ]
+        },
+        "code": {
+          "text": "Invented migraine"
+        },
+        "subject": {
+          "reference": "Patient/synth-patient-1001"
+        }
+      }
+    },
+    {
+      "fullUrl": "https://synthetic.invalid/fhir/Observation/synth-obs-6001",
+      "resource": {
+        "resourceType": "Observation",
+        "id": "synth-obs-6001",
+        "status": "final",
+        "code": {
+          "text": "Invented blood pressure"
+        },
+        "subject": {
+          "reference": "Patient/synth-patient-1001"
+        },
+        "effectiveDateTime": "2026-10-15T14:05:00Z"
+      }
+    },
+    {
+      "fullUrl": "https://synthetic.invalid/fhir/DocumentReference/synth-docref-7001",
+      "resource": {
+        "resourceType": "DocumentReference",
+        "id": "synth-docref-7001",
+        "status": "current",
+        "type": {
+          "text": "Invented clinic note"
+        },
+        "subject": {
+          "reference": "Patient/synth-patient-1001"
+        },
+        "date": "2026-10-15T15:00:00Z",
+        "content": [
+          {
+            "attachment": {
+              "contentType": "text/plain",
+              "title": "Invented note body"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
