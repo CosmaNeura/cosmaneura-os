@@ -1,4 +1,4 @@
-.ehr-read-task[aria-label="Find or connect an Athena visit"] .athena-visit-link summary {
+.ehr-read-task[aria-label="Find or connect an Athena visit"] .athena-visit-link summary{
   box-sizing: border-box;
   min-height: 44px;
   padding: 11px 12px;
@@ -8,6 +8,6 @@
 .ehr-read-task[aria-label="Find or connect an Athena visit"] p,
 .ehr-read-task[aria-label="Find or connect an Athena visit"] h2,
 .ehr-read-task[aria-label="Find or connect an Athena visit"] h3,
-.ehr-read-task[aria-label="Find or connect an Athena visit"] h4 {
+.ehr-read-task[aria-label="Find or connect an Athena visit"] h4{
   overflow-wrap: anywhere;
 }

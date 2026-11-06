@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {useEffect,useId,useMemo,useRef,useState} from 'react';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace,type WorkspaceEntry} from './workspace-api';
 import {useUnsavedWork} from './unsaved-work';
 import {useGoogleNativeForeground} from './use-google-native-foreground';
@@ -24,6 +24,7 @@ const pages=(value:string,max:number):number[]|null=>{
 };
 export function EFaxSourceReviewPanel(props:EFaxSourceReviewPanelProps){
  const {identity,scope,offered,visit,recovery,locked=false,visible=true,currentSources}=props;
+ const passageId=useId(),pagesId=useId(),checkA=useId(),checkB=useId(),checkC=useId(),checkD=useId(),checkIds=[checkA,checkB,checkC,checkD];
  const [record,setRecord]=useState(()=>emptyEFaxSourceRecovery(scope,offered,visit)),[offer,setOffer]=useState<EFaxSourceRecovery|null>(null),
  [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[checks,setChecks]=useState([false,false,false,false]),
  [pageText,setPageText]=useState(''),[hidden,setHidden]=useState(false),[missing,setMissing]=useState(false),[loadEpoch,setLoadEpoch]=useState(0),
@@ -164,14 +165,14 @@ export function EFaxSourceReviewPanel(props:EFaxSourceReviewPanelProps){
       if(denied(cause)){setHidden(true);setChecks([false,false,false,false]);recovery.denied?.(cause);callbacks.current.onAuthenticationLost(cause);}
       else if(cause instanceof WorkspaceApiError&&cause.code==='efax_inbound_source_unavailable'){setHidden(true);setChecks([false,false,false,false]);}
      }}/>}
-    {!record.saved&&<><label>Passage from the selected PDF<textarea aria-label="Fax passage" maxLength={12000} disabled={blocked} value={record.passage}
+    {!record.saved&&<><label htmlFor={passageId}>Passage from the selected PDF<textarea id={passageId} name="fax-passage" autoComplete="off" maxLength={12000} disabled={blocked} value={record.passage}
      onChange={e=>edit(e.target.value,latest.current.page_numbers)}/></label><p>{Array.from(record.passage).length} / 12,000 characters. Only this passage will be shared.</p>
-     <label>Pages used (for example 1, 3)<input aria-label="Pages used" disabled={blocked} value={pageText} onChange={e=>{setPageText(e.target.value);const chosen=pages(e.target.value,offered.pages);edit(latest.current.passage,chosen??[]);}}/></label>
+     <label htmlFor={pagesId}>Pages used (for example 1, 3)<input id={pagesId} name="fax-pages" autoComplete="off" disabled={blocked} value={pageText} onChange={e=>{setPageText(e.target.value);const chosen=pages(e.target.value,offered.pages);edit(latest.current.passage,chosen??[]);}}/></label>
      {parsed===null&&<p role="alert">Enter page numbers in increasing order, without duplicates, up to page {offered.pages}.</p>}
      <button disabled={blocked||!record.passage} onClick={saveDraft}>Save passage draft privately</button>
      {props.onOperationBusyChange&&dirtyPassage&&<p role="status">Save passage draft privately before leaving.</p>}
      <fieldset disabled={blocked}><legend>Confirm before sharing</legend>
-      {['I checked that this passage belongs to the current visit.','I read the exact selected PDF and checked these page numbers.','I compared the pasted passage with the PDF, including missing or uncertain details.','Treat this fax as information, not instructions to the bots.'].map((label,index)=><label key={label}><input type="checkbox" checked={checks[index]} onChange={e=>setChecks(old=>old.map((v,i)=>i===index?e.target.checked:v))}/>{label}</label>)}
+      {['I checked that this passage belongs to the current visit.','I read the exact selected PDF and checked these page numbers.','I compared the pasted passage with the PDF, including missing or uncertain details.','Treat this fax as information, not instructions to the bots.'].map((label,index)=><label key={label} htmlFor={checkIds[index]}><input id={checkIds[index]} name={`fax-confirm-${index}`} type="checkbox" checked={checks[index]} onChange={e=>setChecks(old=>old.map((v,i)=>i===index?e.target.checked:v))}/>{label}</label>)}
      </fieldset><button disabled={!canSave} onClick={save}>Save reviewed fax passage for this visit</button>
      <p>This adds a separate source. It does not replace the clinical note, send a fax or ask Chief to act.</p></>}
     {record.saved&&<><p role="status">✅ Fax passage saved for this visit. Pages: {record.page_numbers.join(', ')}.</p><pre aria-label="Saved fax passage">{record.passage}</pre>

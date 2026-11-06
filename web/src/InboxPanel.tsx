@@ -1,5 +1,5 @@
 import {inboxDraftSelection,type InboxDraftSelection} from './inbox-analysis-contract';
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useId,useRef,useState} from 'react';
 import {WorkspaceApiError,type WorkspaceIdentity} from './workspace-api';
 import {vendorCanonical} from './vendor-contract';
 import {inboxApi} from './inbox-api';
@@ -34,6 +34,7 @@ export function InboxPanel({identity,recovery,enabled=false,onDone,onBusyChange,
   return <InboxEditor key={vendorCanonical(loaded.catalog.scope)} identity={identity} recovery={recovery} initial={loaded.catalog} onDenied={hide} onDone={onDone} onBusyChange={onBusyChange} presentation={presentation} onOpenHandoff={onOpenHandoff} onDraftInbox={onDraftInbox}/>;
 }
 function InboxEditor({identity,recovery,initial,onDenied,onDone,onBusyChange,presentation='expanded',onOpenHandoff,onDraftInbox}:InboxPanelProps&{initial:Catalog;onDenied:()=>void}){
+  const encounterId=useId(),classificationId=useId(),instructionsId=useId(),outcomeId=useId(),evidenceId=useId();
   const state=useInboxRecovery(recovery,initial.scope),[catalog,setCatalog]=useState(initial),[bundle,setBundle]=useState<InboxBundle|null>(null),[options,setOptions]=useState<ReviewOptions|null>(null),[historical,setHistorical]=useState<Source|null>(null),[checks,setChecks]=useState(emptyChecks),[page,setPage]=useState<InboxPage>('list'),[handoffSelection,setHandoffSelection]=useState<{itemId:string;detailKey:string;generation:number}|null>(null),epoch=useRef(0);
   const [draftSelection,setDraftSelection]=useState<{selection:InboxDraftSelection;detailKey:string;generation:number}|null>(null);
   const focused=presentation==='focused',detailKey=bundle?basis(bundle.detail):'';
@@ -130,7 +131,7 @@ function InboxEditor({identity,recovery,initial,onDenied,onDone,onBusyChange,pre
   const park=()=>void state.run(async()=>{await state.save(parkInboxCommand(state.current.current));setBundle(null);setOptions(null);setHistorical(null);setChecks(emptyChecks());setPage('list');state.setStatus('The unresolved command is kept exactly. It has not been cancelled. A new command for that item remains blocked until its exact receipt is resolved.');});
   const resume=(itemId:string)=>void state.run(async()=>{await state.save(resumeInboxCommand(state.current.current,itemId));setBundle(null);setOptions(null);setHistorical(null);setChecks(emptyChecks());setPage('list');state.setStatus('The original command is selected for exact recovery. Nothing was retried.');});
   const selectedOptions=options?.choices.find(x=>x.workspace_id===draft?.workspace_id);
-  const check=(name:keyof ReturnType<typeof emptyChecks>,label:string)=><label className="inbox-check"><input type="checkbox" checked={checks[name]} disabled={blocked} onChange={e=>setChecks(v=>({...v,[name]:e.target.checked}))}/>{label}</label>;
+  const check=(name:keyof ReturnType<typeof emptyChecks>,label:string)=>{const id=`inbox-check-${name}`;return <label className="inbox-check" htmlFor={id}><input id={id} name={name} type="checkbox" checked={checks[name]} disabled={blocked} onChange={e=>setChecks(v=>({...v,[name]:e.target.checked}))}/>{label}</label>;};
   const pending=state.record.pending,receipt=state.record.receipt;
   const canAdministrative=!!summary?.workspace_current&&!summary.incomplete_content&&!summary.source_conflict&&!summary.read_issue;
   const show=(value:InboxPage)=>!focused||page===value;
@@ -188,20 +189,20 @@ function InboxEditor({identity,recovery,initial,onDenied,onDone,onBusyChange,pre
           {focused&&(page==='review'||page==='completion')&&sourceCard&&<details><summary>Current incoming message</summary>{sourceCard}</details>}
           {show('review')&&(<fieldset disabled={inputBlocked||!detail.availability.review}><legend>Patient and thread review</legend>
         <button onClick={loadOptions} disabled={blocked}>Load matching encounters</button>
-        {options&&<>{options.choices.length===0?<p>No current matching encounter workspace is available.</p>:<label>Matching encounter<select value={draft.workspace_id} onChange={e=>edit({workspace_id:e.target.value})}><option value="">Choose an encounter</option>{options.choices.map(o=><option key={o.workspace_id} value={o.workspace_id}>{o.label} · {new Date(o.start_at).toLocaleString()}</option>)}</select></label>}</>}
+        {options&&<>{options.choices.length===0?<p>No current matching encounter workspace is available.</p>:<label htmlFor={encounterId}>Matching encounter<select id={encounterId} name="matching-encounter" autoComplete="off" value={draft.workspace_id} onChange={e=>edit({workspace_id:e.target.value})}><option value="">Choose an encounter</option>{options.choices.map(o=><option key={o.workspace_id} value={o.workspace_id}>{o.label} · {new Date(o.start_at).toLocaleString()}</option>)}</select></label>}</>}
         {check('patient','I checked the patient and selected encounter')}{check('thread','I checked this exact incoming thread')}{check('untrusted','I reviewed the source as untrusted external text')}
         <button onClick={()=>command('review')} disabled={blocked||!selectedOptions||!checks.patient||!checks.thread||!checks.untrusted}>Record patient and thread review</button>
       </fieldset>)}
           {show('triage')&&(<fieldset disabled={inputBlocked||!detail.availability.triage}><legend>Human triage</legend>
-        <label>Review classification<select value={draft.classification} onChange={e=>edit({classification:e.target.value as InboxDraft['classification']})}>{Object.entries(classifications).map(([value,label])=><option key={value} value={value} disabled={value==='administrative_review'&&!canAdministrative}>{label}</option>)}</select></label>
+        <label htmlFor={classificationId}>Review classification<select id={classificationId} name="review-classification" autoComplete="off" value={draft.classification} onChange={e=>edit({classification:e.target.value as InboxDraft['classification']})}>{Object.entries(classifications).map(([value,label])=><option key={value} value={value} disabled={value==='administrative_review'&&!canAdministrative}>{label}</option>)}</select></label>
         {(draft.classification==='clinical_human_review'||draft.classification==='urgent_human_review')&&<p>This remains a human clinical review task. No clinical decision or notification is made here.</p>}
-        <InboxDueDateInput label="Review due date" value={draft.due_date} onChange={value=>edit({due_date:value})} disabled={inputBlocked||!detail.availability.triage}/><label>Human review instructions<textarea maxLength={2000} value={draft.instructions} onChange={e=>edit({instructions:e.target.value})}/></label>
+        <InboxDueDateInput label="Review due date" value={draft.due_date} onChange={value=>edit({due_date:value})} disabled={inputBlocked||!detail.availability.triage}/><label htmlFor={instructionsId}>Human review instructions<textarea id={instructionsId} name="review-instructions" autoComplete="off" maxLength={2000} value={draft.instructions} onChange={e=>edit({instructions:e.target.value})}/></label>
         {check('triage','I confirm that a human must perform this review')}
         <button onClick={()=>command('triage')} disabled={blocked||!checks.triage||!isInboxCalendarDate(draft.due_date)||!draft.instructions.trim()||draft.classification==='administrative_review'&&!canAdministrative}>Record human triage</button>
       </fieldset>)}
           {show('result')&&<>{triageEvidence}<fieldset disabled={inputBlocked||!detail.availability.result}><legend>Human result</legend>
-        <label>Review outcome<select value={draft.result_disposition} onChange={e=>edit({result_disposition:e.target.value as InboxDraft['result_disposition']})}><option value="needs_human">Further human attention needed</option><option value="local_review_complete" disabled={blocked||!canAdministrative||summary!.classification!=='administrative_review'}>Local administrative review performed</option></select></label>
-        <label>Human result evidence<textarea maxLength={2000} value={draft.result_evidence} onChange={e=>edit({result_evidence:e.target.value})}/></label>
+        <label htmlFor={outcomeId}>Review outcome<select id={outcomeId} name="review-outcome" autoComplete="off" value={draft.result_disposition} onChange={e=>edit({result_disposition:e.target.value as InboxDraft['result_disposition']})}><option value="needs_human">Further human attention needed</option><option value="local_review_complete" disabled={blocked||!canAdministrative||summary!.classification!=='administrative_review'}>Local administrative review performed</option></select></label>
+        <label htmlFor={evidenceId}>Human result evidence<textarea id={evidenceId} name="result-evidence" autoComplete="off" maxLength={2000} value={draft.result_evidence} onChange={e=>edit({result_evidence:e.target.value})}/></label>
         {check('result','This result claims no reply, vendor change or clinical completion')}
         <button onClick={()=>command('result')} disabled={blocked||!savedTriage||!checks.result||!draft.result_evidence.trim()}>Record human result</button>
       </fieldset></>}

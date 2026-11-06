@@ -149,7 +149,7 @@ it('opens a listed visit, confirms fresh consent and starts in two explicit acti
   saveRecordingPreferences(team.recovery_scope, {regions:'US-NY',language:'en-US'});
   vi.mocked(prepareCapture).mockRejectedValueOnce({code:'capture_consent_required'});
   await click('Choose an encounter'); // Meeting selection is available; no recorder has opened.
-  await click('Record Invented visit 1'); // 1: Select the visit and prepare its consent screen.
+  await click('Record visit · Invented visit 1'); // 1: Select the visit and prepare its consent screen.
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
   expect(container.querySelector('[aria-label="Recording consent"]')?.textContent).toContain('US-NY');
   expect(container.querySelector<HTMLDetailsElement>('.capture-options')?.open).toBe(false);

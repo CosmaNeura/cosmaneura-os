@@ -1,11 +1,11 @@
-.native-ready-practices { display:grid; gap:8px; width:100%; min-width:0; }
-.native-ready-practices p { margin:0; overflow-wrap:anywhere; }
-.native-ready-practices ul { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
-.native-ready-practices li { display:flex; flex-direction:column; justify-content:center; gap:3px; min-height:44px; padding:8px 0; border-bottom:1px solid #d6dbe0; overflow-wrap:anywhere; }
-.native-ready-practices li span { font-size:.85em; }
-.native-ready-practices button { width:100%; min-height:44px; white-space:normal; overflow-wrap:anywhere; }
-.native-ready-practices li button[aria-pressed="true"] { border-color:#253d34; background:#edf3ef; }
-.native-practices-entry .apple-hosted-status { padding:24px 16px; }
-.native-practices-entry .apple-hosted-brand { margin-bottom:24px; }
-.native-practices-entry .apple-hosted-card { border:0; padding:0; background:transparent; }
-.native-practices-entry .apple-hosted-kicker { display:none; }
+.native-ready-practices{ display:grid; gap:8px; width:100%; min-width:0; }
+.native-ready-practices p{ margin:0; overflow-wrap:anywhere; }
+.native-ready-practices ul{ list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+.native-ready-practices li{ display:flex; flex-direction:column; justify-content:center; gap:3px; min-height:44px; padding:8px 0; border-bottom:1px solid #d6dbe0; overflow-wrap:anywhere; }
+.native-ready-practices li span{ font-size:.85em; }
+.native-ready-practices button{ width:100%; min-height:44px; white-space:normal; overflow-wrap:anywhere; }
+.native-ready-practices li button[aria-pressed="true"]{ border-color:#253d34; background:#edf3ef; }
+.native-practices-entry .apple-hosted-status{ padding:24px 16px; }
+.native-practices-entry .apple-hosted-brand{ margin-bottom:24px; }
+.native-practices-entry .apple-hosted-card{ border:0; padding:0; background:transparent; }
+.native-practices-entry .apple-hosted-kicker{ display:none; }

@@ -24,8 +24,8 @@ export function HandoffCard({ handoff, locked, onRetry, onShow, resultAvailable=
         handoff.review?.decision==='changes_requested'?'Changes requested':labels[handoff.status]}</small></div></header>
     <p className="team-task-goal">{preview}</p>
     {handoff.status === "completed" && handoff.result_entry_id && !handoff.task_brief_unavailable &&
-      <button className="team-task-review" disabled={locked||!resultAvailable} onClick={onShow} aria-label={`Review ${handoff.recipient_name} result`}>{resultAvailable?'Review result':'Loading saved result…'}</button>}
-    {reviewRecovery&&<button className="team-task-review" disabled={locked} onClick={onShow} aria-label={`Check saved ${handoff.recipient_name} review`}>Check saved review</button>}
+      <button className="team-task-review" disabled={locked||!resultAvailable} onClick={onShow} aria-label={resultAvailable?`Review result · ${handoff.recipient_name}`:`Loading saved result… · ${handoff.recipient_name}`}>{resultAvailable?'Review result':'Loading saved result…'}</button>}
+    {reviewRecovery&&<button className="team-task-review" disabled={locked} onClick={onShow} aria-label={`Check saved review · ${handoff.recipient_name}`}>Check saved review</button>}
     <p className="team-task-summary team-fine">{handoff.status==='completed'
       ? <>Private draft saved{handoff.completion_evidence?` · revision ${handoff.completion_evidence.revision} · ${handoff.completion_evidence.source_versions.length} sources cited`:''}</>
       : task ? <>{task.source_versions.length} saved {task.source_versions.length===1?'source':'sources'} · Independent draft</>

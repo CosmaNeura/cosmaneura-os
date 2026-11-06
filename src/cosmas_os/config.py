@@ -132,6 +132,12 @@ class Settings(BaseSettings):
     # Real-practice EHR origins. Default off; hosted/production configs must not
     # set it. Requires a recorded practice-BAA flag on the connection as well.
     cosmas_ehr_real_data_enabled: bool = False
+    # Track 3 mock scaffolds only. Default off; hosted/production must stay off.
+    # No prescribing vendor is selected; send stays refused by the scaffold.
+    workspace_rx_sandbox_enabled: bool = False
+    # Synthetic fax scaffold observe only. Does not flip live fax/eFax inbound
+    # or outbound flags, and does not call vendor_connectors send paths.
+    workspace_efax_sandbox_enabled: bool = False
     # Additional clinical read scope; appointments retain their three-scope grant.
     workspace_elation_problems_enabled: bool = False
     workspace_elation_medications_enabled: bool = False
@@ -225,6 +231,28 @@ class Settings(BaseSettings):
     @property
     def workspace_elation_sandbox_available(self) -> bool:
         return bool(self.workspace_ehr_read_available and self.workspace_elation_sandbox_enabled)
+
+    @property
+    def workspace_rx_sandbox_available(self) -> bool:
+        """Synthetic prescription scaffold only; never hosted and never a send path."""
+        return bool(
+            self.workspace_rx_sandbox_enabled
+            and self.workspace_available
+            and self.workspace_authenticated_enabled
+            and self.auth_mode == "clerk_jwt"
+            and not self.workspace_hosted_enabled
+        )
+
+    @property
+    def workspace_efax_sandbox_available(self) -> bool:
+        """Synthetic fax scaffold observe only; never hosted and never live send."""
+        return bool(
+            self.workspace_efax_sandbox_enabled
+            and self.workspace_available
+            and self.workspace_authenticated_enabled
+            and self.auth_mode == "clerk_jwt"
+            and not self.workspace_hosted_enabled
+        )
 
     @property
     def fax_inbound_source_available(self) -> bool:
@@ -547,6 +575,14 @@ class Settings(BaseSettings):
         if self.cosmas_ehr_real_data_enabled and self.workspace_hosted_enabled:
             errors.append(
                 "COSMAS_EHR_REAL_DATA_ENABLED must remain false when WORKSPACE_HOSTED_ENABLED is true"
+            )
+        if self.workspace_rx_sandbox_enabled and self.workspace_hosted_enabled:
+            errors.append(
+                "WORKSPACE_RX_SANDBOX_ENABLED must remain false when WORKSPACE_HOSTED_ENABLED is true"
+            )
+        if self.workspace_efax_sandbox_enabled and self.workspace_hosted_enabled:
+            errors.append(
+                "WORKSPACE_EFAX_SANDBOX_ENABLED must remain false when WORKSPACE_HOSTED_ENABLED is true"
             )
         if (self.workspace_apple_hosted_transport_enabled or self.workspace_desktop_hosted_transport_enabled) and not self.workspace_hosted_enabled:
             errors.append("Hosted native transport requires WORKSPACE_HOSTED_ENABLED")

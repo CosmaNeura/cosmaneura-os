@@ -1,4 +1,4 @@
-:root {
+:root{
   --ink: #1c2430;
   --muted: #5b6775;
   --paper: #f3efe6;
@@ -14,128 +14,128 @@
     linear-gradient(160deg, #efe8da 0%, var(--paper) 45%, #e7eef0 100%);
 }
 
-* { box-sizing: border-box; }
-html {
+*{ box-sizing: border-box; }
+html{
   scroll-padding-top: env(safe-area-inset-top, 0px);
   scroll-padding-bottom: env(safe-area-inset-bottom, 0px);
 }
-body {
+body{
   margin: 0;
   min-height: 100vh;
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
     env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
-body:has(.team-workspace) { background: #faf8f2; }
-button, input, textarea {
+body:has(.team-workspace){ background: #faf8f2; }
+button, input, textarea{
   font: inherit;
 }
-button {
+button{
   cursor: pointer;
   border: 1px solid var(--line);
   background: var(--panel);
   padding: 0.55rem 0.9rem;
   border-radius: 0.35rem;
 }
-button.primary {
+button.primary{
   background: var(--accent);
   color: var(--accent-ink);
   border-color: transparent;
 }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
+button:disabled{ opacity: 0.5; cursor: not-allowed; }
 
-.shell {
+.shell{
   max-width: 920px;
   margin: 0 auto;
   padding: 2.5rem 1.25rem 4rem;
 }
-.brand {
+.brand{
   font-size: clamp(2.2rem, 5vw, 3.4rem);
   letter-spacing: -0.03em;
   margin: 0;
 }
-.lede {
+.lede{
   color: var(--muted);
   max-width: 36rem;
   margin: 0.4rem 0 1.75rem;
 }
-.panel {
+.panel{
   background: color-mix(in srgb, var(--panel) 92%, white);
   border: 1px solid var(--line);
   border-radius: 0.75rem;
   padding: 1.1rem 1.2rem;
   margin-bottom: 1rem;
 }
-.row {
+.row{
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
   align-items: center;
 }
-.app-header {
+.app-header{
   justify-content: space-between;
 }
-.account-controls {
+.account-controls{
   margin-left: auto;
 }
-.meta {
+.meta{
   color: var(--muted);
   font-size: 0.92rem;
 }
-.ticket h2 {
+.ticket h2{
   margin: 0 0 0.35rem;
   font-size: 1.2rem;
 }
-.message {
+.message{
   white-space: pre-wrap;
   background: #f7f3ea;
   border-left: 3px solid var(--accent);
   padding: 0.75rem 0.9rem;
   margin: 0.75rem 0;
 }
-.status {
+.status{
   display: inline-block;
   text-transform: lowercase;
   color: var(--warn);
 }
-.error { color: #8f1d1d; }
-.timeline {
+.error{ color: #8f1d1d; }
+.timeline{
   list-style: none;
   padding: 0;
   margin: 0;
 }
-.timeline li {
+.timeline li{
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--line);
 }
-.identity-admin-heading {
+.identity-admin-heading{
   justify-content: space-between;
 }
-.identity-admin-heading h2 {
+.identity-admin-heading h2{
   margin: 0 0 0.25rem;
 }
-.identity-admin-heading p {
+.identity-admin-heading p{
   margin: 0;
 }
-.identity-form {
+.identity-form{
   display: grid;
   gap: 0.75rem;
   margin: 1rem 0;
 }
-.identity-form label {
+.identity-form label{
   display: grid;
   gap: 0.3rem;
 }
-.identity-form input {
+.identity-form input{
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 0.35rem;
   padding: 0.55rem 0.65rem;
 }
-.identity-roster {
+.identity-roster{
   border-top: 1px solid var(--line);
   margin-top: 1rem;
 }
-.identity-member {
+.identity-member{
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -144,50 +144,50 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   padding: 0.85rem 0;
   border-bottom: 1px solid var(--line);
 }
-.identity-subject {
+.identity-subject{
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
-.notice {
+.notice{
   color: var(--accent);
 }
-.retention-admin {
+.retention-admin{
   border-top: 1px solid var(--line);
   margin-top: 1rem;
   padding-top: 1rem;
 }
-.retention-admin h3 {
+.retention-admin h3{
   margin: 0 0 0.35rem;
 }
 
-.workspace-shell { max-width: 1200px; margin: auto; padding: 2.5rem 1.5rem 4rem; }
-.workspace-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; }
-.workspace-header h1 { margin: 0; font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -0.03em; }
-.workspace-eyebrow { margin: 0 0 .5rem; color: var(--accent); font-size: .9rem; }
-.workspace-welcome { margin-top: 2rem; max-width: 45rem; }
-.workspace-heading { justify-content: space-between; margin-top: 1rem; }
-.workspace-heading h2 { margin: .5rem 0; }
-.workspace-tabs { margin: 1rem 0 1.5rem; }
-.workspace-columns { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 1.25rem; }
-.workspace-columns > *, .workspace-columns .panel { min-width: 0; }
-.workspace-shell h3 { margin-top: 0; }
-.workspace-shell form, .workspace-shell label { display: grid; gap: .5rem; }
-.workspace-shell form { gap: .9rem; }
-.workspace-shell input, .workspace-shell textarea { width: 100%; border: 1px solid var(--line); background: #fffefa; border-radius: .4rem; padding: .7rem; color: var(--ink); }
-.workspace-notepad { line-height: 1.6; resize: vertical; min-height: 15rem; }
-.workspace-shell button { min-height: 44px; }
-.workspace-shell :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-.workspace-source { border-left: 3px solid var(--accent); padding: .2rem 0 .5rem .9rem; margin: 0 0 1.25rem; }
-.workspace-source p, .workspace-history p, .workspace-conversation p { white-space: pre-wrap; overflow-wrap: anywhere; }
-.workspace-history { margin-top: 1.25rem; }
-.workspace-shell summary { cursor: pointer; padding: .4rem 0; }
-.workspace-history article, .workspace-conversation article { border-bottom: 1px solid var(--line); padding: .8rem 0; }
-.workspace-conversation { max-height: 25rem; overflow-y: auto; margin-bottom: 1rem; }
-.workspace-return { max-width: 920px; padding: 1rem; margin: auto; }
+.workspace-shell{ max-width: 1200px; margin: auto; padding: 2.5rem 1.5rem 4rem; }
+.workspace-header{ display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; }
+.workspace-header h1{ margin: 0; font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -0.03em; }
+.workspace-eyebrow{ margin: 0 0 .5rem; color: var(--accent); font-size: .9rem; }
+.workspace-welcome{ margin-top: 2rem; max-width: 45rem; }
+.workspace-heading{ justify-content: space-between; margin-top: 1rem; }
+.workspace-heading h2{ margin: .5rem 0; }
+.workspace-tabs{ margin: 1rem 0 1.5rem; }
+.workspace-columns{ display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 1.25rem; }
+.workspace-columns > *, .workspace-columns .panel{ min-width: 0; }
+.workspace-shell h3{ margin-top: 0; }
+.workspace-shell form, .workspace-shell label{ display: grid; gap: .5rem; }
+.workspace-shell form{ gap: .9rem; }
+.workspace-shell input, .workspace-shell textarea{ width: 100%; border: 1px solid var(--line); background: #fffefa; border-radius: .4rem; padding: .7rem; color: var(--ink); }
+.workspace-notepad{ line-height: 1.6; resize: vertical; min-height: 15rem; }
+.workspace-shell button{ min-height: 44px; }
+.workspace-shell :focus-visible{ outline: 3px solid var(--accent); outline-offset: 3px; }
+.workspace-source{ border-left: 3px solid var(--accent); padding: .2rem 0 .5rem .9rem; margin: 0 0 1.25rem; }
+.workspace-source p, .workspace-history p, .workspace-conversation p{ white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace-history{ margin-top: 1.25rem; }
+.workspace-shell summary{ cursor: pointer; padding: .4rem 0; }
+.workspace-history article, .workspace-conversation article{ border-bottom: 1px solid var(--line); padding: .8rem 0; }
+.workspace-conversation{ max-height: 25rem; overflow-y: auto; margin-bottom: 1rem; }
+.workspace-return{ max-width: 920px; padding: 1rem; margin: auto; }
 @media (max-width: 760px) {
-  .workspace-shell { padding: 1.25rem .85rem 3rem; }
-  .workspace-header { flex-direction: column; gap: .6rem; }
-  .workspace-columns { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .workspace-shell .panel { padding: 1rem; }
-  .workspace-shell input, .workspace-shell textarea { font-size: 16px; }
+  .workspace-shell{ padding: 1.25rem .85rem 3rem; }
+  .workspace-header{ flex-direction: column; gap: .6rem; }
+  .workspace-columns{ grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .workspace-shell .panel{ padding: 1rem; }
+  .workspace-shell input, .workspace-shell textarea{ font-size: 16px; }
 }
-.beta-environment-notice { margin: 0; padding: .5rem 1rem; text-align: center; background: #fff3cd; color: #614a08; font-size: .875rem; }
+.beta-environment-notice{ margin: 0; padding: .5rem 1rem; text-align: center; background: #fff3cd; color: #614a08; font-size: .875rem; }

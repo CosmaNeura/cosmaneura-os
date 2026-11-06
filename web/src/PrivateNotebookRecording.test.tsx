@@ -64,7 +64,7 @@ beforeEach(()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.useRealTimers();vi.unstubAllGlobals();});
 
-it.each(['Start a private recording','Scribe'])('opens consent preparation from an unlinked note through %s without creating or linking another notebook',async entry=>{
+it.each(['Record privately','Scribe'])('opens consent preparation from an unlinked note through %s without creating or linking another notebook',async entry=>{
   await open();
   if(entry==='Scribe')await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent==='Scribe')!.click());
   else await click(entry);
@@ -82,7 +82,7 @@ it.each(['Start a private recording','Scribe'])('opens consent preparation from 
 });
 
 it.each(['onNotebook','onTranscribe'] as const)('retains working text when %s returns a newer signed version of that same private notebook',async callback=>{
-  await open();await click('Start a private recording');
+  await open();await click('Record privately');
   const current=panel.props!,result=notebookResult();result.workspace.revision=2;
   result.workspace.entries=[{id:uuid(802),revision:2,kind:'scratchpad',content:'Different saved text from the signed read.',source_label:null,origin:'human',ticket:null,created_at:'2026-10-20T00:00:00Z'}];
   await act(async()=>callback==='onNotebook'?current.onNotebook!(result):current.onTranscribe!(result,uuid(803)));
@@ -93,7 +93,7 @@ it.each(['onNotebook','onTranscribe'] as const)('retains working text when %s re
 });
 
 it.each(['workspace','identity','scope','linked'] as const)('rejects a signed preparation result with a different %s instead of attaching a recording',async mismatch=>{
-  await open();await click('Start a private recording');const result=notebookResult();
+  await open();await click('Record privately');const result=notebookResult();
   if(mismatch==='workspace')result.workspace.id=uuid(804);
   if(mismatch==='identity')result.identity={mode:'clerk_jwt',getToken:vi.fn()};
   if(mismatch==='scope')result.team.recovery_scope='b'.repeat(64);
@@ -106,7 +106,7 @@ it.each(['workspace','identity','scope','linked'] as const)('rejects a signed pr
 
 it('rejects a notebook read completed after native owner access ends',async()=>{
   let current=true;identity={mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:'invented-native-revision',isCurrent:()=>current} as NonNullable<Extract<AuthenticatedWorkspaceIdentity,{mode:'clerk_jwt'}>['nativeSession']>};
-  await open();await click('Start a private recording');
+  await open();await click('Record privately');
   let release!:(value:PrivateNotebookResult)=>void;
   vi.mocked(workspaceApi.openPrivateDraft).mockImplementation(()=>new Promise(resolve=>{release=resolve;}));
   const prepared=panel.props!.prepareNotebook!();
@@ -123,7 +123,7 @@ it('keeps both private recording entry points visibly locked while an exact conv
   await open();vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(()=>{}));
   await click('Send message');
   await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.ask).toHaveBeenCalledOnce();});
-  expect(button('Start a private recording')!.disabled).toBe(true);
+  expect(button('Record privately')!.disabled).toBe(true);
   const scribe=[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent==='Scribe')!;
   expect(scribe.disabled).toBe(true);await act(async()=>scribe.click());
   expect(host.querySelector('[aria-label="Private Scribe recording"]')).toBeNull();
@@ -131,7 +131,7 @@ it('keeps both private recording entry points visibly locked while an exact conv
 });
 
 it('returns between the focused phone recorder and the same working notebook without remounting the recorder',async()=>{
-  vi.stubGlobal('matchMedia',()=>({matches:true}));await open();await click('Start a private recording');
+  vi.stubGlobal('matchMedia',()=>({matches:true}));await open();await click('Record privately');
   const pane=host.querySelector('[aria-label="Private Scribe recording"]'),owner=panel.props!.identity;
   expect(host.querySelector('.team-workspace')?.getAttribute('data-recording-focused')).toBe('true');expect(panel.mounts).toBe(1);
   await click('Browse workspace');
@@ -202,7 +202,7 @@ it('opens an unlinked native phone note without visit-phase or duplicate progres
   await privatePanel('Sources');expect(host.querySelector('.team-content')?.getAttribute('data-mobile-panel')).toBe('Sources');
   await privatePanel('Notebook');expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
   expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe(workingQuestion);
-  await click('Start a private recording');expect(panel.props!.isCurrent()).toBe(true);expect((await panel.props!.prepareNotebook!()).workspace.id).toBe(workspace.id);
+  await click('Record privately');expect(panel.props!.isCurrent()).toBe(true);expect((await panel.props!.prepareNotebook!()).workspace.id).toBe(workspace.id);
   await click('Close recording');expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
   expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
 });

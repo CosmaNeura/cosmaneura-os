@@ -9,7 +9,7 @@ export const CONNECTION_GUIDES:Record<ConnectionId,{icon:string;group:string;des
     steps:['Continue to Microsoft with your work or school account.','Review the email and calendar permissions.','Return here to view recent email or upcoming events.'],setup:'Microsoft sign-in has not been enabled for this workspace. Your practice administrator must finish the Microsoft application setup before you can connect.'},
   scheduling:{icon:'📅',group:'Your practice',description:'Connect your Scheduling practice and appointments.',access:'Uses the Google account approved for your Scheduling practice to check availability and review proposals. This is separate from Gmail. Live booking is not available in this beta.',
     steps:['Confirm your Scheduling practice membership.','Sign in with the approved Google account.','Use the connected schedule in your encounter workspace.'],setup:'Your practice administrator needs to enable Scheduling and confirm your practice membership.'},
-  messaging:{icon:'📠',group:'Practice services',description:'Messaging and fax with Spruce, SRFax, Documo or eFax Corporate.',access:'Each delivery is prepared and reviewed before it is sent.',
+  messaging:{icon:'📠',group:'Practice services',description:'Messaging and fax with Spruce, SRFax, Documo or eFax Corporate. Prescription send stays unavailable.',access:'Each delivery is prepared and reviewed before it is sent. Prescription and fax sandbox scaffolds are labels only until a later activation; they do not send live prescriptions or faxes.',
     steps:['Choose your practice’s messaging or fax provider.','Have an administrator connect the provider account.','Confirm recipients and review the first delivery.'],setup:'Your practice administrator needs to connect a Spruce, SRFax, Documo or eFax Corporate API account and enable delivery for this workspace.'},
   payments:{icon:'💳',group:'Practice services',description:'Reviewed sandbox payment requests.',access:'The current Stripe workflow creates unconfirmed sandbox payment requests. Live payment collection is not available.',
     steps:['Have an administrator connect the practice’s Stripe account.','Confirm the customer and payment-request details.','Review the amount before creating the payment request.'],setup:'Your practice administrator needs to connect Stripe and enable payment requests for this workspace.'},
@@ -21,4 +21,15 @@ export const CONNECTION_ACTION_LABELS:Record<string,string>={practice_connection
   mail_headers:'Read email headers',reviewed_email_source:'Review selected email for a visit',calendar_source:'Review selected calendar events',email_send:'Send email',calendar_write:'Change calendar events',
   calendar_summaries:'Read calendar summaries',full_email_source:'Review full email for a visit',availability:'Check available times',appointment_proposals:'Review appointment proposals',live_booking:'Book appointments',
   spruce_administrative_message:'Reviewed Spruce administrative messages',fax_delivery:'Reviewed fax delivery',reviewed_received_fax:'Review received fax',sandbox_payment_request:'Sandbox payment requests',
-  live_payment_collection:'Live payment collection',named_portal_work:'Supported practice portal',arbitrary_portal_connection:'Connect other portals'};
+  live_payment_collection:'Live payment collection',named_portal_work:'Supported practice portal',arbitrary_portal_connection:'Connect other portals',
+  // Track 3 mock-placeholder labels only. Not catalog actions; no live connector.
+  prescription_read:'Prescription sandbox status',prescription_send:'Send prescription',
+  efax_sandbox_read:'Fax sandbox status',efax_sandbox_send:'Send fax (scaffold)'};
+
+/** Scaffold-only Connections labels. Not wired into the live catalog contract. */
+export const SCAFFOLD_CONNECTION_LABELS={
+  prescription_read:CONNECTION_ACTION_LABELS.prescription_read,
+  prescription_send:CONNECTION_ACTION_LABELS.prescription_send,
+  efax_sandbox_read:CONNECTION_ACTION_LABELS.efax_sandbox_read,
+  efax_sandbox_send:CONNECTION_ACTION_LABELS.efax_sandbox_send,
+} as const;
