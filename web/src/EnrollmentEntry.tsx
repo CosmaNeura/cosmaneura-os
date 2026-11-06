@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createEnrollmentApi, enrollmentApiBase, type EnrollmentApi, type EnrollmentIdentity } from './enrollment-api';
 import { EnrollmentError, type EnrollmentConfig, type EnrollmentStatus } from './enrollment-contract';
 import { EnrollmentFlow } from './EnrollmentFlow';
-import { prepareEnrollmentWorkspaceToken } from './enrollment-clerk';
+import { openEnrollmentBrowserWorkspace, prepareEnrollmentWorkspaceToken } from './enrollment-clerk';
 import './enrollment.css';
 
 const enrollmentLocalization = {
@@ -60,16 +60,14 @@ function EnrollmentClerkAccount({api,config}:{api:EnrollmentApi;config:Enrollmen
       memberships:page=>user.getOrganizationMemberships({initialPage:page,pageSize:100}),
       activate:organization=>clerk.setActive({organization}),activeOrganization:()=>observed.current.orgId},status,signal,allowPreparation);
   };
-  const openWorkspace=async(status:EnrollmentStatus,url:string)=>{
-    await prepareWorkspaceToken(status,undefined,false);
-    window.location.assign(url);
-  };
+  const openWorkspace=async(status:EnrollmentStatus,url:string)=>
+    openEnrollmentBrowserWorkspace(url,()=>prepareWorkspaceToken(status,undefined,false),config.data_mode);
   if(!auth.isLoaded)return <main className="enrollment-page"><section className="enrollment-card" role="status">Checking your signed-in account…</section></main>;
   if(auth.isSignedIn!==true){const signIn=window.location.pathname.startsWith('/sign-in'),destination=returnPath(window.location.search);
     return <main className="enrollment-page"><header className="enrollment-header"><a className="enrollment-brand" href="/onboarding">CosmaBot</a><nav><a href={signIn?destination:'/sign-in'+window.location.search}>{signIn?'Create account':'Sign in'}</a></nav></header>
       {config.data_mode==='synthetic'&&<p className="enrollment-synthetic-note" role="note">Synthetic staging · Use invented information only.</p>}
       <section className="enrollment-card"><p className="enrollment-eyebrow">Account → Practice → Agreement → Trial → Chief</p><p>{signIn?'Continue to your saved practice setup.':'Create an account to save your practice setup and review the agreement.'}</p>
-        <p>Use Google, Microsoft, or email and password. Connecting a mailbox or calendar is a separate choice after setup.</p>
+        <p>Use Google, Microsoft, or email and password. After setup, Open Chief continues into your practice workspace in the browser.</p>
         <p>{config.activation_available?'A card is required for your 14-day free trial.':'Registration is available. Your trial starts when your workspace is ready.'} CosmaBot is $300 per seat per month. Count every human user through ten seats; 11+ users require an agreed quote.</p>
         <div className="enrollment-auth">{signIn?<SignIn routing="hash" signUpUrl={destination} forceRedirectUrl={destination}/>:<SignUp routing="hash" signInUrl={'/sign-in'+window.location.search} forceRedirectUrl={destination}/>}</div>
       </section></main>;
