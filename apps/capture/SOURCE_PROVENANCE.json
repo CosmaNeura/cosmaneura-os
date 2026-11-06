@@ -3068,8 +3068,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/capture/native-configured/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift",
-        "sha256": "4d274e92a316772d67b0b3fe3658c1cf55f7155bfde2e01610e152989431e395",
-        "status": "byte-identical"
+        "sha256": "08ea87b138d73336fda3c1ed17daace57f3cba2fbbe6deb13baaff3535548eff",
+        "status": "differs"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -3094,8 +3094,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/capture/native-configured/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift",
-        "sha256": "8a16ff1283d0c8c9e2ee339ee6c445b04d220d1442b644e8fdfeb0dda2c7fbc9",
-        "status": "byte-identical"
+        "sha256": "8c98dece16b8702a12cd05a4fd655cb37029bf4cf258384e1d90576f2cd03eb0",
+        "status": "differs"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
