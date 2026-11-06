@@ -23,7 +23,7 @@ async function readSaved(target=address){const reader=new DraftJournal(await sto
 async function render(c:EditorRecoveryAccess|null|undefined=context,p=props){await act(async()=>root.render(<EditorRecoveryContext.Provider value={c}><EFaxSourceReviewMount {...p}/></EditorRecoveryContext.Provider>));}
 async function enterPassage(){await wait(()=>expect(host.querySelector('textarea')).toBeTruthy());await act(async()=>{
  const text=host.querySelector<HTMLTextAreaElement>('textarea')!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(text,record.passage);text.dispatchEvent(new Event('input',{bubbles:true}));
- const pages=host.querySelector<HTMLInputElement>('input[aria-label="Pages used"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(pages,'1, 3');pages.dispatchEvent(new Event('input',{bubbles:true}));
+ const pages=host.querySelector<HTMLInputElement>('input[name="fax-pages"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(pages,'1, 3');pages.dispatchEvent(new Event('input',{bubbles:true}));
  });await act(async()=>host.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c=>c.click()));}
 async function seed(target=address,kind:EditorKind=editor,r=record){await journal.load(target);await journal.persist(target,{kind:'editor',workspaceId:scope.workspace_id,editor:kind,data:r,pending:null});}
 beforeEach(async()=>{
@@ -109,7 +109,7 @@ it('forwards exact-document opening and retained visibility without discarding t
  await render(context,{...props,visible:false});expect(signal?.aborted).toBe(true);
  await render(context,{...props,visible:true});expect(props.onOpenDocument).toHaveBeenCalledOnce();
  expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe(record.passage);
- expect(host.querySelector<HTMLInputElement>('[aria-label="Pages used"]')?.value).toBe('1, 3');
+ expect(host.querySelector<HTMLInputElement>('[name="fax-pages"]')?.value).toBe('1, 3');
  expect([...host.querySelectorAll<HTMLInputElement>('input[type=checkbox]')].every(value=>!value.checked)).toBe(true);
  expect(await readSaved()).toBeNull();expect(efaxSourceApi.review).not.toHaveBeenCalled();
 });

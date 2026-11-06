@@ -12,7 +12,7 @@
 
 .team-task-grid .team-handoff>.team-task-goal{margin:.55rem 0 .4rem;white-space:normal}
 .team-task-grid .team-handoff>.team-task-review{margin:.4rem 0 .45rem}
-.team-task-grid .team-handoff>.team-task-summary{font-size:12px;line-height:1.4;margin:.4rem 0;color:var(--team-muted,#687078)}
+.team-task-grid .team-handoff>.team-task-summary{font-size: 13px;line-height:1.4;margin:.4rem 0;color:var(--team-muted,#687078)}
 .team-task-grid .team-handoff>.team-task-details{margin:.25rem 0 0}
 .team-task-grid .team-handoff>.team-task-details>summary{padding:10px 0}
 

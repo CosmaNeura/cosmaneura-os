@@ -21,7 +21,7 @@ import {teamConfigurationChanged} from './team-configuration-diff';
 import {VisitCatalog} from './VisitCatalog';
 import {consumeWorkspaceStartupTeam} from './workspace-team-read';
 import {workspaceProtocolGeneration} from './workspace-protocol';
-import {readWorkspaceRoute,workspaceRouteHash,type WorkspaceRoute} from './workspace-route';
+import {practicePageFromRoute,readWorkspaceRoute,workspaceRouteHash,type WorkspaceRoute} from './workspace-route';
 import {deferredWorkspacePanel} from './DeferredWorkspacePanel';
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {PracticeAccessPanel} from './PracticeAccessPanel';
@@ -148,7 +148,18 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   practiceAccess?:PracticeAccessContext;
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
-  const [session]=useState(()=>new WorkspaceSession({presentation:{enabled:import.meta.env.VITE_MESSAGES_ENABLED==='true',phone:phoneLayout(),storage:deviceStorage()},initialPage:authenticated?'home':'visits',navigation:{initialRoute:readWorkspaceRoute(window.location.hash)}}));
+  const [session]=useState(()=>{
+    const initialRoute=readWorkspaceRoute(window.location.hash);
+    const fallback=authenticated?'home' as const:'visits' as const;
+    const created=new WorkspaceSession({presentation:{enabled:import.meta.env.VITE_MESSAGES_ENABLED==='true',phone:phoneLayout(),storage:deviceStorage()},initialPage:practicePageFromRoute(initialRoute,fallback),navigation:{initialRoute}});
+    // Seed helper/material chrome from the hash before Home can paint.
+    if(initialRoute?.page==='notebook'){
+      if(initialRoute.helper)created.setSelected(initialRoute.helper);
+      if(initialRoute.material){created.setMobilePanel(initialRoute.material);if(initialRoute.material!=='Conversation')created.setPanel(initialRoute.material);}
+    }else if(initialRoute?.page==='settings'){created.setSettingsOpen(true);created.setPracticeOpen(false);}
+    else if(initialRoute?.page==='work'){created.setPracticeOpen(true);created.setPracticeOpened(true);created.setSettingsOpen(false);}
+    return created;
+  });
   const [researchChief]=useState(()=>new ResearchChiefHandoff(session));
   const inboxOrganization=useSyncExternalStore(session.inboxPreferences.subscribe,session.inboxPreferences.getSnapshot,session.inboxPreferences.getSnapshot);
   const inboxDraftStatus=useSyncExternalStore(session.conversations.drafts.subscribe,session.conversations.drafts.getSnapshot,session.conversations.drafts.getSnapshot);
@@ -1388,7 +1399,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const nativeNoteShortcut=nativeClinicalPlan&&<section className="chief-saved-note-shortcut" aria-label="Saved visit note next steps">
             <span>Saved visit note · version {nativeClinicalPlan.selection.note_version}
               {note!==latestNote?<small>Save your note changes first.</small>:nativeClinicalPlan.sourcesChanged?<small>Review the updated note first.</small>:null}</span>
-            <button type="button" aria-label={`Plan from saved visit note version ${nativeClinicalPlan.selection.note_version}`} disabled={locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked||note!==latestNote||nativeClinicalPlan.sourcesChanged}
+            <button type="button" aria-label={`Follow-up + Research · saved visit note version ${nativeClinicalPlan.selection.note_version}`} disabled={locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked||note!==latestNote||nativeClinicalPlan.sourcesChanged}
               onClick={()=>openClinicalTeamDrafts(nativeClinicalPlan.selection.note_id,false,nativeClinicalPlan,true)}>Follow-up + Research</button>
           </section>;
   const clinicalTeamDrafts=bot?.role==='chief'&&authenticated&&team&&workspace&&<details ref={clinicalTeamRef} className="clinical-team-disclosure" open={clinicalTeamExpanded} onToggle={event=>setClinicalTeamExpanded(event.currentTarget.open)}><summary>Saved note for follow-up and research</summary>
@@ -1542,10 +1553,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span>{showDemoLabels()&&<small className="team-phone-preview">Synthetic preview</small>}{accountControls&&phoneLayout()&&!nativeHome&&!nativeWorkspace&&!nativeChat&&<div className="team-phone-account-controls">{accountControls}</div>}</div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
       <nav ref={navigation} className="practice-navigation" aria-label="Workspace navigation">
-        {authenticated&&<button className={`team-nav-item ${(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} aria-label={messagesMode?'Messages':undefined} onClick={goHome}><WorkspaceNavIcon page="home"/>{messagesMode?'Chats':'Home'}</button>}
-        <button className={`team-nav-item ${!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'active':''}`} aria-current={!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} aria-label={messagesMode?'Visits and notes':undefined} onClick={()=>void (authenticated?loadEncounters():open())}><WorkspaceNavIcon page="visits"/>{messagesMode?'Visits':'Visits and notes'}</button>
+        {authenticated&&<button className={`team-nav-item ${(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}><WorkspaceNavIcon page="home"/>{messagesMode?'Chats':'Home'}</button>}
+        <button className={`team-nav-item ${!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'active':''}`} aria-current={!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void (authenticated?loadEncounters():open())}><WorkspaceNavIcon page="visits"/>{messagesMode?'Visits':'Visits and notes'}</button>
         {workspace&&<button className={`team-nav-item team-nav-secondary ${practicePage==='notebook'&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&!phoneLayout()?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goNotebook}>Current notebook</button>}
-        {hasWorkspaceIdentity&&<button aria-label={messagesMode?'Practice work':undefined} className={`team-nav-item ${practiceOpen?'active':''}`} aria-current={practiceOpen?'page':undefined} disabled={viewNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={()=>leaveTeamSettings(()=>{routeSequence.current++;routeApplying.current=false;routeReady.current=true;clearPageError();setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);})}><WorkspaceNavIcon page="work"/>{messagesMode?'Work':'Practice work'}</button>}
+        {hasWorkspaceIdentity&&<button className={`team-nav-item ${practiceOpen?'active':''}`} aria-current={practiceOpen?'page':undefined} disabled={viewNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={()=>leaveTeamSettings(()=>{routeSequence.current++;routeApplying.current=false;routeReady.current=true;clearPageError();setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);})}><WorkspaceNavIcon page="work"/>{messagesMode?'Work':'Practice work'}</button>}
         {authenticated&&CONNECTION_ONBOARDING_BUILD&&<button className="team-nav-item team-nav-secondary" disabled={viewNavigationLocked||busy||!!pending} onClick={()=>void openSettings('connections')}>Connections</button>}
         {hasWorkspaceIdentity&&<button className={`team-nav-item ${settingsOpen&&!practiceOpen?'active':''}`} aria-current={settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked} onClick={()=>void openSettings()}><WorkspaceNavIcon page="settings"/>Settings</button>}
       </nav>
@@ -1570,7 +1581,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       {newMessage&&team&&<NewMessagePicker team={team} locked={conversationBusy||homeBusy||homePending||viewNavigationLocked} onChoose={address=>void chooseConversationContext(address)} onClose={()=>setNewMessage(false)} canRestoreFocus={canRestoreDialogFocus}/>}
       {conversationDetails&&workspace&&<ConversationDetails initialSources={conversationDetails==='sources'} recordingAvailable={CAPTURE_WORKSPACE_BUILD&&!!authenticated&&team?.capture?.enabled===true} name={bot?.name??'Conversation'} chiefTasks={bot?.role==='chief'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onReviewReceivedFax={EFAX_INBOUND_BUILD&&EFAX_INBOUND_SOURCE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openReceivedFaxWork('conversation'):undefined} onReviewGoogle={GOOGLE_CONNECTION_BUILD&&GOOGLE_MESSAGE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openGoogleWork('message','conversation'):undefined} onReviewGoogleCalendar={GOOGLE_CONNECTION_BUILD&&GOOGLE_CALENDAR_BUILD&&authenticated&&bot?.role==='chief'?()=>void openGoogleWork('calendar','conversation'):undefined} onReviewOutlookCalendar={MICROSOFT_CALENDAR_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openOutlookWork('conversation','calendar'):undefined} onReviewOutlook={OUTLOOK_MESSAGE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openOutlookWork('conversation'):undefined} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onFindAthena={athenaAvailable&&authenticated?()=>void openAthenaTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined} canRestoreFocus={canRestoreDialogFocus}/>}
       {nativeHome||nativeWorkspace?<header className="native-home-header">
-        {nativeWorkspace&&practicePage!=='home'&&<button className="team-subtle" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}>‹ Home</button>}
+        {nativeWorkspace&&practicePage!=='home'&&<button className="team-subtle" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}><span aria-hidden="true">‹ </span>Home</button>}
         <strong>{nativeSavedRecording?'Scribe':'CosmaBot'}</strong>
         <div className="native-workspace-actions">
         {nativeSavedRecording&&<button className="team-subtle" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} aria-label={savedRecordingNotebookOpen?'Back to Scribe':'Open notebook'} onClick={()=>{
@@ -1866,10 +1877,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           <button aria-label="Conversation view" aria-pressed={mobilePanel==='Conversation'&&!phoneChiefToolsVisible} onClick={()=>{setMobilePanel('Conversation');setPhoneChatToolsOpen(false);}}>Conversation</button>
           <button aria-label={phoneChief?'Open private note':'Workspace view'} aria-pressed={mobilePanel!=='Conversation'} onClick={()=>{if(phoneChief){chiefNotebookFocus.current={workspace:workspace.id,generation:generation.current};setPanel('Notebook');setMobilePanel('Notebook');}else setMobilePanel(panel);}}>{phoneChief?'Private note':'Workspace'}</button>
           {CAPTURE_WORKSPACE_BUILD&&authenticated&&workspace.private_draft?.state==='unlinked'&&!visitLinked&&
-            <button aria-label="Start a private recording" disabled={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={startNotebookRecording}>
+            <button aria-label="Record privately" disabled={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={startNotebookRecording}>
               <span aria-hidden="true">🎙️ </span>Record privately</button>}
           {!savedRecordingEntry&&CAPTURE_WORKSPACE_BUILD&&authenticated&&visitLinked&&team?.capture?.enabled&&
-            <button aria-label="Open visit recorder" disabled={locked||captureDraftLocked||!scribe?.enabled} onClick={()=>setCaptureRequest(value=>value+1)}>
+            <button aria-label="Record visit" disabled={locked||captureDraftLocked||!scribe?.enabled} onClick={()=>setCaptureRequest(value=>value+1)}>
               <span aria-hidden="true">🎙️ </span>Record visit</button>}
           {nativeSavedRecording?<button aria-label={nativeChat?'Back to Scribe':'Open Scribe review'} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>setSavedRecordingNotebook(null)}>Scribe</button>:
           phoneChief&&scribe?.enabled&&!scribe.retired&&<button aria-label="Open Scribe" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked||!!privateRecordingEntry} onClick={()=>{
@@ -1900,7 +1911,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           {['Notes','Draft','Review','Saved'].map((step,index)=><li key={step} aria-current={index===(reviewState==='saved'?3:busy&&pending?.type==='ask'?1:panel==='Review'?2:0)?'step':undefined}>{step}</li>)}
         </ol>
         <div className="team-content" data-mobile-panel={mobilePanel} data-scribe-focus="true"><section className="team-conversation" aria-label="Encounter conversation">
-          <header ref={conversationHeaderRef} className="team-conversation-header">{nativeChat&&<button className="native-chat-home" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}>‹ Home</button>}<BotAvatar role={bot?.role ?? "scribe"}
+          <header ref={conversationHeaderRef} className="team-conversation-header">{nativeChat&&<button className="native-chat-home" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}><span aria-hidden="true">‹ </span>Home</button>}<BotAvatar role={bot?.role ?? "scribe"}
             active={busy && pending?.type === "ask" && pending.body.role === selected||workspace.entries.some(e=>modelActive(e)&&e.model_request?.bot.address===selected)}
             enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />
             <div><h2>{bot?.name ?? "Your team"}</h2><p>{template?.description}</p></div>
@@ -2016,7 +2027,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             {!team?.revision ? <p className="team-fine">You can save notes now. Use your team above to start a conversation.</p> :
             <form className="team-composer" onSubmit={event => { event.preventDefault();if(conversationBusy||!conversationCanSend)return;if(chiefNoteCompose)submitPhoneNoteTask();else ask(); }}>
               {chiefNoteCompose&&<div className="chief-note-compose-context" role="status"><span>Follow-up + Research · v{phoneNoteTask!.selection.note_version}</span>
-                <button type="button" className="team-subtle" disabled={viewNavigationLocked} aria-label="Return to regular message" onClick={()=>{setPhoneNoteTask(null);setQuestionFocus(value=>value+1);}}>Message Chief</button></div>}
+                <button type="button" className="team-subtle" disabled={viewNavigationLocked} onClick={()=>{setPhoneNoteTask(null);setQuestionFocus(value=>value+1);}}>Message Chief</button></div>}
               {chiefNoteCompose&&(!phoneNoteMatches?<p className="chief-note-compose-attention" role="status">The saved note changed. Choose its current version above; your directions are kept.</p>:phoneNoteDirectionsError?<p className="chief-note-compose-attention" role="status">{phoneNoteDirectionsError}</p>:phoneNoteDirectionsUnsupported?<p className="chief-note-compose-attention" role="status">This practice service needs an update to include your directions with the saved note. Your text is kept.</p>:phoneNoteAlreadyRequested?<p className="chief-note-compose-attention" role="status">These exact drafts are already requested. Review their saved result above.</p>:!phoneNoteTeamReady?<p className="chief-note-compose-attention" role="status">Enable Chief, Follow-up and Research with private draft handoffs to prepare these drafts.</p>:null)}
               {selectedPrep&&!chiefNoteCompose&&<div className="session-prep-included" role="status"><span>Session Prep included · v{selectedPrep.brief_version}</span>
                 <button type="button" className="team-subtle" disabled={locked} onClick={()=>setPrepSelection(null)} aria-label="Remove Session Prep from this question">Remove</button></div>}

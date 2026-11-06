@@ -42,7 +42,7 @@ function controls(ep:Episode){
  async function click(label:string){await wait(()=>expect(button(label).disabled,label).toBe(false));await act(async()=>button(label).click());await idle();}
  async function enter(){await wait(()=>expect(ep.host.querySelector('textarea')).toBeTruthy());await act(async()=>{
   const t=ep.host.querySelector<HTMLTextAreaElement>('textarea')!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(t,ep.packet!.passage);t.dispatchEvent(new Event('input',{bubbles:true}));
-  const p=ep.host.querySelector<HTMLInputElement>('input[aria-label="Pages used"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(p,'1');p.dispatchEvent(new Event('input',{bubbles:true}));
+  const p=ep.host.querySelector<HTMLInputElement>('input[name="fax-pages"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(p,'1');p.dispatchEvent(new Event('input',{bubbles:true}));
  });}
  async function ack(){expect(ep.host.querySelectorAll('input[type=checkbox]')).toHaveLength(4);await act(async()=>ep.host.querySelectorAll<HTMLInputElement>('input[type=checkbox]').forEach(c=>{expect(c.disabled).toBe(false);c.click();}));}
  async function saved(){const entry=await ep.journal!.load(address(ep));expect(entry?.kind).toBe('editor');if(!entry||entry.kind!=='editor')throw new Error('Encrypted passage record is missing');expect(entry.editor).toBe(`efax-source-review:${ep.packet!.offered.operation_id}`);expect(entry.pending).toBeNull();return validateEFaxSourceRecovery(entry.data,scope(ep),ep.packet!.offered);}

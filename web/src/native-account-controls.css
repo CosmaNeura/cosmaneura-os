@@ -1,9 +1,9 @@
-.native-account-controls { min-width:0; max-width:100%; }
-.native-account-controls summary { display:flex; flex-direction:column; justify-content:center; gap:3px; min-height:44px; padding:10px 30px 10px 12px; position:relative; border:1px solid var(--team-line,#d6dbe0); border-radius:12px; cursor:pointer; list-style:none; overflow-wrap:anywhere; }
-.native-account-controls summary::-webkit-details-marker { display:none; }
-.native-account-controls summary::after { content:'⌄'; position:absolute; right:12px; top:12px; }
-.native-account-controls[open] summary::after { content:'⌃'; }
-.native-account-controls summary span { font-size:.85em; }
-.native-account-actions { display:grid; gap:8px; margin-top:6px; padding:12px; border:1px solid var(--team-line,#d6dbe0); border-radius:12px; }
-.native-account-actions p { margin:0; overflow-wrap:anywhere; }
-.native-account-actions button { width:100%; min-height:44px; white-space:normal; overflow-wrap:anywhere; }
+.native-account-controls{ min-width:0; max-width:100%; }
+.native-account-controls summary{ display:flex; flex-direction:column; justify-content:center; gap:3px; min-height:44px; padding:10px 30px 10px 12px; position:relative; border:1px solid var(--team-line,#d6dbe0); border-radius:12px; cursor:pointer; list-style:none; overflow-wrap:anywhere; }
+.native-account-controls summary::-webkit-details-marker{ display:none; }
+.native-account-controls summary::after{ content:'⌄'; position:absolute; right:12px; top:12px; }
+.native-account-controls[open] summary::after{ content:'⌃'; }
+.native-account-controls summary span{ font-size:.85em; }
+.native-account-actions{ display:grid; gap:8px; margin-top:6px; padding:12px; border:1px solid var(--team-line,#d6dbe0); border-radius:12px; }
+.native-account-actions p{ margin:0; overflow-wrap:anywhere; }
+.native-account-actions button{ width:100%; min-height:44px; white-space:normal; overflow-wrap:anywhere; }

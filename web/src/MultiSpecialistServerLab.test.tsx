@@ -28,7 +28,7 @@ async function ask(content:string){await input('#team-question',content);await c
 async function workers(){const r=await ep.lifecycle.fetch(realFetch,`${base}/lab/work`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspace_id:ep.wid}),cache:'no-store',credentials:'omit',redirect:'error'});expect(r.status,await r.clone().text()).toBe(200);await refresh();return read();}
 async function review(h:ReviewableHandoff,feedback:string){
  const earlier=ep.host.querySelector<HTMLDetailsElement>('.team-earlier-tasks');if(earlier)earlier.open=true;
- await click(`Review ${h.recipient_name} result`);await wait(()=>expect(ep.host.querySelector('[aria-label="Complete saved draft"]')?.textContent?.length).toBeGreaterThan(0));
+ await click(`Review result · ${h.recipient_name}`);await wait(()=>expect(ep.host.querySelector('[aria-label="Complete saved draft"]')?.textContent?.length).toBeGreaterThan(0));
  await click('Request changes');await input('.handoff-review textarea',feedback);await click('Save change request');await wait(()=>expect(button('Prepare revised draft').disabled).toBe(false));
  let current=await read();const changed=current.handoffs!.find(row=>row.id===h.id)! as ReviewableHandoff;expect(changed.review).toMatchObject({decision:'changes_requested',feedback,result_sha256:h.result_sha256});
  await click('Prepare revised draft');await wait(()=>expect(ep.host.textContent).not.toContain('Saving revised assignment…'));current=await read();

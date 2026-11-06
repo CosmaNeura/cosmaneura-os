@@ -35,7 +35,7 @@ beforeEach(()=>{vi.clearAllMocks();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true
  host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
 afterEach(async()=>{release?.();await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
-async function openRecording(){await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={storage}/>));await waitFor(()=>expect(button('Start a private note')?.disabled).toBe(false));await click('Start a private note');await waitFor(()=>expect(button('Start a private recording')?.disabled).toBe(false));await click('Start a private recording');
+async function openRecording(){await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={storage}/>));await waitFor(()=>expect(button('Start a private note')?.disabled).toBe(false));await click('Start a private note');await waitFor(()=>expect(button('Record privately')?.disabled).toBe(false));await click('Record privately');
  await act(async()=>panels.recording!.onTranscribe!({identity,workspace:structuredClone(origin),team:structuredClone(team)},id(803)));await waitFor(()=>expect(panels.visit).toBeTruthy());
 }
 function gesture():RecordingTranscriptionGesture{return {identity,recordingId:id(803),scope,intent_sha256:'b'.repeat(64),claim:vi.fn(()=>true)};}

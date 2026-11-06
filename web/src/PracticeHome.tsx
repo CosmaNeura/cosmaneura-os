@@ -1,6 +1,6 @@
 import {SampleVisit} from './SampleVisit';
 import {NotebookTitleEditor} from './NotebookTitleEditor';
-import {useContext,useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {useContext,useEffect,useId,useLayoutEffect,useRef,useState} from 'react';
 import {WorkspaceConnectionRecoveryContext} from './PracticeAccessGate';
 import {workspaceProtocolGeneration} from './workspace-protocol';
 import type {AccountRecoveryAccess} from './account-recovery';
@@ -32,6 +32,7 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
   const recoveredLists=useRef({identity,recovery,sequence:connection?.identity===identity?connection.sequence:0});
   const listRead=useRef<{epoch:number;promise:Promise<void>}|null>(null);
   const [sample,setSample]=useState(false);
+  const titleId=useId(),searchId=useId(),needsReviewId=useId();
   const [title,setTitle]=useState('Private note'),[pending,setPending]=useState<PrivateDraftCreate|null>(null),[ready,setReady]=useState(false);
   const [busy,setBusy]=useState(false),[retryAllowed,setRetryAllowed]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
   const [opening,setOpening]=useState<{identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess;epoch:number;workspaceId:string}|null>(null);
@@ -196,7 +197,7 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
   const startupStatus=WorkspaceHomeStartup.status({recoveryReady:ready,teamListed:!!team,visitsLoaded:visits!==null||!!visitError,notesLoaded:drafts!==null||!!listError,teamError});
   const showStartupRetry=(!ready&&slowCheck)||!!visitError||!!listError||!!teamError;
   function retryChecks(){if(!ready||teamError)onRetryTeam?.();void readLists(live.current.epoch);}
-  const titleField=<label>Note title<input maxLength={160} value={title} disabled={busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>;
+  const titleField=<label htmlFor={titleId}>Note title<input id={titleId} name="note-title" autoComplete="off" maxLength={160} value={title} disabled={busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>;
   const todayVisits=<section className="practice-home-notes" aria-label="Today's visits"><h2>Today's visits</h2>
       {todaysVisits.map(visit=><button className="practice-home-note" key={visit.appointment_id} disabled={locked||busy} onClick={()=>onOpenVisit?onOpenVisit(visit.appointment_id):onVisits()}><strong>{visit.label}</strong><time dateTime={visit.start_at}>{new Date(visit.start_at!).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time><span>{visit.workspace_id?'Open visit notes':'Open visit'}</span></button>)}
       {visitError?<p role="status">{visitError}</p>:visits&&!todaysVisits.length?<p>No supported visits are scheduled today. You can record or write a private note.</p>:null}
@@ -226,8 +227,8 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
     {error&&<p role="alert">{error}</p>}{listError&&<p role="alert">{listError}</p>}{message&&<p role="status">{message}</p>}
     {!nativeCompact&&todayVisits}
     <section className="practice-home-notes" aria-label="Saved private notes"><h2>{nativeCompact?'Saved notes':'Recent notes'}</h2>
-      <div className="notebook-list-tools"><label>Search notes<input type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Title or patient"/></label>
-        <label><input type="checkbox" checked={needsReview} onChange={event=>setNeedsReview(event.target.checked)}/>Needs review</label>
+      <div className="notebook-list-tools"><label htmlFor={searchId}>Search notes<input id={searchId} name="note-search" type="search" autoComplete="off" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Title or patient"/></label>
+        <label htmlFor={needsReviewId}><input id={needsReviewId} name="needs-review" type="checkbox" checked={needsReview} onChange={event=>setNeedsReview(event.target.checked)}/>Needs review</label>
         <button disabled={!recovery||busy} onClick={()=>void refresh()}>Refresh private notes</button></div>
       {drafts?.drafts.filter(draft=>(!query||`${draft.title} ${draft.patient_label??''}`.toLocaleLowerCase().includes(query))&&(!needsReview||draft.note_state==='needs_review')).map(draft=><article className="notebook-list-row" key={draft.workspace_id}>
         <button className="practice-home-note" disabled={!ready||busy||locked} onClick={()=>void reopen(draft.workspace_id)}><strong>{draft.title}</strong>

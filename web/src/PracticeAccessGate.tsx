@@ -1,5 +1,5 @@
 import {invitationFromHash} from './practice-invitation-contract';
-import {createContext,useCallback,useContext,useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
+import {createContext,useCallback,useContext,useEffect,useId,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {practiceAccessApi} from './practice-access-api';
 import {accessCode,accessName,type AccessStatus,type PracticeSetupStatus,type CompletePracticeSetup} from './practice-access-contract';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
@@ -54,6 +54,7 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
   const [name,setName]=useState(''),[error,setError]=useState(''),[uncertain,setUncertain]=useState(false);
   const [setup,setSetup]=useState<{identity:AuthenticatedWorkspaceIdentity;value:PracticeSetupStatus}|null>(null);
   const [practiceName,setPracticeName]=useState(''),[specialty,setSpecialty]=useState('');
+  const practiceNameId=useId(),displayNameId=useId(),specialtyId=useId(),joinNameId=useId();
   const [inviteToken,setInviteToken]=useState(()=>invitationFromHash(window.location.hash));
   const [entry,setEntry]=useState<'choose'|'solo'|'join'>(()=>invitationFromHash(window.location.hash)?'join':'choose');
   useEffect(()=>{const change=()=>{const token=invitationFromHash(window.location.hash);setInviteToken(token);if(token)setEntry('join');};window.addEventListener?.('hashchange',change);return()=>window.removeEventListener?.('hashchange',change);},[]);
@@ -146,9 +147,9 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
     <p>Confirm your practice. Your provider team and first private note are next.</p>
     {error&&<p role="alert">{error}</p>}
     <div className="practice-setup-fields">
-      <label>Practice name<input maxLength={120} value={practiceName} disabled={busy||uncertain||setupCommand.current!==null} onChange={event=>setPracticeName(event.target.value)}/></label>
-      <label>Your name<input autoComplete="name" maxLength={120} value={name} disabled={busy||uncertain||setupCommand.current!==null} onChange={event=>setName(event.target.value)}/></label>
-      <label>Specialty <span>optional</span><input maxLength={120} value={specialty} disabled={busy||uncertain||setupCommand.current!==null} placeholder="General practice" onChange={event=>setSpecialty(event.target.value)}/></label>
+      <label htmlFor={practiceNameId}>Practice name<input id={practiceNameId} name="practice-name" autoComplete="organization" maxLength={120} value={practiceName} disabled={busy||uncertain||setupCommand.current!==null} onChange={event=>setPracticeName(event.target.value)}/></label>
+      <label htmlFor={displayNameId}>Your name<input id={displayNameId} name="display-name" autoComplete="name" maxLength={120} value={name} disabled={busy||uncertain||setupCommand.current!==null} onChange={event=>setName(event.target.value)}/></label>
+      <label htmlFor={specialtyId}>Specialty <span>optional</span><input id={specialtyId} name="specialty" autoComplete="organization-title" maxLength={120} value={specialty} disabled={busy||uncertain||setupCommand.current!==null} placeholder="General practice" onChange={event=>setSpecialty(event.target.value)}/></label>
     </div>
     <p>No email, calendar or patient portal is needed to start a private note.</p>
     <button className="practice-setup-primary" disabled={busy||uncertain||!accessName(practiceName.trim())||!accessName(name.trim())} onClick={()=>void finishSetup()}>Continue to my workspace</button>
@@ -178,7 +179,7 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
       {status?.state==='approved' && <p>Your request was approved. Check access to open the workspace.</p>}
     </section>}
     {mayRequest&&entry==='join' && <form onSubmit={event=>{event.preventDefault();void submit();}}>
-      <label>Your name<input autoComplete="name" maxLength={120} value={name} disabled={busy||uncertain} onChange={event=>setName(event.target.value)}/></label>
+      <label htmlFor={joinNameId}>Your name<input id={joinNameId} name="display-name" autoComplete="name" maxLength={120} value={name} disabled={busy||uncertain} onChange={event=>setName(event.target.value)}/></label>
       <p>Use the name your practice owner knows. They will see this name and your matching code.</p>
       <button type="submit" disabled={busy||uncertain||!accessName(name.trim())}>Request practice access</button>
     </form>}

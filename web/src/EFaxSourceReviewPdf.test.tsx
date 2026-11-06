@@ -36,7 +36,7 @@ async function enter() {
     const area = host.querySelector('textarea')!;
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, passage);
     area.dispatchEvent(new Event('input', {bubbles: true}));
-    const input = host.querySelector<HTMLInputElement>('[aria-label="Pages used"]')!;
+    const input = host.querySelector<HTMLInputElement>('[name="fax-pages"]')!;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '1');
     input.dispatchEvent(new Event('input', {bubbles: true}));
   });
@@ -46,7 +46,7 @@ const page = (): PdfPage => ({getViewport: ({scale}) => ({width: 600 * scale, he
   readText: vi.fn(async () => 'Optional literal page text'), cleanup: vi.fn()});
 function intact() {
   expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe(passage);
-  expect(host.querySelector<HTMLInputElement>('[aria-label="Pages used"]')?.value).toBe('1');
+  expect(host.querySelector<HTMLInputElement>('[name="fax-pages"]')?.value).toBe('1');
   expect([...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].every(value => !value.checked)).toBe(true);
   expect(props.recovery!.persist).not.toHaveBeenCalled();
   expect(efaxSourceApi.review).not.toHaveBeenCalled();
@@ -215,7 +215,7 @@ it('omits the unavailable open action when no exact-document callback exists', a
 
 async function invalidPages() {
   await act(async () => {
-    const input = host.querySelector<HTMLInputElement>('[aria-label="Pages used"]')!;
+    const input = host.querySelector<HTMLInputElement>('[name="fax-pages"]')!;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'not a page');
     input.dispatchEvent(new Event('input', {bubbles: true}));
   });
@@ -229,7 +229,7 @@ it.each(['empty', 'nonempty'])('escapes concealed invalid-page edits with an %s 
   expect(props.recovery!.persist).not.toHaveBeenCalled(); expect(efaxSourceApi.review).not.toHaveBeenCalled();
   expect(efaxSourceApi.resolve).not.toHaveBeenCalled(); expect(props.onAskChief).not.toHaveBeenCalled();
   await click('Check exact acquired PDF'); expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
-  expect(host.querySelector<HTMLInputElement>('[aria-label="Pages used"]')?.value).toBe('');
+  expect(host.querySelector<HTMLInputElement>('[name="fax-pages"]')?.value).toBe('');
   expect([...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].every(item => !item.checked)).toBe(true);
 });
 
@@ -247,7 +247,7 @@ it('restores the last durable private draft when discarding concealed invalid-pa
   await click('Discard unsaved passage changes'); expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false);
   expect(props.recovery!.persist).toHaveBeenCalledOnce(); expect(vi.mocked(props.recovery!.persist).mock.calls[0][0]).toEqual(persisted);
   await click('Check exact acquired PDF'); expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe(passage);
-  expect(host.querySelector<HTMLInputElement>('[aria-label="Pages used"]')?.value).toBe('1');
+  expect(host.querySelector<HTMLInputElement>('[name="fax-pages"]')?.value).toBe('1');
   expect(efaxSourceApi.review).not.toHaveBeenCalled(); expect(props.onAskChief).not.toHaveBeenCalled();
 });
 
