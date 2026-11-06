@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { botAddress, type BotAddress, type BotRole, type ProviderTeam, type TeamConfiguration } from "./workspace-api";
 import { BLOCKED_CAPABILITIES, type BlockedCapability } from "./team-setup-request";
 import { BotAvatar } from "./BotAvatar";
+import {assistantDescription,showCustomBotControls} from './assistant-copy';
 
 export type ProviderTeamSettingsView = "full" | "overview" | "edit" | "advanced" | "practice" | "add" | "hidden";
 export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelected, locked, inputLocked=locked, onSave, onClose, reviewRequired = false, setupAvailable = false, view = "full", onBotAdded,sourceChoicesReview }: {
@@ -64,43 +65,45 @@ export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelec
     setSelected(instance_id);onBotAdded?.();
   }
   if(view === "hidden")return null;
-  if(view === "overview")return <section className="team-coworker-overview" aria-label="Your coworkers">
+  const customBots=showCustomBotControls();
+  if(view === "overview")return <section className="team-coworker-overview" aria-label="Your AI assistants">
     <ul>{draft.bots.filter(member=>!member.retired).map(member=><li key={botAddress(member)}><button onClick={()=>setSelected(botAddress(member))}>
-      <BotAvatar role={member.role}/><span><strong>{member.name||"Name this coworker"}</strong><small>{member.role==='custom'?(member.job_focus||'Give this coworker a job'):member.job_focus||team.members.find(saved=>botAddress(saved)===botAddress(member))?.description||'Ready to help with this visit'}</small></span>
+      <BotAvatar role={member.role}/><span><strong>{member.name||"Name this assistant"}</strong><small>{member.role==='custom'?(member.job_focus||'Give this assistant a job'):member.job_focus||assistantDescription(member.role)}</small></span>
       <span className="team-flow-state">{!team.configuration.bots.some(saved=>botAddress(saved)===botAddress(member))?'Draft':member.enabled?'On':'Paused'}</span><span aria-hidden="true">›</span></button></li>)}</ul>
-    {draft.bots.some(member=>member.retired)&&<details><summary>Retired coworkers · history kept</summary>{draft.bots.filter(member=>member.retired).map(member=><button key={botAddress(member)} onClick={()=>setSelected(botAddress(member))}>{member.name} · Retired</button>)}</details>}
+    {draft.bots.some(member=>member.retired)&&<details><summary>Retired assistants · history kept</summary>{draft.bots.filter(member=>member.retired).map(member=><button key={botAddress(member)} onClick={()=>setSelected(botAddress(member))}>{member.name} · Retired</button>)}</details>}
   </section>;
   if(view === "add")return <section className="team-add-coworker" aria-label="Add a coworker">
-    <button className="team-primary" disabled={cannotAdd||!team.custom_skills} onClick={addCustom}>Create custom bot</button>
-    <p>Or start from an existing role. You can change its name and job.</p>
-    <div className="team-template-choices">{templates.map(t=><button key={t.role} disabled={cannotAdd} onClick={()=>add(t.role)}><strong>{t.name}</strong><span>{t.description}</span></button>)}</div>
+    {customBots&&<button className="team-primary" disabled={cannotAdd||!team.custom_skills} onClick={addCustom}>Create custom bot</button>}
+    <p>{customBots?'Or start from an existing role. You can change its name and job.':'Start from an existing role. You can change its name and job.'}</p>
+    <div className="team-template-choices">{templates.map(t=><button key={t.role} disabled={cannotAdd} onClick={()=>add(t.role)}><strong>{t.name}</strong><span>{assistantDescription(t.role,t.description)}</span></button>)}</div>
     {cannotAdd&&!locked&&<p role="status">The current team or retained history limit is reached. Existing coworkers and their work remain available.</p>}
   </section>;
   if(view === "practice")return <section className="team-practice-editor" aria-label="Practice profile"><p>These preferences guide your team's drafts. They do not grant permission to act.</p><div className="practice-profile-grid">{(Object.keys(profileFields) as (keyof typeof profileFields)[]).map(key=><label key={key}>{profileFields[key]}{key==='note_format'?<select value={draft.practice_profile?.[key]??''} disabled={inputLocked} onChange={event=>setDraft({...draft,practice_profile:{...emptyPracticeProfile(),...draft.practice_profile,[key]:event.target.value} as PracticeProfile})}><option value="">Choose a format</option>{['SOAP','APSO','Narrative','DAP'].map(format=><option key={format}>{format}</option>)}</select>:<input maxLength={profileLimits[key]} value={draft.practice_profile?.[key]??''} disabled={inputLocked} onChange={event=>setDraft({...draft,practice_profile:{...emptyPracticeProfile(),...draft.practice_profile,[key]:event.target.value} as PracticeProfile})}/>}</label>)}</div><p className="team-fine" role="status">{practiceProfileContext(draft.practice_profile,draft.practice_context).length} / 1,000 characters used in helper context.</p>{practiceProfileContext(draft.practice_profile,draft.practice_context).length>1000&&<p role="alert">Shorten the profile or additional instructions to enable Save.</p>}<details><summary>Additional practice instructions</summary><label>Practice context<textarea rows={3} maxLength={1000} value={draft.practice_context} disabled={inputLocked} onChange={event=>setDraft({...draft,practice_context:event.target.value})}/></label><p>Profile and additional instructions together can use up to 1,000 characters in helper context.</p></details></section>;
   const full=view==='full',essential=full||view==='edit',advanced=full||view==='advanced';
-  return <section className={`team-settings${full?'':' team-settings-focused'}`} aria-label="Provider Team settings">
-    {full&&<div className="team-section-heading"><div><p className="team-kicker">YOUR COWORKERS</p><h2>{team.revision ? "Make the team yours" : "Set up your Provider Team"}</h2>
-      <p>Choose coworkers for your practice, give each a focus, and control the saved context they can use.</p></div>
+  const roleBlurb=assistantDescription(bot.role, template.description);
+  return <section className={`team-settings${full?'':' team-settings-focused'}`} aria-label="AI assistants settings">
+    {full&&<div className="team-section-heading"><div><p className="team-kicker">YOUR AI ASSISTANTS</p><h2>{team.revision ? "Make the team yours" : "Set up your AI assistants"}</h2>
+      <p>Choose assistants for your practice, give each a focus, and control the saved context they can use.</p></div>
       <button className="team-icon-button" onClick={onClose} aria-label="Close team settings">×</button></div>}
-    <div className="team-settings-grid">{full&&<nav aria-label="Choose a bot to configure" className="team-settings-roster">
+    <div className="team-settings-grid">{full&&<nav aria-label="Choose an assistant to configure" className="team-settings-roster">
       {draft.bots.map(member => <button key={botAddress(member)} onClick={() => setSelected(botAddress(member))} aria-pressed={botAddress(bot) === botAddress(member)}>
         <BotAvatar role={member.role} />
-        <span><strong>{member.name || team.members.find(t => t.role === member.role)?.name}</strong><small>{member.retired ? team.configuration.bots.find(b => botAddress(b) === botAddress(member))?.retired ? "Retired · history kept" : "Retire on save" : !team.configuration.bots.some(b => botAddress(b) === botAddress(member)) ? "Draft · save to add" : member.enabled ? "Included in your team" : "Paused"}</small></span>
+        <span><strong>{member.name || team.members.find(t => t.role === member.role)?.name}</strong><small>{member.retired ? team.configuration.bots.find(b => botAddress(b) === botAddress(member))?.retired ? "Retired · history kept" : "Retire on save" : !team.configuration.bots.some(b => botAddress(b) === botAddress(member)) ? "Draft · save to add" : member.enabled ? assistantDescription(member.role, member.job_focus || "Included in your team") : "Paused"}</small></span>
       </button>)}
       <label>Add a bot<select aria-label="Add a bot" value="" disabled={cannotAdd}
         onChange={event => add(event.target.value as BotRole)}>
         <option value="">Choose a template…</option>{templates.map(t => <option key={t.role} value={t.role}>{t.name}</option>)}
       </select></label>
-      <button type="button" disabled={cannotAdd || !team.custom_skills} onClick={addCustom}>Create custom bot</button>
+      {customBots&&<button type="button" disabled={cannotAdd || !team.custom_skills} onClick={addCustom}>Create custom bot</button>}
       {currentCount >= 12 && <p className="team-fine">Your team has 12 current bots. Retire an added bot to make room for another.</p>}
       {draft.bots.length >= 100 && <p className="team-fine">This team's saved bot history is full. Existing bots and their history remain available.</p>}
     </nav>}<div className="team-settings-detail">
       {full&&<div className="team-bot-intro"><BotAvatar role={bot.role} large />
-        <div><h3>{template.name}</h3><p>{template.description}</p></div></div>}
+        <div><h3>{template.name}</h3><p>{roleBlurb}</p></div></div>}
       <div className="team-settings-form">
         {essential&&!savedBot&&bot.instance_id&&<button disabled={inputLocked} onClick={()=>{setDraft({...draft,bots:draft.bots.filter(item=>botAddress(item)!==botAddress(bot))});setSelected(botAddress(draft.bots[0]));}}>Remove unsaved coworker</button>}
-        {essential&&<><p className="team-fine">{template.description}</p><label>Bot name<input maxLength={40} value={bot.name} disabled={fieldsLocked} onChange={e => change({ name: e.target.value })} /></label>
-        <label>{bot.role==='custom'?'Job (required)':'Job'}<JobInput key={botAddress(bot)} value={bot.job_focus??''} defaultJob={bot.role==='custom'?'':template.description} disabled={fieldsLocked} required={bot.role==='custom'} onChange={job_focus=>change({job_focus})}/></label>
+        {essential&&<><p className="team-fine">{roleBlurb}</p><label>Bot name<input maxLength={40} value={bot.name} disabled={fieldsLocked} onChange={e => change({ name: e.target.value })} /></label>
+        <label>{bot.role==='custom'?'Job (required)':'Job'}<JobInput key={botAddress(bot)} value={bot.job_focus??''} defaultJob={bot.role==='custom'?'':roleBlurb} disabled={fieldsLocked} required={bot.role==='custom'} onChange={job_focus=>change({job_focus})}/></label>
         <label>{bot.role === "custom" ? "Instructions" : "Working preferences"}<textarea rows={3} maxLength={2000} value={bot.working_preferences ?? ""} disabled={fieldsLocked}
           placeholder="How would you like this bot to help?" onChange={e => change({ working_preferences: e.target.value })} /></label></>}
         {advanced&&<><label className="team-check"><input type="checkbox" checked={bot.enabled} disabled={fieldsLocked} onChange={e => change({ enabled: e.target.checked })} />Enable this bot</label>
@@ -111,12 +114,12 @@ export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelec
           <label className="team-check"><input type="checkbox" checked={bot.include_notebook} onChange={e => change({ include_notebook: e.target.checked })} />My saved notebook</label>
           <label className="team-check"><input type="checkbox" checked={bot.include_evidence} onChange={e => change({ include_evidence: e.target.checked })} />Saved preparation and evidence</label>
         </fieldset></details>
-        <details className="team-optional-settings"><summary>Restrict what this bot can do</summary><fieldset disabled={fieldsLocked || !setupAvailable}><legend>Capability restrictions</legend>
+        {customBots&&<details className="team-optional-settings"><summary>Restrict what this bot can do</summary><fieldset disabled={fieldsLocked || !setupAvailable}><legend>Capability restrictions</legend>
           {BLOCKED_CAPABILITIES.map(capability => <label className="team-check" key={capability}><input type="checkbox"
             checked={bot.blocked_capabilities?.includes(capability) ?? false} onChange={e => change({blocked_capabilities:e.target.checked
               ? [...(bot.blocked_capabilities ?? []), capability] : (bot.blocked_capabilities ?? []).filter(value => value !== capability)})}/>{blockedLabels[capability]}</label>)}
-        </fieldset></details>
-        {!setupAvailable && <p className="team-fine">Capability changes require the current team setup prerequisites to be available.</p>}
+        </fieldset></details>}
+        {customBots&&!setupAvailable && <p className="team-fine">Capability changes require the current team setup prerequisites to be available.</p>}
         <p className="team-fine">Responsible human: you. These settings do not grant external action authority. Your conversations remain private.</p>
         {bot.instance_id && savedBot && <div className="team-retirement">
           <p className="team-fine">{savedBot.retired ? "This bot is retired. Its conversations and assignments remain available, and it cannot take new work." : bot.retired ? "Saving will permanently retire this bot. Its history stays available. A replacement will have its own history." : "Retiring this bot preserves its history and stops new work. Pause it instead if you may want to use it again."}</p>
@@ -142,7 +145,7 @@ export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelec
     </div></div>
     {full&&reviewRequired && <p className="team-fine" role="status">Check these settings and review the available capabilities before saving team, permission or limit changes.</p>}
     {full&&<footer className="team-settings-footer"><span>{team.revision ? `Saved configuration · revision ${team.revision}` : "Ready to personalize"}</span>
-      <button className="team-primary" disabled={locked || reviewRequired || draft.bots.some(b => !b.name.trim() || b.role === "custom" && !b.job_focus?.trim())} onClick={onSave}>{team.revision ? "Save team settings" : "Set up Provider Team"}</button></footer>}
+      <button className="team-primary" disabled={locked || reviewRequired || draft.bots.some(b => !b.name.trim() || b.role === "custom" && !b.job_focus?.trim())} onClick={onSave}>{team.revision ? "Save team settings" : "Set up AI assistants"}</button></footer>}
   </section>;
 }
 

@@ -39,7 +39,7 @@ async function review(h:ReviewableHandoff,feedback:string){
  current=await read();const accepted=current.handoffs!.find(row=>row.id===completed.id)! as ReviewableHandoff;expect(accepted.review).toMatchObject({decision:'accepted',attempt_id:completed.attempt_id,result_entry_id:completed.result_entry_id,result_sha256:completed.result_sha256});
  await click('Close draft review');return accepted;
 }
-async function coworker(name:string){await wait(()=>expect([...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent===name)).toBeTruthy());await act(async()=>[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent===name)!.click());}
+async function coworker(name:string){await wait(()=>expect([...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="AI assistants"] button')].find(b=>b.querySelector('strong')?.textContent===name)).toBeTruthy());await act(async()=>[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="AI assistants"] button')].find(b=>b.querySelector('strong')?.textContent===name)!.click());}
 return {act,wait,button,click,read,ask,workers,review,coworker};
 }
 beforeEach(()=>{window.history.replaceState(null,'',window.location.pathname+window.location.search);if(!base)return;if(terminalFailure)throw new Error('Prior multi-specialist episode failed; no new case admitted: '+terminalFailure);

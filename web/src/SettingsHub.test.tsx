@@ -11,7 +11,7 @@ vi.mock('./connection-summary',async original=>({...await original<typeof import
 
 let container: HTMLDivElement, root: Root;
 beforeEach(() => { Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true}); container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllEnvs(); });
 function visibleButtons() { return [...container.querySelectorAll('button')].filter(button => !button.closest('[hidden]')); }
 it('opens the existing team editor directly and retains its state on return without visiting a connection',async()=>{
   const mounted=vi.fn(),readCatalog=vi.mocked(readConnectionCatalog),baseline=readCatalog.mock.calls.length;
@@ -178,7 +178,16 @@ it('keeps recovery available while preventing navigation during an undurable edi
   expect(close).toHaveBeenCalledOnce();
 });
 
+it('hides Coming soon connection cards by default in beta builds',async()=>{
+ vi.mocked(readConnectionCatalog).mockResolvedValue(readinessFixture());
+ await act(async()=>root.render(<SettingsHub open initialScreen="connections" guidedConnections connectionIdentity={{mode:'clerk_jwt',getToken:async()=>null}}
+   team={<p>Team</p>} portals={<button>Connect portal</button>} payments={<button>Connect Stripe</button>}
+   teamSummary="5 coworkers" teamDirty={false} onClose={()=>{}}/>));
+ expect(container.querySelector('[aria-label="Coming soon"]')).toBeNull();
+ expect(container.textContent).not.toContain('Patient portals');
+});
 it('keeps user OAuth actionable and puts unsupported portals and uninstalled practice services outside onboarding setup',async()=>{
+ vi.stubEnv('VITE_COMING_SOON_CONNECTIONS_ENABLED','true');
  const catalog=readinessFixture();vi.mocked(readConnectionCatalog).mockResolvedValue(catalog);
  vi.mocked(readConnectionSummary).mockResolvedValue({label:'Needs setup',reason:'Sign in to connect your account.',action:'Connect account',tone:'attention'});
  const mounted=vi.fn();function Portal(){useEffect(()=>{mounted();},[]);return <button>Connect portal</button>;}
@@ -194,6 +203,7 @@ it('keeps user OAuth actionable and puts unsupported portals and uninstalled pra
 });
 
 it('retains a visited recovery editor when a supported installation is removed without showing a new Connect action',async()=>{
+ vi.stubEnv('VITE_COMING_SOON_CONNECTIONS_ENABLED','true');
  const available=readinessFixture({portals:'practice_setup'});available.portals=true;available.readiness!.portals.supported=true;available.readiness!.portals.installed_account='installed';
  vi.mocked(readConnectionCatalog).mockResolvedValue(available);const mounted=vi.fn();
  function Portal(){useEffect(()=>{mounted();},[]);return <button>Resolve exact saved request</button>;}
@@ -206,6 +216,7 @@ it('retains a visited recovery editor when a supported installation is removed w
  expect(mounted).toHaveBeenCalledOnce();
 });
 it('can deliberately open private recovery on a fresh coming-soon service without treating it as connectable',async()=>{
+ vi.stubEnv('VITE_COMING_SOON_CONNECTIONS_ENABLED','true');
  vi.mocked(readConnectionCatalog).mockResolvedValue(readinessFixture());const mounted=vi.fn();
  function Portal(){useEffect(()=>{mounted();},[]);return <button>Resolve exact retained request</button>;}
  await act(async()=>root.render(<SettingsHub open initialScreen="connections" guidedConnections connectionIdentity={{mode:'clerk_jwt',getToken:async()=>null}}

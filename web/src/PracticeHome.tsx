@@ -9,6 +9,7 @@ import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type 
 import {WorkspaceHomeStartup} from './workspace-home-startup';
 import type {PrivateNotebookResult} from './PrivateRecordingPanel';
 import type {PrivateRecordingSnapshot} from './private-recording-runtime';
+import {readConnectionCatalog} from './connection-catalog-api';
 import './practice-home.css';
 
 function recordingDetails(recording:PrivateRecordingSnapshot):string {
@@ -18,7 +19,7 @@ function recordingDetails(recording:PrivateRecordingSnapshot):string {
 }
 
 export type StartPrivateRecording={title:string;prepareNotebook:(title?:string)=>Promise<PrivateNotebookResult>};
-export function PracticeHome({conversationContext,onPendingChange,identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onOpenVisit,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false,teamError='',onRetryTeam,suspended=false}:{
+export function PracticeHome({conversationContext,onPendingChange,identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onOpenVisit,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false,teamError='',onRetryTeam,suspended=false,scheduleConnected}:{
   conversationContext?:{name:string;scribe:boolean};onPendingChange?:(pending:boolean)=>void;
   identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess|null;team:ProviderTeam|null;teamUnchanged?:boolean;locked:boolean;
   onUseTeam:()=>void;onSettings:()=>void;onVisits:()=>void;onOpenVisit?:(appointmentId:string)=>void;onConnections:()=>void;onPracticeWork:()=>void;
@@ -27,6 +28,8 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
   onAccessLost:(cause:unknown)=>void;onBusyChange:(busy:boolean)=>void;
   onRecord?:(value:StartPrivateRecording)=>void;recordings?:PrivateRecordingSnapshot[];onReopenRecording?:(recordingId:string)=>void;
   openRecordingRequest?:number;recordingActive?:boolean;nativeCompact?:boolean;teamError?:string;onRetryTeam?:()=>void;suspended?:boolean;
+  /** When true, empty today means no visits. When false/omitted, Home checks for a schedule source. */
+  scheduleConnected?:boolean;
 }){
   const connection=useContext(WorkspaceConnectionRecoveryContext),connectionLive=useRef(connection);connectionLive.current=connection;
   const recoveredLists=useRef({identity,recovery,sequence:connection?.identity===identity?connection.sequence:0});
@@ -41,6 +44,7 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
   const [listError,setListError]=useState('');
   const [search,setSearch]=useState(''),[needsReview,setNeedsReview]=useState(false),[renaming,setRenaming]=useState<string|null>(null),[slowCheck,setSlowCheck]=useState(false);
   const [visits,setVisits]=useState<Awaited<ReturnType<typeof workspaceApi.catalog>>|null>(null),[visitError,setVisitError]=useState('');
+  const [detectedSchedule,setDetectedSchedule]=useState<boolean|null>(scheduleConnected??null);
   const live=useRef({identity,recovery,epoch:0,alive:true});
   if(live.current.identity!==identity)live.current={identity,recovery,epoch:live.current.epoch+1,alive:true};
   else if(live.current.recovery!==recovery)live.current={...live.current,recovery};
@@ -53,6 +57,7 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
   const recordingRequest=useRef({identity,seen:0});
   useEffect(()=>{callback.current(busy);},[busy]);
   useEffect(()=>{live.current.alive=true;return()=>{live.current.alive=false;};},[]);
+  useEffect(()=>{if(scheduleConnected!==undefined)setDetectedSchedule(scheduleConnected);},[scheduleConnected]);
   useLayoutEffect(()=>{recoveredLists.current={identity,recovery,sequence:connection?.identity===identity?connection.sequence:0};},[identity,recovery]);
   function readLists(epoch:number){
     const flight={epoch,promise:Promise.resolve()};
@@ -69,6 +74,16 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
       else setListError('Recent notes could not be loaded. You can still start recording or write a note.');
       if(schedule.status==='fulfilled'){setVisits(schedule.value);setVisitError('');}
       else setVisitError('Today’s visits could not be loaded. Recording and private notes remain available.');
+      if(scheduleConnected===undefined&&schedule.status==='fulfilled'&&!schedule.value.length){
+        const probe=new AbortController();
+        try{
+          const connections=await readConnectionCatalog(identity,probe.signal);
+          if(sameAccount(epoch))setDetectedSchedule(!!(connections.core||connections.scheduling));
+        }catch{if(sameAccount(epoch))setDetectedSchedule(false);}
+        finally{probe.abort();}
+      }else if(scheduleConnected===undefined&&schedule.status==='fulfilled'&&schedule.value.length){
+        setDetectedSchedule(true);
+      }
     })().catch(()=>{}).finally(()=>{if(listRead.current===flight)listRead.current=null;});
     listRead.current=flight;return flight.promise;
   }
@@ -78,7 +93,7 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
     // Returning to Home reuses the lists already read for this account.
     if(listsFor.current===identity)return;
     listsFor.current=identity;
-    const epoch=++live.current.epoch;openingFlight.current=null;setOpening(null);setReady(false);setPending(null);setDrafts(null);setListError('');setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');setSlowCheck(false);
+    const epoch=++live.current.epoch;openingFlight.current=null;setOpening(null);setReady(false);setPending(null);setDrafts(null);setListError('');setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');setSlowCheck(false);if(scheduleConnected===undefined)setDetectedSchedule(null);
     // Visit and note lists do not decide whether Start is safe.
     void readLists(epoch);
   },[identity,suspended]);
@@ -198,15 +213,20 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
   const showStartupRetry=(!ready&&slowCheck)||!!visitError||!!listError||!!teamError;
   function retryChecks(){if(!ready||teamError)onRetryTeam?.();void readLists(live.current.epoch);}
   const titleField=<label htmlFor={titleId}>Note title<input id={titleId} name="note-title" autoComplete="off" maxLength={160} value={title} disabled={busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>;
+  const scheduleReady=scheduleConnected??detectedSchedule;
+  const emptyVisitPrompt=scheduleReady
+    ?<p>No supported visits are scheduled today. You can record or write a private note.</p>
+    :<div className="practice-home-connect-schedule"><p>Connect your EHR to see today's schedule</p>
+      <button type="button" className="team-primary" disabled={locked||busy} onClick={onConnections}>Connect</button></div>;
   const todayVisits=<section className="practice-home-notes" aria-label="Today's visits"><h2>Today's visits</h2>
       {todaysVisits.map(visit=><button className="practice-home-note" key={visit.appointment_id} disabled={locked||busy} onClick={()=>onOpenVisit?onOpenVisit(visit.appointment_id):onVisits()}><strong>{visit.label}</strong><time dateTime={visit.start_at}>{new Date(visit.start_at!).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time><span>{visit.workspace_id?'Open visit notes':'Open visit'}</span></button>)}
-      {visitError?<p role="status">{visitError}</p>:visits&&!todaysVisits.length?<p>No supported visits are scheduled today. You can record or write a private note.</p>:null}
+      {visitError?<p role="status">{visitError}</p>:visits&&!todaysVisits.length&&scheduleReady!==null?emptyVisitPrompt:null}
     </section>;
   const recordingList=recordings&&onReopenRecording?<section tabIndex={-1} className="practice-home-notes practice-home-recordings" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong>{recording.createdAt&&<time dateTime={recording.createdAt}>{new Date(recording.createdAt).toLocaleString()}</time>}<span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>:null;
   const quickStart=<form className="practice-quick-start" onSubmit={event=>{event.preventDefault();void create();}}>
       {nativeCompact&&!conversationContext&&<><h2>{!team?"Conversation":chiefAvailable?"Chief":"Private note"}</h2><p>Plan your next step privately.</p></>}
       {!nativeCompact&&titleField}
-      {(!nativeCompact||team?.revision===0)&&!conversationContext&&<div className="practice-home-team"><h2>Your provider team</h2><p>{names.length?names.join(' · '):team?'No teammates are on yet.':'Your team list will appear here.'}</p>
+      {(!nativeCompact||team?.revision===0)&&!conversationContext&&<div className="practice-home-team"><h2>Your AI assistants</h2><p>{names.length?names.join(' · '):team?'No assistants are on yet.':'Your assistants will appear here.'}</p>
         <p>Private drafts first. External actions need separate human review.</p>
         {team?.revision===0&&<button type="button" disabled={locked||busy||!ready||!!pending} onClick={onUseTeam}>{teamUnchanged?'Use this team':'Review team changes'}</button>}
         <button type="button" className="team-subtle" onClick={onSettings}>Personalize later in Settings</button>

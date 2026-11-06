@@ -30,9 +30,9 @@ describe('practice Quick start recovery',()=>{
     container=document.createElement('div');document.body.append(container);root=createRoot(container);
   });
   afterEach(async()=>{await act(async()=>root.unmount());recovery.journal.close();container.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
-  async function render(member=identity,configured=team,noteOpened?:typeof opened){
+  async function render(member=identity,configured=team,noteOpened?:typeof opened,scheduleConnected=true){
     const reads=vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length;
-    await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={configured} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onNoteOpened={noteOpened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
+    await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={configured} locked={false} scheduleConnected={scheduleConnected} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onNoteOpened={noteOpened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
     for(let attempt=0;attempt<100;attempt++){
       const called=vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length>reads;
       const start=[...container.querySelectorAll('button')].find(b=>b.textContent==='Start a private note');
@@ -92,7 +92,7 @@ describe('practice Quick start recovery',()=>{
     vi.mocked(workspaceApi.catalog).mockRejectedValueOnce(new WorkspaceApiError(503,'workspace_protocol_required'));
     async function draw(sequence:number,phase:'ready'|'blocked',owner=identity){await act(async()=>root.render(
       <WorkspaceConnectionRecoveryContext.Provider value={{identity:owner,sequence,generation:protocolGeneration,phase,busy:false,retry}}>
-        <PracticeHome identity={identity} recovery={recovery} team={team} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>
+        <PracticeHome identity={identity} recovery={recovery} team={team} locked={false} scheduleConnected={true} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>
       </WorkspaceConnectionRecoveryContext.Provider>));}
     await draw(0,'ready');await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain('Recent notes could not be loaded');});
     vi.mocked(workspaceApi.createPrivateDraft).mockRejectedValueOnce(new WorkspaceApiError(503));await click('Start a private note');
@@ -111,7 +111,7 @@ describe('practice Quick start recovery',()=>{
     const lost=vi.fn();
     vi.mocked(workspaceApi.privateDraftSummaries).mockRejectedValueOnce(new WorkspaceApiError(401));
     vi.mocked(workspaceApi.catalog).mockRejectedValueOnce(new WorkspaceApiError(403));
-    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={lost} onBusyChange={vi.fn()}/>));
+    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} scheduleConnected={true} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={lost} onBusyChange={vi.fn()}/>));
     await vi.waitFor(()=>expect(container.textContent).toContain('Recent notes could not be loaded'));
     expect(container.textContent).toContain('Today’s visits could not be loaded');
     const start=[...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Start a private note')!;
@@ -136,7 +136,7 @@ describe('practice Quick start recovery',()=>{
   it('opens Scribe before catalog readiness and caches the background exact create without navigating',async()=>{
     const record=vi.fn();let finish!:(value:Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>)=>void;
     vi.mocked(workspaceApi.createPrivateDraft).mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));
-    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
+    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} scheduleConnected={true} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
     await click('Start recording');expect(record).toHaveBeenCalledOnce();expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();
     const input=record.mock.calls[0][0] as StartPrivateRecording;expect(input.title).toMatch(/^Visit recording · /);let first!:Promise<Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>>;
     await act(async()=>{first=input.prepareNotebook('Synthetic cardiometabolic visit');expect(input.prepareNotebook('Another title')).toBe(first);});
@@ -148,20 +148,20 @@ describe('practice Quick start recovery',()=>{
   it('allows local Scribe entry while retaining an earlier uncertain note without a duplicate create',async()=>{
     vi.mocked(workspaceApi.createPrivateDraft).mockRejectedValueOnce(new WorkspaceApiError(503));await render();await click('Start a private note');
     const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1],record=vi.fn();
-    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
+    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} scheduleConnected={true} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
     await click('Start recording');const input=record.mock.calls[0][0] as StartPrivateRecording;
     await act(async()=>{await expect(input.prepareNotebook()).rejects.toMatchObject({status:503});});expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();
     expect((await recovery.journal.load(accountEditorAddress('private-draft')))?.pending).toBe(body.idempotency_key);expect(workspaceApi.resolvePrivateDraft).not.toHaveBeenCalled();
   });
   it('consumes sidebar Scribe requests once, waits for unlock and does not replay a former identity request',async()=>{
-    const record=vi.fn();async function request(number:number,locked:boolean,member=identity){await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={team} locked={locked} openRecordingRequest={number} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));}
+    const record=vi.fn();async function request(number:number,locked:boolean,member=identity){await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={team} locked={locked} scheduleConnected={true} openRecordingRequest={number} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));}
     await request(0,false);expect(record).not.toHaveBeenCalled();await request(1,true);expect(record).not.toHaveBeenCalled();await request(1,false);expect(record).toHaveBeenCalledOnce();
     await request(1,false);expect(record).toHaveBeenCalledOnce();const next={mode:'clerk_jwt' as const,getToken:vi.fn()};await request(1,false,next);expect(record).toHaveBeenCalledOnce();await request(2,false,next);expect(record).toHaveBeenCalledTimes(2);expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();
   });
   it('distinguishes same-title audio and empty stops while preserving uncertain stop recovery',async()=>{
     const saved:PrivateRecordingSnapshot={recordingId:id(101),title:'Private recording',createdAt:'2026-10-08T21:43:27.000Z',phase:'sealed',elapsedSeconds:18.704,recordedChunks:2,recordedBytes:598616,workspaceId:null,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null};
     const rows=[saved,{...saved,recordingId:id(102),elapsedSeconds:96.5},{...saved,recordingId:id(103),elapsedSeconds:0,recordedChunks:0,recordedBytes:0},{...saved,recordingId:id(104),phase:'stop_unconfirmed' as const,elapsedSeconds:0,recordedChunks:0,recordedBytes:0}],reopen=vi.fn();
-    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} recordings={rows} onReopenRecording={reopen} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
+    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} scheduleConnected={true} recordings={rows} onReopenRecording={reopen} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
     const times=[...container.querySelectorAll<HTMLTimeElement>('[aria-label="Saved private recordings"] time')];expect(times).toHaveLength(4);expect(times[0].dateTime).toBe(saved.createdAt);
     const buttons=[...container.querySelectorAll<HTMLButtonElement>('[aria-label="Saved private recordings"] button')];
     expect(buttons.map(button=>`${button.querySelector('strong')?.textContent}${button.querySelector('span')?.textContent}`)).toEqual(['Private recording0:18 · Saved on this device · Private','Private recording1:36 · Saved on this device · Private','Private recording0:00 · Stopped · no audio captured · Private','Private recording0:00 · Check recording status · Private']);
@@ -219,5 +219,21 @@ describe('practice Quick start recovery',()=>{
     expect(()=>validatePrivateDraftLinkRecovery({...link,pending:{...link.pending,appointment_link_confirmed:false}},id(1))).toThrow();
     await recovery.journal.load(editorAddress(id(1),'private-draft-link'));
     await expect(recovery.journal.persist(editorAddress(id(1),'private-draft-link'),{kind:'editor',workspaceId:id(1),editor:'private-draft-link',data:link,pending:id(8)})).rejects.toMatchObject({code:'integrity'});
+  });
+  it('asks to connect an EHR when no schedule source is connected and today has no visits',async()=>{
+    const connections=vi.fn();
+    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} scheduleConnected={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={connections} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
+    await vi.waitFor(()=>expect(container.textContent).toContain("Connect your EHR to see today's schedule"));
+    expect(container.textContent).toContain('Your AI assistants');
+    expect(container.textContent).not.toContain('No supported visits are scheduled today');
+    const connect=[...container.querySelectorAll('button')].find(button=>button.textContent==='Connect')!;
+    expect(connect.className).toContain('team-primary');
+    await act(async()=>connect.click());
+    expect(connections).toHaveBeenCalledOnce();
+  });
+  it('keeps the empty-day copy when a schedule source is already connected',async()=>{
+    await render(identity,team,undefined,true);
+    await vi.waitFor(()=>expect(container.textContent).toContain('No supported visits are scheduled today'));
+    expect(container.textContent).not.toContain("Connect your EHR to see today's schedule");
   });
 });

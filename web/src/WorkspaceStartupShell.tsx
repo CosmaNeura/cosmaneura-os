@@ -25,7 +25,7 @@ export function WorkspaceStartupShell({status,children}:{status:string;children?
         {status&&<p className="practice-home-status" role="status">{status}</p>}
         <form className="practice-quick-start" onSubmit={event=>event.preventDefault()}>
           <label htmlFor="startup-note-title">Note title<input id="startup-note-title" name="note-title" autoComplete="off" defaultValue="Private note" disabled/></label>
-          <div className="practice-home-team"><h2>Your provider team</h2>
+          <div className="practice-home-team"><h2>Your AI assistants</h2>
             <p>Private drafts first. External actions need separate human review.</p></div>
           <button type="submit" className="team-primary" disabled>Start a private note</button>
           <p className="team-fine">No appointment, email, calendar or patient portal is needed. Patient-linked work and external actions need separate review.</p>

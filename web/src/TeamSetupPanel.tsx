@@ -129,7 +129,7 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
   const all=view==='all';
   return <section hidden={view==='hidden'} className={`team-setup${all?'':' team-setup-focused'}`} aria-label="Team groups and activation review">
     {all&&<div className="team-section-heading"><div><p className="team-kicker">BUILD YOUR PRIVATE TEAM</p><h2>Choose the help your practice needs</h2>
-      <p>Start with your Provider team. Add coworkers, review their limits, then save the configuration you want.</p></div>
+      <p>Start with your AI assistants. Add coworkers, review their limits, then save the configuration you want.</p></div>
       <button disabled={locked||reading||rehearsing||prerequisitesFailure==='denied'} onClick={refreshPrerequisites}>Refresh setup prerequisites</button></div>}
     {error&&<p role="alert">{error}</p>}{reading&&<p role="status">Checking current team prerequisites…</p>}
     {!all&&prerequisitesFailure==='retry'&&<button disabled={locked||reading||rehearsing} onClick={refreshPrerequisites}>Retry connection check</button>}
@@ -138,7 +138,7 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
         disabled={locked||rehearsing} onClick={()=>{setPreview(p.preset_id);setReplacement(null);}}><strong>{p.label}</strong><span>{p.purpose}</span>
         <small>{draft.presets?.some(b=>b.preset_id===p.preset_id)?"Included in this draft":"Preview group"}</small></button>)}</div>
       {chosen&&<div className="team-preset-preview" aria-label={`${chosen.label} preview`}><h3>{chosen.label}</h3>
-        <p>{installed?"This group is already in your draft. Names, settings and bot identities are preserved.":`${additions} new coworkers; ${chosen.slots.length-additions} existing coworkers reused. Your Provider team settings stay as you set them.`}</p>
+        <p>{installed?"This group is already in your draft. Names, settings and bot identities are preserved.":`${additions} new coworkers; ${chosen.slots.length-additions} existing coworkers reused. Your AI assistant settings stay as you set them.`}</p>
         <ul>{chosen.slots.map(slot=><li key={slot.slot}><strong>{slot.name}</strong> · {slot.address?"Reuse existing coworker":slot.enabled?"New configured coworker":"New paused coworker"}</li>)}</ul>
         {chosen.unavailable_capabilities.length>0&&<p>{chosen.unavailable_capabilities.map(c=>capabilityLabels[c]).join(", ")} remains unavailable in this beta. Turning on chat does not connect this operational lane.</p>}
         <p>{draft.bots.filter(b=>!b.retired).length+additions} of 12 current coworkers · {draft.bots.length+additions} of 100 retained records.</p>

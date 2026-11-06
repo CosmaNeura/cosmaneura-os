@@ -68,7 +68,7 @@ async function settings(ep:Episode,label:string){
 }
 async function receiving(ep:Episode){await settings(ep,'Team settings');await settings(ep,'Connections');await settings(ep,'Messaging & fax');}
 async function refresh(ep:Episode){const c=controls(ep);await c.click('Refresh encounter');await c.wait(()=>expect(c.button('Refresh encounter').disabled).toBe(false));ep.workspace=await workspaceApi.read(ep.identity,ep.packet!.workspace.id);return ep.workspace;}
-async function teammate(ep:Episode,name:string){const b=[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent===name);expect(b,name).toBeTruthy();await act(async()=>b!.click());}
+async function teammate(ep:Episode,name:string){const b=[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="AI assistants"] button')].find(b=>b.querySelector('strong')?.textContent===name);expect(b,name).toBeTruthy();await act(async()=>b!.click());}
 async function material(ep:Episode,name:string){const b=[...ep.host.querySelectorAll<HTMLButtonElement>('.team-material-tabs button')].find(b=>b.textContent===name);expect(b,name).toBeTruthy();await act(async()=>b!.click());}
 async function sealedRows(ep:Episode){const db=await new Promise<IDBDatabase>((resolve,reject)=>{const r=ep.idb.open('cosmas-private-drafts:v1:'+ep.namespace);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});try{return await new Promise<unknown[]>((resolve,reject)=>{const r=db.transaction('sealed-drafts').objectStore('sealed-drafts').getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}finally{db.close();}}
 beforeEach(()=>{window.history.replaceState(null,'',window.location.pathname+window.location.search);
