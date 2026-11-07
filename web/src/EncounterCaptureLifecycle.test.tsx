@@ -85,7 +85,7 @@ async function open(number: number) {
 }
 async function start() {
   await open(1);
-  await click("Scribe", container.querySelector('[aria-label="Provider Team"]')!);
+  await click("Scribe", container.querySelector('[aria-label="AI assistants"]')!);
   await click("Record visit");
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
   await click("Start synthetic capture");
@@ -110,8 +110,8 @@ it("keeps recording and scratch-note saving in the same encounter across noteboo
   await click("Save notebook revision");
   expect(workspaceApi.append).toHaveBeenCalledWith(identity, visit(1).id,
     expect.objectContaining({ kind: "scratchpad", content: "Invented observation during recording" }));
-  await click("Chief", container.querySelector('[aria-label="Provider Team"]')!);
-  await click("Configure Provider Team");
+  await click("Chief", container.querySelector('[aria-label="AI assistants"]')!);
+  await click("Configure AI assistants");
   await click("Done");
   await click("During", container.querySelector('[aria-label="Encounter stage"]')!);
   expect(container.querySelector('[aria-label="Scribe recording"]')).toBe(panel);

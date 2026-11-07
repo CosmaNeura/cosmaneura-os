@@ -36,9 +36,9 @@ function Harness({initialTeam=teamFixture(),initialDraft=initialTeam.configurati
     onSave={()=>{saved={draft:structuredClone(draft),review:approval};}} onClose={()=>{}} onRefresh={()=>{refresh();setApproval(null);}}/>;
 }
 async function mount(props:Parameters<typeof Harness>[0]={}){await act(async()=>root.render(<Harness {...props}/>));await wait(()=>expect(teamSetupApi.read).toHaveBeenCalled());}
-beforeEach(async()=>{vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.clearAllMocks();saved=null;review=null;refresh=vi.fn();element=document.createElement('div');document.body.append(element);root=createRoot(element);
+beforeEach(async()=>{vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_CUSTOM_BOTS_ENABLED','true');vi.clearAllMocks();saved=null;review=null;refresh=vi.fn();element=document.createElement('div');document.body.append(element);root=createRoot(element);
   vi.mocked(modelActivityApi.read).mockResolvedValue(activityPage());const team=teamFixture();vi.mocked(teamSetupApi.read).mockResolvedValue({team,catalog:catalogFixture(),setup:await projectionFixture(team.configuration)});vi.mocked(teamSetupApi.rehearse).mockImplementation(async(_,body)=>rehearsalFixture(body.configuration,body.expected_revision));});
-afterEach(async()=>{await act(async()=>root.unmount());element.remove();vi.unstubAllGlobals();});
+afterEach(async()=>{await act(async()=>root.unmount());element.remove();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 
 it.each(['chief','follow_up'])('opens saved-source controls only for the explicitly reviewed current bot: %s',async address=>{
   const team=teamFixture(),draft=structuredClone(team.configuration);draft.bots=draft.bots.map(bot=>bot.role==='chief'?{...bot,include_notebook:false,include_evidence:false}:bot);

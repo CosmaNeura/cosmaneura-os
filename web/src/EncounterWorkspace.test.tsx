@@ -849,7 +849,7 @@ describe("private encounter workspace", () => {
     expect(workspaceApi.saveTeam).not.toHaveBeenCalled();
     await settings().editSelected();
     await settings().overview();
-    expect(container.querySelector('[aria-label="Your coworkers"]')?.textContent).toContain("Visit partner");
+    expect(container.querySelector('[aria-label="Your AI assistants"]')?.textContent).toContain("Visit partner");
   });
 
   it("shows each custom bot's own conversation and preserves the shared notebook", async () => {

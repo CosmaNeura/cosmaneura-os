@@ -139,7 +139,7 @@ it.each([
     result_entry_id:handoff.result_entry_id!,result_sha256:binding==='wrong_hash'?'f'.repeat(64):handoff.result_sha256!,
     decision,feedback:decision==='changes_requested'?'Confirm the responsible person.':'',created_at:time};
   await open();
-  const choose=async()=>{const control=[...host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')]
+  const choose=async()=>{const control=[...host.querySelectorAll<HTMLButtonElement>('[aria-label="AI assistants"] button')]
     .find(b=>b.querySelector('strong')?.textContent==='follow up');expect(control).toBeTruthy();await act(async()=>control!.click());
     await wait(()=>expect(host.querySelector(`#turn-${handoff.result_entry_id} .team-bot-message header`)?.textContent).toContain(label));};
   await choose();await act(async()=>root.unmount());await mount();await open();await choose();
