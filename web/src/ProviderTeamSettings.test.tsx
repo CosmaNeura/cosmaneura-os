@@ -1,7 +1,8 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderTeamSettings } from "./ProviderTeamSettings";
+import { ASSISTANT_DESCRIPTIONS } from "./assistant-copy";
 import { supportsSkill, type BotRole, type ProviderTeam, type TeamConfiguration } from "./workspace-api";
 
 const roles: BotRole[] = ["scribe", "visit_prep", "follow_up", "chief"];
@@ -26,10 +27,11 @@ describe("custom bot creation", () => {
   }
   beforeEach(async () => {
     Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true}); saved = undefined;
+    vi.stubEnv("VITE_CUSTOM_BOTS_ENABLED", "true");
     container = document.createElement("div"); document.body.append(container); root = createRoot(container);
     await act(async () => root.render(<Harness />));
   });
-  afterEach(async () => {await act(async () => root.unmount()); container.remove();});
+  afterEach(async () => {await act(async () => root.unmount()); container.remove(); vi.unstubAllEnvs();});
   function button(label: string) {return [...container.querySelectorAll("button")].find(b => b.textContent === label)!;}
   function field(label: string) {return [...container.querySelectorAll("label")].find(l => l.textContent?.startsWith(label))!.querySelector("input,textarea") as HTMLInputElement;}
   async function fill(label: string, value: string) {
@@ -64,5 +66,36 @@ describe("custom bot creation", () => {
     expect(new Set(saved!.bots.slice(4).map(b => b.instance_id)).size).toBe(2);
     expect(saved!.bots[5].skills).toEqual(["saved_context"]);
     expect(supportsSkill(saved!.bots[5], "work_status")).toBe(false);
+  });
+});
+
+describe("beta assistant settings", () => {
+  let container: HTMLDivElement, root: Root;
+  function Harness({view = "full"}: {view?: "full" | "overview"}) {
+    const [draft, setDraft] = useState(structuredClone(initial.configuration));
+    const [selected, setSelected] = useState("scribe");
+    return <ProviderTeamSettings team={initial} draft={draft} setDraft={setDraft} selected={selected}
+      setSelected={setSelected} locked={false} onClose={() => {}} onSave={() => {}} view={view} />;
+  }
+  beforeEach(() => {
+    Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true});
+    container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+  });
+  afterEach(async () => {await act(async () => root.unmount()); container.remove(); vi.unstubAllEnvs();});
+  it("hides custom bot creation and capability restrictions by default", async () => {
+    vi.stubEnv("VITE_CUSTOM_BOTS_ENABLED", "false");
+    await act(async () => root.render(<Harness />));
+    expect(container.textContent).not.toContain("Create custom bot");
+    expect(container.textContent).not.toContain("Restrict what this bot can do");
+    expect(container.querySelector('[aria-label="AI assistants settings"]')).toBeTruthy();
+    expect(container.textContent).toContain("YOUR AI ASSISTANTS");
+    expect(container.textContent).toContain(ASSISTANT_DESCRIPTIONS.scribe);
+  });
+  it("lists plain assistant descriptions on the Settings overview", async () => {
+    await act(async () => root.render(<Harness view="overview" />));
+    expect(container.querySelector('[aria-label="Your AI assistants"]')?.textContent).toContain(ASSISTANT_DESCRIPTIONS.chief);
+    expect(container.textContent).toContain(ASSISTANT_DESCRIPTIONS.scribe);
+    expect(container.textContent).toContain(ASSISTANT_DESCRIPTIONS.visit_prep);
+    expect(container.textContent).toContain(ASSISTANT_DESCRIPTIONS.follow_up);
   });
 });

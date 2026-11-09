@@ -68,7 +68,10 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   await input('Practice name','Invented solo Quick start');await input('Your name','Invented physician');await click('Continue to my workspace');
   await wait(()=>expect(container.querySelector('[aria-label="Practice Home"]'),container.textContent??'').toBeTruthy());
   expect(calls.some(call=>call.method==='POST'&&call.path==='/workspaces')).toBe(false);expect(button('Close notebook')).toBeUndefined();await click('Use this team');
-  await wait(()=>expect(container.querySelector('.team-roster small')?.textContent).toBe('On'));
+  await wait(()=>{
+    expect(container.querySelector('.team-roster small i.ready')).toBeTruthy();
+    expect(container.querySelector('.team-roster small')?.textContent).toContain('Turns a recorded visit into a draft note');
+  });
   const hardware=new GeneratedAudioHardware();
   const actualOpen=PrivateRecordingRuntime.open.bind(PrivateRecordingRuntime);
   vi.spyOn(PrivateRecordingRuntime,'open').mockImplementation(async(options,value)=>{

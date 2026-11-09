@@ -38,7 +38,10 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   await input('Practice name','Invented solo Quick start');await input('Your name','Invented physician');await click('Continue to my workspace');
   await wait(()=>expect(container.querySelector('[aria-label="Practice Home"]'),container.textContent??'').toBeTruthy());
   expect(calls.some(call=>call.method==='POST'&&call.path==='/workspaces')).toBe(false);expect(button('Close notebook')).toBeUndefined();await click('Use this team');
-  await wait(()=>expect(container.querySelector('.team-roster small')?.textContent).toBe('On'));
+  await wait(()=>{
+    expect(container.querySelector('.team-roster small i.ready')).toBeTruthy();
+    expect(container.querySelector('.team-roster small')?.textContent).toContain('Turns a recorded visit into a draft note');
+  });
   await click('Start a private note');await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false));
   expect(container.querySelector('[aria-label="Link private draft to a visit"]')?.textContent).toContain('not linked');
   expect(container.querySelector('.team-encounter-heading .team-kicker')?.textContent).toBe('PRIVATE NOTE');

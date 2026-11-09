@@ -39,7 +39,7 @@ async function assertPreserved(){const c=await inspect();expect(preserved(c.work
 async function mount(){root=createRoot(host);await act(async()=>root!.render(<EncounterWorkspace authenticated={identity}/>));await click('Visits and notes');
  await wait(()=>expect([...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].some(b=>b.textContent?.includes(packet.workspace.label))).toBe(true));
  await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].find(b=>b.textContent?.includes(packet.workspace.label))!.click());await wait(()=>expect(host.querySelector('#team-notebook')).toBeTruthy());
- const follow=[...host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent==='Follow-up')!;expect(follow).toBeTruthy();await act(async()=>follow.click());
+ const follow=[...host.querySelectorAll<HTMLButtonElement>('[aria-label="AI assistants"] button')].find(b=>b.querySelector('strong')?.textContent==='Follow-up')!;expect(follow).toBeTruthy();await act(async()=>follow.click());
  await wait(()=>expect(host.querySelector('[aria-label="Scheduling patient setup"]')).toBeTruthy());}
 async function open(persona:string,round:string){const r=await realFetch(`${base}/lab/case?persona=${persona}&round=${round}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(r.status,await r.clone().text()).toBe(200);packet=await r.json();expect(packet.dob).toBeNull();
  identity={mode:'clerk_jwt',getToken:async()=>packet.token};const g=workspaceProtocolGeneration(identity);await practiceAccessApi.compatibility(identity);admitWorkspaceProtocol(identity,g);await mount();}

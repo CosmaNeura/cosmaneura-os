@@ -24,6 +24,10 @@ interface ImportMetaEnv {
   readonly VITE_INBOX_HANDOFF_ENABLED?: string;
   /** Short git SHA baked in at build time for Settings/footer. */
   readonly VITE_BUILD_SHA?: string;
+  /** Opt-in: show Create custom bot and capability restrictions (hidden by default in beta). */
+  readonly VITE_CUSTOM_BOTS_ENABLED?: string;
+  /** Opt-in: show Coming soon connection cards (hidden by default in beta). */
+  readonly VITE_COMING_SOON_CONNECTIONS_ENABLED?: string;
 }
 
 interface ImportMeta {
