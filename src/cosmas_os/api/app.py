@@ -2385,8 +2385,19 @@ app.add_middleware(EhrReadBoundary)
 allowed_headers.append("X-Cosmas-Ehr-Read")
 
 from cosmas_os.api.copy_to_ehr_routes import router as copy_to_ehr_router  # noqa: E402
+from cosmas_os.api.copy_to_ehr_remote_routes import (  # noqa: E402
+    router as copy_to_ehr_remote_router,
+)
 
 app.include_router(copy_to_ehr_router(configuration=lambda: settings))
+app.include_router(copy_to_ehr_remote_router(
+    configuration=lambda: settings,
+    identity_dependency=_identity,
+    session_dependency=get_session,
+    workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity,
+))
+allowed_headers.append("X-Cosmas-Copy-To-Ehr")
 
 
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: E402

@@ -27,11 +27,13 @@ from cosmas_os.application.ehr_export import (
     audit_contains_note_text,
     build_audit_event,
     build_export_package,
+    compute_expires_at,
     copy_profile_for_vendor,
     get_profile,
     known_vendor_profile_ids,
     manifest_vendor_ids,
     payload_hash_for,
+    refresh_package_activity,
     render_full_note,
     render_section,
 )
@@ -370,61 +372,79 @@ def test_logger_scrub_drops_note_text_from_copy_paths():
 def test_package_expiry_bounds_match_fifteen_and_sixty_minutes():
     assert IDLE_EXPIRY_SECONDS == 15 * 60
     assert ABSOLUTE_EXPIRY_SECONDS == 60 * 60
-    before = datetime.now(UTC)
+    created = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+    assert compute_expires_at(created) == created + timedelta(seconds=IDLE_EXPIRY_SECONDS)
+    later = created + timedelta(minutes=50)
+    assert compute_expires_at(created, last_activity_at=later) == created + timedelta(
+        seconds=ABSOLUTE_EXPIRY_SECONDS
+    )
     pkg = build_export_package(_synthetic_draft(), "atlas_md")
-    after = datetime.now(UTC)
-    assert pkg.created_at >= before
-    assert pkg.expires_at <= after + timedelta(seconds=IDLE_EXPIRY_SECONDS)
-    assert pkg.expires_at - pkg.created_at <= timedelta(seconds=IDLE_EXPIRY_SECONDS)
-    assert ABSOLUTE_EXPIRY_SECONDS >= IDLE_EXPIRY_SECONDS
+    refreshed = refresh_package_activity(pkg, at=pkg.created_at + timedelta(minutes=10))
+    assert refreshed.expires_at == pkg.created_at + timedelta(minutes=25)
+    capped = refresh_package_activity(pkg, at=pkg.created_at + timedelta(minutes=55))
+    assert capped.expires_at == pkg.created_at + timedelta(seconds=ABSOLUTE_EXPIRY_SECONDS)
 
 
 def test_session_expires_after_fifteen_minutes_idle():
     import importlib
+    from uuid import uuid4
 
-    sessions = importlib.import_module("cosmas_os.application.ehr_export.sessions")
-
-    clock = {"now": datetime(2026, 11, 9, 15, 0, tzinfo=UTC)}
-
-    def now():
-        return clock["now"]
-
-    session = sessions.create_session(
-        clinician_id="invented-clinician",
-        draft_id=DRAFT_ID,
-        draft_revision=DRAFT_REVISION,
-        clock=now,
+    remote = importlib.import_module("cosmas_os.application.copy_to_ehr_remote")
+    store = remote.RemoteSessionStore()
+    start = datetime(2026, 11, 9, 15, 0, tzinfo=UTC)
+    session = store.create(
+        box_id="box",
+        principal_id="invented-clinician",
+        draft_id=str(uuid4()),
+        draft_revision=1,
+        section_keys=["subjective", "plan"],
+        visit_key="visit-taylor-morgan-sore-throat",
+        now=start,
     )
-    assert sessions.is_active(session, clock=now) is True
-    clock["now"] = clock["now"] + timedelta(minutes=14, seconds=59)
-    assert sessions.is_active(session, clock=now) is True
-    clock["now"] = clock["now"] + timedelta(seconds=2)
-    assert sessions.is_active(session, clock=now) is False
+    idle_expired = store.events_after(
+        session_id=session.id,
+        box_id="box",
+        principal_id="invented-clinician",
+        after=0,
+        now=start + timedelta(minutes=15),
+    )[0]
+    assert remote.session_status(idle_expired) == "expired"
+    assert idle_expired.end_reason == "idle"
 
 
 def test_session_expires_after_sixty_minutes_absolute():
     import importlib
+    from uuid import uuid4
 
-    sessions = importlib.import_module("cosmas_os.application.ehr_export.sessions")
-
+    remote = importlib.import_module("cosmas_os.application.copy_to_ehr_remote")
+    store = remote.RemoteSessionStore()
     start = datetime(2026, 11, 9, 10, 0, tzinfo=UTC)
-    clock = {"now": start}
-
-    def now():
-        return clock["now"]
-
-    session = sessions.create_session(
-        clinician_id="invented-clinician",
-        draft_id=DRAFT_ID,
-        draft_revision=DRAFT_REVISION,
-        clock=now,
+    session = store.create(
+        box_id="box",
+        principal_id="invented-clinician",
+        draft_id=str(uuid4()),
+        draft_revision=2,
+        section_keys=["subjective"],
+        visit_key="visit-taylor-morgan-sore-throat",
+        now=start,
     )
-    for minutes in (10, 20, 30, 40, 50, 59):
-        clock["now"] = start + timedelta(minutes=minutes)
-        sessions.touch(session, clock=now)
-        assert sessions.is_active(session, clock=now) is True
-    clock["now"] = start + timedelta(minutes=60, seconds=1)
-    assert sessions.is_active(session, clock=now) is False
+    store.highlight(
+        session_id=session.id,
+        box_id="box",
+        principal_id="invented-clinician",
+        draft_revision=2,
+        section_key="subjective",
+        now=start + timedelta(minutes=14),
+    )
+    absolute = store.events_after(
+        session_id=session.id,
+        box_id="box",
+        principal_id="invented-clinician",
+        after=0,
+        now=start + timedelta(minutes=60),
+    )[0]
+    assert remote.session_status(absolute) == "expired"
+    assert absolute.end_reason == "absolute"
 
 
 # ---------------------------------------------------------------------------
@@ -433,24 +453,36 @@ def test_session_expires_after_sixty_minutes_absolute():
 
 def test_remote_highlight_messages_contain_no_note_text():
     import importlib
+    from uuid import uuid4
 
-    sessions = importlib.import_module("cosmas_os.application.ehr_export.sessions")
-
-    session = sessions.create_session(
-        clinician_id="invented-clinician",
-        draft_id=DRAFT_ID,
-        draft_revision=DRAFT_REVISION,
+    remote = importlib.import_module("cosmas_os.application.copy_to_ehr_remote")
+    store = remote.RemoteSessionStore()
+    session = store.create(
+        box_id="box",
+        principal_id="invented-clinician",
+        draft_id=str(uuid4()),
+        draft_revision=1,
+        section_keys=["subjective", "plan"],
+        visit_key="visit-taylor-morgan-sore-throat",
     )
-    message = sessions.highlight_message(
-        session,
-        draft_revision=DRAFT_REVISION,
+    event = store.highlight(
+        session_id=session.id,
+        box_id="box",
+        principal_id="invented-clinician",
+        draft_revision=1,
         section_key="subjective",
     )
-    body = message if isinstance(message, dict) else dict(message)
+    body = {
+        "seq": event.seq,
+        "section_key": event.section_key,
+        "draft_revision": event.draft_revision,
+        "at": event.at.isoformat(),
+    }
     encoded = json.dumps(body, default=str)
     for token in NOTE_CANARIES:
         assert token not in encoded
-    assert body["draft_revision"] == DRAFT_REVISION
+    remote.assert_no_note_text(body)
+    assert set(body) == {"seq", "section_key", "draft_revision", "at"}
     assert body["section_key"] == "subjective"
     assert "text" not in body
     assert "section_text" not in body
