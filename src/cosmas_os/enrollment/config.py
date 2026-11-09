@@ -76,9 +76,13 @@ class EnrollmentSettings(BaseSettings):
     # Central master only. Each Box receives a derived immutable-scope key.
     runtime_admission_secret: SecretStr = SecretStr("")
     # Invitation email stays dark until the operator webhook is configured.
+    # New / staging flags default OFF. Production never enables this path.
     invitation_mail_enabled: bool = False
     invitation_mail_webhook_url: str = ""
     invitation_mail_webhook_secret: SecretStr = SecretStr("")
+    # Exact synthetic team test inboxes (in addition to *@example.invalid).
+    # Empty by default; operators set exact addresses only — never secrets.
+    invitation_mail_allowed_recipients: list[str] = []
     # Public Mac / iPhone distribution URLs. Empty means "not published yet".
     mac_download_url: str = ""
     iphone_download_url: str = ""
@@ -192,7 +196,9 @@ class EnrollmentSettings(BaseSettings):
         return errors
 
     def invitation_mail_configured(self) -> bool:
-        return bool(self.invitation_mail_enabled
+        # Synthetic staging only. Production and disabled modes stay fail-closed.
+        return bool(self.data_mode == "synthetic"
+                    and self.invitation_mail_enabled
                     and owned_https_url(self.invitation_mail_webhook_url)
                     and len(self.invitation_mail_webhook_secret.get_secret_value()) >= 32)
 
