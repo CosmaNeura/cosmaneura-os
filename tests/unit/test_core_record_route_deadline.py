@@ -1,6 +1,7 @@
 """Real route execution with invented resources; no database or sockets."""
 
 import asyncio
+import contextlib
 import inspect
 import time
 from contextlib import contextmanager
@@ -21,7 +22,68 @@ from tests.unit.test_core_capture_admission import core_handler, selection
 from cosmas_os.adapters.core_record_connection import BoundedCoreRecordConnection
 from cosmas_os.api import core_record_routes as route
 from cosmas_os.api.auth import RequestIdentity
+from cosmas_os.api.capture_deadline import CaptureBoundary
+from cosmas_os.application.capture_deadline import CaptureBudget
 from cosmas_os.models import CoreCaptureAccount, ExternalIdentity
+
+
+def _install_public_deadline_wake(monkeypatch):
+    """Wake CaptureBoundary's public wait when CaptureBudget.cancel() runs.
+
+    The production wait only uses a wall-clock timeout. This test hook trips the
+    same 504 path from a phase barrier so setup cost cannot race DEADLINE_SECONDS.
+    """
+    original_call = CaptureBoundary.__call__
+    original_cancel = CaptureBudget.cancel
+    original_wait = asyncio.wait
+
+    async def wrapped_call(self, scope, receive, send):
+        loop = asyncio.get_running_loop()
+        wake = asyncio.Event()
+
+        def cancel(budget_self):
+            original_cancel(budget_self)
+            try:
+                loop.call_soon_threadsafe(wake.set)
+            except RuntimeError:
+                pass
+
+        async def wait(fs, **kwargs):
+            fs = set(fs)
+            timeout = kwargs.get("timeout", None)
+            return_when = kwargs.get("return_when", asyncio.ALL_COMPLETED)
+            # Public deadline wait: two futures, FIRST_COMPLETED, timed.
+            if (
+                timeout is not None
+                and return_when == asyncio.FIRST_COMPLETED
+                and len(fs) == 2
+            ):
+                wake_task = asyncio.create_task(wake.wait())
+                try:
+                    done, pending = await original_wait(
+                        fs | {wake_task},
+                        timeout=timeout,
+                        return_when=return_when,
+                    )
+                finally:
+                    if not wake_task.done():
+                        wake_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await wake_task
+                if wake_task in done and not (done & fs):
+                    return set(), fs
+                return done & fs, pending & fs
+            return await original_wait(fs, **kwargs)
+
+        CaptureBudget.cancel = cancel
+        asyncio.wait = wait
+        try:
+            return await original_call(self, scope, receive, send)
+        finally:
+            CaptureBudget.cancel = original_cancel
+            asyncio.wait = original_wait
+
+    monkeypatch.setattr(CaptureBoundary, "__call__", wrapped_call)
 
 
 def test_slow_initial_identity_cannot_begin_core_work(monkeypatch):
@@ -128,6 +190,10 @@ def fixture(monkeypatch):
         identity_valid=True,
         patient_valid=True,
         slow=None,
+        # When set, the slow phase cancels the public CaptureBudget as soon as
+        # that phase has begun, instead of sleeping against a wall-clock budget.
+        trip_deadline_when_slow=False,
+        capture_budget=None,
         after=lambda path: None,
         cleanup_gate=None,
         cleanup_entered=Event(),
@@ -217,7 +283,17 @@ def fixture(monkeypatch):
         path = request.url.path
         f.dispatches.append(path)
         if f.slow == path:
-            await asyncio.sleep(1)
+            if f.trip_deadline_when_slow:
+                # Phase has started. Cancel the public budget so CaptureBoundary
+                # returns 504 while this worker remains owned (cleanup_gate).
+                owner = f.capture_budget
+                assert owner is not None
+                owner.expires_at = time.monotonic()
+                owner.cancel()
+                # Park until the linked RecordDeadline cancel interrupts us.
+                await asyncio.Event().wait()
+            else:
+                await asyncio.sleep(1)
         response = core_handler(selected, f.calls)(request)
         f.after(path)
         return response
@@ -313,10 +389,18 @@ def test_changed_current_scope_prevents_next_phase_or_disclosure(fixture, phase,
 @pytest.mark.parametrize("phase", PATHS)
 def test_timeout_of_each_dispatched_phase_never_starts_the_next(fixture, monkeypatch, phase):
     f = fixture
-    # Keep the public deadline well under the 1s slow-phase sleep, but above
-    # cold CI setup so earlier phases can still dispatch before the timeout.
-    monkeypatch.setattr(route, "DEADLINE_SECONDS", 0.35)
+    # Deterministic deadline hit: after this phase begins, cancel the public
+    # budget (wake-on-cancel) instead of racing a short DEADLINE_SECONDS.
+    original_budget_init = CaptureBudget.__init__
+
+    def track_budget(self, seconds):
+        original_budget_init(self, seconds)
+        f.capture_budget = self
+
+    monkeypatch.setattr(CaptureBudget, "__init__", track_budget)
+    _install_public_deadline_wake(monkeypatch)
     f.slow = phase
+    f.trip_deadline_when_slow = True
     f.cleanup_gate = Event()
     with TestClient(f.app) as client:
         try:
