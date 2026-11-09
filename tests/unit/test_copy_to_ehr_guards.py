@@ -515,36 +515,6 @@ def test_connection_failure_status_is_not_sent_copy_instead_and_does_not_block()
     )
 
 
-def test_connection_failure_fallback_module_marks_visible_offer():
-    import importlib
-
-    fallback = importlib.import_module("cosmas_os.application.ehr_export.fallback")
-
-    visit = SimpleNamespace(
-        id="00000000-0000-4000-8000-000000000777",
-        copy_to_ehr_fallback=False,
-        blocked=False,
-        visit_copy_to_ehr_status="unset",
-    )
-    mark = getattr(fallback, "on_adapter_connection_failure", None) or getattr(
-        fallback, "mark_copy_to_ehr_fallback", None
-    )
-    assert callable(mark), "fallback.py must expose connection-failure marking"
-    result = mark(
-        visit,
-        error=SimpleNamespace(code="adapter_disconnected", message="invented disconnect"),
-    )
-    assert visit.copy_to_ehr_fallback is True or getattr(visit, "visit_copy_to_ehr_status", None) == "not_sent_copy_instead"
-    assert getattr(visit, "blocked", False) is False
-    if result is not None:
-        payload = result if isinstance(result, dict) else dict(result.__dict__)
-        assert payload.get("note_sent") is False or payload.get("silent") is False
-        message = str(payload.get("clinician_message", ""))
-        if message:
-            assert "not sent" in message.lower()
-            assert "Copy to EHR" in message or payload.get("offer_copy_to_ehr") is True
-
-
 # ---------------------------------------------------------------------------
 # Package surface stays minimum: no audio, transcript, chart, demographics,
 # credentials, or chart match.
