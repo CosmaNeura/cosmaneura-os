@@ -37,10 +37,13 @@ class ProviderCommand(Protected):
                 raise ValueError("invalid_ehr_clinical_scope")
         elif action == "core_medications":
             raise ValueError("explicit_medication_scope_required")
-        if self.protocol == "core" or self.provider == "athena":
+        if self.protocol == "fhir":
+            if self.provider not in ("tebra", "athena") or action not in ("status", "inspect", "resolve", "fhir_patients", "fhir_medications", "review"):
+                raise ValueError("invalid_ehr_protocol")
+        elif self.protocol == "core" or self.provider == "athena":
             if self.protocol != "core" or self.provider != "athena" or action not in ("status", "inspect", "resolve", "core_patients", "core_allergies", "core_medications", "review"):
                 raise ValueError("invalid_ehr_protocol")
-        elif self.protocol is not None and (self.provider != "tebra" or action not in ("status", "inspect", "resolve", "fhir_patients", "fhir_medications", "review")):
+        elif self.protocol is not None:
             raise ValueError("invalid_ehr_protocol")
         return self
 
@@ -185,7 +188,7 @@ class FhirContext(ProviderCommand):
 
     @model_validator(mode="after")
     def explicit_fhir(self):
-        if self.provider != "tebra" or self.protocol != "fhir":
+        if self.provider not in ("tebra", "athena") or self.protocol != "fhir":
             raise ValueError("explicit_fhir_required")
         return self
 

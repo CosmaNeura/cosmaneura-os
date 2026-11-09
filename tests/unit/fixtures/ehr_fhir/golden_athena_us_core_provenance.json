@@ -1,0 +1,30 @@
+{
+  "vendor": "athena",
+  "patient_id": "synth-patient-1001",
+  "sources": [
+    {
+      "resource_type": "MedicationRequest",
+      "resource_id": "synth-medreq-5001"
+    },
+    {
+      "resource_type": "Encounter",
+      "resource_id": "synth-encounter-2001"
+    },
+    {
+      "resource_type": "AllergyIntolerance",
+      "resource_id": "synth-allergy-4001"
+    },
+    {
+      "resource_type": "Condition",
+      "resource_id": "synth-condition-3001"
+    },
+    {
+      "resource_type": "Observation",
+      "resource_id": "synth-obs-6001"
+    },
+    {
+      "resource_type": "DocumentReference",
+      "resource_id": "synth-docref-7001"
+    }
+  ]
+}
