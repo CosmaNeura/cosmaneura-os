@@ -6,6 +6,8 @@ export interface WorkspaceAuthPlugin {
   signIn(): Promise<unknown>;
   signOut(): Promise<unknown>;
   getToken(options: { expectedRevision: string }): Promise<unknown>;
+  /** After server account deletion: sign out and wipe Clerk Keychain credentials. */
+  clearAccountCredentials?(): Promise<unknown>;
   addListener(event: "authStateChanged", listener: (state: unknown) => void): Promise<PluginListenerHandle>;
 }
 
