@@ -8,6 +8,9 @@ from uuid import UUID
 import httpx
 from pydantic import SecretStr
 
+from cosmas_os.adapters.athena_fhir_medication_read import read_athena_fhir_medications
+from cosmas_os.adapters.athena_fhir_r4 import AthenaFhirR4Adapter
+from cosmas_os.adapters.ehr_auth import ClientCredentialsTokenClient
 from cosmas_os.adapters.ehr_fhir_vendor import (
     connection_scope_payload,
     patient_grant_payload,
@@ -15,6 +18,7 @@ from cosmas_os.adapters.ehr_fhir_vendor import (
 )
 from cosmas_os.adapters.tebra_fhir_read import (
     TebraFhirCredential,
+    TebraFhirPatient,
     TebraFhirReadAdapter,
     TebraFhirReadError,
     TebraFhirScope,
@@ -111,18 +115,30 @@ class SyntheticTebraFhirReads:
 
     def __init__(self, scopes: tuple[TebraFhirConnectionScope, ...],
                  patients: tuple[TebraFhirAuthorizedPatient, ...], transport: httpx.MockTransport, *,
-                 enabled: Callable[[], bool]):
+                 enabled: Callable[[], bool],
+                 athena_token_client: ClientCredentialsTokenClient | None = None,
+                 athena_sandbox_enabled: bool = False,
+                 athena_real_data_enabled: bool = False,
+                 athena_practice_baa_recorded: bool = False):
         if (type(scopes) is not tuple or not 1 <= len(scopes) <= 20
                 or any(type(scope) is not TebraFhirConnectionScope for scope in scopes)
                 or type(patients) is not tuple or len(patients) > 500
                 or any(type(patient) is not TebraFhirAuthorizedPatient for patient in patients)
-                or type(transport) is not httpx.MockTransport or not callable(enabled)):
+                or type(transport) is not httpx.MockTransport or not callable(enabled)
+                or type(athena_sandbox_enabled) is not bool
+                or type(athena_real_data_enabled) is not bool
+                or type(athena_practice_baa_recorded) is not bool):
             raise ValueError("explicit_synthetic_tebra_fhir_installation_required")
         try:
             vendors = {scope.vendor for scope in scopes}
             if len(vendors) != 1:
                 raise ValueError
             self.vendor = next(iter(vendors))
+            if self.vendor == "athena":
+                if type(athena_token_client) is not ClientCredentialsTokenClient:
+                    raise ValueError
+            elif athena_token_client is not None:
+                raise ValueError
             if len({scope.commitment() for scope in scopes}) != len(scopes):
                 raise ValueError
             seen = set()
@@ -141,6 +157,10 @@ class SyntheticTebraFhirReads:
         except Exception:
             raise ValueError("explicit_synthetic_tebra_fhir_installation_required") from None
         self._scopes, self._patients, self._transport, self._enabled = scopes, patients, transport, enabled
+        self._athena_token_client = athena_token_client
+        self._athena_sandbox_enabled = athena_sandbox_enabled
+        self._athena_real_data_enabled = athena_real_data_enabled
+        self._athena_practice_baa_recorded = athena_practice_baa_recorded
 
     def current(self, scope):
         try:
@@ -163,6 +183,17 @@ class SyntheticTebraFhirReads:
             raise TebraFhirReadError("access_denied")
         return selected
 
+    def _athena_adapter(self) -> AthenaFhirR4Adapter:
+        if self.vendor != "athena" or type(self._athena_token_client) is not ClientCredentialsTokenClient:
+            raise TebraFhirReadError("request_invalid")
+        return AthenaFhirR4Adapter(
+            token_client=self._athena_token_client,
+            transport=self._transport,
+            sandbox_enabled=self._athena_sandbox_enabled,
+            real_data_enabled=self._athena_real_data_enabled,
+            practice_baa_recorded=self._athena_practice_baa_recorded,
+        )
+
     def medications(self, scope, patient, *, authorize) -> TebraMedicationReviewSnapshot:
         if not callable(authorize):
             raise TebraFhirReadError("request_invalid")
@@ -174,17 +205,29 @@ class SyntheticTebraFhirReads:
         if not current():
             raise TebraFhirReadError("access_denied")
         read_scope = patient.read_scope()
-        adapter = TebraFhirReadAdapter(enabled=True, transport=self._transport,
-            authorize_read=lambda selected: selected == read_scope and current(),
-            verify_patient=lambda selected, value: selected == read_scope and current()
-                and value.patient_id == patient.fhir_patient_id and value.identity_json == patient.identity_json
-                and value.identity_sha256 == patient.identity_sha256)
-        observation = adapter.medication_history(read_scope,
-            TebraFhirCredential(read_scope.commitment(), SecretStr("synthetic-tebra-fhir-token")))
+        vendor = patient.connection_scope.vendor
+        if vendor == "athena":
+            expected = TebraFhirPatient(
+                patient.fhir_patient_id, patient.identity_json, patient.identity_sha256,
+            )
+            observation = read_athena_fhir_medications(
+                self._athena_adapter(),
+                read_scope,
+                expected_patient=expected,
+                authorize=lambda: current() is True,
+            )
+        else:
+            adapter = TebraFhirReadAdapter(enabled=True, transport=self._transport,
+                authorize_read=lambda selected: selected == read_scope and current(),
+                verify_patient=lambda selected, value: selected == read_scope and current()
+                    and value.patient_id == patient.fhir_patient_id and value.identity_json == patient.identity_json
+                    and value.identity_sha256 == patient.identity_sha256)
+            observation = adapter.medication_history(read_scope,
+                TebraFhirCredential(read_scope.commitment(vendor), SecretStr("synthetic-tebra-fhir-token")))
         review = prepare_medication_review(observation, expected_scope=read_scope,
             expected_source_sha256=observation.source_sha256, expected_patient_identity_sha256=patient.identity_sha256,
             authorize_read=lambda selected: selected == read_scope and current(),
-            vendor=patient.connection_scope.vendor)
+            vendor=vendor)
         if not current():
             raise TebraFhirReadError("access_denied")
         return review
