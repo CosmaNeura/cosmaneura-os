@@ -68,7 +68,8 @@ def catalog(settings, runtime, *, version=1, identity=None, managed=None, portal
 
     actions = {
         "core": [action("practice_connection", enabled["core"]), action("visit_discovery", enabled["core"]),
-                 action("athena_schedule", getattr(settings, "workspace_athena_connection_available", False)),
+                 action("athena_schedule", getattr(settings, "workspace_athena_connection_available", False)
+                        or getattr(settings, "workspace_athena_fhir_sandbox_available", False)),
                  action("ehr_write", False, supported=False)],
         "google": [action("mail_headers", enabled["google"]),
                    action("reviewed_email_source", enabled["google"] and getattr(settings, "workspace_google_message_available", False)),

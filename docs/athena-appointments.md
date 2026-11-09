@@ -7,6 +7,12 @@ connection. The shared web/Apple/desktop bundle also requires
 `VITE_ATHENA_CONNECTION_ENABLED=true` and the existing Core/workspace flags.
 The public example configurations leave these flags off.
 
+C9 (sandbox only): when both `WORKSPACE_EHR_READ_ENABLED` and
+`WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED` are on, today's schedule is built from
+athena Preview FHIR Encounter reads instead of Core
+`/embed/v1/athena/appointments/read`. No FHIR Appointment calls. See
+`docs/beta/ATHENA_FHIR_TODAY_SCHEDULE.md`. Both flags stay off for live users.
+
 The client checks the practice's reviewed Athena schedule, then explicitly reads
 a date range of at most 31 inclusive days. Readiness and a successful schedule
 read are different states. Times retain the source department's local calendar

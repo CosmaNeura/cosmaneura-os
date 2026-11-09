@@ -37,6 +37,7 @@ refused by C14 unless the real-data switch and practice BAA are both set
 ## Not in this ticket
 
 - Live Preview smoke or Key Vault creation (J2)
-- Appointment UI path (C9) or Non-Certified appointments (C15)
+- Today's schedule from Encounter (C9 — see `ATHENA_FHIR_TODAY_SCHEDULE.md`)
+- Non-Certified appointments (C15)
 - Flag flips in hosted or production
 - Web UI redesign, infra, or deploy files
