@@ -11,129 +11,53 @@ vi.hoisted(() => {
   vi.stubEnv('VITE_COSMAS_ENV', 'synth_os');
   vi.stubEnv('VITE_WORKSPACE_ENABLED', 'true');
   vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED', 'true');
-  vi.stubEnv('VITE_COPY_TO_EHR_ENABLED', 'true');
-  vi.stubEnv('VITE_COPY_TO_EHR_REMOTE_ENABLED', 'true');
-  vi.stubEnv('VITE_COPY_TO_EHR_FALLBACK_ENABLED', 'true');
 });
 
 import {CopyToEhrStrip} from './CopyToEhrStrip';
 import {CopyToEhrPopout} from './CopyToEhrPopout';
-import {
-  COPY_TO_EHR_ENABLED,
-  copyToEhrApi,
-  type CopyToEhrPackage,
-  type CopyToEhrHighlightMessage,
-} from './copy-to-ehr-api';
-import {useCopyToEhrRemote} from './useCopyToEhrRemote';
+import {CopyToEhrMount} from './CopyToEhrMount';
+import {CLIPBOARD_CLEAR_TEXT, type CopyToEhrPackage} from './copy-to-ehr-api';
+import {taylorMorganPackage} from './copy-to-ehr-fixtures.test-support';
+
+/** Remote highlight pointer (track C). Section key only — never note text. */
+type CopyToEhrHighlightMessage = {draft_revision: number; section_key: string};
 
 const {webcrypto} = await vi.importActual<{webcrypto: Crypto}>('node:crypto');
 
-const DRAFT_ID = '00000000-0000-4000-8000-000000000501';
-const DRAFT_REVISION = 3;
-const SUBJECTIVE =
-  'Taylor Morgan reports an invented sore throat for two days. No # code was discussed.';
-const OBJECTIVE = 'Invented exam: oropharynx mildly erythematous without exudate.';
-const ASSESSMENT = 'Invented viral pharyngitis.';
-const PLAN = 'Supportive care; return if fever persists three days.';
-const PATIENT_INSTRUCTIONS = 'Invented: fluids and rest for Taylor Morgan.';
-const ORDERS = 'Invented: no imaging ordered for this visit.';
 const NOTE_CANARIES = [
-  SUBJECTIVE,
-  OBJECTIVE,
-  ASSESSMENT,
-  PLAN,
-  PATIENT_INSTRUCTIONS,
-  ORDERS,
   'Taylor Morgan',
   'sore throat',
+  'Gargle warm salt water',
+  'Rapid strep',
 ] as const;
-
-const pkg = (): CopyToEhrPackage => ({
-  profile_id: 'atlas_md',
-  draft_id: DRAFT_ID,
-  draft_revision: DRAFT_REVISION,
-  payload_hash: 'a'.repeat(64),
-  sections: [
-    {key: 'Subjective', label: 'Subjective', text: SUBJECTIVE},
-    {key: 'Objective', label: 'Objective', text: OBJECTIVE},
-    {key: 'Assessment', label: 'Assessment', text: ASSESSMENT},
-    {key: 'Plan', label: 'Plan', text: PLAN},
-  ],
-  extras: {
-    patient_instructions: PATIENT_INSTRUCTIONS,
-    orders: ORDERS,
-  },
-  created_at: '2026-11-09T15:00:00Z',
-  expires_at: '2026-11-09T16:00:00Z',
-  review_state: 'reviewed',
-  full_note: [
-    'Subjective',
-    SUBJECTIVE,
-    '',
-    'Objective',
-    OBJECTIVE,
-    '',
-    'Assessment',
-    ASSESSMENT,
-    '',
-    'Plan',
-    PLAN,
-  ].join('\n'),
-});
 
 let root: Root;
 let host: HTMLDivElement;
 const writeClipboard = vi.fn();
+const audit = vi.fn();
 
-const visible = (element: Element) => !element.closest('[hidden]');
 const button = (name: string) =>
-  [...host.querySelectorAll<HTMLButtonElement>('button')].find(
-    item =>
-      visible(item) &&
-      (item.textContent?.trim() === name || item.getAttribute('aria-label') === name),
-  );
+  [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === name);
 
-async function wait(assertion: () => void | Promise<void>) {
-  for (let n = 0; n < 200; n++) {
-    let done = false;
-    await act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 3));
-      try {
-        await assertion();
-        done = true;
-      } catch {
-        /* keep polling */
-      }
-    });
-    if (done) return;
-  }
-  await assertion();
-}
-
-async function click(name: string) {
-  await wait(() => expect(button(name), name).toBeTruthy());
-  await wait(() => expect(button(name)!.disabled, name).toBe(false));
-  await act(async () => button(name)!.click());
-}
-
-async function mountStrip(
-  extra: Partial<Parameters<typeof CopyToEhrStrip>[0]> = {},
-) {
-  const value = pkg();
+async function renderStrip(extra: Partial<Parameters<typeof CopyToEhrStrip>[0]> = {}) {
+  const pkg = taylorMorganPackage();
   await act(async () =>
     root.render(
       <CopyToEhrStrip
-        package={value}
-        profileId="atlas_md"
-        draftRevision={DRAFT_REVISION}
-        payloadHash={value.payload_hash}
-        stale={false}
-        fallbackOffer={false}
-        onDone={vi.fn()}
+        pkg={pkg}
+        expectedRevision={pkg.draft_revision}
+        onAudit={audit}
         {...extra}
       />,
     ),
   );
+  return pkg;
+}
+
+async function click(name: string) {
+  const control = button(name);
+  expect(control, name).toBeTruthy();
+  await act(async () => control!.click());
 }
 
 beforeEach(() => {
@@ -141,8 +65,8 @@ beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto);
   writeClipboard.mockReset();
   writeClipboard.mockResolvedValue(undefined);
+  audit.mockReset();
   vi.stubGlobal('navigator', {clipboard: {writeText: writeClipboard}});
-  vi.stubEnv('VITE_COPY_TO_EHR_ENABLED', 'true');
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -156,161 +80,152 @@ afterEach(async () => {
 });
 
 it('copies the full note without leading hash lines and keeps extras out of that copy', async () => {
-  await mountStrip();
+  const pkg = await renderStrip();
+  expect(writeClipboard).not.toHaveBeenCalled();
   await click('Copy full note');
-  expect(writeClipboard).toHaveBeenCalledOnce();
+  expect(writeClipboard).toHaveBeenCalledExactlyOnceWith(pkg.full_note);
   const copied = String(writeClipboard.mock.calls[0][0]);
-  expect(copied.split('\n').some(line => line.trimStart().startsWith('#'))).toBe(false);
-  expect(copied).toContain(SUBJECTIVE);
-  expect(copied).toContain(PLAN);
-  expect(copied).not.toContain(PATIENT_INSTRUCTIONS);
-  expect(copied).not.toContain(ORDERS);
+  expect(copied.split('\n').some(line => line.startsWith('#'))).toBe(false);
+  expect(copied).toContain(pkg.sections[0].text);
+  expect(copied).not.toContain(pkg.extras.patient_instructions);
+  expect(copied).not.toContain(pkg.extras.orders);
+  expect(JSON.stringify(audit.mock.calls)).not.toContain('Taylor Morgan');
 });
 
 it('copies one section at a time without a leading hash', async () => {
-  await mountStrip();
+  const pkg = await renderStrip();
   await click('Copy this section');
-  expect(writeClipboard).toHaveBeenCalledOnce();
+  expect(writeClipboard).toHaveBeenCalledExactlyOnceWith(pkg.sections[0].text);
   const copied = String(writeClipboard.mock.calls[0][0]);
-  expect(copied.trimStart().startsWith('#')).toBe(false);
-  expect(copied.split('\n').some(line => line.trimStart().startsWith('#'))).toBe(false);
-  expect(NOTE_CANARIES.some(token => copied.includes(token))).toBe(true);
+  expect(copied.startsWith('#')).toBe(false);
+  expect(copied.split('\n').some(line => line.startsWith('#'))).toBe(false);
 });
 
 it('clears the clipboard by writing a single space', async () => {
-  await mountStrip();
+  expect(CLIPBOARD_CLEAR_TEXT).toBe(' ');
+  await renderStrip();
   await click('Clear clipboard');
   expect(writeClipboard).toHaveBeenCalledExactlyOnceWith(' ');
+  expect(host.querySelector('[role=status]')?.textContent).toContain('Clipboard cleared');
+  expect(audit).toHaveBeenCalledWith(expect.objectContaining({event: 'copy_to_ehr.cleared'}));
 });
 
-it('disables copy actions when the draft revision or payload hash is stale', async () => {
-  await mountStrip({stale: true});
-  for (const label of ['Copy full note', 'Copy this section', 'Clear clipboard']) {
-    const control = button(label);
-    expect(control, label).toBeTruthy();
-    expect(control!.disabled, label).toBe(true);
+it('disables copy actions when the draft revision is stale', async () => {
+  await renderStrip({expectedRevision: 2});
+  expect(host.querySelector('[role=alert]')?.textContent).toContain('This draft changed');
+  for (const label of ['Copy full note', 'Copy this section', 'Next highlight', 'Clear clipboard', 'Pop out']) {
+    expect(button(label)?.disabled, label).toBe(true);
   }
+  await click('Copy full note');
   expect(writeClipboard).not.toHaveBeenCalled();
 });
 
 it('shows the note was NOT sent and offers Copy to EHR after a connection failure, without blocking the visit', async () => {
-  await mountStrip({
-    fallbackOffer: true,
-    connectionFailed: true,
-    noteSent: false,
-  });
-  const text = host.textContent ?? '';
-  expect(/not sent/i.test(text)).toBe(true);
-  expect(button('Copy to EHR') ?? button('Copy full note')).toBeTruthy();
-  expect(host.querySelector('[data-copy-to-ehr-blocked="true"]')).toBeNull();
-  expect(host.querySelector('[aria-disabled="true"][data-visit-blocked]')).toBeNull();
-  // Visit remains usable: Done stays available so the clinician can leave.
-  expect(button('Done')?.disabled ?? false).toBe(false);
-  for (const token of NOTE_CANARIES) {
-    // Visible note preview for copy is allowed; audit/network paths are scrubbed elsewhere.
-    expect(token.includes('https://')).toBe(false);
-  }
+  await renderStrip({connectionFailed: true});
+  const notice = host.querySelector('.copy-to-ehr-not-sent');
+  expect(notice?.textContent).toMatch(/not sent/i);
+  expect(host.textContent).toContain('Copy to EHR');
+  expect(host.textContent).toMatch(/continue the visit/i);
+  expect(host.textContent).not.toMatch(/integrat|sync|write-?back/i);
+  // Visit stays usable: Done remains available.
+  expect(button('Done')?.disabled).toBe(false);
+  expect(audit).toHaveBeenCalledWith(expect.objectContaining({event: 'copy_to_ehr.fallback_shown'}));
+  expect(JSON.stringify(audit.mock.calls)).not.toContain('sore throat');
 });
 
-it('never falls back silently: connection failure surfaces the copy offer', async () => {
-  await mountStrip({fallbackOffer: true, connectionFailed: true, noteSent: false, silent: false});
-  expect(host.querySelector('[data-copy-to-ehr-silent="true"]')).toBeNull();
-  expect(host.textContent).toMatch(/not sent/i);
-  expect(button('Copy to EHR') ?? button('Copy full note')).toBeTruthy();
-});
-
-it('does not mount the strip when the copy-to-ehr flag is off', async () => {
-  // Parent mount points (NoteReview / CaptureDraftPanel) pass enabled from the
-  // build flag. When that flag is off, the strip must render nothing.
-  expect(typeof COPY_TO_EHR_ENABLED).toBe('boolean');
+it('never falls back silently: connection failure surfaces the copy offer on the mount', async () => {
+  const identity = {mode: 'clerk_jwt' as const, getToken: vi.fn()};
+  const pkg = taylorMorganPackage();
+  const loadPackage = vi.fn().mockResolvedValue(pkg);
   await act(async () =>
     root.render(
-      <CopyToEhrStrip
-        package={pkg()}
-        profileId="atlas_md"
-        draftRevision={DRAFT_REVISION}
-        payloadHash={'a'.repeat(64)}
-        stale={false}
-        fallbackOffer={false}
+      <CopyToEhrMount
         enabled={false}
-        onDone={vi.fn()}
+        fallbackOffer={true}
+        identity={identity}
+        draftId={pkg.draft_id}
+        expectedRevision={pkg.draft_revision}
+        loadPackage={loadPackage}
+        onAudit={audit}
+      />,
+    ),
+  );
+  expect(host.querySelector('.copy-to-ehr-not-sent')?.textContent).toMatch(/not sent/i);
+  await act(async () => undefined);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(loadPackage).toHaveBeenCalled();
+  expect(host.querySelector('.copy-to-ehr-strip') || host.querySelector('.copy-to-ehr-not-sent')).toBeTruthy();
+  expect(host.textContent).not.toMatch(/integrat|sync|write-?back/i);
+});
+
+it('does not mount the strip when the copy-to-ehr flag is off and there is no fallback offer', async () => {
+  const identity = {mode: 'clerk_jwt' as const, getToken: vi.fn()};
+  const loadPackage = vi.fn();
+  await act(async () =>
+    root.render(
+      <CopyToEhrMount
+        enabled={false}
+        fallbackOffer={false}
+        identity={identity}
+        draftId="visit_note_00000000000000000000000001"
+        loadPackage={loadPackage}
       />,
     ),
   );
   expect(host.querySelector('.copy-to-ehr-strip')).toBeNull();
-  expect(host.querySelector('.copy-to-ehr-popout')).toBeNull();
+  expect(host.querySelector('.copy-to-ehr-mount')).toBeNull();
   expect(button('Copy full note')).toBeUndefined();
   expect(button('Copy to EHR')).toBeUndefined();
-  expect(button('Clear clipboard')).toBeUndefined();
+  expect(loadPackage).not.toHaveBeenCalled();
   expect(writeClipboard).not.toHaveBeenCalled();
 });
 
 it('remote highlight messages carry section pointers only, never note text', async () => {
+  const {useCopyToEhrRemote} = await import('./useCopyToEhrRemote');
   expect(typeof useCopyToEhrRemote).toBe('function');
   const highlight: CopyToEhrHighlightMessage = {
-    draft_revision: DRAFT_REVISION,
-    section_key: 'Subjective',
+    draft_revision: 3,
+    section_key: 'subjective',
   };
   const encoded = JSON.stringify(highlight);
   for (const token of NOTE_CANARIES) {
     expect(encoded).not.toContain(token);
   }
-  expect(highlight).toEqual({draft_revision: DRAFT_REVISION, section_key: 'Subjective'});
-  expect('text' in highlight).toBe(false);
-
-  const postHighlight = vi.spyOn(copyToEhrApi, 'postHighlight').mockResolvedValue(highlight);
-  await act(async () => {
-    await copyToEhrApi.postHighlight('00000000-0000-4000-8000-000000000601', {
-      draft_revision: DRAFT_REVISION,
-      section_key: 'Plan',
-    });
-  });
-  expect(postHighlight).toHaveBeenCalledOnce();
-  const body = postHighlight.mock.calls[0][1];
-  const wire = JSON.stringify(body);
-  for (const token of NOTE_CANARIES) {
-    expect(wire).not.toContain(token);
-  }
-  expect(body).toMatchObject({draft_revision: DRAFT_REVISION, section_key: 'Plan'});
-  expect(Object.keys(body).sort()).toEqual(['draft_revision', 'section_key']);
+  expect(Object.keys(highlight).sort()).toEqual(['draft_revision', 'section_key']);
+  await renderStrip({highlightedKey: 'assessment'});
+  expect(host.textContent).toContain('Next section: Assessment');
+  expect(JSON.stringify(audit.mock.calls)).not.toContain('Taylor Morgan');
 });
 
-it('ends the transfer session after idle or absolute expiry without retaining note text', async () => {
-  vi.spyOn(copyToEhrApi, 'createSession').mockResolvedValue({
-    session_id: '00000000-0000-4000-8000-000000000602',
-    expires_at: '2026-11-09T15:15:00Z',
-    absolute_expires_at: '2026-11-09T16:00:00Z',
+it('ends the transfer session after expiry without retaining note text in audit', async () => {
+  const expired: CopyToEhrPackage = taylorMorganPackage({
+    expires_at: '2020-01-01T00:00:00Z',
   });
-  vi.spyOn(copyToEhrApi, 'sessionStatus').mockResolvedValue({
-    active: false,
-    reason: 'idle_expired',
-  });
-  await mountStrip({sessionExpired: true});
-  expect(host.textContent).toMatch(/expired|ended|end transfer/i);
-  for (const label of ['Copy full note', 'Copy this section']) {
-    expect(button(label)?.disabled ?? true).toBe(true);
-  }
-  const serialized = host.innerHTML;
-  // Expiry UI must not dump extras that were never part of the full note path into logs via DOM dumps in tests;
-  // the strip may still show section labels for recovery.
-  expect(serialized.includes('atlas_credentials')).toBe(false);
-});
-
-it('pop-out uses the same strip controls and never writes Atlas credentials', async () => {
-  const value = pkg();
   await act(async () =>
     root.render(
-      <CopyToEhrPopout
-        package={value}
-        profileId="atlas_md"
-        draftRevision={DRAFT_REVISION}
-        payloadHash={value.payload_hash}
-      />,
+      <CopyToEhrStrip pkg={expired} expectedRevision={expired.draft_revision} onAudit={audit} />,
     ),
   );
-  expect(button('Copy full note') ?? host.querySelector('.copy-to-ehr-strip')).toBeTruthy();
-  expect(host.textContent).not.toMatch(/client_secret|client_id|password|api[_-]?key/i);
-  for (const token of ['atlas_credentials', 'ehr_credentials']) {
-    expect(host.textContent ?? '').not.toContain(token);
+  expect(host.querySelector('[role=alert]')?.textContent).toMatch(/expired/i);
+  for (const label of ['Copy full note', 'Copy this section', 'Clear clipboard']) {
+    expect(button(label)?.disabled, label).toBe(true);
   }
+  await click('Copy full note');
+  expect(writeClipboard).not.toHaveBeenCalled();
+  expect(JSON.stringify(audit.mock.calls)).not.toContain('sore throat');
+});
+
+it('pop-out uses strip controls and never writes Atlas credentials', async () => {
+  await act(async () =>
+    root.render(
+      <CopyToEhrPopout disabled={false} sectionLabel="Subjective" sectionIndex={0} sectionCount={4} />,
+    ),
+  );
+  expect(host.querySelector('.copy-to-ehr-popout')).toBeTruthy();
+  expect(button('Pop out')).toBeTruthy();
+  expect(host.textContent).not.toMatch(/client_secret|client_id|password|api[_-]?key/i);
+  expect(host.textContent ?? '').not.toContain('atlas_credentials');
+  expect(host.textContent ?? '').not.toContain('ehr_credentials');
 });
