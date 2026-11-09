@@ -6,6 +6,7 @@ import json
 import socket
 from dataclasses import asdict
 from datetime import date, timedelta
+from pathlib import Path
 from typing import NoReturn
 from urllib.request import OpenerDirector
 
@@ -18,6 +19,8 @@ from cosmas_os.adapters.calendar_file_import import (
     CalendarImportWindow,
     parse_calendar_file,
 )
+
+ATLAS_FIXTURES = Path(__file__).parent / "fixtures" / "calendar_import"
 
 WINDOW = CalendarImportWindow(date(2026, 10, 25), date(2026, 11, 1), "America/New_York")
 FALL = CalendarImportWindow(date(2026, 11, 1), date(2026, 11, 8), "America/New_York")
@@ -396,3 +399,51 @@ def test_missing_optional_parser_is_closed(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", missing)
     refused(calendar(event()), "calendar_parser_unavailable")
+
+
+def atlas_fixture(name: str) -> bytes:
+    """Synthetic Atlas-shaped bytes only; never a real Atlas export or patient file."""
+    return (ATLAS_FIXTURES / name).read_bytes()
+
+
+def test_atlas_busy_only_fixture_projects_times_without_summaries():
+    raw = atlas_fixture("atlas_busy_only.ics")
+    result = parse_calendar_file(raw, WINDOW)
+    assert result.total_events == result.matching_events == 4
+    assert [row.title for row in result.items] == ["", "", "", ""]
+    assert not any(row.title_truncated for row in result.items)
+    timed = [row for row in result.items if not row.all_day]
+    all_day = [row for row in result.items if row.all_day]
+    assert [(row.starts_at, row.ends_at) for row in timed] == [
+        ("2026-10-27T13:00:00Z", "2026-10-27T13:30:00Z"),
+        ("2026-10-28T18:00:00Z", "2026-10-28T19:00:00Z"),
+        ("2026-10-30T18:00:00Z", "2026-10-30T18:45:00Z"),
+    ]
+    assert [(row.starts_at, row.ends_at) for row in all_day] == [("2026-10-29", "2026-10-30")]
+    encoded = json.dumps(asdict(result), default=str)
+    for forbidden in ("Atlas", "555-", "example.invalid", "DESCRIPTION", "LOCATION", "ATTENDEE", "Busy"):
+        assert forbidden not in encoded
+
+
+def test_atlas_detailed_fixture_keeps_titles_and_drops_private_fields():
+    raw = atlas_fixture("atlas_detailed.ics")
+    result = parse_calendar_file(raw, WINDOW)
+    assert result.total_events == result.matching_events == 3
+    assert [(row.title, row.starts_at, row.ends_at, row.all_day) for row in result.items] == [
+        ("Follow-up with Casey Rivera", "2026-10-26T14:00:00Z", "2026-10-26T14:30:00Z", False),
+        ("New patient: Jordan Lee", "2026-10-27T17:15:00Z", "2026-10-27T18:00:00Z", False),
+        ("Clinic admin day", "2026-10-31", "2026-11-01", True),
+    ]
+    encoded = json.dumps(asdict(result), default=str)
+    for forbidden in (
+        "555-0102", "555-0199", "555-0144", "Exam Room", "Telehealth",
+        "casey.rivera@example.invalid", "jordan.lee@example.invalid",
+        "DESCRIPTION", "LOCATION", "ATTENDEE", "ORGANIZER", "Atlas",
+    ):
+        assert forbidden not in encoded
+
+
+def test_atlas_style_recurrence_in_either_export_shape_is_refused():
+    for name in ("atlas_busy_only.ics", "atlas_detailed.ics"):
+        raw = atlas_fixture(name).replace(b"END:VEVENT", b"RRULE:FREQ=WEEKLY\r\nEND:VEVENT", 1)
+        refused(raw, "calendar_recurrence_unsupported")
