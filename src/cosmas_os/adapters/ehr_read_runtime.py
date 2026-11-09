@@ -13,7 +13,9 @@ def runtime_provider(port):
         return "athena"
     if type(port) in (SyntheticElationReads, ManagedElationSandboxReads):
         return "elation"
-    if type(port) in (SyntheticTebraReads, SyntheticTebraFhirReads):
+    if type(port) is SyntheticTebraFhirReads:
+        return getattr(port, "vendor", "tebra")
+    if type(port) is SyntheticTebraReads:
         return "tebra"
     return None
 
@@ -27,15 +29,17 @@ def runtime_clinical_scope(port):
 
 
 class EhrReadRuntimes:
-    def __init__(self, *, elation=None, tebra=None, tebra_fhir=None, athena_core=None, athena_medications=None):
+    def __init__(self, *, elation=None, tebra=None, tebra_fhir=None, athena_fhir=None, athena_core=None, athena_medications=None):
         if ((elation is not None and runtime_provider(elation) != "elation")
                 or (tebra is not None and type(tebra) is not SyntheticTebraReads)
-                or (tebra_fhir is not None and type(tebra_fhir) is not SyntheticTebraFhirReads)
+                or (tebra_fhir is not None and (type(tebra_fhir) is not SyntheticTebraFhirReads or runtime_provider(tebra_fhir) != "tebra"))
+                or (athena_fhir is not None and (type(athena_fhir) is not SyntheticTebraFhirReads or runtime_provider(athena_fhir) != "athena"))
                 or (athena_core is not None and type(athena_core) is not SyntheticAthenaAllergyReads)
                 or (athena_medications is not None and type(athena_medications) is not SyntheticAthenaMedicationReads)):
             raise ValueError("explicit_ehr_runtimes_required")
         self._elation, self._tebra = elation, tebra
         self._tebra_fhir = tebra_fhir
+        self._athena_fhir = athena_fhir
         self._athena_core = athena_core
         self._athena_medications = athena_medications
 
@@ -45,7 +49,7 @@ class EhrReadRuntimes:
         if protocol == "core":
             return self._athena_core if provider == "athena" else None
         if protocol == "fhir":
-            return self._tebra_fhir if provider == "tebra" else None
+            return self._tebra_fhir if provider == "tebra" else self._athena_fhir if provider == "athena" else None
         if protocol is not None:
             return None
         return self._elation if provider == "elation" else self._tebra if provider == "tebra" else None

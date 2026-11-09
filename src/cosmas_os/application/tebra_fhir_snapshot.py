@@ -14,6 +14,12 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Literal
 
+from cosmas_os.adapters.ehr_fhir_vendor import (
+    medication_history_contract,
+    medication_source_title,
+    require_fhir_vendor,
+    review_snapshot_contract,
+)
 from cosmas_os.adapters.tebra_fhir_read import (
     MAX_PROJECTION_BYTES,
     MAX_ROWS,
@@ -129,7 +135,8 @@ def _validated_record(row, patient_id):
         "recorded" if row.dosage_instructions_json is not None else "not_provided")
 
 
-def _validate_observation(observation, scope, source_sha256, identity_sha256):
+def _validate_observation(observation, scope, source_sha256, identity_sha256, vendor="tebra"):
+    vendor = require_fhir_vendor(vendor)
     if type(observation) is not TebraFhirMedicationRead or observation.scope != scope:
         raise TebraFhirSnapshotError("snapshot_mismatch")
     if (type(observation.patient) is not TebraFhirPatient or observation.patient.patient_id != scope.patient_id
@@ -156,22 +163,22 @@ def _validate_observation(observation, scope, source_sha256, identity_sha256):
     records = tuple(_validated_record(row, scope.patient_id) for row in observation.rows)
     if len({item.record.record_id for item in records}) != len(records):
         raise TebraFhirSnapshotError("snapshot_invalid")
-    content = {"scope_sha256": scope.commitment(), "patient": asdict(observation.patient),
+    content = {"scope_sha256": scope.commitment(vendor), "patient": asdict(observation.patient),
         "rows": [asdict(row) for row in observation.rows], "observed_at": observation.observed_at.isoformat(),
         "coverage": observation.coverage, "reported_total": total, "warnings": observation.warnings,
         "provider_sources": observation.provider_sources}
     if len(canonical_json(content).encode("utf-8")) > MAX_PROJECTION_BYTES:
         raise TebraFhirSnapshotError("snapshot_too_large")
-    if payload_hash({"contract": "tebra-fhir-medication-history.v1", **content}) != source_sha256:
+    if payload_hash({"contract": medication_history_contract(vendor), **content}) != source_sha256:
         raise TebraFhirSnapshotError("snapshot_mismatch")
     birth = TebraRecordedDate("recorded", _date(identity["birthDate"])) if "birthDate" in identity else TebraRecordedDate("not_provided", None)
     return records, birth
 
 
-def _source(observation, records):
+def _source(observation, records, vendor="tebra"):
     coverage = ("More rows are available; only this page was read." if observation.coverage == "more_rows_available"
         else "Returned page only; completeness is not established.")
-    lines = ["Tebra medication records (bounded synthetic snapshot)",
+    lines = [medication_source_title(vendor),
         "Patient identity: "+observation.patient.identity_json,
         "Observed: "+observation.observed_at.isoformat(), "Coverage: "+coverage,
         f"Returned records: {len(records)}; reported total: {observation.reported_total if observation.reported_total is not None else 'not provided'}.",
@@ -200,7 +207,7 @@ def _source(observation, records):
 
 def prepare_medication_review(observation: TebraFhirMedicationRead, *, expected_scope: TebraFhirScope,
         expected_source_sha256: str, expected_patient_identity_sha256: str,
-        authorize_read: Callable[[TebraFhirScope], bool]) -> TebraMedicationReviewSnapshot:
+        authorize_read: Callable[[TebraFhirScope], bool], vendor: str = "tebra") -> TebraMedicationReviewSnapshot:
     """Prepare exact review content against trusted server pins; never grants access.
 
     The application must obtain the expected scope/hashes from current server-owned
@@ -208,6 +215,7 @@ def prepare_medication_review(observation: TebraFhirMedicationRead, *, expected_
     Actual review, SQL custody, recovery and Chief admission remain separate work.
     """
     try:
+        vendor = require_fhir_vendor(vendor)
         if type(expected_scope) is not TebraFhirScope or not callable(authorize_read):
             raise TebraFhirSnapshotError("snapshot_invalid")
         expected_scope.validate()
@@ -215,12 +223,12 @@ def prepare_medication_review(observation: TebraFhirMedicationRead, *, expected_
             raise TebraFhirSnapshotError("access_denied")
         _digest(expected_source_sha256)
         _digest(expected_patient_identity_sha256)
-        records, birth = _validate_observation(observation, expected_scope, expected_source_sha256, expected_patient_identity_sha256)
-        source = _source(observation, records)
+        records, birth = _validate_observation(observation, expected_scope, expected_source_sha256, expected_patient_identity_sha256, vendor)
+        source = _source(observation, records, vendor)
         if len(source) > SOURCE_LIMIT:
             raise TebraFhirSnapshotError("snapshot_too_large")
         content_sha256 = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        review_sha256 = payload_hash({"contract": "tebra-fhir-review-snapshot.v1", "scope_sha256": expected_scope.commitment(),
+        review_sha256 = payload_hash({"contract": review_snapshot_contract(vendor), "scope_sha256": expected_scope.commitment(vendor),
             "observation_sha256": expected_source_sha256, "patient_identity_sha256": expected_patient_identity_sha256,
             "source_content_sha256": content_sha256, "completeness": "bounded_recorded_history"})
         if authorize_read(expected_scope) is not True:
