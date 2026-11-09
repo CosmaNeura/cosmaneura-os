@@ -14,6 +14,7 @@ from cosmas_os.adapters.elation_read import (
     ElationReadError,
     ElationReadScope,
 )
+from cosmas_os.application.ehr_export.fallback import visit_read
 
 
 class SyntheticElationReads:
@@ -109,7 +110,8 @@ class SyntheticElationReads:
                     raise ElationReadError("record_unavailable")
                 patient = await adapter.patient(patient_id)
                 return appointment, patient
-        return asyncio.run(run())
+        with visit_read("elation", appointment_id):
+            return asyncio.run(run())
 
 
     def problem_list(self, scope: ElationReadScope, appointment_id: int, patient_id: int, *, authorize, verify_identity):
@@ -126,7 +128,8 @@ class SyntheticElationReads:
                     raise ElationReadError("record_unavailable")
                 result = await adapter.problems(patient_id)
                 return appointment, patient, result
-        return asyncio.run(run())
+        with visit_read("elation", appointment_id):
+            return asyncio.run(run())
 
     def medication_list(self, scope: ElationReadScope, appointment_id: int, patient_id: int, *, authorize, verify_identity):
         async def run():
@@ -142,4 +145,5 @@ class SyntheticElationReads:
                     raise ElationReadError("record_unavailable")
                 result = await adapter.medications(patient_id)
                 return appointment, patient, result
-        return asyncio.run(run())
+        with visit_read("elation", appointment_id):
+            return asyncio.run(run())
