@@ -332,13 +332,19 @@ def command_allowed(body: object) -> bool:
         return False
     if action in {"fhir_patients", "fhir_medications"}:
         return parsed.protocol == "fhir" and parsed.clinical_scope is None
+    if action == "status":
+        if parsed.protocol == "fhir":
+            return parsed.clinical_scope is None
+        if parsed.protocol == "core":
+            return parsed.clinical_scope in (None, "medications")
+        return False
     if parsed.protocol != "core":
         return False
     if action == "core_allergies":
         return parsed.clinical_scope is None
     if action == "core_medications":
         return parsed.clinical_scope == "medications"
-    return action == "status" and parsed.clinical_scope in (None, "medications")
+    return False
 
 
 def ehr_route_allowed(body: object) -> bool:
