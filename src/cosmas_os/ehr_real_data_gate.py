@@ -39,19 +39,23 @@ ATHENA_PREVIEW_ORIGIN = "https://api.preview.platform.athenahealth.com"
 ATHENA_PRODUCTION_ORIGIN = "https://api.platform.athenahealth.com"
 ELATION_SANDBOX_ORIGIN = "https://sandbox.elationemr.com"
 ELATION_PRODUCTION_ORIGIN = "https://api.app.elationemr.com"
+# Elation FHIR R4 hosts (distinct from REST APIv2). Vendor-specific only —
+# these must never be added to the shared C4 default sandbox host allowlist.
+ELATION_FHIR_SANDBOX_ORIGIN = "https://sandbox.fhir.elationemr.com"
+ELATION_FHIR_PRODUCTION_ORIGIN = "https://fhir.elationemr.com"
 TEBRA_FHIR_ORIGIN = "https://fhir.prd.cloud.tebra.com"
 TEBRA_SOAP_ORIGIN = "https://webservice.kareo.com"
 
 SANDBOX_ORIGINS: dict[Vendor, frozenset[str]] = {
     "athena": frozenset({ATHENA_PREVIEW_ORIGIN}),
-    "elation": frozenset({ELATION_SANDBOX_ORIGIN}),
+    "elation": frozenset({ELATION_SANDBOX_ORIGIN, ELATION_FHIR_SANDBOX_ORIGIN}),
     "tebra": frozenset(),
     "atlas_md": frozenset(),
 }
 
 PRODUCTION_ORIGINS: dict[Vendor, frozenset[str]] = {
     "athena": frozenset({ATHENA_PRODUCTION_ORIGIN}),
-    "elation": frozenset({ELATION_PRODUCTION_ORIGIN}),
+    "elation": frozenset({ELATION_PRODUCTION_ORIGIN, ELATION_FHIR_PRODUCTION_ORIGIN}),
     "tebra": frozenset({TEBRA_FHIR_ORIGIN, TEBRA_SOAP_ORIGIN}),
     "atlas_md": frozenset(),
 }

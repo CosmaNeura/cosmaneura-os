@@ -24,6 +24,13 @@ list names only — never secret VALUES.
 | `COSMAS_MANAGED_SECRET_EHR_ATHENA_FHIR_CLIENT_ID` | Secret holding the athena app **client id** for Cosmaneura CosmaBot FHIR | Preview / sandbox app. |
 | `COSMAS_MANAGED_SECRET_EHR_ATHENA_FHIR_CLIENT_SECRET` | Secret holding the athena app **client secret** | Private. Never paste into chat or git. |
 
+## Vault secrets for Elation FHIR R4 sandbox (names only; not created by this ticket)
+
+| Reference name | What John creates in Key Vault | Notes |
+| --- | --- | --- |
+| `COSMAS_MANAGED_SECRET_EHR_ELATION_FHIR_CLIENT_ID` | Secret holding the Elation FHIR sandbox **client id** | Separate from REST APIv2 keys. After sandbox / API agreement. |
+| `COSMAS_MANAGED_SECRET_EHR_ELATION_FHIR_CLIENT_SECRET` | Secret holding the Elation FHIR sandbox **client secret** | Private. Never paste into chat or git. |
+
 ## Token handling
 
 - Grant: `client_credentials`
@@ -41,6 +48,9 @@ then CosmaBot does not sign JWT client assertions for EHR auth.
 - C2 token client (`adapters.ehr_auth`)
 - C7 athena Certified FHIR R4 Preview adapter (`adapters.athena_fhir_r4`) —
   mock transport only; no live Preview call in CI; route wiring is C8
+- C11/C20 Elation FHIR R4 sandbox adapter (`adapters.elation_fhir_r4`) —
+  mock transport only; appointments stay on REST `adapters.elation_read`;
+  no live sandbox call in CI
 
 ## What this code will not do
 

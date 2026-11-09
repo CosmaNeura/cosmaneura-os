@@ -20,6 +20,8 @@ from cosmas_os.adapters.ehr_auth.client_credentials import (
 from cosmas_os.adapters.ehr_auth.managed_secret_env import (
     ATHENA_FHIR_CLIENT_ID_REF,
     ATHENA_FHIR_CLIENT_SECRET_REF,
+    ELATION_FHIR_CLIENT_ID_REF,
+    ELATION_FHIR_CLIENT_SECRET_REF,
     ManagedSecretEnvResolver,
     validate_managed_secret_reference_name,
 )
@@ -32,6 +34,8 @@ __all__ = [
     "ClientCredentialsAuthProvider",
     "ClientCredentialsConfig",
     "ClientCredentialsTokenClient",
+    "ELATION_FHIR_CLIENT_ID_REF",
+    "ELATION_FHIR_CLIENT_SECRET_REF",
     "ManagedSecretEnvResolver",
     "normalize_system_read_scopes",
     "validate_managed_secret_reference_name",
