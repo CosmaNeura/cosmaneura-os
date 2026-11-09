@@ -352,8 +352,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift",
-        "sha256": "0bf0e66aaab47c41b5598785f9f6c59bb6817f0861f21d064efc6731344723c5",
-        "status": "differs"
+        "sha256": "fbba94d245e8890e2e1c89164e20add77cceb44a7c9f5268727a2652c6e63991",
+        "status": "byte-identical"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -547,8 +547,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift",
-        "sha256": "65781df4ec92056563e3d7d71101f9b36e00e35b104c60d6cdc77e74f008c2e8",
-        "status": "differs"
+        "sha256": "f17be675e044e651c03a316b4b05b0508ebcd4b06c4981db6bc57114f1ceb2de",
+        "status": "byte-identical"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -573,8 +573,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/native-auth/Sources/CosmasNativeAuth/DesktopAuthProtocol.swift",
-        "sha256": "4a870405efcc894c7e1769c4a04c6a238ef3389767aa3c630ac24bc7cf0cca22",
-        "status": "differs"
+        "sha256": "29ed2081def6a61dcc002647c556aa2f84a51f76591426a9473d826c04d00aa4",
+        "status": "byte-identical"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -703,8 +703,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeWorkspaceAuth.swift",
-        "sha256": "f67442c847e69cad1c8d27ed638fd356b4bf8f52ac8b34efa4884d2b19f0a43f",
-        "status": "differs"
+        "sha256": "80589b7a3d54c958276bfb3d07df71e891364ae575934290fa51d86b820656c5",
+        "status": "byte-identical"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -729,8 +729,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/native-auth/Tests/CosmasNativeAuthTests/DesktopAuthProtocolTests.swift",
-        "sha256": "2833750395acfdd6d0becc3779322538aa375a1e2fe79ff27d04c82b6b820d81",
-        "status": "differs"
+        "sha256": "c34c91ae0d72cfb72031de9182f43808039b0eaa8dc8994c126296f99eea8d31",
+        "status": "byte-identical"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -755,8 +755,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/native-auth/Tests/CosmasNativeAuthTests/KeychainInteractionPolicyTests.swift",
-        "sha256": "b2359790209bf6b8ce23a6af205d068274bfbf9fe59bbfff65e9fb22882e255d",
-        "status": "differs"
+        "sha256": "0076f143ef4349df130cd3b7da5bee167dd66c11685f49bb0761ad12293fc995",
+        "status": "byte-identical"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -781,8 +781,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativePrivateRecordingGateTests.swift",
-        "sha256": "64f3e14a85b5ea321acedb01526ef6aa1f253dfe43266c349fec58ef2473b984",
-        "status": "differs"
+        "sha256": "a732fbe5604ddb1d8db756e8bcb63956d32f46bc2d3d256b41ae342b83f155db",
+        "status": "byte-identical"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -807,8 +807,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift",
-        "sha256": "8688218b869c11b547e3be70d7d961000b4c3203a7b49ac1639c325731c19dea",
-        "status": "differs"
+        "sha256": "d6e021039bb30478aec162c9e48df39ebc1578f25ec36d66cc18f6c9aa5e35f8",
+        "status": "byte-identical"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },

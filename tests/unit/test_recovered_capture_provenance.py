@@ -23,21 +23,25 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "5067448784d2410cd38798a516eb2bca0667442c0e776f2eb1d71f6f197cafe1",
     "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "2533a5c011d12173635937a607b46a1f827c3d015fab5862261f49da31214492",
     "clients/apple/startup-recovery/WorkspaceRecoveryState.swift": "c07f68af3d311b75890108c4fc5c04b5e38eeeda11cb0047f25424a04531cfd1",
-    "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift": "c5f315aa8d19334cab8f364e0748b88fc0b4642e3904b57ea8fd1da395ac659e",
+    "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift": "8132283f189b8cd0497957326fbcc020efc44e7c4b9fe2327ce0248b44d9494f",
     "clients/apple/native-auth/Bridge/NativeProviderConnection.swift": "61b1c30c279a940f3ffab824a74fe21aba01cdc053d63ed59530b9d12bde2ce9",
     "clients/apple/native-auth/Bridge/NativeProviderRecordingRuntime.swift": "c0e570f99371e1fa07ccac58db1a56db0c7994323fb50d1f8af5d98d462279c4",
     "clients/apple/native-auth/Bridge/NativeSourceProofJournal.swift": "851c0e23018aab0c898bd8563108aabfcf0ce07a4925af161e6d2fbda43e7c39",
-    "clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift": "8d90bb1fd7e86a6773b99d4bb560eadfa66f9aaad57b89e2fbefde509392f1a9",
+    "clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift": "7713db8afa3959ac9c936a4008aecb2144d4d62dedc9649fd21490fbdbcb88af",
+    "clients/apple/native-auth/Sources/CosmasNativeAuth/DesktopAuthProtocol.swift": "4a870405efcc894c7e1769c4a04c6a238ef3389767aa3c630ac24bc7cf0cca22",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/GoogleConnectionNavigation.swift": "f5e7b2606ed7972d9f96ea1cb8631c0fed84e902477d34f0946e13d639f4bdb5",
-    "clients/apple/native-auth/Sources/CosmasNativeAuth/MicrosoftConnectionNavigation.swift": "aecc572273fd6a83ba2f328273389c91f74368d781c31f7be8eb435e0d9a49b0",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/KeychainAccessBlock.swift": "9985767055e2e36e208dd7b2696029ac5d88f34257fa4fa44df6fe3d3502403c",
+    "clients/apple/native-auth/Sources/CosmasNativeAuth/MicrosoftConnectionNavigation.swift": "aecc572273fd6a83ba2f328273389c91f74368d781c31f7be8eb435e0d9a49b0",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeAuthAwait.swift": "48f59a9ade9ceca9e30c82c13c4bccbea0c69a45d26c9fefa2d4eaabc9a8501d",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift": "9c9d70eaa1f9d13e383bbf3ab492fce6901422d9b4cf813a1b2341a8f7c6fefb",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeTokenPolicy.swift": "f951145dbfabb7bc7244633b60267ddd65ba31ff378613f1fb75360f9a890298",
-    "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeWorkspaceAuth.swift": "618a81673f050b438313660a621792c88923b5c4b9c1de898daaa46821443868",
+    "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeWorkspaceAuth.swift": "c777eeac82ccc9cc54e9b400ee2eefd1761dca74ca156355dc64da041699b717",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/DesktopAuthProtocolTests.swift": "2833750395acfdd6d0becc3779322538aa375a1e2fe79ff27d04c82b6b820d81",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/GoogleConnectionNavigationTests.swift": "7f25b506b325cfbf76e7fc4ad1082c2406ca238f5ef054793de8213dda3c8eba",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/KeychainInteractionPolicyTests.swift": "b2359790209bf6b8ce23a6af205d068274bfbf9fe59bbfff65e9fb22882e255d",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeClerkConfigurationTests.swift": "2aff431cbe3b8d80d9b8eb6da67e18d4a9c2326a29d49c5e14e732c33fb9dbac",
-    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift": "6083e5b8619d13b1014a11ca625e5a1f6860f4068c0fb24ee42caf265bd56db8",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativePrivateRecordingGateTests.swift": "64f3e14a85b5ea321acedb01526ef6aa1f253dfe43266c349fec58ef2473b984",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift": "dda52ed7cbf2976050d93be2a97de0f4474ba7ea348e1bb967cf94603f62c83a",
 }
 
 # Owned Capacitor path pins in capture package manifests. Historical recovery
@@ -116,16 +120,8 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
     assert reviewed_current == set(REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256)
     assert reviewed_capacitor == set(REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256)
     assert differed == [
-        "native-plugins/cosmas-native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift",
         "native-plugins/cosmas-native-auth/Package.swift",
-        "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift",
-        "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/DesktopAuthProtocol.swift",
         "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
-        "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeWorkspaceAuth.swift",
-        "native-plugins/cosmas-native-auth/Tests/CosmasNativeAuthTests/DesktopAuthProtocolTests.swift",
-        "native-plugins/cosmas-native-auth/Tests/CosmasNativeAuthTests/KeychainInteractionPolicyTests.swift",
-        "native-plugins/cosmas-native-auth/Tests/CosmasNativeAuthTests/NativePrivateRecordingGateTests.swift",
-        "native-plugins/cosmas-native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift",
         "native-plugins/native-recording-pcm/Package.swift",
     ]
 
