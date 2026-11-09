@@ -32,11 +32,12 @@ system and without changing Tebra digest bytes.
   DocumentReference → source-review projections with provenance
   (`vendor`, `resource_type`, `resource_id_hash`, `read_time`)
 
-Appointment is not mapped for athena (C15 / Non-Certified parked; C9 uses
-Encounter). No proprietary athena Appointment calls.
+Appointment is not mapped for athena (C15 / Non-Certified parked). C9 maps
+Encounter into the existing schedule row shape via `map_encounter_to_schedule`.
+No proprietary athena Appointment calls and no FHIR Appointment reads.
 
 ## Follow-on
 
 - Route wiring and plugin tools (C8)
-- Appointment path replacement (C9)
+- Today's schedule from Encounter (C9 — `docs/beta/ATHENA_FHIR_TODAY_SCHEDULE.md`)
 - Live Preview calls, Key Vault, or flag flips

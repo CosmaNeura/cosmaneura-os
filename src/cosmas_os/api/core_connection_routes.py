@@ -69,8 +69,9 @@ def install_boundary(app):
 
 
 def router(*, settings, session_factory, identity_dependency, workspace_gate,
-           connection_factory=CoreEncounterConnection):
+           connection_factory=CoreEncounterConnection, fhir_schedule_runtime=None):
     routes = APIRouter(route_class=ConnectionRoute)
+    schedule_runtime = fhir_schedule_runtime if fhir_schedule_runtime is not None else (lambda: None)
 
     @routes.post(PATH)
     async def connection(request: Request):
@@ -131,7 +132,12 @@ def router(*, settings, session_factory, identity_dependency, workspace_gate,
                             raise ws.WorkspaceError("core_connection_unavailable", 404)
                         if isinstance(command, AthenaVisitLinkCommand) and not current.workspace_athena_visit_link_available:
                             raise ws.WorkspaceError("core_connection_unavailable", 404)
-                        if isinstance(command, AthenaCommand) and not current.workspace_athena_connection_available:
+                        if isinstance(command, AthenaCommand) and not (
+                            current.workspace_athena_connection_available
+                            or current.workspace_athena_fhir_sandbox_available
+                        ):
+                            # C9 schedule is available behind C8 FHIR flags; otherwise
+                            # keep the pre-existing Core-mediated athena connection gate.
                             raise ws.WorkspaceError("core_connection_unavailable", 404)
                         if (current.core_capture_origin, current.core_connection_tenant_ref) != scope:
                             raise ws.WorkspaceError("core_connection_changed", 409)
@@ -149,9 +155,17 @@ def router(*, settings, session_factory, identity_dependency, workspace_gate,
 
                     port = connection_factory(scope[0], budget)
                     try:
+                        fhir_schedule = None
+                        if isinstance(command, AthenaCommand) and config.workspace_athena_fhir_sandbox_available:
+                            fhir_schedule = schedule_runtime()
+                            if fhir_schedule is None:
+                                # Flags on but no synthetic schedule runtime: refuse
+                                # before the missing Core appointments/read path.
+                                raise ws.WorkspaceError("core_connection_unavailable", 404)
                         return core_connection.execute(session, identity=identity, command=command,
                             tenant_ref=scope[1], bearer=SecretStr(authorization.partition(" ")[2]),
-                            port=port, reauthenticate=reauthenticate, budget=budget)
+                            port=port, reauthenticate=reauthenticate, budget=budget,
+                            fhir_schedule=fhir_schedule)
                     except CoreSetupChanged:
                         raise ws.WorkspaceError("core_connection_changed", 409) from None
                     except CoreDiscoveryDenied:
