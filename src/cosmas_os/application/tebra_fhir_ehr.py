@@ -41,7 +41,8 @@ KINDS = ("fhir_patients", "fhir_medications")
 
 def scope(binding):
     return TebraFhirConnectionScope(UUID(binding.box_id), UUID(binding.owner_id), UUID(binding.account_id),
-        UUID(binding.connection_id), UUID(binding.credential_generation), binding.practice_name)
+        UUID(binding.connection_id), UUID(binding.credential_generation), binding.practice_name,
+        vendor=binding.vendor if binding.vendor in ("tebra", "athena") else "tebra")
 
 
 def grant(s, identifier, *, current=False):
@@ -101,7 +102,8 @@ def status(s, box, actor, account_id, *, enabled, port, reauthenticate=None):
     if not enabled or type(port) is not SyntheticTebraFhirReads:
         return empty
     rows = list(s.scalars(select(EhrReadBinding).where(EhrReadBinding.box_id == box, EhrReadBinding.owner_id == actor,
-        EhrReadBinding.account_id == account_id, EhrReadBinding.vendor == "tebra", EhrReadBinding.protocol == "fhir", EhrReadBinding.state == "active")))
+        EhrReadBinding.account_id == account_id, EhrReadBinding.vendor.in_(("tebra", "athena")),
+        EhrReadBinding.protocol == "fhir", EhrReadBinding.state == "active")))
     if len(rows) != 1:
         return empty
     try:
@@ -111,7 +113,7 @@ def status(s, box, actor, account_id, *, enabled, port, reauthenticate=None):
         ehr._binding(s, account, binding.connection_id, binding.binding_digest, port=port)
     except ws.WorkspaceError:
         return empty
-    return {**empty, "status": "ready", "connection_id": binding.connection_id,
+    return {**empty, "provider": binding.vendor, "status": "ready", "connection_id": binding.connection_id,
         "binding_sha256": binding.binding_digest, "display_label": binding.practice_name}
 
 
@@ -143,7 +145,7 @@ def patient_item(item):
     return {**value, "sha256": ehr.item_hash("fhir_patients", value)}
 
 
-def medication_item(item, prepared):
+def medication_item(item, prepared, *, vendor="tebra"):
     from cosmas_os.application import ehr_reads as ehr
 
     observed = prepared.observation
@@ -151,7 +153,7 @@ def medication_item(item, prepared):
         coverage=observed.coverage, reported_total=observed.reported_total, warnings=list(observed.warnings),
         records=[{key: value for key, value in asdict(row).items() if key not in ("record_id", "patient_id")} for row in observed.rows],
         source_content=prepared.source_content, content_sha256=prepared.source_content_sha256)
-    return {**value, "sha256": ehr.item_hash("fhir_medications", value)}
+    return {**value, "sha256": ehr.item_hash("fhir_medications", value, vendor=vendor)}
 
 
 def validate_snapshot(s, read, snap):
@@ -161,7 +163,8 @@ def validate_snapshot(s, read, snap):
     pub, priv = payload.public, payload.private
     binding = s.get(EhrReadBinding, read.binding_id)
     if (not isinstance(pub, (FhirPatientsObservation, FhirMedicationsObservation)) or not isinstance(priv, FhirPrivateSnapshot)
-            or binding is None or binding.protocol != "fhir" or binding.vendor != "tebra" or read.transport != "mock"
+            or binding is None or binding.protocol != "fhir" or binding.vendor not in ("tebra", "athena")
+            or pub.provider != binding.vendor or read.transport != "mock"
             or pub.kind != read.kind or str(pub.workspace_id) != read.workspace_id
             or pub.display_label != binding.practice_name or str(priv.workspace_id) != read.workspace_id
             or str(priv.patient_link_id) != read.patient_link_id
@@ -199,9 +202,10 @@ def validate_snapshot(s, read, snap):
         observed = reader(priv.reader_snapshot_json)
         # Structural replay uses immutable server grant pins; current authority is checked separately at every release/admission.
         prepared = prepare_medication_review(observed, expected_scope=selected.read_scope(), expected_source_sha256=observed.source_sha256,
-            expected_patient_identity_sha256=selected.identity_sha256, authorize_read=lambda _: True)
+            expected_patient_identity_sha256=selected.identity_sha256, authorize_read=lambda _: True, vendor=binding.vendor)
         if (prepared.snapshot_sha256 != priv.review_sha256 or observed.patient.identity_json != item.patient_identity_json
-                or pub.observed_at != observed.observed_at or pub.item.model_dump(mode="json") != medication_item(item, prepared)):
+                or pub.observed_at != observed.observed_at
+                or pub.item.model_dump(mode="json") != medication_item(item, prepared, vendor=binding.vendor)):
             raise ValueError("invalid_fhir_review_projection")
     return snap
 
@@ -216,7 +220,9 @@ def patients(s, box, actor, account_id, *, key, connection_id, binding_sha256, w
     if binding.protocol != "fhir" or type(port) is not SyntheticTebraFhirReads:
         raise ws.WorkspaceError("ehr_read_provider_mismatch", 409)
     w = ws._workspace(s, box, actor, workspace_id, writing=True)
-    body = dict(provider="tebra", protocol="fhir", action="fhir_patients", connection_id=connection_id,
+    if binding.vendor not in ("tebra", "athena"):
+        raise ws.WorkspaceError("ehr_read_provider_mismatch", 409)
+    body = dict(provider=binding.vendor, protocol="fhir", action="fhir_patients", connection_id=connection_id,
         binding_sha256=binding_sha256, workspace_id=workspace_id, idempotency_key=key)
     read, replay = ehr._reserve(s, account, binding, body, None, port=port, workspace=w)
     if replay is not None:
@@ -232,7 +238,7 @@ def patients(s, box, actor, account_id, *, key, connection_id, binding_sha256, w
             if row.state == "active":
                 items.append(FhirPrivateItem(handle=uuid4(), grant_id=selected.grant_id,
                     grant_sha256=selected.commitment(), patient_identity_json=selected.identity_json))
-        payload = dict(public=dict(provider="tebra", protocol="fhir", mode="synthetic", kind="fhir_patients",
+        payload = dict(public=dict(provider=binding.vendor, protocol="fhir", mode="synthetic", kind="fhir_patients",
             workspace_id=w.id, display_label=binding.practice_name, observed_at=model_work.now(s), coverage="authorized_candidates_only",
             items=[patient_item(item) for item in items]), private=dict(protocol="fhir", binding_sha256=read.binding_digest,
             request_sha256=read.request_hash, workspace_id=w.id, patient_link_id=w.patient_link_id,
@@ -255,7 +261,9 @@ def medications(s, box, actor, account_id, *, key, connection_id, binding_sha256
     account = ehr._access(s, box, actor, account_id, reauthenticate)
     binding = ehr._binding(s, account, connection_id, binding_sha256, port=port)
     prior = ehr._read(s, box, actor, account_id, observation_id)
-    ehr._require_provider(s, prior, "tebra", "fhir")
+    if binding.vendor not in ("tebra", "athena"):
+        raise ws.WorkspaceError("ehr_read_provider_mismatch", 409)
+    ehr._require_provider(s, prior, binding.vendor, "fhir")
     if prior.kind != "fhir_patients" or prior.binding_id != binding.id or prior.workspace_id != workspace_id:
         raise ws.WorkspaceError("ehr_read_not_observed")
     ehr._authorize(s, prior, port=port)
@@ -269,7 +277,7 @@ def medications(s, box, actor, account_id, *, key, connection_id, binding_sha256
         raise ws.WorkspaceError("ehr_read_not_observed")
     row, selected = grant(s, item.grant_id, current=True)
     w = workspace(s, prior)
-    body = dict(provider="tebra", protocol="fhir", action="fhir_medications", connection_id=connection_id,
+    body = dict(provider=binding.vendor, protocol="fhir", action="fhir_medications", connection_id=connection_id,
         binding_sha256=binding_sha256, workspace_id=workspace_id, idempotency_key=key, observation_id=observation_id,
         observation_sha256=observation_sha256, item_handle=item_handle, item_sha256=item_sha256)
     read, replay = ehr._reserve(s, account, binding, body, None, parent=parent, item_handle=item_handle, port=port, workspace=w, grant=row)
@@ -277,10 +285,10 @@ def medications(s, box, actor, account_id, *, key, connection_id, binding_sha256
         return replay
     try:
         prepared = port.medications(scope(binding), selected, authorize=lambda: ehr._provider_authorize(s, read.id, port, reauthenticate))
-        payload = dict(public=dict(provider="tebra", protocol="fhir", mode="synthetic", kind="fhir_medications",
+        payload = dict(public=dict(provider=binding.vendor, protocol="fhir", mode="synthetic", kind="fhir_medications",
             workspace_id=w.id, display_label=binding.practice_name, observed_at=prepared.observation.observed_at,
             parent=dict(observation_id=prior.id, source_sha256=parent.source_sha256, item_sha256=item_sha256),
-            item=medication_item(item, prepared)), private=dict(protocol="fhir", binding_sha256=read.binding_digest,
+            item=medication_item(item, prepared, vendor=binding.vendor)), private=dict(protocol="fhir", binding_sha256=read.binding_digest,
                 request_sha256=read.request_hash, workspace_id=w.id, patient_link_id=w.patient_link_id,
                 items=[item.model_dump(mode="json")], reader_snapshot_json=reader_json(prepared.observation), review_sha256=prepared.snapshot_sha256))
         return ehr._store(s, read.id, payload, port, reauthenticate)

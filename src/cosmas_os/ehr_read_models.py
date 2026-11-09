@@ -45,6 +45,7 @@ class EhrReadBinding(OwnerScope, Base):
             "(protocol IS NULL AND vendor='tebra' AND environment='synthetic' AND customer_id IS NOT NULL AND customer_id ~ '^[1-9][0-9]{0,9}$' "
             "AND customer_id::numeric<=2147483647 AND practice_id::numeric<=2147483647 "
             "AND practice_timezone IS NOT NULL) OR (protocol='fhir' AND vendor='tebra' AND environment='synthetic' "
+            "AND practice_id IS NULL AND customer_id IS NULL AND practice_timezone IS NULL) OR (protocol='fhir' AND vendor='athena' AND environment='preview' "
             "AND practice_id IS NULL AND customer_id IS NULL AND practice_timezone IS NULL) OR (protocol='core' AND vendor='athena' AND environment IN ('preview','production') AND customer_id IS NULL AND practice_timezone IS NULL),false)", name="ck_ehr_read_binding_vendor"),
         CheckConstraint("coalesce((protocol='fhir' AND practice_id IS NULL) OR (protocol IS NULL AND practice_id IS NOT NULL "
             "AND practice_id ~ '^[1-9][0-9]*$' AND char_length(practice_id)<=19 "
@@ -309,7 +310,7 @@ class EhrReadSourceReview(WorkspaceScope, Base):
         UniqueConstraint("workspace_id", "snapshot_id", "item_handle", name="uq_ehr_read_review_item"),
         UniqueConstraint("workspace_id", "idempotency_key", name="uq_ehr_read_review_key"),
         CheckConstraint("command_provider IS NULL OR command_provider IN ('elation','tebra','athena')", name="ck_ehr_review_provider"),
-        CheckConstraint("coalesce(command_protocol IS NULL OR (command_protocol='fhir' AND command_provider='tebra') OR (command_protocol='core' AND command_provider='athena'),false)", name="ck_ehr_review_protocol"),
+        CheckConstraint("coalesce(command_protocol IS NULL OR (command_protocol='fhir' AND command_provider IN ('tebra','athena')) OR (command_protocol='core' AND command_provider='athena'),false)", name="ck_ehr_review_protocol"),
         CheckConstraint("coalesce(command_clinical_scope IS NULL OR (command_clinical_scope='medications' AND command_protocol='core' AND command_provider='athena'),false)", name="ck_ehr_review_clinical_scope"),
         CheckConstraint("expected_revision>=1 AND workspace_revision=expected_revision+1",
             name="ck_ehr_read_review_revision"),
