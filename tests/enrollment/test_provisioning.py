@@ -117,6 +117,20 @@ def bearer(plan, subject=None):
                        "org_id": plan.organization_id}, "invented-test-secret-at-least-32-characters", algorithm="HS256")
 
 
+def test_delete_user_is_idempotent_for_missing_accounts():
+    deleted = []
+
+    def respond(request):
+        if request.method == "DELETE" and request.url.path.startswith("/v1/users/"):
+            deleted.append(request.url.path.rsplit("/", 1)[-1])
+            return httpx.Response(404, json={"errors": [{"code": "resource_not_found"}]})
+        return httpx.Response(500)
+
+    clerk = ClerkProvisioningPort("sk_test_invented", client=httpx.Client(transport=httpx.MockTransport(respond)))
+    clerk.delete_user("user_already_gone")
+    assert deleted == ["user_already_gone"]
+
+
 def test_lost_clerk_response_reuses_exact_practice_and_never_starts_trial(lab):
     client, headers, provisioner, transport, practice = lab
     first = prepare(provisioner, practice)

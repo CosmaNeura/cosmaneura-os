@@ -213,12 +213,15 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   }
 
   if (state?.phase === "ready" && identity) {
-    const controls=<NativeAccountControls key={state.revision} onSignOut={()=>void act("signOut")}
-      onConnectPractice={practiceCanConnect?connectPractice:undefined}/>;
+    const clearNative=plugin.clearAccountCredentials
+      ? async()=>{try{await plugin.clearAccountCredentials!();}finally{await act("signOut");}}
+      : undefined;
+    const controls=<NativeAccountControls key={state.revision} identity={identity} onSignOut={()=>void act("signOut")}
+      onConnectPractice={practiceCanConnect?connectPractice:undefined} clearNativeCredentials={clearNative}/>;
     return hostedWorkspaceRequested()
       ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate key={state.revision} identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity}
-          accountControls={<NativeAccountControls key={state.revision} displayName={access.displayName} practiceName={access.practiceName}
-            onSignOut={()=>void act("signOut")} onConnectPractice={practiceCanConnect?connectPractice:undefined}/>} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
+          accountControls={<NativeAccountControls key={state.revision} identity={identity} displayName={access.displayName} practiceName={access.practiceName}
+            onSignOut={()=>void act("signOut")} onConnectPractice={practiceCanConnect?connectPractice:undefined} clearNativeCredentials={clearNative}/>} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
       : <EncounterWorkspace key={state.revision} authenticated={identity} accountControls={controls}/>;
   }
   if (state?.phase === "unavailable" || failed) return <StatusScreen title="Sign-in needs attention"

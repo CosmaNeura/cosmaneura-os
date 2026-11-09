@@ -42,6 +42,8 @@ vi.mock("@clerk/react", () => ({
   SignIn: () => "Clerk sign in",
   UserButton: () => "User menu",
   useAuth: () => clerkHarness.auth,
+  useClerk: () => ({ signOut: vi.fn() }),
+  useUser: () => ({ isLoaded: true, user: null }),
 }));
 
 import { type QueueItem } from "./api";
