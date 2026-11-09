@@ -1,12 +1,14 @@
 FROM python:3.13-slim@sha256:d0a9e379c0c588befb0e427db17ca9731751d281f32c6cb1a90a1277b680bdad
 # Apply verified Debian security fixes when the pinned base omits them.
 # CVE-2026-109518 (apt / libapt-pkg7.0) is fixed in 3.0.4; keep the
-# libpcre2 pin from the prior base refresh.
+# libpcre2 pin from the prior base refresh. zlib1g 1+deb13u1 covers
+# CVE-2026-76844 and CVE-2026-85091 for the release image Trivy gate.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         apt=3.0.4 \
         libapt-pkg7.0=3.0.4 \
         libpcre2-8-0=10.46-1~deb13u3 \
+        zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
