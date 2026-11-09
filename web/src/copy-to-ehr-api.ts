@@ -4,20 +4,22 @@ import {permittedWorkspaceApi} from './workspace-origin';
 import {workspaceAuthHeaders,assertCurrentDesktopSession} from './workspace-auth-headers';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
-/** Closed package JSON from GET /api/copy-to-ehr/drafts/{draft_id}. Profiles stay on track A. */
+/** Mirrors package JSON from GET /api/copy-to-ehr/drafts/{draft_id}. Profiles stay on track A. */
 export type CopyToEhrSection={key:string;label:string;text:string};
-export type CopyToEhrExtras={patient_instructions?:string;orders?:string};
+export type VisitCopyToEhrStatus='unset'|'not_sent_copy_instead';
 export type CopyToEhrPackage={
   profile_id:string;
   draft_id:string;
-  draft_revision:number;
+  draft_revision:string;
   payload_hash:string;
   sections:CopyToEhrSection[];
-  extras:CopyToEhrExtras;
+  extras:CopyToEhrSection[];
   created_at:string;
   expires_at:string;
   review_state:string;
+  visit_copy_to_ehr_status:VisitCopyToEhrStatus;
   full_note:string;
+  section_notes:Record<string,string>;
 };
 
 export type CopyToEhrAuditEvent=
@@ -38,55 +40,77 @@ export type CopyToEhrAuditMetadata={
 
 const HASH=/^[a-f0-9]{64}$/u;
 const ISO=/^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$/u;
+const EXTRA_KEYS=new Set(['patient_instructions','orders']);
 const closed=(value:unknown,keys:string):value is Record<string,unknown>=>
   !!value&&typeof value==='object'&&!Array.isArray(value)&&
   Object.keys(value).sort().join(',')===keys.split(',').sort().join(',');
 const text=(value:unknown,limit:number):value is string=>
   typeof value==='string'&&value.length>0&&value.length<=limit;
 
-export function validateCopyToEhrPackage(value:unknown):CopyToEhrPackage{
-  if(!closed(value,'profile_id,draft_id,draft_revision,payload_hash,sections,extras,created_at,expires_at,review_state,full_note')||
-      !text(value.profile_id,64)||!text(value.draft_id,200)||
-      !Number.isSafeInteger(value.draft_revision)||Number(value.draft_revision)<1||
-      typeof value.payload_hash!=='string'||!HASH.test(value.payload_hash)||
-      !Array.isArray(value.sections)||value.sections.length<1||value.sections.length>100||
-      !text(value.created_at,64)||!ISO.test(value.created_at)||!Number.isFinite(Date.parse(value.created_at))||
-      !text(value.expires_at,64)||!ISO.test(value.expires_at)||!Number.isFinite(Date.parse(value.expires_at))||
-      !text(value.review_state,64)||typeof value.full_note!=='string'||value.full_note.length>1048576||
-      !value.extras||typeof value.extras!=='object'||Array.isArray(value.extras)){
+function parseSection(row:unknown):CopyToEhrSection{
+  if(!closed(row,'key,label,text')||!text(row.key,200)||!text(row.label,200)||
+      typeof row.text!=='string'||row.text.length>262144||
+      row.text.startsWith('#')||row.label.startsWith('#')){
     throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
   }
-  const extras=value.extras as Record<string,unknown>;
-  for(const key of Object.keys(extras)){
-    if(key!=='patient_instructions'&&key!=='orders')throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
-    const item=extras[key];
-    if(item!==undefined&&(typeof item!=='string'||item.length>262144))throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
+  return {key:row.key,label:row.label,text:row.text};
+}
+
+export function validateCopyToEhrPackage(value:unknown):CopyToEhrPackage{
+  if(!closed(value,'profile_id,draft_id,draft_revision,payload_hash,sections,extras,created_at,expires_at,review_state,visit_copy_to_ehr_status,full_note,section_notes')||
+      !text(value.profile_id,64)||!text(value.draft_id,200)||!text(value.draft_revision,200)||
+      typeof value.payload_hash!=='string'||!HASH.test(value.payload_hash)||
+      !Array.isArray(value.sections)||value.sections.length<1||value.sections.length>100||
+      !Array.isArray(value.extras)||value.extras.length>20||
+      !text(value.created_at,64)||!ISO.test(value.created_at)||!Number.isFinite(Date.parse(value.created_at))||
+      !text(value.expires_at,64)||!ISO.test(value.expires_at)||!Number.isFinite(Date.parse(value.expires_at))||
+      !text(value.review_state,64)||
+      (value.visit_copy_to_ehr_status!=='unset'&&value.visit_copy_to_ehr_status!=='not_sent_copy_instead')||
+      typeof value.full_note!=='string'||value.full_note.length>1048576||
+      !value.section_notes||typeof value.section_notes!=='object'||Array.isArray(value.section_notes)){
+    throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
   }
   const seen=new Set<string>();
   const sections:CopyToEhrSection[]=[];
   for(const row of value.sections){
-    if(!closed(row,'key,label,text')||!text(row.key,200)||!text(row.label,200)||
-        typeof row.text!=='string'||row.text.length>262144||seen.has(row.key)||
-        row.text.startsWith('#')||row.label.startsWith('#')){
-      throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
-    }
-    seen.add(row.key);
-    sections.push({key:row.key,label:row.label,text:row.text});
+    const section=parseSection(row);
+    if(seen.has(section.key)||EXTRA_KEYS.has(section.key))throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
+    seen.add(section.key);
+    sections.push(section);
+  }
+  const extras:CopyToEhrSection[]=[];
+  for(const row of value.extras){
+    const section=parseSection(row);
+    if(!EXTRA_KEYS.has(section.key)||seen.has(section.key))throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
+    seen.add(section.key);
+    extras.push(section);
   }
   if(value.full_note.split('\n').some(line=>line.startsWith('#'))){
     throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
   }
+  const notes=value.section_notes as Record<string,unknown>;
+  const section_notes:Record<string,string>={};
+  for(const section of sections){
+    const note=notes[section.key];
+    if(typeof note!=='string'||note.length>262144||note.startsWith('#')){
+      throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
+    }
+    section_notes[section.key]=note;
+  }
+  if(Object.keys(notes).length!==sections.length)throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
   return {
     profile_id:value.profile_id as string,
     draft_id:value.draft_id as string,
-    draft_revision:value.draft_revision as number,
+    draft_revision:value.draft_revision as string,
     payload_hash:value.payload_hash as string,
     sections,
-    extras:extras as CopyToEhrExtras,
+    extras,
     created_at:value.created_at as string,
     expires_at:value.expires_at as string,
     review_state:value.review_state as string,
+    visit_copy_to_ehr_status:value.visit_copy_to_ehr_status as VisitCopyToEhrStatus,
     full_note:value.full_note as string,
+    section_notes,
   };
 }
 
@@ -111,10 +135,10 @@ export async function fetchCopyToEhrPackage(
   identity:AuthenticatedWorkspaceIdentity,
   draftId:string,
   profileId='atlas_md',
-  revision?:number,
+  revision?:string,
   signal?:AbortSignal,
 ):Promise<CopyToEhrPackage>{
-  if(!text(draftId,200)||!text(profileId,64)||revision!==undefined&&(!Number.isSafeInteger(revision)||revision<1)){
+  if(!text(draftId,200)||!text(profileId,64)||revision!==undefined&&!text(revision,200)){
     throw new WorkspaceApiError(422,'copy_to_ehr_request_invalid');
   }
   const controller=new AbortController();
@@ -128,7 +152,7 @@ export async function fetchCopyToEhrPackage(
       throw new WorkspaceApiError(503,'copy_to_ehr_unavailable');
     }
     const query=new URLSearchParams({profile:profileId});
-    if(revision!==undefined)query.set('revision',String(revision));
+    if(revision!==undefined)query.set('revision',revision);
     const headers=await workspaceAuthHeaders(identity,base);
     assertCurrentDesktopSession(identity);
     const response=await workspaceFetch(identity,`${base}/api/copy-to-ehr/drafts/${encodeURIComponent(draftId)}?${query}`,{

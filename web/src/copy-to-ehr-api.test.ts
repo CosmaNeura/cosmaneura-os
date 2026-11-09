@@ -7,13 +7,15 @@ it('accepts a closed package with plain labeled sections and separate extras',()
   expect(pkg.sections.map(section=>section.key)).toEqual(['subjective','objective','assessment','plan']);
   expect(pkg.full_note).toContain('Subjective\nTaylor Morgan reports');
   expect(pkg.full_note).not.toMatch(/^#/m);
-  expect(pkg.extras.patient_instructions).toContain('Gargle');
+  expect(pkg.extras.map(extra=>extra.key)).toEqual(['patient_instructions','orders']);
+  expect(pkg.visit_copy_to_ehr_status).toBe('unset');
   expect(CLIPBOARD_CLEAR_TEXT).toBe(' ');
 });
 
 it('rejects a leading hash in section text or the full note',()=>{
   expect(()=>validateCopyToEhrPackage(taylorMorganPackage({
     sections:[{key:'subjective',label:'Subjective',text:'#AI macro would open'}],
+    section_notes:{subjective:'Subjective\nplain'},
     full_note:'Subjective\nplain',
   }))).toThrow();
   expect(()=>validateCopyToEhrPackage(taylorMorganPackage({

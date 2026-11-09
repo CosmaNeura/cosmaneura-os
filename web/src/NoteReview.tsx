@@ -189,7 +189,7 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
     {latest?.review && !dirty && !otherVersion && <p className="team-fine">Version {latest.version} reviewed by you at {new Date(latest.review.created_at).toLocaleString()}.{sourcesChanged ? " That review predates the source changes." : ""}</p>}
     {latest?.review && !dirty && !otherVersion && copyToEhrIdentity && (copyToEhrEnabled || copyToEhrFallbackOffer) &&
       <CopyToEhrMount enabled={copyToEhrEnabled} fallbackOffer={copyToEhrFallbackOffer} identity={copyToEhrIdentity}
-        draftId={latest.id} expectedRevision={latest.version} profileId={copyToEhrProfileId}
+        draftId={latest.id} expectedRevision={String(latest.version)} profileId={copyToEhrProfileId}
         locked={locked} highlightedKey={copyToEhrHighlightedKey} />}
     {compactReview&&nextSteps}
     {!!workspace.note?.history.length && <details className="team-history"><summary>Note version history</summary>

@@ -11,7 +11,7 @@ import './copy-to-ehr.css';
 export type CopyToEhrStripProps={
   pkg:CopyToEhrPackage;
   /** Expected draft revision at open. Mismatch locks the strip. */
-  expectedRevision:number;
+  expectedRevision:string;
   locked?:boolean;
   /** Visit-level connector failure: show that the note was not sent. */
   connectionFailed?:boolean;
@@ -27,7 +27,7 @@ type CopyState='idle'|'copying'|'copied'|'manual'|'cleared';
 function targetText(target:CopyTarget,pkg:CopyToEhrPackage):string{
   if(target==='clear')return CLIPBOARD_CLEAR_TEXT;
   if(target==='full')return pkg.full_note;
-  return target.text;
+  return pkg.section_notes[target.key]??target.text;
 }
 
 function targetLabel(target:CopyTarget):string{
@@ -41,6 +41,7 @@ export function CopyToEhrStrip({
 }:CopyToEhrStripProps){
   const stale=expectedRevision!==pkg.draft_revision;
   const expired=Date.parse(pkg.expires_at)<=Date.now();
+  const notSent=connectionFailed||pkg.visit_copy_to_ehr_status==='not_sent_copy_instead';
   const disabled=locked||stale||expired;
   const [index,setIndex]=useState(0);
   const [state,setState]=useState<CopyState>('idle');
@@ -55,10 +56,10 @@ export function CopyToEhrStrip({
   const active=pkg.sections.find(section=>section.key===activeKey)??pkg.sections[0];
 
   useEffect(()=>{
-    onAudit?.({event:connectionFailed?'copy_to_ehr.fallback_shown':'copy_to_ehr.opened',profile_id:pkg.profile_id,outcome:'ok'});
+    onAudit?.({event:notSent?'copy_to_ehr.fallback_shown':'copy_to_ehr.opened',profile_id:pkg.profile_id,outcome:'ok'});
   // Open once per package identity.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[pkg.draft_id,pkg.payload_hash,connectionFailed]);
+  },[pkg.draft_id,pkg.payload_hash,notSent]);
 
   useEffect(()=>{
     if(!highlightedKey)return;
@@ -122,14 +123,12 @@ export function CopyToEhrStrip({
 
   if(!open)return null;
 
-  const extras=Object.entries(pkg.extras).filter(([,value])=>typeof value==='string'&&value.length>0) as [string,string][];
-
   return <section className="copy-to-ehr-strip" aria-label="Copy to EHR">
     <header>
       <h3>Copy to EHR</h3>
       <p className="team-fine">Copy plain text, then paste in the chart yourself. CosmaBot never types into the chart.</p>
     </header>
-    {connectionFailed&&<p className="copy-to-ehr-not-sent" role="status">
+    {notSent&&<p className="copy-to-ehr-not-sent" role="status">
       This note was not sent. Use Copy to EHR below, or continue the visit without copying.
     </p>}
     {stale&&<p className="copy-to-ehr-lock" role="alert">This draft changed. Reopen Copy to EHR on the current reviewed version. Buttons stay locked.</p>}
@@ -143,10 +142,10 @@ export function CopyToEhrStrip({
       <CopyToEhrPopout disabled={disabled} sectionLabel={active.label} sectionIndex={pkg.sections.findIndex(s=>s.key===active.key)} sectionCount={pkg.sections.length}/>
       <button type="button" disabled={locked} onClick={finish}>Done</button>
     </div>
-    {extras.length>0&&<div className="copy-to-ehr-extras" aria-label="Separate outputs">
+    {pkg.extras.length>0&&<div className="copy-to-ehr-extras" aria-label="Separate outputs">
       <p className="team-fine">These stay out of the full note. Copy them only when you need them.</p>
-      {extras.map(([key,text])=><button key={key} type="button" disabled={disabled||state==='copying'}
-        onClick={()=>void copy({key,label:key.replaceAll('_',' '),text})}>Copy {key.replaceAll('_',' ')}</button>)}
+      {pkg.extras.map(extra=><button key={extra.key} type="button" disabled={disabled||state==='copying'}
+        onClick={()=>void copy(extra)}>Copy {extra.label}</button>)}
     </div>}
     {state==='copying'&&<p role="status">Copying…</p>}
     {state==='copied'&&<p role="status">Copied. Paste in the chart, then review before saving there.</p>}

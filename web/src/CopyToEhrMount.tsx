@@ -16,7 +16,7 @@ export type CopyToEhrMountProps={
   identity:AuthenticatedWorkspaceIdentity;
   draftId:string;
   /** When set, sent as ?revision= and used for stale lock. Omit until the host knows it. */
-  expectedRevision?:number;
+  expectedRevision?:string;
   profileId?:string;
   locked?:boolean;
   highlightedKey?:string|null;
@@ -75,8 +75,10 @@ export function CopyToEhrMount({
 
   if(!active||dismissed)return null;
 
+  const notSent=fallbackOffer||pkg?.visit_copy_to_ehr_status==='not_sent_copy_instead';
+
   return <div className="copy-to-ehr-mount">
-    {fallbackOffer&&!pkg&&!busy&&<p className="copy-to-ehr-not-sent" role="status">
+    {notSent&&!pkg&&!busy&&<p className="copy-to-ehr-not-sent" role="status">
       This note was not sent. Copy to EHR is available when the package loads, or continue the visit without copying.
     </p>}
     {busy&&<p role="status">Opening Copy to EHR…</p>}

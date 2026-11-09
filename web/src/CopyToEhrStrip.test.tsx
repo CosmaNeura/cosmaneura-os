@@ -37,10 +37,10 @@ it('copies the full labeled note only after an explicit click',async()=>{
 it('copies the highlighted section and advances on next highlight',async()=>{
   await render();
   await click('Copy this section');
-  expect(write).toHaveBeenCalledExactlyOnceWith(pkg.sections[0].text);
+  expect(write).toHaveBeenCalledExactlyOnceWith(pkg.section_notes.subjective);
   await click('Next highlight');
   await click('Copy this section');
-  expect(write).toHaveBeenLastCalledWith(pkg.sections[1].text);
+  expect(write).toHaveBeenLastCalledWith(pkg.section_notes.objective);
   expect(host.textContent).toContain('Next section: Objective');
 });
 
@@ -53,13 +53,19 @@ it('clears the clipboard with a single space',async()=>{
 });
 
 it('locks every copy button when the draft revision is stale',async()=>{
-  await render({expectedRevision:2});
+  await render({expectedRevision:'rev-stale'});
   expect(host.querySelector('[role=alert]')?.textContent).toContain('This draft changed');
   for(const label of ['Copy full note','Copy this section','Next highlight','Clear clipboard','Pop out']){
     expect(button(label)?.disabled).toBe(true);
   }
   await click('Copy full note');
   expect(write).not.toHaveBeenCalled();
+});
+
+it('copies section_notes text for the active section',async()=>{
+  await render();
+  await click('Copy this section');
+  expect(write).toHaveBeenCalledExactlyOnceWith(pkg.section_notes.subjective);
 });
 
 it('shows selectable text when the clipboard is blocked',async()=>{
@@ -69,10 +75,10 @@ it('shows selectable text when the clipboard is blocked',async()=>{
   expect(host.querySelector('[role=status]')?.textContent).toContain('Clipboard copy is blocked');
   const field=host.querySelector('textarea')!;
   expect(field.readOnly).toBe(true);
-  expect(field.value).toBe(pkg.sections[0].text);
+  expect(field.value).toBe(pkg.section_notes.subjective);
   await click('Select and copy');
   expect(document.activeElement).toBe(field);
-  expect(field.selectionEnd).toBe(pkg.sections[0].text.length);
+  expect(field.selectionEnd).toBe(pkg.section_notes.subjective.length);
 });
 
 it('states clearly that a failed connection did not send the note',async()=>{
