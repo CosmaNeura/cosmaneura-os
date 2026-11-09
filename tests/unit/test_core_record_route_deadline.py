@@ -313,7 +313,9 @@ def test_changed_current_scope_prevents_next_phase_or_disclosure(fixture, phase,
 @pytest.mark.parametrize("phase", PATHS)
 def test_timeout_of_each_dispatched_phase_never_starts_the_next(fixture, monkeypatch, phase):
     f = fixture
-    monkeypatch.setattr(route, "DEADLINE_SECONDS", 0.08)
+    # Keep the public deadline well under the 1s slow-phase sleep, but above
+    # cold CI setup so earlier phases can still dispatch before the timeout.
+    monkeypatch.setattr(route, "DEADLINE_SECONDS", 0.35)
     f.slow = phase
     f.cleanup_gate = Event()
     with TestClient(f.app) as client:
