@@ -32,6 +32,12 @@ it('exposes the supplied account control at home without duplicating or replacin
  const logout=vi.fn();await act(async()=>root.render(<SettingsHub {...{accountControls:<button onClick={logout}>Log out</button>}} open team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
  expect(host.querySelector('[aria-label="Account"]')?.textContent).toContain('Log out');await click('Log out');expect(logout).toHaveBeenCalledOnce();
 });
+it('renders Delete account inside Settings Account when the control supplies it',async()=>{
+ await act(async()=>root.render(<SettingsHub {...{accountControls:<div className="row account-controls" aria-label="Account"><button>Log out</button><button>Delete account</button></div>}} open team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
+ const account=host.querySelector('.settings-account[aria-label="Account"]');
+ expect(account?.textContent).toContain('Delete account');
+ expect(account?.textContent).toContain('Log out');
+});
 it('opens the EHR and Rx Relay portal without claiming a prescription can be sent',async()=>{
  const open=vi.fn();await act(async()=>root.render(<SettingsHub {...{practiceRecordActions:{elation:open}}} open team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
  await click('EHR & Rx Relay');

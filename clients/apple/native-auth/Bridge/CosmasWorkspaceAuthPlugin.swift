@@ -16,6 +16,7 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
         CAPPluginMethod(name: "getState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "signIn", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "signOut", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearAccountCredentials", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "prepareProviderSource", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "closeProviderSource", returnType: CAPPluginReturnPromise),
@@ -348,6 +349,17 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
             do {
                 guard let auth = self.auth else { throw NativeAuthError.unavailable }
                 call.resolve(Self.payload(try await auth.signOut()))
+            } catch { Self.reject(call) }
+        }
+    }
+
+    @objc nonisolated public func clearAccountCredentials(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            guard call.options.isEmpty else { return Self.reject(call) }
+            self.initializeAuth()
+            do {
+                guard let auth = self.auth else { throw NativeAuthError.unavailable }
+                call.resolve(Self.payload(try await auth.clearAccountCredentials()))
             } catch { Self.reject(call) }
         }
     }

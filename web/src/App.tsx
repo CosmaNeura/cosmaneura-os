@@ -3,6 +3,7 @@ import {PracticeAccessGate} from './PracticeAccessGate';
 import {hostedWorkspaceRequested} from './hosted-workspace';
 import { OrganizationSwitcher, UserButton, useAuth, useClerk, useUser } from "@clerk/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { AccountControls } from "./AccountControls";
 import { BetaIdentityAdmin } from "./BetaIdentityAdmin";
 import { BetaSignIn } from "./beta-sign-in";
 import { api, COMPACT_LOCAL, type ApiIdentity, type QueueItem, type Seed } from "./api";
@@ -335,6 +336,7 @@ function BetaOrganizationQueue({ getToken }: { getToken: BetaTokenGetter }) {
 
 function SignedInWorkspace({ getToken, accountControls }: { getToken: BetaTokenGetter; accountControls?: ReactNode }) {
   const active = useRef(true);
+  const clerk = useClerk();
   const tokenGetter = useRef(getToken);
   tokenGetter.current = getToken;
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -343,8 +345,8 @@ function SignedInWorkspace({ getToken, accountControls }: { getToken: BetaTokenG
     const token = await tokenGetter.current(options);
     return active.current ? token : null;
   }}), []);
-  const controls=accountControls ?? <div className="row account-controls" aria-label="Account and organization">
-    <OrganizationSwitcher hidePersonal /><UserButton /></div>;
+  const controls=accountControls ?? <AccountControls identity={identity} onSignOut={()=>void clerk.signOut()}
+    extras={<><OrganizationSwitcher hidePersonal /><UserButton /></>}/>;
   return hostedWorkspaceRequested()
     ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
     : <EncounterWorkspace authenticated={identity} accountControls={controls}/>;
@@ -432,9 +434,12 @@ function StandaloneOrganizationGate({ target, userId, sessionId, orgId, getToken
   };
   // The SDK promise is not admission: wait for observed auth and freshly read
   // membership to agree. A changed org immediately unmounts the old workspace.
-  if (orgId === target && !selecting) return <SignedInWorkspace key={`${userId}:${sessionId}:${orgId}`}
-    getToken={scopedGetToken} accountControls={<div className="row account-controls" aria-label="Account and practice">
-      <span>{membership.name}</span><UserButton /></div>} />;
+  if (orgId === target && !selecting) {
+    const signedIdentity={mode:"clerk_jwt" as const,getToken:scopedGetToken};
+    return <SignedInWorkspace key={`${userId}:${sessionId}:${orgId}`}
+      getToken={scopedGetToken} accountControls={<AccountControls identity={signedIdentity} onSignOut={()=>void clerk.signOut()}
+        extras={<><span>{membership.name}</span><UserButton /></>}/>} />;
+  }
   return <StatusScreen title={`Open ${membership.name}`} detail={selectionFailed
     ? "Your practice did not open. Try again, or use the account menu to sign in again."
     : "This CosmaBot app opens this practice. Your other practice work stays separate."} role={selectionFailed ? "alert" : "status"}>
