@@ -19,6 +19,8 @@ def test_plugin_tool_surfaces_unchanged_by_capability_declaration():
         "athena_read_appointments",
         "athena_read_medications",
         "athena_read_allergies",
+        "athena_read_authorized_patients",
+        "athena_read_fhir_medications",
         "athena_read_visit_link_status",
     )
     assert elation.NAMES == (

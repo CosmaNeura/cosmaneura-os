@@ -72,9 +72,10 @@ def test_plugin_manifests_match_expected_vendors():
 def test_athena_elation_tebra_declare_sandbox_reads():
     assert ATHENA.sandbox_supported is True
     assert ATHENA.readable_resources == frozenset({
-        "appointments", "medications", "allergies", "visit_link_status",
+        "appointments", "patients", "medications", "allergies", "visit_link_status",
     })
     assert "athena_platform_bearer" in ATHENA.auth_styles
+    assert "oauth2_client_credentials" in ATHENA.auth_styles
     assert ELATION.sandbox_supported is True
     assert ELATION.readable_resources == frozenset({
         "appointments", "problems", "medications", "labs",
