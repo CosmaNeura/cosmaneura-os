@@ -31,7 +31,7 @@ alwaysApply: true
 - Keep unexpected owner changes in place and continue the rest of the work.
 - Stop only when a required credential or physical device is not available.
   Sibling repositories stay read-only.
-- GPT-5.6 SOL is the development agent, not a product runtime dependency.
+- Grok 4.7 (standard settings: Fast off, normal context) is the development agent, not a product runtime dependency.
 - Preserve the one-Org/one-Box model, distinct human/agent principals, F-8 as
   the sole approval substrate, payload-bound decisions, and the local operation
   ledger.
