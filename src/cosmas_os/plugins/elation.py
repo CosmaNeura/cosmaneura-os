@@ -545,23 +545,28 @@ EHR_CAPABILITY = CapabilityManifest(
     auth_styles=frozenset({"cosmas_session", "oauth2_client_credentials"}),
     readable_resources=frozenset({
         "appointments",
+        "patients",
         "problems",
         "medications",
+        "allergies",
         "labs",
+        "visit",
     }),
     unsupported_actions=frozenset({
         "write_chart",
         "prescribe",
         "sign_note",
         "book_appointment",
-        "read_allergies",
         "production_target",
     }),
     sandbox_supported=True,
     production_supported=False,
     writes_supported=False,
     notes=(
-        "Plugin tools call signed CosmaBot EHR reads. Vendor adapter auth is "
-        "OAuth2 client-credentials against the Elation sandbox only."
+        "Plugin tools call signed CosmaBot EHR reads. Appointments and practice "
+        "verification stay on REST APIv2 (adapters.elation_read). Clinical chart "
+        "reads use the C11/C20 FHIR R4 sandbox adapter (adapters.elation_fhir_r4) "
+        "with OAuth2 client-credentials; mock transport only; flags default off; "
+        "no CosmaBot route wiring from this ticket."
     ),
 )

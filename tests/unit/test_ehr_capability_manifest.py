@@ -78,9 +78,10 @@ def test_athena_elation_tebra_declare_sandbox_reads():
     assert "oauth2_client_credentials" in ATHENA.auth_styles
     assert ELATION.sandbox_supported is True
     assert ELATION.readable_resources == frozenset({
-        "appointments", "problems", "medications", "labs",
+        "appointments", "patients", "problems", "medications", "allergies", "labs", "visit",
     })
     assert "oauth2_client_credentials" in ELATION.auth_styles
+    assert "read_allergies" not in ELATION.unsupported_actions
     assert TEBRA.sandbox_supported is True
     assert TEBRA.readable_resources == frozenset({
         "appointments", "visit", "patients", "medications",

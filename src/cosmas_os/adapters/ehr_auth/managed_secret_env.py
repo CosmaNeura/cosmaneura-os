@@ -22,6 +22,11 @@ MANAGED_SECRET_REFERENCE_PATTERN = re.compile(
 ATHENA_FHIR_CLIENT_ID_REF = "COSMAS_MANAGED_SECRET_EHR_ATHENA_FHIR_CLIENT_ID"
 ATHENA_FHIR_CLIENT_SECRET_REF = "COSMAS_MANAGED_SECRET_EHR_ATHENA_FHIR_CLIENT_SECRET"
 
+# Elation FHIR R4 sandbox app — names only; John creates the vault secrets after
+# the Elation API agreement / sandbox packet. Never put VALUES in source.
+ELATION_FHIR_CLIENT_ID_REF = "COSMAS_MANAGED_SECRET_EHR_ELATION_FHIR_CLIENT_ID"
+ELATION_FHIR_CLIENT_SECRET_REF = "COSMAS_MANAGED_SECRET_EHR_ELATION_FHIR_CLIENT_SECRET"
+
 
 def validate_managed_secret_reference_name(name: str) -> str:
     if type(name) is not str or MANAGED_SECRET_REFERENCE_PATTERN.fullmatch(name) is None:

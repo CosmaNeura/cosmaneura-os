@@ -31,6 +31,8 @@ from cosmas_os.adapters.tebra_read import TebraReadAdapter, TebraReadError
 from cosmas_os.config import Settings
 from cosmas_os.ehr_real_data_gate import (
     ATHENA_PRODUCTION_ORIGIN,
+    ELATION_FHIR_PRODUCTION_ORIGIN,
+    ELATION_FHIR_SANDBOX_ORIGIN,
     ELATION_PRODUCTION_ORIGIN,
     PRODUCTION_ORIGINS,
     CosmasEhrRealDataGate,
@@ -47,6 +49,7 @@ from cosmas_os.plugins import atlas_md
     [
         ("athena", ATHENA_PRODUCTION_ORIGIN),
         ("elation", ELATION_PRODUCTION_ORIGIN),
+        ("elation", ELATION_FHIR_PRODUCTION_ORIGIN),
         ("tebra", FHIR_BASE),
         ("tebra", TEBRA_SOAP_ENDPOINT),
     ],
@@ -91,6 +94,7 @@ def test_real_data_gate_off_by_default_refuses_every_non_sandbox_source_in_every
     assert non_sandbox == [
         ("athena", ATHENA_PRODUCTION_ORIGIN),
         ("elation", ELATION_PRODUCTION_ORIGIN),
+        ("elation", ELATION_FHIR_PRODUCTION_ORIGIN),
         ("tebra", "https://fhir.prd.cloud.tebra.com"),
         ("tebra", "https://webservice.kareo.com"),
     ]
@@ -198,6 +202,7 @@ def test_real_data_gate_off_by_default_refuses_every_non_sandbox_source_in_every
     [
         ("athena", ATHENA_ORIGINS["preview"]),
         ("elation", ELATION_SANDBOX_ORIGIN),
+        ("elation", ELATION_FHIR_SANDBOX_ORIGIN),
     ],
 )
 def test_sandbox_origin_allowed_only_with_sandbox_flag(vendor, origin):
@@ -208,6 +213,20 @@ def test_sandbox_origin_allowed_only_with_sandbox_flag(vendor, origin):
         assert_ehr_request_allowed(vendor=vendor, origin=origin, sandbox_enabled=False)
     decision = assert_ehr_request_allowed(vendor=vendor, origin=origin, sandbox_enabled=True)
     assert decision.allowed is True and decision.kind == "sandbox"
+
+
+def test_elation_fhir_production_origin_refused_by_default():
+    assert classify_ehr_origin("elation", ELATION_FHIR_PRODUCTION_ORIGIN) == "production"
+    with pytest.raises(EhrRealDataGateError, match="^real_data_required$"):
+        assert_ehr_request_allowed(
+            vendor="elation",
+            origin=ELATION_FHIR_PRODUCTION_ORIGIN,
+            sandbox_enabled=True,
+            real_data_enabled=False,
+            practice_baa_recorded=False,
+            mock_transport_only=True,
+        )
+    assert ELATION_FHIR_PRODUCTION_ORIGIN in PRODUCTION_ORIGINS["elation"]
 
 
 def test_production_allowed_only_with_real_data_switch_and_practice_baa():
