@@ -10,6 +10,8 @@ const harness = vi.hoisted(() => ({providers:0, tokens:vi.fn(async()=>"invented.
 vi.mock("@clerk/react",()=>({
   ClerkProvider:({children}:{children:unknown})=>{harness.providers++;return children;},
   useAuth:()=>({isLoaded:true,isSignedIn:true,orgId:"org_invented",userId:"user_invented",sessionId:"sess_invented",getToken:harness.tokens}),
+  useClerk:()=>({signOut:vi.fn()}),
+  useUser:()=>({isLoaded:true,user:null}),
   OrganizationSwitcher:()=>null,UserButton:()=>null,SignIn:()=>"Invited sign in",
 }));
 vi.mock("./EncounterWorkspace",()=>({EncounterWorkspace:({authenticated}:{authenticated:AuthenticatedWorkspaceIdentity})=>{harness.identity=authenticated;return "Connected private workspace";}}));

@@ -247,6 +247,12 @@ class IdentityChangeBody(BaseModel):
     evidence_ref: str = Field(min_length=1, max_length=255)
 
 
+class AccountDeleteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm: str = Field(min_length=1, max_length=64)
+
+
 class IdentitySummaryResponse(BaseModel):
     clerk_subject: str
     display_name: str
@@ -1511,6 +1517,51 @@ def account_identity(request: Request, response: Response, identity: RequestIden
             else "existing" if getattr(request.state, "enrollment_existing_user", False) else "new_enrolled")
     return {"state": "allowed", "box_id": identity.box_id, "organization_id": identity.organization_id,
             "enrollment_user": user}
+
+
+def _clerk_user_deletion_port():
+    """Clerk Backend delete client. Tests override this dependency."""
+    secret = settings.clerk_secret_key
+    if secret is None or not secret.get_secret_value():
+        return None
+    from cosmas_os.enrollment.provisioning import ClerkProvisioningPort
+
+    return ClerkProvisioningPort(secret.get_secret_value())
+
+
+@app.post("/account/delete")
+def delete_account(
+    body: AccountDeleteBody,
+    response: Response,
+    session: Session = Depends(get_session),
+    identity: RequestIdentity = Depends(_identity),
+    clerk=Depends(_clerk_user_deletion_port),
+) -> dict[str, str]:
+    """Delete the signed-in user's app data and Clerk login after explicit confirm."""
+    from cosmas_os.application.account_deletion import delete_own_account
+    from cosmas_os.enrollment.domain import EnrollmentError
+
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return delete_own_account(
+            session,
+            box_id=identity.box_id,
+            principal_id=identity.principal_id,
+            external_identity_id=identity.external_identity_id,
+            confirm=body.confirm,
+            clerk=clerk,
+        )
+    except EnrollmentError as exc:
+        raise HTTPException(
+            status_code=exc.status,
+            detail="account deletion is temporarily unavailable",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        mapped = _map_err(exc)
+        headers = dict(mapped.headers or {})
+        headers["Cache-Control"] = "no-store"
+        raise HTTPException(status_code=mapped.status_code, detail=mapped.detail, headers=headers) from exc
 
 
 @app.get("/ready")
