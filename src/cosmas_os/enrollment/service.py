@@ -37,7 +37,7 @@ from .domain import (
     utc,
 )
 from .environments import hosting_environment_for_data_mode
-from .mail import DisabledInvitationNotifier, InvitationNotifier
+from .mail import AllowlistedInvitationNotifier, DisabledInvitationNotifier, InvitationNotifier
 from .models import (
     Acceptance,
     Account,
@@ -82,7 +82,15 @@ class EnrollmentService:
             raise ValueError("Synthetic period time cannot be installed in production enrollment")
         self._period_time = period_time
         self.native_workspace_authority = native_workspace_authority
-        self.invitation_notifier = invitation_notifier or DisabledInvitationNotifier()
+        # Always wrap with the fail-closed recipient allowlist (including test fakes).
+        inner = invitation_notifier or DisabledInvitationNotifier()
+        self.invitation_notifier = (
+            inner if isinstance(inner, (DisabledInvitationNotifier, AllowlistedInvitationNotifier))
+            else AllowlistedInvitationNotifier(
+                inner,
+                allowed_recipients=settings.invitation_mail_allowed_recipients,
+            )
+        )
         self.workspace_allocation_scheduler = workspace_allocation_scheduler
 
     def _period_now(self) -> datetime:

@@ -68,6 +68,15 @@ runtime admission master, Stripe key and Stripe webhook secret. Keep references 
 in Key Vault. Browser build output receives only enrollment enable/origin
 settings; the browser obtains public Clerk/pricing/readiness from `/enrollment/v1/config`.
 
+Synthetic staging invitation email (optional, default off): set
+`ENROLLMENT_INVITATION_MAIL_ENABLED=true` only with an operator-owned HTTPS
+`ENROLLMENT_INVITATION_MAIL_WEBHOOK_URL` and matching
+`ENROLLMENT_INVITATION_MAIL_WEBHOOK_SECRET` already present in the owned vault
+(do not invent or commit secret values here). Recipients are limited in code to
+`@example.invalid` plus exact
+`ENROLLMENT_INVITATION_MAIL_ALLOWED_RECIPIENTS` team test inboxes. Production
+keeps invitation mail dark.
+
 `readiness` contains explicit booleans corresponding to the backend admission
 flags. All omitted flags are false. `qualification.source_commit` binds the
 selected source. The fixed synthetic Development account host can admit intake

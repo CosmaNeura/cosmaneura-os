@@ -12,8 +12,12 @@ keep `/config.enabled` false and authenticated signup returns an actionable 503.
 Public `/enrollment/v1/config` includes `activation_blockers` when trial
 activation is closed, optional Mac/iPhone `client_install` download URLs, and
 `invitation_email_configured`. Invitation email stays dark until
-`ENROLLMENT_INVITATION_MAIL_*` webhook settings are configured; the invite API
-returns `email_sent` without exposing webhook secrets.
+`ENROLLMENT_INVITATION_MAIL_*` webhook settings are configured on synthetic
+staging (`data_mode=synthetic`); the invite API returns `email_sent` without
+exposing webhook secrets. Recipients are fail-closed: only `@example.invalid`
+addresses, plus any exact entries in
+`ENROLLMENT_INVITATION_MAIL_ALLOWED_RECIPIENTS` (team test inboxes), may receive
+mail. Production never enables invitation mail. The enable flag defaults off.
 
 Apply `python -m cosmas_os.enrollment.migration upgrade` to an independent empty
 PostgreSQL database, then run `check`. The additive migration refuses a database
