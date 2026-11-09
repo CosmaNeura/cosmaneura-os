@@ -230,7 +230,8 @@ def test_allow_read_refusals_carry_plain_english_message_for_each_vendor(vendor_
 
     undeclared = {
         "athena": "problems",
-        "elation": "allergies",
+        # Elation FHIR adapter declares allergies; visit_link_status stays undeclared.
+        "elation": "visit_link_status",
         "tebra": "labs",
     }[vendor_id]
     with pytest.raises(EhrReadRefused) as raised:
