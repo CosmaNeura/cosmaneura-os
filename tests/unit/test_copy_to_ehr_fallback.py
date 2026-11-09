@@ -18,7 +18,7 @@ from cosmas_os.adapters.tebra_fhir_read_runtime import (
     SyntheticTebraFhirReads,
     TebraFhirConnectionScope,
 )
-from cosmas_os.application.ehr_export import audit_contains_note_text
+from cosmas_os.application.ehr_export import ABSOLUTE_EXPIRY_SECONDS, audit_contains_note_text
 from cosmas_os.config import Settings, settings
 
 NOTE = "Sore throat for two days"
@@ -199,3 +199,33 @@ def test_audit_drops_note_text(monkeypatch):
     assert audit_contains_note_text(packed, [NOTE, "Taylor Morgan"]) is False
     assert "error_code" not in event.detail
     assert event.event == "copy_to_ehr.fallback_shown"
+
+
+def test_audit_events_stay_bounded_at_500(monkeypatch):
+    _enable(monkeypatch)
+    for index in range(550):
+        fallback.note_adapter_failure(
+            f"visit-bound-{index}", "elation", kind="error", error_code="unavailable",
+        )
+    assert len(fallback.fallback_audit_events()) == 500
+
+
+def test_visit_mark_expires_and_is_pruned_after_absolute_window(monkeypatch):
+    _enable(monkeypatch)
+    clock = {"now": 10_000.0}
+    monkeypatch.setattr(fallback, "_now", lambda: clock["now"])
+    fallback.note_adapter_failure(
+        "visit-window", "elation", kind="error", error_code="unavailable",
+    )
+    assert fallback.visit_view("visit-window")["visit_copy_to_ehr_status"] == "not_sent_copy_instead"
+    clock["now"] += ABSOLUTE_EXPIRY_SECONDS - 1
+    assert fallback.visit_view("visit-window")["visit_copy_to_ehr_status"] == "not_sent_copy_instead"
+    clock["now"] += 1
+    fallback.note_adapter_failure(
+        "visit-later", "elation", kind="disconnect", error_code="connection_changed",
+    )
+    assert "visit-window" not in fallback._marks
+    expired = fallback.visit_view("visit-window")
+    assert expired["visit_copy_to_ehr_status"] == "unset"
+    assert expired["offer"] == ""
+    assert fallback.visit_view("visit-later")["visit_copy_to_ehr_status"] == "not_sent_copy_instead"

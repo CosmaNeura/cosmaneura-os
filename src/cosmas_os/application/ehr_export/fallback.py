@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from collections import deque
 from collections.abc import Iterator, MutableMapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,7 +20,11 @@ from uuid import UUID
 
 from cosmas_os.application.ehr_export.audit import build_audit_event
 from cosmas_os.application.ehr_export.profiles import copy_profile_for_vendor
-from cosmas_os.application.ehr_export.types import CopyToEhrAuditEvent, VisitCopyToEhrStatus
+from cosmas_os.application.ehr_export.types import (
+    ABSOLUTE_EXPIRY_SECONDS,
+    CopyToEhrAuditEvent,
+    VisitCopyToEhrStatus,
+)
 
 logger = logging.getLogger("cosmas_os.ehr_export.fallback")
 
@@ -47,9 +53,16 @@ _ADAPTER_ERROR_TYPES = frozenset({
 })
 _TOKEN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
+_EVENT_LIMIT = 500
 _lock = Lock()
-_marks: dict[str, VisitCopyToEhrStatus] = {}
-_events: list[CopyToEhrAuditEvent] = []
+# visit id -> (status, monotonic time the mark was set)
+_marks: dict[str, tuple[VisitCopyToEhrStatus, float]] = {}
+_events: deque[CopyToEhrAuditEvent] = deque(maxlen=_EVENT_LIMIT)
+
+
+def _now() -> float:
+    """Clock for the mark window. Tests replace this; production uses monotonic time."""
+    return time.monotonic()
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +89,9 @@ def visit_view(visit_id: object) -> dict[str, str]:
     if key is None:
         return {"visit_id": "", "visit_copy_to_ehr_status": _UNSET, "offer": ""}
     with _lock:
-        status = _marks.get(key, _UNSET)
+        _prune_marks_locked(_now())
+        stored = _marks.get(key)
+    status = stored[0] if stored is not None else _UNSET
     return {
         "visit_id": key,
         "visit_copy_to_ehr_status": status,
@@ -157,8 +172,10 @@ def _apply(
     vendor = vendor_id if isinstance(vendor_id, str) else None
     profile = copy_profile_for_vendor(vendor)
     # Mark first so the clinician still sees the offer if audit construction fails.
+    now = _now()
     with _lock:
-        _marks[key] = _NOT_SENT
+        _prune_marks_locked(now)
+        _marks[key] = (_NOT_SENT, now)
     if visit_view_field is not None:
         visit_view_field["visit_copy_to_ehr_status"] = _NOT_SENT
         visit_view_field["offer"] = VISIBLE_OFFER
@@ -184,6 +201,16 @@ def _apply(
         visit_copy_to_ehr_status=_NOT_SENT,
         offer=VISIBLE_OFFER,
     )
+
+
+def _prune_marks_locked(now: float) -> None:
+    """Drop marks whose 60-minute absolute window has elapsed. Caller holds ``_lock``."""
+    expired = [
+        visit_id for visit_id, (_status, set_at) in _marks.items()
+        if now - set_at >= ABSOLUTE_EXPIRY_SECONDS
+    ]
+    for visit_id in expired:
+        del _marks[visit_id]
 
 
 def _enabled() -> bool:
