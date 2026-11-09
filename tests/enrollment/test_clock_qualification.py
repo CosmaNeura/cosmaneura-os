@@ -156,15 +156,29 @@ def original(c):
 
 @needs_pg
 @pytest.mark.parametrize("point", ["expiry", "after"])
-def test_original_exact_fourteen_days_runtime_and_worker_cutoff(runtime_case, point):
+def test_original_exact_fourteen_days_runtime_and_worker_cutoff(runtime_case, point, monkeypatch):
     from datetime import UTC
+
+    from cosmas_os.adapters import enrollment_admission as adapter_module
+    from cosmas_os.enrollment import admission as admission_module
+    from cosmas_os.enrollment import service as service_module
+
     f, c = runtime_case, runtime_case.control
     saved = activate(f)
     assert (saved[1].astimezone(UTC) - saved[0].astimezone(UTC)).total_seconds() == 14 * 86400
+    # The before-cutoff proof lasts one second. Freeze wall-security time so the
+    # one-second admission TTL cannot race real wall ticks (same pattern as the
+    # private-clock lab cutoff fixture).
+    wall = {"now": service_module.now_utc()}
+    wall_security = SimpleNamespace(time=lambda: wall["now"].timestamp())
+    monkeypatch.setattr(adapter_module, "time", wall_security)
+    monkeypatch.setattr(admission_module, "time", wall_security)
+    monkeypatch.setattr(service_module, "now_utc", lambda: wall["now"])
     c.commerce.advance("before")
     assert f.client.get("/workspaces", headers=f.headers).status_code == 200
     proof = c.responses[-1].json()
-    assert int(time.time()) - 1 <= proof["issued_at"] <= int(time.time())
+    stamp = int(wall_security.time())
+    assert stamp - 1 <= proof["issued_at"] <= stamp
     assert 0 < proof["expires_at"] - proof["issued_at"] <= 1
     c.adapter.authorize("", "user_synthetic_owner-a", purpose="worker", operation_id=str(uuid4()), approval_sha256="a" * 64)
     c.commerce.advance(point)
