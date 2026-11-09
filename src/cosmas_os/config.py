@@ -145,6 +145,8 @@ class Settings(BaseSettings):
     workspace_elation_medications_enabled: bool = False
     workspace_elation_labs_enabled: bool = False
     workspace_tebra_fhir_enabled: bool = False
+    # athena Certified FHIR R4 Preview (practice 195900). Default off; hosted/prod refuse.
+    workspace_athena_fhir_sandbox_enabled: bool = False
     workspace_athena_allergies_enabled: bool = False
     workspace_athena_medications_enabled: bool = False
     google_connection_client_id: str = ""
@@ -233,6 +235,11 @@ class Settings(BaseSettings):
     @property
     def workspace_elation_sandbox_available(self) -> bool:
         return bool(self.workspace_ehr_read_available and self.workspace_elation_sandbox_enabled)
+
+    @property
+    def workspace_athena_fhir_sandbox_available(self) -> bool:
+        """athena Preview FHIR reads only; never hosted and never a live production origin."""
+        return bool(self.workspace_ehr_read_available and self.workspace_athena_fhir_sandbox_enabled)
 
     @property
     def workspace_rx_sandbox_available(self) -> bool:
@@ -585,6 +592,10 @@ class Settings(BaseSettings):
         if self.workspace_efax_sandbox_enabled and self.workspace_hosted_enabled:
             errors.append(
                 "WORKSPACE_EFAX_SANDBOX_ENABLED must remain false when WORKSPACE_HOSTED_ENABLED is true"
+            )
+        if self.workspace_athena_fhir_sandbox_enabled and self.workspace_hosted_enabled:
+            errors.append(
+                "WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED must remain false when WORKSPACE_HOSTED_ENABLED is true"
             )
         if (self.workspace_apple_hosted_transport_enabled or self.workspace_desktop_hosted_transport_enabled) and not self.workspace_hosted_enabled:
             errors.append("Hosted native transport requires WORKSPACE_HOSTED_ENABLED")

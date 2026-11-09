@@ -65,14 +65,21 @@ def workspace(s, read):
     return value
 
 
+def _fhir_sandbox_enabled(settings, vendor: str) -> bool:
+    if vendor == "athena":
+        return bool(settings.workspace_athena_fhir_sandbox_enabled)
+    return bool(settings.workspace_tebra_fhir_enabled)
+
+
 def authorize(s, read, binding, port):
     from cosmas_os.application import provider_team
 
-    if not (provider_team.runtime_settings.workspace_ehr_read_available
-            and provider_team.runtime_settings.workspace_tebra_fhir_enabled):
+    settings = provider_team.runtime_settings
+    if not (settings.workspace_ehr_read_available and _fhir_sandbox_enabled(settings, binding.vendor)):
         raise ws.WorkspaceError("ehr_read_unavailable", 404)
     workspace(s, read)
-    if type(port) is not SyntheticTebraFhirReads or not port.current(scope(binding)):
+    if (type(port) is not SyntheticTebraFhirReads or getattr(port, "vendor", None) != binding.vendor
+            or not port.current(scope(binding))):
         raise ws.WorkspaceError("ehr_read_binding_changed")
     if read.kind == "fhir_medications":
         row, selected = grant(s, read.fhir_grant_id, current=True)
@@ -91,18 +98,21 @@ def authorize(s, read, binding, port):
     return binding
 
 
-def status(s, box, actor, account_id, *, enabled, port, reauthenticate=None):
+def status(s, box, actor, account_id, *, enabled, port, reauthenticate=None, provider="tebra"):
     from cosmas_os.application import ehr_reads as ehr
 
     account = ehr._identity(s, box, actor, account_id)
     if reauthenticate:
         reauthenticate()
-    empty = dict(contract_version=1, provider="tebra", protocol="fhir", mode="synthetic", transport="mock",
+    vendor = provider if provider in ("tebra", "athena") else "tebra"
+    if type(port) is SyntheticTebraFhirReads and getattr(port, "vendor", None) in ("tebra", "athena"):
+        vendor = port.vendor
+    empty = dict(contract_version=1, provider=vendor, protocol="fhir", mode="synthetic", transport="mock",
         status="not_configured" if enabled else "not_enabled", connection_id=None, binding_sha256=None, display_label=None)
-    if not enabled or type(port) is not SyntheticTebraFhirReads:
+    if not enabled or type(port) is not SyntheticTebraFhirReads or getattr(port, "vendor", None) != vendor:
         return empty
     rows = list(s.scalars(select(EhrReadBinding).where(EhrReadBinding.box_id == box, EhrReadBinding.owner_id == actor,
-        EhrReadBinding.account_id == account_id, EhrReadBinding.vendor.in_(("tebra", "athena")),
+        EhrReadBinding.account_id == account_id, EhrReadBinding.vendor == vendor,
         EhrReadBinding.protocol == "fhir", EhrReadBinding.state == "active")))
     if len(rows) != 1:
         return empty

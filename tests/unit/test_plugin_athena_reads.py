@@ -36,6 +36,14 @@ from cosmas_os.ports.athena_schedule import AthenaScheduleResponse
 from cosmas_os.ports.athena_visit_links import AthenaVisitLinkResponse
 from cosmas_os.ports.core_encounters import digest
 
+# Existing core/schedule tools. FHIR tools have their own focused C8 tests.
+CORE_NAMES = (
+    "athena_read_appointments",
+    "athena_read_medications",
+    "athena_read_allergies",
+    "athena_read_visit_link_status",
+)
+
 CONNECTION = "33333333-3333-4333-8333-333333333333"
 OTHER = "22222222-2222-4222-8222-222222222222"
 BINDING = "ab" * 32
@@ -288,7 +296,7 @@ def success_handler(name, *, more=False):
     return handler
 
 
-@pytest.mark.parametrize("name", NAMES)
+@pytest.mark.parametrize("name", CORE_NAMES)
 def test_each_read_returns_one_synthetic_page_and_checks_the_account_again(name):
     runtime, _, calls = runtime_for(success_handler(name))
     try:
@@ -381,6 +389,7 @@ def test_expired_codes_are_only_the_link_and_account_codes():
         "ehr_read_binding_unavailable",
         "workspace_access_denied",
         "ehr_read_source_unavailable",
+        "ehr_read_fhir_grant_unavailable",
         "core_connection_access_denied",
     }
     assert RECORD_ACCESS_DETAILS == {
@@ -390,7 +399,7 @@ def test_expired_codes_are_only_the_link_and_account_codes():
     assert EXPIRED_DETAILS.isdisjoint(RECORD_ACCESS_DETAILS)
 
 
-@pytest.mark.parametrize("name", NAMES)
+@pytest.mark.parametrize("name", CORE_NAMES)
 @pytest.mark.parametrize("status_code,detail", [
     (503, "ehr_read_binding_changed"),
     (409, "ehr_read_binding_unavailable"),
@@ -430,7 +439,7 @@ READ_ACTION = {
 }
 
 
-@pytest.mark.parametrize("name", NAMES)
+@pytest.mark.parametrize("name", CORE_NAMES)
 @pytest.mark.parametrize("detail", sorted(RECORD_ACCESS_DETAILS))
 @pytest.mark.parametrize("status_code", [409, 403])
 def test_grant_unavailable_is_neutral_and_does_not_reconnect(name, detail, status_code):
@@ -544,7 +553,7 @@ def test_timeout_is_one_read_and_does_not_retry():
         runtime.close()
 
 
-@pytest.mark.parametrize("name", NAMES)
+@pytest.mark.parametrize("name", CORE_NAMES)
 def test_pagination_reports_the_page_and_does_not_ask_for_the_next_page(name):
     runtime, _, calls = runtime_for(success_handler(name, more=True))
     try:

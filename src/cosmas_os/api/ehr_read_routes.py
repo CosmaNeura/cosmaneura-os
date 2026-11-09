@@ -46,10 +46,18 @@ class EhrReadBoundary:
 def router(*, runtime, configuration, identity_dependency, session_dependency, workspace_gate, fence):
     routes = APIRouter()
 
+    def fhir_enabled(provider):
+        cfg = configuration()
+        if provider == "tebra":
+            return bool(cfg.workspace_tebra_fhir_enabled)
+        if provider == "athena":
+            return bool(cfg.workspace_athena_fhir_sandbox_enabled)
+        return False
+
     def service(provider=None, protocol=None, clinical_scope=None):
         port = select_runtime(runtime(), provider or "elation", protocol, clinical_scope)
         if (not configuration().workspace_ehr_read_available or port is None
-                or protocol == "fhir" and not configuration().workspace_tebra_fhir_enabled
+                or protocol == "fhir" and not fhir_enabled(provider)
                 or clinical_scope == "medications" and not configuration().workspace_athena_medications_enabled
                 or protocol == "core" and clinical_scope is None and not configuration().workspace_athena_allergies_enabled):
             raise ws.WorkspaceError("ehr_read_unavailable", 404)
@@ -101,8 +109,11 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                     return athena_allergy_ehr.status(*scope, enabled=configuration().workspace_ehr_read_available and configuration().workspace_athena_allergies_enabled,
                         port=select_runtime(runtime(), "athena", "core"), reauthenticate=reauthenticate)
                 if body.protocol == "fhir":
-                    return tebra_fhir_ehr.status(*scope, enabled=configuration().workspace_ehr_read_available and configuration().workspace_tebra_fhir_enabled,
-                        port=select_runtime(runtime(), "tebra", "fhir"), reauthenticate=reauthenticate)
+                    provider = body.provider if body.provider in ("tebra", "athena") else "tebra"
+                    return tebra_fhir_ehr.status(*scope,
+                        enabled=configuration().workspace_ehr_read_available and fhir_enabled(provider),
+                        port=select_runtime(runtime(), provider, "fhir"),
+                        reauthenticate=reauthenticate, provider=provider)
                 result = ehr_reads.status(*scope, enabled=configuration().workspace_ehr_read_available,
                     port=runtime(), reauthenticate=reauthenticate, provider=body.provider, include_problems=body.include_problems is True, include_medications=body.include_medications is True, include_labs=body.include_labs is True)
                 if body.include_problems is True and not configuration().workspace_elation_problems_enabled:

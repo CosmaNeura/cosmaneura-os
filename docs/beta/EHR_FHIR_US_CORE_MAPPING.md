@@ -2,8 +2,8 @@
 
 Tonight for existing live users: nothing changes. This work unlocks the shared
 FHIR PatientLink grant and human source-review path for athena Preview and maps
-synthetic US Core resources into review provenance. It does not wire
-`/connections/ehr/reads` or plugin tools (C8). Flags stay off. No live calls.
+synthetic US Core resources into review provenance. Route and plugin wiring is
+C8 (`docs/beta/ATHENA_FHIR_CONNECTIONS_WIRING.md`). Flags stay off. No live calls.
 
 ## What already existed
 
@@ -35,7 +35,7 @@ system and without changing Tebra digest bytes.
 Appointment is not mapped for athena (C15 / Non-Certified parked; C9 uses
 Encounter). No proprietary athena Appointment calls.
 
-## Not in this ticket
+## Follow-on
 
 - Route wiring and plugin tools (C8)
 - Appointment path replacement (C9)

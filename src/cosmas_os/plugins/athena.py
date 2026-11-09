@@ -29,7 +29,13 @@ from cosmas_os.adapters.athena_medication_read import (
     RecordedNumber,
     clinical_loads,
 )
-from cosmas_os.api.ehr_read_schemas import AthenaAllergies, AthenaMedications, Status
+from cosmas_os.api.ehr_read_schemas import (
+    AthenaAllergies,
+    AthenaMedications,
+    FhirMedications,
+    FhirPatients,
+    Status,
+)
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.plugins.ehr.manifest import CapabilityManifest
 from cosmas_os.plugins.runtime import PluginError
@@ -37,6 +43,7 @@ from cosmas_os.ports.athena_allergy_ehr import AthenaAllergiesObservation
 from cosmas_os.ports.athena_medication_ehr import AthenaMedicationsObservation
 from cosmas_os.ports.athena_schedule import AthenaCommand, AthenaScheduleResponse
 from cosmas_os.ports.athena_visit_links import AthenaVisitLinkCommand, AthenaVisitLinkResponse
+from cosmas_os.ports.tebra_fhir_ehr import FhirMedicationsObservation, FhirPatientsObservation
 
 EHR_PATH = "/connections/ehr/reads"
 SCHEDULE_PATH = "/connections/cosmaneura/read"
@@ -91,17 +98,38 @@ APPOINTMENT_STATUS = {
 CONNECTION_STATUS = {"connected", "review_required", "ready_to_connect"}
 
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
+WARNING = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 EHR_COMMANDS = {
     "status": Status,
     "core_allergies": AthenaAllergies,
     "core_medications": AthenaMedications,
+    "fhir_patients": FhirPatients,
+    "fhir_medications": FhirMedications,
 }
+FHIR_OBSERVATIONS = {
+    "fhir_patients": FhirPatientsObservation,
+    "fhir_medications": FhirMedicationsObservation,
+}
+FHIR_RECEIPT = {
+    "provider", "protocol", "contract_version", "observation_id", "observation_key",
+    "transport", "connection_id", "binding_sha256", "source_sha256", "payload_sha256", "observation",
+}
+PATIENTS_PAGE = (
+    "Showing authorized patients for this encounter. This is not a complete patient list, "
+    "and this read does not ask for another page."
+)
+MEDICATIONS_MORE = "More medication records are available; only this page was read."
+MEDICATIONS_PAGE = (
+    "Showing this page of medication records. This is not a complete chart, "
+    "and this read does not ask for another page."
+)
 UNSUPPORTED_DETAILS = {"ehr_read_unavailable", "unsupported"}
 EXPIRED_DETAILS = {
     "ehr_read_binding_changed",
     "ehr_read_binding_unavailable",
     "workspace_access_denied",
     "ehr_read_source_unavailable",
+    "ehr_read_fhir_grant_unavailable",
     "core_connection_access_denied",
 }
 RECORD_ACCESS_DETAILS = {
@@ -118,6 +146,7 @@ STALE_DETAILS = {
     "ehr_read_superseded",
     "ehr_read_core_grant_changed",
     "ehr_read_core_medication_grant_changed",
+    "ehr_read_fhir_grant_changed",
     "core_connection_changed",
 }
 UNAVAILABLE_DETAILS = {
@@ -156,6 +185,7 @@ class Spec:
     clinical_scope: str | None
     arguments: tuple[str, ...]
     workspace: bool = False
+    protocol: str = "core"
 
 
 def _schema(arguments: tuple[str, ...]) -> dict[str, Any]:
@@ -183,6 +213,7 @@ VISIT = (
     "connection_id", "binding_sha256", "workspace_id", "observation_id", "observation_sha256",
     "item_handle", "item_sha256", "idempotency_key",
 )
+FHIR_PATIENTS = ("connection_id", "binding_sha256", "workspace_id", "idempotency_key")
 SPECS = (
     Spec(
         name="athena_read_appointments", operation_id="athena.read_appointments",
@@ -216,6 +247,28 @@ SPECS = (
         ),
         route="ehr", action="core_allergies", kind="allergies", clinical_scope=None,
         arguments=VISIT, workspace=True,
+    ),
+    Spec(
+        name="athena_read_authorized_patients", operation_id="athena.read_authorized_patients",
+        title="Read authorized Athena FHIR patients",
+        description=(
+            "Read the authorized Athena FHIR patients already granted for this encounter. "
+            "This uses the Preview FHIR sandbox path only, does not search the chart, and does not change a patient. "
+            "Not connected and not supported are separate from the returned list."
+        ),
+        route="ehr", action="fhir_patients", kind="fhir_patients", clinical_scope=None,
+        arguments=FHIR_PATIENTS, workspace=True, protocol="fhir",
+    ),
+    Spec(
+        name="athena_read_fhir_medications", operation_id="athena.read_fhir_medications",
+        title="Read Athena FHIR medication records",
+        description=(
+            "Read one page of Athena FHIR medication records for one authorized patient. "
+            "This uses the Preview FHIR sandbox path only. It does not prescribe, sign, or change the chart, "
+            "and it does not ask for the next page. Not connected and not supported are separate from a returned page."
+        ),
+        route="ehr", action="fhir_medications", kind="fhir_medications", clinical_scope=None,
+        arguments=VISIT, workspace=True, protocol="fhir",
     ),
     Spec(
         name="athena_read_visit_link_status", operation_id="athena.read_visit_link_status",
@@ -265,7 +318,7 @@ def tool_definitions() -> list[dict[str, Any]]:
 
 def command_allowed(body: object) -> bool:
     """True only for the closed Athena chart reads these tools send."""
-    if not isinstance(body, dict) or body.get("provider") != "athena" or body.get("protocol") != "core":
+    if not isinstance(body, dict) or body.get("provider") != "athena":
         return False
     action = body.get("action")
     model = EHR_COMMANDS.get(action) if isinstance(action, str) else None
@@ -275,13 +328,23 @@ def command_allowed(body: object) -> bool:
         parsed = model.model_validate(body)
     except ValidationError:
         return False
-    if parsed.action != action or parsed.provider != "athena" or parsed.protocol != "core":
+    if parsed.action != action or parsed.provider != "athena":
+        return False
+    if action in {"fhir_patients", "fhir_medications"}:
+        return parsed.protocol == "fhir" and parsed.clinical_scope is None
+    if action == "status":
+        if parsed.protocol == "fhir":
+            return parsed.clinical_scope is None
+        if parsed.protocol == "core":
+            return parsed.clinical_scope in (None, "medications")
+        return False
+    if parsed.protocol != "core":
         return False
     if action == "core_allergies":
         return parsed.clinical_scope is None
     if action == "core_medications":
         return parsed.clinical_scope == "medications"
-    return action == "status" and parsed.clinical_scope in (None, "medications")
+    return False
 
 
 def ehr_route_allowed(body: object) -> bool:
@@ -357,7 +420,7 @@ def _validate(spec: Spec, arguments: object) -> dict[str, Any]:
 
 
 def _ehr_status_body(spec: Spec) -> dict[str, Any]:
-    body: dict[str, Any] = {"action": "status", "provider": "athena", "protocol": "core"}
+    body: dict[str, Any] = {"action": "status", "provider": "athena", "protocol": spec.protocol}
     if spec.clinical_scope:
         body["clinical_scope"] = spec.clinical_scope
     return body
@@ -367,7 +430,7 @@ def _ehr_read_body(spec: Spec, arguments: dict[str, Any]) -> dict[str, Any]:
     body = {name: arguments[name] for name in spec.arguments}
     body["action"] = spec.action
     body["provider"] = "athena"
-    body["protocol"] = "core"
+    body["protocol"] = spec.protocol
     if spec.clinical_scope:
         body["clinical_scope"] = spec.clinical_scope
     return body
@@ -408,6 +471,35 @@ def _wire(payload: object) -> tuple[dict[str, Any], str | None]:
 
 
 def _parse_ehr_status(body: dict[str, Any], spec: Spec) -> dict[str, Any]:
+    if spec.protocol == "fhir":
+        allowed = {
+            "contract_version", "provider", "protocol", "mode", "status", "connection_id",
+            "binding_sha256", "display_label", "transport",
+        }
+        if set(body) != allowed:
+            raise ValueError
+        connection = body["connection_id"]
+        binding = body["binding_sha256"]
+        label = body["display_label"]
+        if (type(body["contract_version"]) is not int or body["contract_version"] != 1
+                or body["provider"] != "athena" or body["protocol"] != "fhir" or body["mode"] != "synthetic"
+                or body["status"] not in {"not_enabled", "not_configured", "ready"}
+                or body["transport"] != "mock"):
+            raise ValueError
+        if connection is not None and (not isinstance(connection, str) or str(UUID(connection)) != connection):
+            raise ValueError
+        if binding is not None and (not isinstance(binding, str) or DIGEST.fullmatch(binding) is None):
+            raise ValueError
+        if label is not None and (not isinstance(label, str) or not 1 <= len(label) <= 200):
+            raise ValueError
+        if body["status"] == "ready" and (connection is None or binding is None or label is None):
+            raise ValueError
+        if body["status"] != "ready" and (connection is not None or binding is not None or label is not None):
+            raise ValueError
+        return {
+            "status": body["status"], "connection_id": connection, "binding_sha256": binding,
+            "practice_label": label, "clinical_scope": None, "display_label": label,
+        }
     allowed = {
         "contract_version", "provider", "protocol", "mode", "status", "connection_id",
         "binding_sha256", "practice_label", "transport", "clinical_scope",
@@ -629,7 +721,110 @@ def _matches_parent(public: dict[str, Any], arguments: dict[str, Any]) -> bool:
             and public["workspace_id"] == arguments["workspace_id"])
 
 
+def _fhir_patient_view(raw: str) -> dict[str, Any]:
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict) or parsed.get("resourceType") != "Patient":
+        raise ValueError
+    names = parsed.get("name") or []
+    if not isinstance(names, list) or not names:
+        raise ValueError
+    primary = names[0]
+    if not isinstance(primary, dict):
+        raise ValueError
+    given = primary.get("given") or []
+    if type(given) is not list:
+        raise ValueError
+    return {
+        "first_name": given[0] if given and isinstance(given[0], str) else None,
+        "last_name": primary.get("family") if isinstance(primary.get("family"), str) else None,
+        "birth_date": parsed.get("birthDate") if isinstance(parsed.get("birthDate"), str) else None,
+    }
+
+
+def _fhir_directions(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    parsed = json.loads(raw)
+    if type(parsed) is not list:
+        raise ValueError
+    texts = []
+    for row in parsed:
+        if not isinstance(row, dict):
+            raise ValueError
+        text = row.get("text")
+        if text is None:
+            continue
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError
+        texts.append(text)
+    return "\n".join(texts) if texts else None
+
+
+def _fhir_medication_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "medication_name": row["medication_name"],
+        "status": row["status"],
+        "intent": row["intent"],
+        "authored_on": row["authored_on"],
+        "do_not_perform": row["do_not_perform"],
+        "directions": _fhir_directions(row["dosage_instructions_json"]),
+    }
+
+
+def _project_fhir(spec: Spec, body: dict[str, Any], arguments: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
+    observation = body.get("observation")
+    if (set(body) != FHIR_RECEIPT or type(body["contract_version"]) is not int
+            or body["contract_version"] != 1 or body["provider"] != "athena" or body["protocol"] != "fhir"
+            or body["transport"] != "mock" or body["observation_key"] != arguments["idempotency_key"]
+            or body["connection_id"] != arguments["connection_id"]
+            or body["binding_sha256"] != arguments["binding_sha256"]
+            or not isinstance(body["observation_id"], str)
+            or str(UUID(body["observation_id"])) != body["observation_id"]
+            or not isinstance(body["source_sha256"], str) or DIGEST.fullmatch(body["source_sha256"]) is None
+            or not isinstance(body["payload_sha256"], str) or DIGEST.fullmatch(body["payload_sha256"]) is None
+            or not isinstance(observation, dict) or payload_hash(observation) != body["payload_sha256"]):
+        raise ValueError
+    if (body["connection_id"] != status["connection_id"] or body["binding_sha256"] != status["binding_sha256"]):
+        return _state("wrong_practice", WRONG_PRACTICE)
+    public = FHIR_OBSERVATIONS[spec.kind].model_validate(observation).model_dump(mode="json")
+    if public["display_label"] != status["practice_label"] or public["workspace_id"] != arguments["workspace_id"]:
+        return _state("wrong_practice", WRONG_PRACTICE)
+    if spec.kind == "fhir_patients":
+        rows = [{"handle": item["handle"], "sha256": item["sha256"],
+                 **_fhir_patient_view(item["patient_identity_json"])} for item in public["items"]]
+        message, more = PATIENTS_PAGE, False
+        patient = None
+        warnings = None
+    else:
+        parent = public["parent"]
+        if (parent["observation_id"] != arguments["observation_id"]
+                or parent["source_sha256"] != arguments["observation_sha256"]
+                or parent["item_sha256"] != arguments["item_sha256"]
+                or public["item"]["handle"] != arguments["item_handle"]):
+            return _state("malformed", MALFORMED)
+        warnings = public["item"]["warnings"]
+        if any(not isinstance(code, str) or WARNING.fullmatch(code) is None for code in warnings):
+            raise ValueError
+        rows = [_fhir_medication_row(row) for row in public["item"]["records"]]
+        more = public["item"]["coverage"] == "more_rows_available"
+        message = MEDICATIONS_MORE if more else MEDICATIONS_PAGE
+        patient = _fhir_patient_view(public["item"]["patient_identity_json"])
+    if not rows:
+        message = f"{message} {EMPTY_PAGE}"
+    result = _state(
+        "ready", message, more_available=more,
+        practice={"label": public["display_label"]},
+        observation_id=body["observation_id"], source_sha256=body["source_sha256"], rows=rows,
+    )
+    if patient is not None:
+        result["patient"] = patient
+        result["warnings"] = list(warnings or ())
+    return result
+
+
 def _project_chart(spec: Spec, body: dict[str, Any], arguments: dict[str, Any], status: dict[str, Any]) -> dict[str, Any]:
+    if spec.protocol == "fhir":
+        return _project_fhir(spec, body, arguments, status)
     allowed = {
         "provider", "protocol", "clinical_scope", "contract_version", "observation_id", "observation_key",
         "transport", "connection_id", "binding_sha256", "source_sha256", "payload_sha256", "observation",
@@ -879,11 +1074,12 @@ EHR_CAPABILITY = CapabilityManifest(
     auth_styles=frozenset({
         "cosmas_session",
         "athena_platform_bearer",
-        # C2 2-legged client-credentials for Cosmaneura CosmaBot FHIR (not live-wired).
+        # C2 2-legged client-credentials for Cosmaneura CosmaBot FHIR (sandbox only).
         "oauth2_client_credentials",
     }),
     readable_resources=frozenset({
         "appointments",
+        "patients",
         "medications",
         "allergies",
         "visit_link_status",
@@ -897,6 +1093,7 @@ EHR_CAPABILITY = CapabilityManifest(
         "unlink_visit",
         "read_problems",
         "read_labs",
+        "fhir_appointment",
         "production_target",
     }),
     sandbox_supported=True,
@@ -905,9 +1102,9 @@ EHR_CAPABILITY = CapabilityManifest(
     notes=(
         "Plugin tools call signed CosmaBot routes only. Athena Platform preview "
         "is treated as the sandbox class for this contract; production stays refused. "
-        "oauth2_client_credentials is declared for the Cosmaneura CosmaBot FHIR "
-        "sandbox auth module. The C7 Certified FHIR R4 Preview adapter lives under "
-        "adapters.athena_fhir_r4 (practice 195900, mock transport only); CosmaBot "
-        "route wiring stays for C8 and is not enabled from this plugin."
+        "FHIR patients and medications use C7 Preview adapter + C5 mapping behind "
+        "WORKSPACE_EHR_READ_ENABLED and WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED "
+        "(both default off; hosted/prod refuse). Practice 195900; mock transport "
+        "and COSMAS_MANAGED_SECRET_* refs only. FHIR Appointment stays unsupported."
     ),
 )

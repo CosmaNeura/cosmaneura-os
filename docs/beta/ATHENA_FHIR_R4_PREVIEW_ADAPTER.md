@@ -40,9 +40,10 @@ for the appointments UI path.
   `extra_sandbox_hosts=`, and DiagnosticReport/Binary only via
   `allowed_resources=` on the athena adapter's FHIR client
 
-## Not in this ticket
+## Follow-on
 
-- Route wiring into `/connections/ehr/reads` or plugin tools (C8)
+- Route wiring into `/connections/ehr/reads` and plugin tools is C8
+  (`docs/beta/ATHENA_FHIR_CONNECTIONS_WIRING.md`). Flags stay off.
 - Appointment UI path (C9)
 - Live Preview smoke (Nov 5 override: mock/recorded CI only; do not wait on J2)
 - Key Vault creation (John / J2) — tests use a fake env vault only

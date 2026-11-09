@@ -230,7 +230,18 @@ def _binding(s, account, connection_id, digest, *, port=None):
             if (installed is None or receipt is None or receipt.installation_id != str(installed.id)
                     or receipt.installation_sha256 != installed.commitment()):
                 raise ValueError
-        if ((binding.environment not in ("preview", "production") if binding.protocol == "core" else binding.environment != ("synthetic" if binding.vendor == "tebra" else "sandbox"))
+        if binding.protocol == "core":
+            environment_ok = binding.environment in ("preview", "production")
+        elif binding.protocol == "fhir":
+            # Match SQL ck_ehr_read_binding_vendor: tebra synthetic, athena Preview.
+            environment_ok = binding.environment == (
+                "synthetic" if binding.vendor == "tebra" else "preview"
+            )
+        else:
+            environment_ok = binding.environment == (
+                "synthetic" if binding.vendor == "tebra" else "sandbox"
+            )
+        if (not environment_ok
                 or binding.binding_digest != scope.commitment() or digest != binding.binding_digest
                 or not runtime.current(scope)):
             raise ValueError
