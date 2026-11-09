@@ -21,6 +21,7 @@ from cosmas_os.application.athena_allergy_snapshot import (
     AthenaAllergyReviewSnapshot,
     prepare_allergy_review,
 )
+from cosmas_os.application.ehr_export.fallback import visit_read
 from cosmas_os.domain.hashing import payload_hash
 
 
@@ -127,32 +128,34 @@ class SyntheticAthenaAllergyReads:
             and patient in self._patients)
 
     def patient_candidates(self, scope, workspace_id, patient_link_id, *, authorize):
-        if type(workspace_id) is not UUID or type(patient_link_id) is not UUID or not callable(authorize):
-            raise AthenaAllergyError("invalid_scope")
-        if not self.current(scope) or authorize() is not True or not self.current(scope):
-            raise AthenaAllergyError("access_denied")
-        selected = tuple(patient for patient in self._patients if patient.connection_scope == scope
-            and patient.workspace_id == workspace_id and patient.patient_link_id == patient_link_id)
-        if authorize() is not True or not self.current(scope):
-            raise AthenaAllergyError("access_denied")
-        return selected
+        with visit_read("athena", patient_link_id):
+            if type(workspace_id) is not UUID or type(patient_link_id) is not UUID or not callable(authorize):
+                raise AthenaAllergyError("invalid_scope")
+            if not self.current(scope) or authorize() is not True or not self.current(scope):
+                raise AthenaAllergyError("access_denied")
+            selected = tuple(patient for patient in self._patients if patient.connection_scope == scope
+                and patient.workspace_id == workspace_id and patient.patient_link_id == patient_link_id)
+            if authorize() is not True or not self.current(scope):
+                raise AthenaAllergyError("access_denied")
+            return selected
 
     def allergies(self, scope, patient, *, authorize) -> AthenaAllergyReviewSnapshot:
-        if not callable(authorize):
-            raise AthenaAllergyError("invalid_scope")
-        def current():
-            return (self.current(scope) and self.current_patient(patient) and patient.connection_scope == scope
-                and authorize() is True and self.current(scope) and self.current_patient(patient))
-        if not current():
-            raise AthenaAllergyError("access_denied")
-        read_scope = patient.read_scope()
-        observation = AthenaAllergyReader(read_scope, self._transport,
-            expected_identity_sha256=patient.identity_sha256, enabled=lambda: self.current(scope),
-            authorize=lambda selected: selected == read_scope and current(),
-            sandbox_enabled=read_scope.environment == "preview").read()
-        review = prepare_allergy_review(observation, expected_scope=read_scope,
-            expected_source_sha256=observation.source_sha256, expected_patient_identity_sha256=patient.identity_sha256,
-            authorize_read=lambda selected: selected == read_scope and current())
-        if not current():
-            raise AthenaAllergyError("access_denied")
-        return review
+        with visit_read("athena", getattr(patient, "patient_link_id", None)):
+            if not callable(authorize):
+                raise AthenaAllergyError("invalid_scope")
+            def current():
+                return (self.current(scope) and self.current_patient(patient) and patient.connection_scope == scope
+                    and authorize() is True and self.current(scope) and self.current_patient(patient))
+            if not current():
+                raise AthenaAllergyError("access_denied")
+            read_scope = patient.read_scope()
+            observation = AthenaAllergyReader(read_scope, self._transport,
+                expected_identity_sha256=patient.identity_sha256, enabled=lambda: self.current(scope),
+                authorize=lambda selected: selected == read_scope and current(),
+                sandbox_enabled=read_scope.environment == "preview").read()
+            review = prepare_allergy_review(observation, expected_scope=read_scope,
+                expected_source_sha256=observation.source_sha256, expected_patient_identity_sha256=patient.identity_sha256,
+                authorize_read=lambda selected: selected == read_scope and current())
+            if not current():
+                raise AthenaAllergyError("access_denied")
+            return review
