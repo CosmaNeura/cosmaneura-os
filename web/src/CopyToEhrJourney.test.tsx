@@ -18,9 +18,7 @@ import {CopyToEhrPopout} from './CopyToEhrPopout';
 import {CopyToEhrMount} from './CopyToEhrMount';
 import {CLIPBOARD_CLEAR_TEXT, type CopyToEhrPackage} from './copy-to-ehr-api';
 import {taylorMorganPackage} from './copy-to-ehr-fixtures.test-support';
-
-/** Remote highlight pointer (track C). Section key only — never note text. */
-type CopyToEhrHighlightMessage = {draft_revision: number; section_key: string};
+import {useCopyToEhrRemote} from './useCopyToEhrRemote';
 
 const {webcrypto} = await vi.importActual<{webcrypto: Crypto}>('node:crypto');
 
@@ -30,6 +28,9 @@ const NOTE_CANARIES = [
   'Gargle warm salt water',
   'Rapid strep',
 ] as const;
+
+/** Remote highlight pointer (track C). Section key only — never note text. */
+type CopyToEhrHighlightMessage = {draft_revision: number; section_key: string};
 
 let root: Root;
 let host: HTMLDivElement;
@@ -87,15 +88,16 @@ it('copies the full note without leading hash lines and keeps extras out of that
   const copied = String(writeClipboard.mock.calls[0][0]);
   expect(copied.split('\n').some(line => line.startsWith('#'))).toBe(false);
   expect(copied).toContain(pkg.sections[0].text);
-  expect(copied).not.toContain(pkg.extras.patient_instructions);
-  expect(copied).not.toContain(pkg.extras.orders);
+  for (const extra of pkg.extras) {
+    expect(copied).not.toContain(extra.text);
+  }
   expect(JSON.stringify(audit.mock.calls)).not.toContain('Taylor Morgan');
 });
 
 it('copies one section at a time without a leading hash', async () => {
   const pkg = await renderStrip();
   await click('Copy this section');
-  expect(writeClipboard).toHaveBeenCalledExactlyOnceWith(pkg.sections[0].text);
+  expect(writeClipboard).toHaveBeenCalledExactlyOnceWith(pkg.section_notes.subjective);
   const copied = String(writeClipboard.mock.calls[0][0]);
   expect(copied.startsWith('#')).toBe(false);
   expect(copied.split('\n').some(line => line.startsWith('#'))).toBe(false);
@@ -111,7 +113,7 @@ it('clears the clipboard by writing a single space', async () => {
 });
 
 it('disables copy actions when the draft revision is stale', async () => {
-  await renderStrip({expectedRevision: 2});
+  await renderStrip({expectedRevision: 'rev-stale'});
   expect(host.querySelector('[role=alert]')?.textContent).toContain('This draft changed');
   for (const label of ['Copy full note', 'Copy this section', 'Next highlight', 'Clear clipboard', 'Pop out']) {
     expect(button(label)?.disabled, label).toBe(true);
@@ -127,7 +129,6 @@ it('shows the note was NOT sent and offers Copy to EHR after a connection failur
   expect(host.textContent).toContain('Copy to EHR');
   expect(host.textContent).toMatch(/continue the visit/i);
   expect(host.textContent).not.toMatch(/integrat|sync|write-?back/i);
-  // Visit stays usable: Done remains available.
   expect(button('Done')?.disabled).toBe(false);
   expect(audit).toHaveBeenCalledWith(expect.objectContaining({event: 'copy_to_ehr.fallback_shown'}));
   expect(JSON.stringify(audit.mock.calls)).not.toContain('sore throat');
@@ -135,7 +136,7 @@ it('shows the note was NOT sent and offers Copy to EHR after a connection failur
 
 it('never falls back silently: connection failure surfaces the copy offer on the mount', async () => {
   const identity = {mode: 'clerk_jwt' as const, getToken: vi.fn()};
-  const pkg = taylorMorganPackage();
+  const pkg = taylorMorganPackage({visit_copy_to_ehr_status: 'not_sent_copy_instead'});
   const loadPackage = vi.fn().mockResolvedValue(pkg);
   await act(async () =>
     root.render(
@@ -151,7 +152,6 @@ it('never falls back silently: connection failure surfaces the copy offer on the
     ),
   );
   expect(host.querySelector('.copy-to-ehr-not-sent')?.textContent).toMatch(/not sent/i);
-  await act(async () => undefined);
   await act(async () => {
     await Promise.resolve();
   });
@@ -169,7 +169,7 @@ it('does not mount the strip when the copy-to-ehr flag is off and there is no fa
         enabled={false}
         fallbackOffer={false}
         identity={identity}
-        draftId="visit_note_00000000000000000000000001"
+        draftId="visit_note_01habcdef0123456789abcde"
         loadPackage={loadPackage}
       />,
     ),
@@ -183,7 +183,6 @@ it('does not mount the strip when the copy-to-ehr flag is off and there is no fa
 });
 
 it('remote highlight messages carry section pointers only, never note text', async () => {
-  const {useCopyToEhrRemote} = await import('./useCopyToEhrRemote');
   expect(typeof useCopyToEhrRemote).toBe('function');
   const highlight: CopyToEhrHighlightMessage = {
     draft_revision: 3,
