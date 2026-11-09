@@ -45,6 +45,14 @@ def _section(key: str, text: str, *, forbid_leading_hash: bool) -> ExportSection
     )
 
 
+def compute_expires_at(created_at: datetime, *, last_activity_at: datetime | None = None) -> datetime:
+    """Effective expiry: 15 minutes after last activity, capped at 60 minutes absolute."""
+    activity = last_activity_at or created_at
+    idle = activity + timedelta(seconds=IDLE_EXPIRY_SECONDS)
+    absolute = created_at + timedelta(seconds=ABSOLUTE_EXPIRY_SECONDS)
+    return idle if idle <= absolute else absolute
+
+
 def build_export_package(draft: ExportDraft, profile_id: EhrExportProfileId | str) -> ExportPackage:
     """Map a reviewed draft into an ``ExportPackage`` for the given profile."""
     profile = get_profile(profile_id)
@@ -62,10 +70,6 @@ def build_export_package(draft: ExportDraft, profile_id: EhrExportProfileId | st
             sections.append(section)
 
     now = datetime.now(UTC)
-    idle = now + timedelta(seconds=IDLE_EXPIRY_SECONDS)
-    absolute = now + timedelta(seconds=ABSOLUTE_EXPIRY_SECONDS)
-    expires_at = idle if idle <= absolute else absolute
-
     return ExportPackage(
         profile_id=profile.id,
         draft_id=draft.draft_id,
@@ -74,9 +78,26 @@ def build_export_package(draft: ExportDraft, profile_id: EhrExportProfileId | st
         sections=tuple(sections),
         extras=tuple(extras),
         created_at=now,
-        expires_at=expires_at,
+        expires_at=compute_expires_at(now, last_activity_at=now),
         review_state=draft.review_state,
         visit_copy_to_ehr_status=draft.visit_copy_to_ehr_status,
+    )
+
+
+def refresh_package_activity(pkg: ExportPackage, *, at: datetime | None = None) -> ExportPackage:
+    """Extend idle expiry from activity time, never past the absolute 60-minute cap."""
+    moment = at or datetime.now(UTC)
+    return ExportPackage(
+        profile_id=pkg.profile_id,
+        draft_id=pkg.draft_id,
+        draft_revision=pkg.draft_revision,
+        payload_hash=pkg.payload_hash,
+        sections=pkg.sections,
+        extras=pkg.extras,
+        created_at=pkg.created_at,
+        expires_at=compute_expires_at(pkg.created_at, last_activity_at=moment),
+        review_state=pkg.review_state,
+        visit_copy_to_ehr_status=pkg.visit_copy_to_ehr_status,
     )
 
 

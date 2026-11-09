@@ -8,7 +8,9 @@ from cosmas_os.application.ehr_export.audit import (
 )
 from cosmas_os.application.ehr_export.build import (
     build_export_package,
+    compute_expires_at,
     payload_hash_for,
+    refresh_package_activity,
     render_full_note,
     render_section,
 )
@@ -49,6 +51,7 @@ __all__ = [
     "audit_contains_note_text",
     "build_audit_event",
     "build_export_package",
+    "compute_expires_at",
     "copy_profile_for_vendor",
     "get_profile",
     "known_vendor_profile_ids",
@@ -56,6 +59,7 @@ __all__ = [
     "new_correlation_id",
     "payload_hash_for",
     "record_audit",
+    "refresh_package_activity",
     "render_full_note",
     "render_section",
 ]
