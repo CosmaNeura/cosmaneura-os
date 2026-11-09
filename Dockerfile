@@ -1,8 +1,9 @@
 FROM python:3.13-slim@sha256:d0a9e379c0c588befb0e427db17ca9731751d281f32c6cb1a90a1277b680bdad
 # Apply verified Debian security fixes when the pinned base omits them.
 # CVE-2026-109518 (apt / libapt-pkg7.0) is fixed in 3.0.4; keep the
-# libpcre2 pin from the prior base refresh. CVE-2026-76844 and
-# CVE-2026-85091 (zlib1g) are fixed in 1:1.3.dfsg+really1.3.1-1+deb13u1.
+# libpcre2 pin from the prior base refresh.
+# zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1 closes CVE-2026-76844 and
+# CVE-2026-85091 (DSA-6613-1) on Debian trixie.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         apt=3.0.4 \

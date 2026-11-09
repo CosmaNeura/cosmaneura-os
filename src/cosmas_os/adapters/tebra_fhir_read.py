@@ -18,6 +18,11 @@ from uuid import UUID
 import httpx
 from pydantic import SecretStr
 
+from cosmas_os.adapters.ehr_fhir_vendor import (
+    medication_history_contract,
+    patient_scope_payload,
+    require_fhir_vendor,
+)
 from cosmas_os.domain.hashing import canonical_json, payload_hash
 from cosmas_os.ehr_real_data_gate import EhrRealDataGateError, assert_ehr_request_allowed
 
@@ -149,10 +154,10 @@ class TebraFhirScope:
         except TebraFhirReadError:
             raise TebraFhirReadError("request_invalid") from None
 
-    def commitment(self):
+    def commitment(self, vendor: str = "tebra"):
         self.validate()
-        return payload_hash({"contract": "tebra-fhir-patient-scope.v1", "fhir_base": FHIR_BASE,
-            **{key: str(value) for key, value in asdict(self).items()}})
+        require_fhir_vendor(vendor)
+        return payload_hash(patient_scope_payload(vendor, {key: str(value) for key, value in asdict(self).items()}))
 
 
 @dataclass(frozen=True, repr=False)
@@ -507,7 +512,7 @@ class TebraFhirReadAdapter:
             if len(canonical_json(content).encode()) > MAX_PROJECTION_BYTES:
                 raise TebraFhirReadError("response_too_large")
             return TebraFhirMedicationRead(scope, patient, observed, tuple(projected), content["coverage"], total, warnings,
-                payload_hash({"contract": "tebra-fhir-medication-history.v1", **content}), tuple(proofs))
+                payload_hash({"contract": medication_history_contract("tebra"), **content}), tuple(proofs))
         except TebraFhirReadError:
             raise
         except Exception:

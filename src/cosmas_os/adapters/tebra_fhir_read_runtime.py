@@ -1,14 +1,19 @@
-"""Explicit FHIR patient grants for the synthetic Tebra workflow; never authenticates."""
+"""Explicit FHIR patient grants for the synthetic shared FHIR workflow; never authenticates."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
 import httpx
 from pydantic import SecretStr
 
+from cosmas_os.adapters.ehr_fhir_vendor import (
+    connection_scope_payload,
+    patient_grant_payload,
+    require_fhir_vendor,
+)
 from cosmas_os.adapters.tebra_fhir_read import (
-    FHIR_BASE,
     TebraFhirCredential,
     TebraFhirReadAdapter,
     TebraFhirReadError,
@@ -31,8 +36,10 @@ class TebraFhirConnectionScope:
     connection_id: UUID
     credential_generation: UUID
     display_label: str
+    vendor: Literal["tebra", "athena"] = "tebra"
 
     def validate(self):
+        require_fhir_vendor(self.vendor)
         if (any(type(value) is not UUID for value in (self.box_id, self.owner_id, self.account_id,
                 self.connection_id, self.credential_generation))
                 or type(self.display_label) is not str or not self.display_label.strip()
@@ -42,10 +49,15 @@ class TebraFhirConnectionScope:
 
     def commitment(self):
         self.validate()
-        return payload_hash({"contract": "tebra-fhir-connection-scope.v1", "fhir_base": FHIR_BASE,
-            "box_id": str(self.box_id), "owner_id": str(self.owner_id), "account_id": str(self.account_id),
-            "connection_id": str(self.connection_id), "credential_generation": str(self.credential_generation),
-            "display_label": self.display_label})
+        return payload_hash(connection_scope_payload(
+            self.vendor,
+            box_id=str(self.box_id),
+            owner_id=str(self.owner_id),
+            account_id=str(self.account_id),
+            connection_id=str(self.connection_id),
+            credential_generation=str(self.credential_generation),
+            display_label=self.display_label,
+        ))
 
 
 @dataclass(frozen=True, repr=False)
@@ -81,10 +93,14 @@ class TebraFhirAuthorizedPatient:
 
     def commitment(self):
         self.validate()
-        return payload_hash({"contract": "tebra-fhir-patient-grant.v1", "grant_id": str(self.grant_id),
-            "connection_sha256": self.connection_scope.commitment(), "workspace_id": str(self.workspace_id),
-            "patient_link_id": str(self.patient_link_id), "read_scope_sha256": self.read_scope().commitment(),
-            "patient_identity_sha256": self.identity_sha256})
+        return payload_hash(patient_grant_payload(self.connection_scope.vendor, {
+            "grant_id": str(self.grant_id),
+            "connection_sha256": self.connection_scope.commitment(),
+            "workspace_id": str(self.workspace_id),
+            "patient_link_id": str(self.patient_link_id),
+            "read_scope_sha256": self.read_scope().commitment(self.connection_scope.vendor),
+            "patient_identity_sha256": self.identity_sha256,
+        }))
 
 
 class SyntheticTebraFhirReads:
@@ -103,13 +119,18 @@ class SyntheticTebraFhirReads:
                 or type(transport) is not httpx.MockTransport or not callable(enabled)):
             raise ValueError("explicit_synthetic_tebra_fhir_installation_required")
         try:
+            vendors = {scope.vendor for scope in scopes}
+            if len(vendors) != 1:
+                raise ValueError
+            self.vendor = next(iter(vendors))
             if len({scope.commitment() for scope in scopes}) != len(scopes):
                 raise ValueError
             seen = set()
             contexts = {}
             for patient in patients:
                 patient.validate()
-                if patient.connection_scope not in scopes or patient.grant_id in seen:
+                if (patient.connection_scope not in scopes or patient.grant_id in seen
+                        or patient.connection_scope.vendor != self.vendor):
                     raise ValueError
                 seen.add(patient.grant_id)
                 context = (patient.connection_scope.commitment(), patient.workspace_id, patient.patient_link_id)
@@ -162,7 +183,8 @@ class SyntheticTebraFhirReads:
             TebraFhirCredential(read_scope.commitment(), SecretStr("synthetic-tebra-fhir-token")))
         review = prepare_medication_review(observation, expected_scope=read_scope,
             expected_source_sha256=observation.source_sha256, expected_patient_identity_sha256=patient.identity_sha256,
-            authorize_read=lambda selected: selected == read_scope and current())
+            authorize_read=lambda selected: selected == read_scope and current(),
+            vendor=patient.connection_scope.vendor)
         if not current():
             raise TebraFhirReadError("access_denied")
         return review
