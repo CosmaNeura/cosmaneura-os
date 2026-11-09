@@ -164,20 +164,29 @@ def test_hook_failure_is_swallowed_and_the_read_error_is_unchanged(monkeypatch, 
 
     monkeypatch.setattr(fallback, "build_audit_event", explode)
     scope, port = _elation(enabled=False)
-    with caplog.at_level(logging.INFO, logger="cosmas_os.ehr_export.fallback"):
-        with pytest.raises(ElationReadError) as raised:
-            port.visit(scope, 6161, 7, authorize=lambda: True)
-    assert type(raised.value) is ElationReadError
-    assert raised.value.code == "disabled"
-    assert raised.value.args == ("disabled",)
-    assert "copy_to_ehr.fallback_hook_failed" in caplog.text
-    assert NOTE not in caplog.text
-    for record in caplog.records:
-        blob = record.getMessage()
-        for _key, value in record.__dict__.items():
-            if isinstance(value, str):
-                blob += " " + value
-        assert NOTE not in blob
+    hook_logger = logging.getLogger("cosmas_os.ehr_export.fallback")
+    # Alembic fileConfig disables loggers that already exist. The full suite
+    # does that before this test, which drops the record and leaves an empty
+    # capture (same trap as tests/unit/test_log_scrub.py).
+    was_disabled = hook_logger.disabled
+    hook_logger.disabled = False
+    try:
+        with caplog.at_level(logging.INFO, logger="cosmas_os.ehr_export.fallback"):
+            with pytest.raises(ElationReadError) as raised:
+                port.visit(scope, 6161, 7, authorize=lambda: True)
+        assert type(raised.value) is ElationReadError
+        assert raised.value.code == "disabled"
+        assert raised.value.args == ("disabled",)
+        assert "copy_to_ehr.fallback_hook_failed" in caplog.text
+        assert NOTE not in caplog.text
+        for record in caplog.records:
+            blob = record.getMessage()
+            for _key, value in record.__dict__.items():
+                if isinstance(value, str):
+                    blob += " " + value
+            assert NOTE not in blob
+    finally:
+        hook_logger.disabled = was_disabled
 
 
 def test_audit_drops_note_text(monkeypatch):
