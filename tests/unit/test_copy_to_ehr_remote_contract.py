@@ -17,6 +17,7 @@ from cosmas_os.api.copy_to_ehr_remote_schemas import (
 )
 from cosmas_os.application import copy_to_ehr_remote as remote
 from cosmas_os.application.workspace import WorkspaceError
+from cosmas_os.config import Settings
 
 HEADERS = {
     "Authorization": "Bearer synthetic",
@@ -96,7 +97,8 @@ def isolated(enabled=True, identity=None, store=None):
     return TestClient(app), calls, member, sessions
 
 
-def test_flag_off_returns_unavailable_without_creating_a_session():
+def test_flag_defaults_off_on_settings_and_route_stays_dark():
+    assert Settings().copy_to_ehr_remote_enabled is False
     client, calls, _, store = isolated(enabled=False)
     with client:
         result = client.post("/api/copy-to-ehr/sessions", headers=HEADERS, json=create_body())
