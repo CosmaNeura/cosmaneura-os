@@ -46,7 +46,8 @@ class ConnectionCommand(Closed):
 COMMAND_ADAPTER = TypeAdapter(Annotated[ConnectionCommand | AthenaCommand | AppointmentSetupCommand | AthenaVisitLinkCommand, Field(discriminator="action")])
 
 
-def execute(session, *, identity, command, tenant_ref, bearer, port, reauthenticate, budget):
+def execute(session, *, identity, command, tenant_ref, bearer, port, reauthenticate, budget,
+            fhir_schedule=None):
     if isinstance(command, ConnectionCommand):
         command.validate_selection()
     athena_link = isinstance(command, AthenaVisitLinkCommand)
@@ -113,6 +114,9 @@ def execute(session, *, identity, command, tenant_ref, bearer, port, reauthentic
         result = port.athena_visit_link(request, bearer)
     elif setup:
         result = port.setup_appointments(request, bearer)
+    elif athena and fhir_schedule is not None:
+        # C9: Encounter FHIR schedule behind C8 flags. Never call Core appointments/read.
+        result = fhir_schedule.read_schedule(port, request, bearer)
     else:
         result = port.read_athena(request, bearer) if athena else port.read(request, bearer)
     canonical_workspace_id = port.scribe_workspace(result, bearer) if new_notebook else None

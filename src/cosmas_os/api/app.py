@@ -2232,7 +2232,8 @@ from cosmas_os.api.capture_deadline import install_capture_boundaries  # noqa: E
 install_capture_boundaries(app, _capture_connection)
 
 app.include_router(core_connection_router(settings=lambda: settings, session_factory=lambda: SessionLocal(),
-    identity_dependency=_identity, workspace_gate=_workspace_gate))
+    identity_dependency=_identity, workspace_gate=_workspace_gate,
+    fhir_schedule_runtime=lambda: getattr(app.state, "athena_fhir_schedule", None)))
 from cosmas_os.api.connection_catalog import router as connection_catalog_router  # noqa: E402
 
 app.include_router(connection_catalog_router(settings=lambda: settings, runtime=lambda: app.state,

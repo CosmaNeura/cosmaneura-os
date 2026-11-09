@@ -26,8 +26,8 @@ Preview practice **195900**.
 `system/Practitioner.read`, `system/Organization.read`.
 
 FHIR **Appointment** is refused. Encounter is the schedule source for now. The
-Non-Certified appointments path stays parked (C15). C9 will use Encounter only
-for the appointments UI path.
+Non-Certified appointments path stays parked (C15). C9 uses Encounter only for
+today's schedule (`docs/beta/ATHENA_FHIR_TODAY_SCHEDULE.md`).
 
 ## Guards
 
@@ -44,6 +44,7 @@ for the appointments UI path.
 
 - Route wiring into `/connections/ehr/reads` and plugin tools is C8
   (`docs/beta/ATHENA_FHIR_CONNECTIONS_WIRING.md`). Flags stay off.
-- Appointment UI path (C9)
+- Today's schedule from Encounter is C9
+  (`docs/beta/ATHENA_FHIR_TODAY_SCHEDULE.md`). Flags stay off.
 - Live Preview smoke (Nov 5 override: mock/recorded CI only; do not wait on J2)
 - Key Vault creation (John / J2) — tests use a fake env vault only

@@ -2,15 +2,18 @@
 
 Produces PatientLink-ready identity pins and human source-review projections with
 provenance (vendor, resource type, resource id hash, read time). Reuses the
-shared FHIR custody shape; does not wire routes or plugin tools (C8).
+shared FHIR custody shape. C9 maps Encounter into the existing schedule row
+shape (no FHIR Appointment). Route wiring for schedule is C9; C8 owns chart reads.
 """
 
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cosmas_os.adapters.ehr_fhir_vendor import (
     VENDOR_DISPLAY,
@@ -21,6 +24,7 @@ from cosmas_os.plugins.ehr_fhir.resources import READABLE_RESOURCES
 
 # Resources C8 will read through the shared FHIR path into source-review.
 # Appointment stays vendor-specific (Tebra SOAP / parked athena C15) — not mapped here.
+# C9 uses Encounter only for today's schedule (no Appointment scope or calls).
 MAPPED_SOURCE_TYPES: frozenset[str] = frozenset(
     {
         "Patient",
@@ -32,6 +36,18 @@ MAPPED_SOURCE_TYPES: frozenset[str] = frozenset(
         "DocumentReference",
     }
 )
+
+_VENDOR_ID = re.compile(r"^[1-9][0-9]{0,17}$")
+_ENCOUNTER_STATUS: dict[str, Literal["f", "2", "3", "4", "x"]] = {
+    "planned": "f",
+    "arrived": "2",
+    "triaged": "2",
+    "in-progress": "2",
+    "onleave": "f",
+    "finished": "3",
+    "cancelled": "x",
+    "unknown": "f",
+}
 
 # Keep identity projection aligned with SQL ehr_fhir grant identity allow-list.
 _PATIENT_IDENTITY_KEYS = (
@@ -269,3 +285,108 @@ def map_bundle_entries(
 def provenance_commitment(provenance: FhirSourceProvenance) -> str:
     """Stable hash over the four provenance fields required by C5 done criteria."""
     return payload_hash({"contract": "ehr-fhir-source-provenance.v1", **provenance.as_dict()})
+
+
+@dataclass(frozen=True, repr=False)
+class MappedScheduleEncounter:
+    """Encounter projected into the existing Athena schedule row shape (C9)."""
+
+    appointment_ref: str
+    patient_ref: str
+    source_local_start: datetime
+    duration_minutes: int
+    source_status: Literal["f", "2", "3", "4", "x"]
+    provenance: FhirSourceProvenance
+
+
+def vendor_numeric_id(value: str) -> str:
+    """Map FHIR resource ids onto the closed numeric VendorID schedule contract."""
+    if type(value) is not str or not 1 <= len(value) <= 64:
+        raise ValueError("invalid_fhir_schedule_id")
+    if _VENDOR_ID.fullmatch(value):
+        return value
+    tail = value.rsplit("-", 1)[-1]
+    if _VENDOR_ID.fullmatch(tail):
+        return tail
+    raise ValueError("invalid_fhir_schedule_id")
+
+
+def _patient_ref(resource: dict[str, Any]) -> str:
+    subject = resource.get("subject")
+    if type(subject) is not dict:
+        raise ValueError("invalid_fhir_encounter_subject")
+    reference = subject.get("reference")
+    if type(reference) is not str or not reference.startswith("Patient/"):
+        raise ValueError("invalid_fhir_encounter_subject")
+    return vendor_numeric_id(reference.removeprefix("Patient/"))
+
+
+def _local_start(period_start: str, department_timezone: str) -> datetime:
+    if type(period_start) is not str or not period_start:
+        raise ValueError("invalid_fhir_encounter_period")
+    try:
+        zone = ZoneInfo(department_timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("invalid_fhir_schedule_timezone") from exc
+    raw = period_start
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        instant = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError("invalid_fhir_encounter_period") from exc
+    if instant.tzinfo is None:
+        # Athena Preview may return department-local civil times without an offset.
+        return instant.replace(microsecond=0)
+    return instant.astimezone(zone).replace(tzinfo=None, microsecond=0)
+
+
+def _duration_minutes(period: dict[str, Any], start_local: datetime, department_timezone: str) -> int:
+    end_raw = period.get("end")
+    if end_raw is None:
+        return 30
+    if type(end_raw) is not str:
+        raise ValueError("invalid_fhir_encounter_period")
+    end_local = _local_start(end_raw, department_timezone)
+    minutes = int((end_local - start_local) / timedelta(minutes=1))
+    if not 1 <= minutes <= 1440:
+        raise ValueError("invalid_fhir_encounter_duration")
+    return minutes
+
+
+def map_encounter_to_schedule(
+    resource: dict[str, Any],
+    *,
+    vendor: str,
+    read_time: datetime,
+    department_timezone: str,
+) -> MappedScheduleEncounter:
+    """Map one US Core Encounter into the existing schedule observation row (C9).
+
+    Never reads or maps FHIR Appointment. Cancelled encounters stay labelled
+    cancelled. Times keep the department's local civil components.
+    """
+    kind, identifier = _require_resource(resource, "Encounter")
+    if kind != "Encounter":
+        raise ValueError("unexpected_fhir_resource_type")
+    status = resource.get("status")
+    if status == "entered-in-error":
+        raise ValueError("unsupported_fhir_encounter_status")
+    if type(status) is not str or status not in _ENCOUNTER_STATUS:
+        raise ValueError("unsupported_fhir_encounter_status")
+    period = resource.get("period")
+    if type(period) is not dict or "start" not in period:
+        raise ValueError("invalid_fhir_encounter_period")
+    start_local = _local_start(period["start"], department_timezone)
+    if start_local.utcoffset() is not None:
+        raise ValueError("athena_source_time_is_department_local")
+    vendor = require_fhir_vendor(vendor)
+    provenance = _provenance(vendor, kind, identifier, read_time)
+    return MappedScheduleEncounter(
+        appointment_ref=vendor_numeric_id(identifier),
+        patient_ref=_patient_ref(resource),
+        source_local_start=start_local,
+        duration_minutes=_duration_minutes(period, start_local, department_timezone),
+        source_status=_ENCOUNTER_STATUS[status],
+        provenance=provenance,
+    )
