@@ -2387,7 +2387,11 @@ allowed_headers.append("X-Cosmas-Ehr-Read")
 from cosmas_os.api.copy_to_ehr_remote_routes import (  # noqa: E402
     router as copy_to_ehr_remote_router,
 )
+from cosmas_os.api.copy_to_ehr_routes import (  # noqa: E402
+    router as copy_to_ehr_router,
+)
 
+app.include_router(copy_to_ehr_router(configuration=lambda: settings))
 app.include_router(copy_to_ehr_remote_router(
     configuration=lambda: settings,
     identity_dependency=_identity,
