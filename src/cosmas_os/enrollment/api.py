@@ -210,6 +210,7 @@ def create_app(settings: EnrollmentSettings | None = None, *, engine=None,
             enabled=settings.invitation_mail_enabled,
             webhook_url=settings.invitation_mail_webhook_url,
             webhook_secret=settings.invitation_mail_webhook_secret.get_secret_value(),
+            allowed_recipients=settings.invitation_mail_allowed_recipients,
         ) if settings.invitation_mail_configured() else DisabledInvitationNotifier())
     except ValueError:
         invitation_notifier = DisabledInvitationNotifier()
