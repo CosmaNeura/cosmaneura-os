@@ -44,6 +44,7 @@ private func selection(nonce: UInt8 = 1, api: String = practiceOne, org: String 
     var tokenBody: (@MainActor () async throws -> String?)?
     func signIn() async throws {}
     func signOut() async throws { identity = nil }
+    func clearStoredCredentials() throws {}
     func freshToken() async throws -> String? { try await tokenBody?() }
 }
 @MainActor private final class PracticeBlock: NativeAuthAccessBlock {
