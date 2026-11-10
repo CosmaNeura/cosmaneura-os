@@ -99,6 +99,7 @@ import Foundation
     private var recent: [String] = []
     private var signInWindow: SignInWindow?
     private var sourceHost: DesktopSourceHost?
+    private var copyHotkey: CopyToEhrMacHotkey?
 
     init() {
         let settings = Bundle.main.object(forInfoDictionaryKey: "CosmasNativeAuth") as? [String: Any] ?? [:]
@@ -160,6 +161,7 @@ import Foundation
     }
 
     func run() async {
+        installCopyHotkeyIfEnabled()
         Self.send(["event": "ready", "version": 1])
         var frames = DesktopAuthFrames()
         do {
@@ -299,9 +301,24 @@ import Foundation
         catch { exit(74) }
     }
 
+    private func installCopyHotkeyIfEnabled() {
+        let settings = CopyToEhrHotkeySettings.read(info: Bundle.main.infoDictionary, defaults: UserDefaults.standard)
+        guard settings.isEnabled else { return }
+        let hotkey = CopyToEhrMacHotkey(settings: settings) { [weak self] in
+            guard let self else { throw CopyToEhrCopyRefusal.unavailable }
+            let state = self.auth.state()
+            if state.phase == .disabled { return nil }
+            guard state.phase == .ready else { throw CopyToEhrCopyRefusal.unavailable }
+            return try await self.auth.token(expectedRevision: state.revision)
+        }
+        if !hotkey.install() { hotkey.present(CopyToEhrCopyMessages.hotkeyUnavailable) }
+        copyHotkey = hotkey
+    }
+
     private func stop(code: Int32) -> Never {
         for task in active.values { task.cancel() }
         sourceHost?.close()
+        copyHotkey?.stop()
         exit(code)
     }
 }
