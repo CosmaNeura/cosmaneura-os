@@ -298,6 +298,9 @@ fi
   cutover=$(copy_to_ehr_render_cutover "e29bf5a2de0eddec1663b1185076472ef172b590" "9dfd4cfd" "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump")
   printf '%s\n' "$cutover" | grep -q 'release-r10'
   printf '%s\n' "$cutover" | grep -q 'pg_dump -Fc'
+  printf '%s\n' "$cutover" | grep -q 'copy_to_ehr_confirm_prior_identity'
+  printf '%s\n' "$cutover" | grep -q 'copy_to_ehr_cutover_trap_rollback'
+  printf '%s\n' "$cutover" | grep -q 'copy_to_ehr_assert_target_schema'
   if printf '%s\n' "$cutover" | grep -E 'blob download|scp '; then exit 1; fi
   printf '%s\n' "$cutover" >"$root_dir/cutover.sh"
   awk 'seen && $0 == "COPY_TO_EHR_BASH_BODY" {exit} seen {print} $0 == "exec /bin/bash <<'\''COPY_TO_EHR_BASH_BODY'\''" {seen=1}' "$root_dir/cutover.sh" >"$root_dir/cutover-inner.sh"
@@ -397,6 +400,7 @@ fi
   copy_to_ehr_restore_gate() { return 0; }
   copy_to_ehr_stop_live_listeners() { return 0; }
   copy_to_ehr_migrate_live() { return 0; }
+  copy_to_ehr_psql() { printf '%s\n' 'a46f2c09d853'; }
   copy_to_ehr_start_new_listeners() { return 0; }
   copy_to_ehr_ready_for_pointer() { return 0; }
   copy_to_ehr_write_new_pointer() { return 0; }
@@ -459,6 +463,156 @@ if [[ $? -eq 0 ]]; then
   pass "web chunk command stays a script and does not print the archive bytes"
 else
   fail "web chunk command stays a script and does not print the archive bytes"
+fi
+
+served_commit=9dfd4cfd0123456789abcdef0123456789abcdef
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  log="$root_dir/version.log"
+  : >"$log"
+  curl() {
+    if [[ "$*" == *"/version.json"* ]]; then
+      printf '%s' "{\"commit\":\"${served_commit}\"}"
+      return 0
+    fi
+    return 1
+  }
+  copy_to_ehr_stop_live_listeners() { printf 'STOP\n' >>"$log"; }
+  copy_to_ehr_pg_dump() { printf 'DUMP\n' >>"$log"; }
+  if copy_to_ehr_confirm_prior_identity "9dfd4cfd" \
+    "cosmabot-nov1-api:6e65ffc6d892282e9f13cbd16c8a17e7592fa88c" \
+    "9dfd4cfd0123456789abcdef0123456789abcdef"; then
+    :
+  else
+    exit 1
+  fi
+  if copy_to_ehr_confirm_prior_identity "9dfd4cfd" \
+    "cosmabot-nov1-api:6e65ffc6d892282e9f13cbd16c8a17e7592fa88c" \
+    "6e65ffc6d892282e9f13cbd16c8a17e7592fa88c"; then
+    exit 1
+  fi
+  curl() { return 1; }
+  if copy_to_ehr_confirm_prior_identity "9dfd4cfd" \
+    "cosmabot-nov1-api:6e65ffc6d892282e9f13cbd16c8a17e7592fa88c" \
+    "9dfd4cfd0123456789abcdef0123456789abcdef"; then
+    exit 1
+  fi
+  curl() {
+    printf '%s' '{"commit":"6e65ffc6d892282e9f13cbd16c8a17e7592fa88c"}'
+    return 0
+  }
+  if copy_to_ehr_confirm_prior_identity "9dfd4cfd" \
+    "cosmabot-nov1-api:6e65ffc6d892282e9f13cbd16c8a17e7592fa88c" \
+    "9dfd4cfd0123456789abcdef0123456789abcdef"; then
+    exit 1
+  fi
+  main_body=$(declare -f copy_to_ehr_cutover_main)
+  version_line=$(printf '%s\n' "$main_body" | awk '/copy_to_ehr_confirm_prior_identity/{print NR; exit}')
+  sequence_line=$(printf '%s\n' "$main_body" | awk '/copy_to_ehr_cutover_sequence/{print NR; exit}')
+  [[ -n "$version_line" && -n "$sequence_line" && "$version_line" -lt "$sequence_line" ]]
+  if [[ -s "$log" ]]; then exit 1; fi
+) >"$root_dir/version.out" 2>"$root_dir/version.err"
+if [[ $? -eq 0 ]] \
+  && grep -q 'PRIOR_SHA_MISMATCH' "$root_dir/version.err" \
+  && grep -q 'PRIOR_VERSION_UNREADABLE' "$root_dir/version.err" \
+  && grep -q 'PRIOR_VERSION_MISMATCH' "$root_dir/version.err"; then
+  pass "version mismatch or an unreadable version.json aborts before the dump"
+else
+  fail "version mismatch or an unreadable version.json aborts before the dump"
+  cat "$root_dir/version.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  log="$root_dir/trap.log"
+  : >"$log"
+  copy_to_ehr_rollback_to_r10() { printf 'TRAP_ROLLBACK\n' >>"$log"; return 0; }
+  copy_to_ehr_arm_cutover_trap "$root_dir/trap.dump" "cosmabot_standalone_e0a414184674"
+  false
+) >"$root_dir/trap.out" 2>"$root_dir/trap.err"
+status=$?
+set -e
+if [[ "$status" -ne 0 ]] \
+  && grep -q 'TRAP_ROLLBACK' "$root_dir/trap.log" \
+  && grep -q 'CUTOVER_ROLLBACK' "$root_dir/trap.err"; then
+  pass "a death after listeners stop runs rollback"
+else
+  fail "a death after listeners stop runs rollback"
+  cat "$root_dir/trap.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  copy_to_ehr_remove_new_listeners() { return 0; }
+  copy_to_ehr_restore_dump_over_live() { return 1; }
+  copy_to_ehr_start_prior_listeners() { return 0; }
+  copy_to_ehr_rollback_to_r10 "$root_dir/missing.dump" "cosmabot_standalone_e0a414184674"
+) >"$root_dir/failed-rollback.out" 2>"$root_dir/failed-rollback.err"
+status=$?
+set -e
+if [[ "$status" -ne 0 ]] && grep -q 'CUTOVER_ROLLBACK_FAILED' "$root_dir/failed-rollback.err"; then
+  pass "a failed rollback exits non-zero with CUTOVER_ROLLBACK_FAILED"
+else
+  fail "a failed rollback exits non-zero with CUTOVER_ROLLBACK_FAILED"
+  cat "$root_dir/failed-rollback.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  log="$root_dir/schema.log"
+  : >"$log"
+  copy_to_ehr_restore_gate() { return 0; }
+  copy_to_ehr_stop_live_listeners() { printf 'STOP\n' >>"$log"; return 0; }
+  copy_to_ehr_migrate_live() { printf 'MIGRATE\n' >>"$log"; return 0; }
+  copy_to_ehr_psql() { printf '%s\n' 'bb57e3d10c964'; }
+  copy_to_ehr_start_new_listeners() { printf 'STARTED\n' >>"$log"; return 0; }
+  copy_to_ehr_rollback_to_r10() { printf 'SCHEMA_ROLLBACK\n' >>"$log"; return 0; }
+  if copy_to_ehr_cutover_sequence "$root_dir/schema-root" "$root_dir/schema.dump" "cosmabot_standalone_e0a414184674"; then
+    exit 1
+  fi
+  grep -q 'STOP' "$log"
+  grep -q 'MIGRATE' "$log"
+  grep -q 'SCHEMA_ROLLBACK' "$log"
+  if grep -q 'STARTED' "$log"; then exit 1; fi
+) >"$root_dir/schema.out" 2>"$root_dir/schema.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -q 'SCHEMA_NOT_TARGET' "$root_dir/schema.err"; then
+  pass "a database that is not the target schema rolls back"
+else
+  fail "a database that is not the target schema rolls back"
+  cat "$root_dir/schema.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  payload=$(python3 -c 'import json,sys; sys.stdout.write(json.dumps({"value":[{"message":"RESTORE_CHECK_OK\nLOOKING\nCOUNT alembic_version=4\nOKAY\nthis line is OK\n"}]}))')
+  filtered=$(printf '%s' "$payload" | copy_to_ehr_filter_run_output)
+  printf '%s\n' "$filtered" | grep -qx 'RESTORE_CHECK_OK'
+  printf '%s\n' "$filtered" | grep -qx 'COUNT alembic_version=4'
+  printf '%s\n' "$filtered" | grep -qx 'this line is OK'
+  if printf '%s\n' "$filtered" | grep -qx 'LOOKING'; then exit 1; fi
+  if printf '%s\n' "$filtered" | grep -qx 'OKAY'; then exit 1; fi
+)
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "run-command output keeps whole status tokens"
+else
+  fail "run-command output keeps whole status tokens"
 fi
 
 if [[ "$failures" -eq 0 ]]; then

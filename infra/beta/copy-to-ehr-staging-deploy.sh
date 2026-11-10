@@ -577,14 +577,126 @@ copy_to_ehr_post_switch_checks() {
   printf 'POST_SWITCH_OK\n'
 }
 
+copy_to_ehr_read_served_commit() {
+  local port="$1" body commit
+  body=$(curl -sf -H "Host: ${STAGING_WEB_HOST}" "http://127.0.0.1:${port}/version.json") || return 1
+  commit=$(printf '%s' "$body" | python3 -c 'import json, sys
+raw = sys.stdin.read()
+try:
+    value = json.loads(raw).get("commit", "")
+except Exception:
+    value = ""
+if not isinstance(value, str):
+    value = ""
+sys.stdout.write(value)
+') || return 1
+  [[ "$commit" =~ ^[0-9a-f]{8,40}$ ]] || return 1
+  printf '%s\n' "$commit"
+}
+
+copy_to_ehr_confirm_prior_identity() {
+  local expected="$1" image_ref="$2" source_text="$3" served=""
+  [[ ${#expected} -ge 8 ]] || {
+    printf 'PRIOR_SHA_MISMATCH\n' >&2
+    return 1
+  }
+  if ! served=$(copy_to_ehr_read_served_commit "$LIVE_EDGE_PORT"); then
+    printf 'PRIOR_VERSION_UNREADABLE\n' >&2
+    return 1
+  fi
+  if ! copy_to_ehr_prior_matches "$expected" "$served"; then
+    printf 'PRIOR_VERSION_MISMATCH\n' >&2
+    return 1
+  fi
+  COPY_TO_EHR_SERVED_PRIOR="$served"
+  if [[ -n "$source_text" ]] && copy_to_ehr_prior_matches "$expected" "$source_text"; then
+    return 0
+  fi
+  if copy_to_ehr_prior_matches "$expected" "$image_ref"; then
+    return 0
+  fi
+  printf 'PRIOR_SHA_MISMATCH\n' >&2
+  return 1
+}
+
+copy_to_ehr_assert_target_schema() {
+  local live_db="$1" version=""
+  version=$(copy_to_ehr_psql "$live_db" "SELECT version_num FROM public.alembic_version") || return 1
+  [[ "$version" == "$STAGING_TARGET_SCHEMA" ]]
+}
+
+copy_to_ehr_disarm_cutover_trap() {
+  trap - ERR EXIT INT
+}
+
+copy_to_ehr_cutover_trap_rollback() {
+  local status=$?
+  copy_to_ehr_disarm_cutover_trap
+  if ! copy_to_ehr_rollback_to_r10 "$COPY_TO_EHR_TRAP_DUMP" "$COPY_TO_EHR_TRAP_DB"; then
+    exit 1
+  fi
+  printf 'CUTOVER_ROLLBACK\n' >&2
+  exit "$status"
+}
+
+copy_to_ehr_arm_cutover_trap() {
+  COPY_TO_EHR_TRAP_DUMP="$1"
+  COPY_TO_EHR_TRAP_DB="$2"
+  trap copy_to_ehr_cutover_trap_rollback ERR EXIT INT
+}
+
+copy_to_ehr_rollback_verify_prior() {
+  local ready_body="" ready_code="" version_commit=""
+  ready_body=$(mktemp /tmp/copy-to-ehr-ready.XXXXXX)
+  ready_code=$(curl -s -o "$ready_body" -w '%{http_code}' "http://127.0.0.1:${LIVE_API_PORT}/ready") || {
+    rm -f -- "$ready_body"
+    return 1
+  }
+  if [[ "$ready_code" != "200" ]] || ! grep -F -q '"status":"ready"' "$ready_body"; then
+    rm -f -- "$ready_body"
+    return 1
+  fi
+  rm -f -- "$ready_body"
+  version_commit=$(copy_to_ehr_read_served_commit "$LIVE_EDGE_PORT") || return 1
+  if [[ -n "${COPY_TO_EHR_SERVED_PRIOR:-}" ]]; then
+    [[ "$version_commit" == "$COPY_TO_EHR_SERVED_PRIOR" ]] || return 1
+  fi
+  copy_to_ehr_prior_matches "${COPY_TO_EHR_PRIOR:-}" "$version_commit"
+}
+
 copy_to_ehr_rollback_to_r10() {
   local dump="$1" live_db="$2"
-  copy_to_ehr_remove_new_listeners || true
-  copy_to_ehr_restore_dump_over_live "$dump" "$live_db" || return 1
-  copy_to_ehr_start_prior_listeners || return 1
-  copy_to_ehr_write_prior_pointer || return 1
-  copy_to_ehr_expect_ready "$LIVE_API_PORT" || return 1
+  if ! copy_to_ehr_remove_new_listeners; then
+    printf 'CUTOVER_ROLLBACK_FAILED\n' >&2
+    return 1
+  fi
+  if ! copy_to_ehr_restore_dump_over_live "$dump" "$live_db"; then
+    printf 'CUTOVER_ROLLBACK_FAILED\n' >&2
+    return 1
+  fi
+  if ! copy_to_ehr_start_prior_listeners; then
+    printf 'CUTOVER_ROLLBACK_FAILED\n' >&2
+    return 1
+  fi
+  if ! copy_to_ehr_write_prior_pointer; then
+    printf 'CUTOVER_ROLLBACK_FAILED\n' >&2
+    return 1
+  fi
+  if ! copy_to_ehr_rollback_verify_prior; then
+    printf 'CUTOVER_ROLLBACK_FAILED\n' >&2
+    return 1
+  fi
   printf 'ROLLBACK_OK\n'
+}
+
+copy_to_ehr_fail_rollback() {
+  local dump="$1" live_db="$2"
+  copy_to_ehr_disarm_cutover_trap
+  if ! copy_to_ehr_rollback_to_r10 "$dump" "$live_db"; then
+    return 1
+  fi
+  printf 'CUTOVER_ROLLBACK\n' >&2
+  return 1
 }
 
 copy_to_ehr_cutover_sequence() {
@@ -593,36 +705,36 @@ copy_to_ehr_cutover_sequence() {
     printf 'CUTOVER_ABORT_RESTORE_CHECK\n' >&2
     return 1
   fi
+  copy_to_ehr_arm_cutover_trap "$dump" "$live_db"
   if ! copy_to_ehr_stop_live_listeners; then
-    copy_to_ehr_start_prior_listeners || true
+    copy_to_ehr_disarm_cutover_trap
+    if ! copy_to_ehr_start_prior_listeners; then
+      printf 'CUTOVER_ROLLBACK_FAILED\n' >&2
+      return 1
+    fi
     printf 'CUTOVER_ABORT_STOP\n' >&2
     return 1
   fi
   if ! copy_to_ehr_migrate_live "$dump"; then
-    copy_to_ehr_rollback_to_r10 "$dump" "$live_db" || true
-    printf 'CUTOVER_ROLLBACK\n' >&2
-    return 1
+    copy_to_ehr_fail_rollback "$dump" "$live_db" || return 1
+  fi
+  if ! copy_to_ehr_assert_target_schema "$live_db"; then
+    printf 'SCHEMA_NOT_TARGET\n' >&2
+    copy_to_ehr_fail_rollback "$dump" "$live_db" || return 1
   fi
   if ! copy_to_ehr_start_new_listeners; then
-    copy_to_ehr_rollback_to_r10 "$dump" "$live_db" || true
-    printf 'CUTOVER_ROLLBACK\n' >&2
-    return 1
+    copy_to_ehr_fail_rollback "$dump" "$live_db" || return 1
   fi
   if ! copy_to_ehr_ready_for_pointer; then
-    copy_to_ehr_rollback_to_r10 "$dump" "$live_db" || true
-    printf 'CUTOVER_ROLLBACK\n' >&2
-    return 1
+    copy_to_ehr_fail_rollback "$dump" "$live_db" || return 1
   fi
   if ! copy_to_ehr_write_new_pointer; then
-    copy_to_ehr_rollback_to_r10 "$dump" "$live_db" || true
-    printf 'CUTOVER_ROLLBACK\n' >&2
-    return 1
+    copy_to_ehr_fail_rollback "$dump" "$live_db" || return 1
   fi
   if ! copy_to_ehr_post_switch_checks; then
-    copy_to_ehr_rollback_to_r10 "$dump" "$live_db" || true
-    printf 'CUTOVER_ROLLBACK\n' >&2
-    return 1
+    copy_to_ehr_fail_rollback "$dump" "$live_db" || return 1
   fi
+  copy_to_ehr_disarm_cutover_trap
   printf 'CUTOVER_OK\n'
 }
 
@@ -638,15 +750,11 @@ copy_to_ehr_cutover_main() {
   esac
   image_ref=$(docker inspect --format '{{.Config.Image}}' "cosmabot-standalone-r10-api-${STAGING_SHORT}")
   source_file="${STAGING_DATA_ROOT}/${STAGING_PRIOR_RELEASE}/source-sha"
-  observed="$image_ref"
+  observed=""
   if [[ -f "$source_file" ]]; then
     observed=$(tr -d '[:space:]' <"$source_file")
   fi
-  if ! copy_to_ehr_prior_matches "$COPY_TO_EHR_PRIOR" "$observed" \
-    && ! copy_to_ehr_prior_matches "$COPY_TO_EHR_PRIOR" "$image_ref"; then
-    printf 'PRIOR_SHA_MISMATCH\n' >&2
-    return 1
-  fi
+  copy_to_ehr_confirm_prior_identity "$COPY_TO_EHR_PRIOR" "$image_ref" "$observed" || return 1
   COPY_TO_EHR_PG_CONTAINER=$(docker ps --format '{{.ID}} {{.Ports}}' | awk '/(^|[^0-9])54111([^0-9]|$)/ {print $1; exit}')
   if [[ -z "${COPY_TO_EHR_PG_CONTAINER:-}" ]]; then
     printf 'LIVE_POSTGRES_CONTAINER_NOT_FOUND\n' >&2
@@ -920,6 +1028,14 @@ copy_to_ehr_render_cutover() {
   body="${body}
 $(declare -f \
     copy_to_ehr_prior_matches \
+    copy_to_ehr_read_served_commit \
+    copy_to_ehr_confirm_prior_identity \
+    copy_to_ehr_assert_target_schema \
+    copy_to_ehr_disarm_cutover_trap \
+    copy_to_ehr_cutover_trap_rollback \
+    copy_to_ehr_arm_cutover_trap \
+    copy_to_ehr_rollback_verify_prior \
+    copy_to_ehr_fail_rollback \
     copy_to_ehr_release_dir \
     copy_to_ehr_dump_file_on_staging_vm \
     copy_to_ehr_pg_dump \
@@ -971,7 +1087,11 @@ copy_to_ehr_invoke_remote() {
     copy_to_ehr_die "run-command ${name} failed"
   fi
   rm -f -- "$file"
-  printf '%s' "$result" | python3 -c '
+  printf '%s' "$result" | copy_to_ehr_filter_run_output
+}
+
+copy_to_ehr_filter_run_output() {
+  python3 -c '
 import json, sys
 raw = sys.stdin.read()
 try:
@@ -985,11 +1105,23 @@ if isinstance(value, list):
     for item in value:
         if isinstance(item, dict):
             text += str(item.get("message") or "")
-allowed = ("OK", "REFUSED", "ABORT", "DUMP_BYTES", "COUNT ", "ROLLBACK", "CHUNK", "POINTER", "READY", "VERSION", "COPY_TO_EHR", "PRIOR", "DISK", "API_IMAGE", "POST_SWITCH", "RESTORE")
+allowed = {
+    "OK", "REFUSED", "ABORT", "DUMP_BYTES", "COUNT", "ROLLBACK",
+    "CHUNK", "POINTER", "READY", "VERSION", "COPY_TO_EHR", "PRIOR",
+    "DISK", "API_IMAGE", "POST_SWITCH", "RESTORE", "SCHEMA",
+}
+
+def whole(token):
+    head = token.split("=", 1)[0]
+    parts = head.split("_")
+    if head in allowed or token in allowed:
+        return True
+    return any(part in allowed for part in parts)
+
 for line in text.splitlines():
     if len(line) > 200:
         continue
-    if any(token in line for token in allowed):
+    if any(whole(word) for word in line.split()):
         sys.stdout.write(line + "\n")
 '
 }

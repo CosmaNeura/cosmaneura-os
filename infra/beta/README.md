@@ -1209,7 +1209,19 @@ The candidate SHA lives in one constant, `DEFAULT_SOURCE_SHA`, currently
 `e29bf5a2de0eddec1663b1185076472ef172b590`. Pass `--sha` when PR 341 moves.
 That tree keeps schema head `a46f2c09d853` and the public keys
 `COPY_TO_EHR_ENABLED`, `COPY_TO_EHR_REMOTE_ENABLED`, and
-`COPY_TO_EHR_FALLBACK_ENABLED`. The pre-cutover `pg_dump` stays on the staging VM under
+`COPY_TO_EHR_FALLBACK_ENABLED`.
+
+Cutover requires `--expect-prior-sha 9dfd4cfd`. That is the commit live staging
+serves in `version.json`. Before the dump, the script curls the live listener
+on port 54112. The read has to succeed, and the commit has to prefix-match
+that value. The value has to be at least 8 hex characters. The same value
+must also prefix-match `release-r10/source-sha` or the running image tag.
+Both checks have to pass. `6e65ffc6` is the image tag
+`cosmabot-nov1-api:6e65ffc6d892282e9f13cbd16c8a17e7592fa88c`, not the served
+commit. After a migration the database has to be at `a46f2c09d853`. A failed
+rollback prints `CUTOVER_ROLLBACK_FAILED` and exits non-zero.
+
+The pre-cutover `pg_dump` stays on the staging VM under
 `/var/lib/cosmabot/standalone/e0a41418-4674-456e-8512-7d5de7a78670`, inside
 `rg-cosmas-os-vm-staging-eus2-lab01`. The script does not download that dump.
 Before any live migration it restores the dump into a scratch database, checks
