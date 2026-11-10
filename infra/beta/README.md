@@ -1192,3 +1192,30 @@ on this estimate without the existing exact deployment review.
 
 Record only sanitized evidence in git. D3 is not complete until every item is
 demonstrated by the authorized human path.
+
+## Copy to EHR staging deploy
+
+`copy-to-ehr-staging-deploy.sh` is the repeatable staging path for the Copy to
+EHR beta. It follows the October 31 pointer switch on
+`vm-cosmabot-staging-eus2-lab01`. It does not use the Container Apps /
+`render.py` path.
+
+The script is a dry-run until `--execute`. Without `--cutover` it leaves
+`release-r10` on ports 54110 and 54112 and trials the new build on 54120 and
+54122, with a throwaway database on 54130. The live database is not migrated
+until cutover. Cutover also requires `--expect-prior-sha`.
+
+The candidate SHA lives in one constant, `DEFAULT_SOURCE_SHA`. Pass `--sha`
+when PR 341 moves. The pre-cutover `pg_dump` stays on the staging VM under
+`/var/lib/cosmabot/standalone/e0a41418-4674-456e-8512-7d5de7a78670`, inside
+`rg-cosmas-os-vm-staging-eus2-lab01`. The script does not download that dump.
+Before any live migration it restores the dump into a scratch database, checks
+the alembic version and row counts, drops the scratch database, and aborts if
+that check fails. A failed cutover restores the on-VM dump and points
+`/etc/cosmabot/active-release` back at `release-r10`.
+
+Run the shell tests from the repository root:
+
+```sh
+bash infra/beta/tests/copy-to-ehr-staging-deploy.sh
+```
