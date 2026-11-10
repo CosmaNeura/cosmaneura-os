@@ -41,7 +41,8 @@ private func selectedInputs(session: String = "sess_one", box: UUID = UUID(uuidS
 }
 @MainActor private final class SelectedDriver: NativeAuthDriver {
     var loaded = true; var identity: NativeAuthIdentity?
-    func signIn() async throws {}; func signOut() async throws { identity = nil }; func freshToken() async throws -> String? { nil }
+    func signIn() async throws {}; func signOut() async throws { identity = nil }
+    func clearStoredCredentials() throws {}; func freshToken() async throws -> String? { nil }
 }
 @MainActor private final class SelectedBlock: NativeAuthAccessBlock {
     func isBlocked() throws -> Bool { false }; func setBlocked(_ value: Bool) throws {}

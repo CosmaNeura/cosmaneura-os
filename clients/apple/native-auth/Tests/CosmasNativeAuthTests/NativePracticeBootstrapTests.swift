@@ -47,6 +47,7 @@ private func encodeBootstrap(_ value: [String: Any]) throws -> Data {
     var identity: NativeAuthIdentity?
     func signIn() async throws {}
     func signOut() async throws { identity = nil }
+    func clearStoredCredentials() throws {}
     func freshToken() async throws -> String? { nil }
 }
 @MainActor private final class SnapshotBlock: NativeAuthAccessBlock {
