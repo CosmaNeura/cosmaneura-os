@@ -87,7 +87,7 @@ run_script() {
 }
 
 if [[ "$(grep -c '^DEFAULT_SOURCE_SHA=' "$target")" -eq 1 ]] \
-  && grep -q '^DEFAULT_SOURCE_SHA=288eeb42effb6e1bc5f667eb7c6610b95e6d5636$' "$target"; then
+  && grep -q '^DEFAULT_SOURCE_SHA=e29bf5a2de0eddec1663b1185076472ef172b590$' "$target"; then
   pass "default sha is one constant"
 else
   fail "default sha is one constant"
@@ -113,7 +113,7 @@ if run_script "$stubs" --workdir "$workdir" >"$dry_out" 2>"$dry_err"; then
     && grep -q 'account show' "$stubs/az.log" \
     && grep -q 'vm show' "$stubs/az.log" \
     && ! grep -q 'run-command' "$stubs/az.log" \
-    && grep -q '288eeb42effb6e1bc5f667eb7c6610b95e6d5636' "$dry_out" \
+    && grep -q 'e29bf5a2de0eddec1663b1185076472ef172b590' "$dry_out" \
     && grep -q 'stop before cutover: live release-r10 stays on 54110/54112' "$dry_out" \
     && grep -q 'SIDE_PORT_REFUSED_LIVE_DATABASE' "$dry_out" \
     && grep -q '54130' "$dry_out"; then
@@ -277,7 +277,7 @@ fi
 (
   # shellcheck disable=SC1090
   source "$target"
-  side=$(copy_to_ehr_render_side_port "288eeb42effb6e1bc5f667eb7c6610b95e6d5636")
+  side=$(copy_to_ehr_render_side_port "e29bf5a2de0eddec1663b1185076472ef172b590")
   printf '%s\n' "$side" | grep -q 'SIDE_PORT_REFUSED_LIVE_DATABASE'
   printf '%s\n' "$side" | grep -q 'cosmabot_copy_ehr_trial'
   printf '%s\n' "$side" | grep -q '54130'
@@ -295,7 +295,7 @@ fi
   migrate=$(printf '%s\n' "$body" | awk '/copy_to_ehr_migrate_live/{print NR; exit}')
   [[ -n "$restore" && -n "$stop" && -n "$migrate" ]]
   [[ "$restore" -lt "$stop" && "$stop" -lt "$migrate" ]]
-  cutover=$(copy_to_ehr_render_cutover "288eeb42effb6e1bc5f667eb7c6610b95e6d5636" "9dfd4cfd" "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump")
+  cutover=$(copy_to_ehr_render_cutover "e29bf5a2de0eddec1663b1185076472ef172b590" "9dfd4cfd" "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump")
   printf '%s\n' "$cutover" | grep -q 'release-r10'
   printf '%s\n' "$cutover" | grep -q 'pg_dump -Fc'
   if printf '%s\n' "$cutover" | grep -E 'blob download|scp '; then exit 1; fi

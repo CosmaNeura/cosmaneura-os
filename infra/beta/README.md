@@ -1205,8 +1205,11 @@ The script is a dry-run until `--execute`. Without `--cutover` it leaves
 54122, with a throwaway database on 54130. The live database is not migrated
 until cutover. Cutover also requires `--expect-prior-sha`.
 
-The candidate SHA lives in one constant, `DEFAULT_SOURCE_SHA`. Pass `--sha`
-when PR 341 moves. The pre-cutover `pg_dump` stays on the staging VM under
+The candidate SHA lives in one constant, `DEFAULT_SOURCE_SHA`, currently
+`e29bf5a2de0eddec1663b1185076472ef172b590`. Pass `--sha` when PR 341 moves.
+That tree keeps schema head `a46f2c09d853` and the public keys
+`COPY_TO_EHR_ENABLED`, `COPY_TO_EHR_REMOTE_ENABLED`, and
+`COPY_TO_EHR_FALLBACK_ENABLED`. The pre-cutover `pg_dump` stays on the staging VM under
 `/var/lib/cosmabot/standalone/e0a41418-4674-456e-8512-7d5de7a78670`, inside
 `rg-cosmas-os-vm-staging-eus2-lab01`. The script does not download that dump.
 Before any live migration it restores the dump into a scratch database, checks

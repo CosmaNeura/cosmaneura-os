@@ -12,7 +12,7 @@ set -euo pipefail
 
 # DEFAULT_SOURCE_SHA is the only default candidate. When PR 341 moves, change
 # this one line or pass --sha. Do not add a second default.
-DEFAULT_SOURCE_SHA=288eeb42effb6e1bc5f667eb7c6610b95e6d5636
+DEFAULT_SOURCE_SHA=e29bf5a2de0eddec1663b1185076472ef172b590
 
 STAGING_SUBSCRIPTION_ID=bab2a709-1fcb-4c87-a9fc-802f7477ec13
 STAGING_SUBSCRIPTION_NAME="Microsoft Azure Sponsorship"
