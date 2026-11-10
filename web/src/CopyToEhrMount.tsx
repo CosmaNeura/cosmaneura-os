@@ -19,6 +19,8 @@ export type CopyToEhrMountProps={
   expectedRevision?:string;
   profileId?:string;
   locked?:boolean;
+  /** copy_to_ehr_remote_enabled. Pointers only; the computer still copies. */
+  remoteEnabled?:boolean;
   highlightedKey?:string|null;
   loadPackage?:typeof fetchCopyToEhrPackage;
   onAudit?:(meta:Omit<CopyToEhrAuditMetadata,'correlation_id'|'duration_ms'>&{duration_ms?:number})=>void;
@@ -37,6 +39,7 @@ export function CopyToEhrMount({
   expectedRevision,
   profileId='atlas_md',
   locked=false,
+  remoteEnabled=false,
   highlightedKey=null,
   loadPackage=fetchCopyToEhrPackage,
   onAudit,
@@ -77,7 +80,7 @@ export function CopyToEhrMount({
 
   const notSent=fallbackOffer||pkg?.visit_copy_to_ehr_status==='not_sent_copy_instead';
 
-  return <div className="copy-to-ehr-mount">
+  return <div className="copy-to-ehr-mount" data-copy-to-ehr-remote={remoteEnabled?'on':'off'}>
     {notSent&&!pkg&&!busy&&<p className="copy-to-ehr-not-sent" role="status">
       This note was not sent. Copy to EHR is available when the package loads, or continue the visit without copying.
     </p>}

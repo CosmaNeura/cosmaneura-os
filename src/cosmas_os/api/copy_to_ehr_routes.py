@@ -16,6 +16,7 @@ from cosmas_os.application.ehr_export import (
     render_full_note,
     render_section,
 )
+from cosmas_os.application.ehr_export.draft_source import find_workspace_note, load_export_draft
 
 # Testable draft source. Production wiring replaces this; starts empty.
 _DraftLoader = Callable[[str], ExportDraft | None]
@@ -32,6 +33,54 @@ def configure_draft_loader(loader: _DraftLoader | None) -> None:
     """Install or clear the draft loader used by the GET route."""
     global _draft_loader
     _draft_loader = loader if loader is not None else _missing_draft
+
+
+def copy_to_ehr_flags_header(configuration) -> bytes:
+    """Three flags only. Never note text."""
+    cfg = configuration() if callable(configuration) else configuration
+
+    def bit(name: str) -> str:
+        return "1" if bool(getattr(cfg, name, False)) else "0"
+
+    return (
+        f"{bit('copy_to_ehr_enabled')},{bit('copy_to_ehr_remote_enabled')},"
+        f"{bit('copy_to_ehr_fallback_enabled')}"
+    ).encode()
+
+
+class CopyToEhrFlagHeaderMiddleware:
+    """Publish the three flags on responses the workspace already receives."""
+
+    def __init__(self, app, configuration):
+        self.app = app
+        self.configuration = configuration
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        header = copy_to_ehr_flags_header(self.configuration)
+
+        async def send_with_flags(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                headers.append((b"x-cosmas-copy-to-ehr-flags", header))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_flags)
+
+
+def install_copy_to_ehr_draft_loader(*, enabled: bool, open_session, find_note=find_workspace_note) -> None:
+    """Register the workspace draft loader only when copy-to-EHR is enabled."""
+    if not enabled:
+        return
+    finder = find_note
+
+    def load(draft_id: str) -> ExportDraft | None:
+        return load_export_draft(open_session, draft_id, find_note=finder)
+
+    configure_draft_loader(load)
 
 
 def _package_json(pkg: ExportPackage) -> dict[str, Any]:
@@ -59,6 +108,16 @@ def _package_json(pkg: ExportPackage) -> dict[str, Any]:
 
 def router(*, configuration) -> APIRouter:
     routes = APIRouter()
+
+    @routes.get("/api/copy-to-ehr/flags")
+    def copy_to_ehr_flags(response: Response) -> dict[str, bool]:
+        response.headers["Cache-Control"] = "no-store"
+        cfg = configuration()
+        return {
+            "copy_to_ehr_enabled": bool(getattr(cfg, "copy_to_ehr_enabled", False)),
+            "copy_to_ehr_remote_enabled": bool(getattr(cfg, "copy_to_ehr_remote_enabled", False)),
+            "copy_to_ehr_fallback_enabled": bool(getattr(cfg, "copy_to_ehr_fallback_enabled", False)),
+        }
 
     @routes.get("/api/copy-to-ehr/drafts/{draft_id}")
     def get_export_draft(

@@ -9,7 +9,7 @@ import {canReviewChiefNote,supportsChiefNoteSource,type ChiefNoteOffer} from './
 import { CopyToEhrMount } from "./CopyToEhrMount";
 
 export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange,onTeamDrafts,compact=false,notebookDirty=false,chiefNoteOffer,
-  copyToEhrEnabled=false,copyToEhrFallbackOffer=false,copyToEhrIdentity,copyToEhrProfileId='atlas_md',copyToEhrHighlightedKey=null }: {
+  copyToEhrEnabled=false,copyToEhrFallbackOffer=false,copyToEhrRemoteEnabled=false,copyToEhrIdentity,copyToEhrProfileId='atlas_md',copyToEhrHighlightedKey=null }: {
   workspace: Workspace; locked: boolean; onSave: (operation: NoteOperation) => void; onSources: () => void; active?:boolean;
   onStateChange?:(state:'editing'|'review'|'saved')=>void;
   onTeamDrafts?:(noteId:string)=>void;
@@ -20,6 +20,8 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
   copyToEhrEnabled?:boolean;
   /** Visit connector-failure offer. Shows that the note was not sent. */
   copyToEhrFallbackOffer?:boolean;
+  /** copy_to_ehr_remote_enabled. Passed through; defaults false. */
+  copyToEhrRemoteEnabled?:boolean;
   copyToEhrIdentity?:AuthenticatedWorkspaceIdentity;
   copyToEhrProfileId?:string;
   copyToEhrHighlightedKey?:string|null;
@@ -188,8 +190,8 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
 
     {latest?.review && !dirty && !otherVersion && <p className="team-fine">Version {latest.version} reviewed by you at {new Date(latest.review.created_at).toLocaleString()}.{sourcesChanged ? " That review predates the source changes." : ""}</p>}
     {latest?.review && !dirty && !otherVersion && copyToEhrIdentity && (copyToEhrEnabled || copyToEhrFallbackOffer) &&
-      <CopyToEhrMount enabled={copyToEhrEnabled} fallbackOffer={copyToEhrFallbackOffer} identity={copyToEhrIdentity}
-        draftId={latest.id} expectedRevision={String(latest.version)} profileId={copyToEhrProfileId}
+      <CopyToEhrMount enabled={copyToEhrEnabled} fallbackOffer={copyToEhrFallbackOffer} remoteEnabled={copyToEhrRemoteEnabled}
+        identity={copyToEhrIdentity} draftId={latest.id} expectedRevision={String(latest.version)} profileId={copyToEhrProfileId}
         locked={locked} highlightedKey={copyToEhrHighlightedKey} />}
     {compactReview&&nextSteps}
     {!!workspace.note?.history.length && <details className="team-history"><summary>Note version history</summary>

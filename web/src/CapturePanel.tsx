@@ -25,7 +25,7 @@ const idle: CaptureFlowSnapshot = { state: "idle", statusCode: "idle", sessionId
   recordedChunks: 0, queuedChunks: 0, elapsedSeconds: 0, remainingBudgetSeconds: null,
   remainingAuthoritySeconds: null, transcriptionStatus: null, transcript: null };
 
-export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptureRuntime, notesEnabled = false, correctionsEnabled = false, recoveryEnabled = CAPTURE_RECOVERY_BUILD, onDraftLock, onNavigationLock, onTransitionChange, onExpandedChange, onReviewDraft, onCurrentDraft, reviewLocked, scratchpad, notebookDirty = false, onNotebook, taskBot, openRequest = 0, preferencesScope, encounterLabel }: {
+export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptureRuntime, notesEnabled = false, correctionsEnabled = false, recoveryEnabled = CAPTURE_RECOVERY_BUILD, onDraftLock, onNavigationLock, onTransitionChange, onExpandedChange, onReviewDraft, onCurrentDraft, reviewLocked, scratchpad, notebookDirty = false, onNotebook, taskBot, openRequest = 0, preferencesScope, encounterLabel, copyToEhrEnabled = false, copyToEhrFallbackOffer = false, copyToEhrRemoteEnabled = false }: {
   workspaceId: string; identity: AuthenticatedWorkspaceIdentity; runtimeFactory?: CaptureRuntimeFactory; notesEnabled?: boolean;
   onDraftLock?: (locked: boolean) => void;
   onTransitionChange?: (blocked:boolean) => void;
@@ -37,6 +37,7 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
   recoveryEnabled?: boolean;
   scratchpad?: SavedScratchpad; notebookDirty?: boolean; onNotebook?: () => void;
   taskBot?: CaptureTaskBot; openRequest?: number; preferencesScope?: string; encounterLabel?: string;
+  copyToEhrEnabled?: boolean; copyToEhrFallbackOffer?: boolean; copyToEhrRemoteEnabled?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [snapshot, setSnapshot] = useState<CaptureRuntime['controller']['snapshot']>(idle);
@@ -303,7 +304,8 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
             workspaceId={workspaceId} sessionId={snapshot.sessionId} sourceId={reviewed.working.working_transcript_id}
             identity={identity} onDraftLock={setDraftLocked} onReviewDraft={onReviewDraft} onCurrentDraft={onCurrentDraft}
             reviewLocked={reviewLocked || transcriptLocked} sourceLocked={transcriptLocked}
-            scratchpad={scratchpad} notebookDirty={notebookDirty} onNotebook={onNotebook} taskBot={taskBot} />}
+            scratchpad={scratchpad} notebookDirty={notebookDirty} onNotebook={onNotebook} taskBot={taskBot}
+            copyToEhrEnabled={copyToEhrEnabled} copyToEhrFallbackOffer={copyToEhrFallbackOffer} copyToEhrRemoteEnabled={copyToEhrRemoteEnabled} />}
       </>}
       {snapshot.state === "complete" && sourceGapReview(snapshot.qualifiedSource) &&
         <CaptureGapNotice review={sourceGapReview(snapshot.qualifiedSource)!} />}
@@ -325,6 +327,7 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
           sessionId={snapshot.sessionId} sourceId={snapshot.transcript.id} identity={identity} onDraftLock={setDraftLocked}
           scratchpad={scratchpad} notebookDirty={notebookDirty} onNotebook={onNotebook}
           taskBot={taskBot}
+          copyToEhrEnabled={copyToEhrEnabled} copyToEhrFallbackOffer={copyToEhrFallbackOffer} copyToEhrRemoteEnabled={copyToEhrRemoteEnabled}
           onReviewDraft={onReviewDraft} onCurrentDraft={onCurrentDraft} reviewLocked={reviewLocked || transcriptLocked} sourceLocked={transcriptLocked} />}
       {error && <p className="capture-error" role="alert">{error}</p>}
     </div>}
