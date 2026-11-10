@@ -50,6 +50,12 @@ public enum CopyToEhrWording {
         }
         return folded.range(of: #"\bsync\b"#, options: .regularExpression) == nil
     }
+
+    /// A server label that fails the copy-only check is not shown. Position is 1-based.
+    public static func sectionDisplayName(label: String, position: Int) -> String {
+        guard isCopyOnly(label) else { return "Section \(position)" }
+        return label
+    }
 }
 
 public struct CopyToEhrSection: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
@@ -340,8 +346,9 @@ public struct CopyToEhrHotkeySession: Equatable, Sendable {
             let section = package.sections[index]
             guard let note = package.sectionNotes[section.key] else { return .failure(.unavailable) }
             let next = (index + 1) % package.sections.count
+            let name = CopyToEhrWording.sectionDisplayName(label: section.label, position: index + 1)
             return .success(makePlan(
-                name: section.label, text: note, notSent: package.notSent, nextIndex: next,
+                name: name, text: note, notSent: package.notSent, nextIndex: next,
                 hash: package.payloadHash, marker: marker))
         case .fullNote:
             return .success(makePlan(
@@ -415,7 +422,10 @@ public struct CopyToEhrHotkeyChord: Equatable, Sendable {
         self.command = command
     }
 
-    public var isUsable: Bool { (control || option) && Self.virtualKeyCode(for: key) != nil }
+    /// Command is refused even when Control or Option is also held.
+    public var isUsable: Bool {
+        !command && (control || option) && Self.virtualKeyCode(for: key) != nil
+    }
 
     public static func parse(_ stored: String) -> CopyToEhrHotkeyChord? {
         let parts = stored.lowercased().split(separator: "+").map {

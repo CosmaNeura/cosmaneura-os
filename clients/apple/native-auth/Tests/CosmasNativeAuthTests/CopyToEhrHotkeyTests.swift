@@ -194,6 +194,65 @@ import Testing
         #expect(CopyToEhrCarbonHotkey.nextID != CopyToEhrCarbonHotkey.fullNoteID)
     }
 
+    @Test func commandChordIsRefusedEvenWithOtherModifiers() {
+        for stored in [
+            "ctrl+cmd+c", "control+command+c", "opt+cmd+shift+n",
+            "ctrl+opt+command+k", "cmd+ctrl+c", "option+alt+cmd+v",
+        ] {
+            #expect(CopyToEhrHotkeyChord.parse(stored) == nil)
+        }
+        let entered = CopyToEhrHotkeyChord(key: "c", control: true, option: true, shift: true, command: true)
+        #expect(!entered.isUsable)
+        #expect(entered.carbonSpec() == nil)
+        let bothRefused = CopyToEhrHotkeyChord.resolved(storedNext: "ctrl+cmd+c", storedFull: "opt+command+n")
+        #expect(bothRefused.next == .nextSection)
+        #expect(bothRefused.full == .fullNote)
+        let oneRefused = CopyToEhrHotkeyChord.resolved(storedNext: "ctrl+opt+cmd+c", storedFull: "ctrl+opt+shift+k")
+        #expect(oneRefused.next == .nextSection)
+        #expect(oneRefused.full.carbonSpec()?.keyCode == 0x28)
+        let nextModifiers = oneRefused.next.carbonSpec()?.modifiers ?? 0
+        let fullModifiers = oneRefused.full.carbonSpec()?.modifiers ?? 0
+        #expect(nextModifiers & CopyToEhrCarbonModifiers.command == 0)
+        #expect(fullModifiers & CopyToEhrCarbonModifiers.command == 0)
+    }
+
+    @Test func unsafeSectionLabelShowsSectionNumberNotTheLabel() throws {
+        var package = try samplePackage()
+        package.sections[0].label = "Assessment sync"
+        package.sections[1].label = "Objective integration"
+        package.visitStatus = "not_sent_copy_instead"
+        var session = CopyToEhrHotkeySession()
+        let now = try timestamp("2026-11-10T12:05:00Z")
+        let first = try session.plan(
+            .nextSection, package: package, enabled: true, expectedRevision: nil, now: now, marker: "m1").get()
+        #expect(first.outcome.copiedName == "Section 1")
+        #expect(first.outcome.confirmation == "This note was not sent. Copied Section 1. Press Paste in the chart yourself.")
+        #expect(!first.outcome.confirmation.contains("sync"))
+        #expect(!first.outcome.confirmation.contains("Invented stiffness."))
+        #expect(first.outcome.item.text == package.sectionNotes["subjective"])
+        #expect(CopyToEhrWording.isCopyOnly(first.outcome.confirmation))
+        session.commit(first)
+        let second = try session.plan(
+            .nextSection, package: package, enabled: true, expectedRevision: nil, now: now, marker: "m2").get()
+        #expect(second.outcome.copiedName == "Section 2")
+        #expect(!second.outcome.confirmation.contains("integration"))
+        #expect(!second.outcome.confirmation.contains("Invented range."))
+        #expect(second.outcome.item.text == package.sectionNotes["objective"])
+        session.commit(second)
+        package.sections[2].label = "Plan auto-entry"
+        let third = try session.plan(
+            .nextSection, package: package, enabled: true, expectedRevision: nil, now: now, marker: "m3").get()
+        #expect(third.outcome.copiedName == "Section 3")
+        #expect(!third.outcome.confirmation.contains("auto-entry"))
+        #expect(!third.outcome.confirmation.contains("auto entry"))
+        #expect(!third.outcome.confirmation.contains("Invented rest."))
+        let full = try session.plan(
+            .fullNote, package: package, enabled: true, expectedRevision: nil, now: now, marker: "m4").get()
+        #expect(full.outcome.copiedName == "Full note")
+        #expect(!full.outcome.confirmation.contains("Section"))
+        #expect(!full.outcome.confirmation.contains("Invented rest."))
+    }
+
     @Test func draftRequestUsesTheCopyRouteAndKeepsTheTokenOutOfTheURL() throws {
         let origin = try #require(URL(string: "https://api.staging.example"))
         let request = try #require(CopyToEhrDraftEndpoint.request(
