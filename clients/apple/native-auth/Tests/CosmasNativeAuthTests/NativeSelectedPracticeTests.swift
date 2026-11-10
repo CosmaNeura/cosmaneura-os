@@ -27,7 +27,9 @@ private func selectedInputs(session: String = "sess_one", box: UUID = UUID(uuidS
 @MainActor private func selectedProfile(_ expected: NativePracticeConnectionExpectation, _ binding: NativePracticeAccountServiceBinding,
                                       source: String = String(repeating: "1", count: 40), image: String = String(repeating: "2", count: 64),
                                       proof: String = String(repeating: "3", count: 64)) async throws -> NativePracticeProfile {
-    let now = Int(Date().timeIntervalSince1970), address = expected.apiOrigin.replacingOccurrences(of: "https://api.", with: "https://")
+    // Product decode pairs https://<host>/chief with https://api.<host> only.
+    let now = Int(Date().timeIntervalSince1970)
+    let address = expected.apiOrigin.replacingOccurrences(of: "https://api.", with: "https://") + "/chief"
     let body: [String: Any] = ["contract_version": "cosmas-native-workspace-profile.v1", "client": "apple", "nonce": expected.nonce.uuidString.lowercased(),
         "native_origin": "capacitor://localhost", "data_mode": "synthetic",
         "nativeIdentity": ["version": 1, "profile": "operational-staging-v1", "client": "apple", "apiOrigin": expected.apiOrigin,

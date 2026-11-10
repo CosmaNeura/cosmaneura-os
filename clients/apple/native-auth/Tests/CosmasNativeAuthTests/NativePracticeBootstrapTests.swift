@@ -23,7 +23,8 @@ private func bootstrapBody(_ expected: NativePracticeConnectionExpectation, _ bi
         "organizationId": expected.organizationID, "audience": ""],
      "session": ["issuer": expected.account.issuer, "subject": expected.account.userID, "session_id": expected.account.sessionID],
      "practice": ["practice_id": expected.selectionID.uuidString.lowercased(), "box_id": expected.boxID.uuidString.lowercased()],
-     "workspace": ["url": "https://practice.example.invalid", "source_commit": String(repeating: "1", count: 40),
+     // Product decode pairs https://<host>/chief with https://api.<host> only.
+     "workspace": ["url": "https://practice.example.invalid/chief", "source_commit": String(repeating: "1", count: 40),
         "image_sha256": String(repeating: "2", count: 64), "workspace_proof_sha256": String(repeating: "3", count: 64),
         "member_proof_sha256": String(repeating: "4", count: 64), "native_qualification_sha256": String(repeating: "5", count: 64)],
      "issued_at": Int(now.timeIntervalSince1970), "expires_at": Int(now.timeIntervalSince1970) + 30]
