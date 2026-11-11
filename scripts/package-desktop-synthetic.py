@@ -44,11 +44,20 @@ def validate_storage_profile(configuration, app):
                 not isinstance(google, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", google) is None
                 or callback != configuration.get("apiOrigin", "") + "/connections/google/callback")):
             raise ValueError("Independent beta Google sign-in must use an explicit client and its exact configured API callback.")
+        capture_enabled = "VITE_WORKSPACE_CAPTURE_ENABLED" in manifest["enabledFlags"]
         if (installation.get("storageScope") != "identity-v1" or "nativeIdentity" not in configuration
-                or configuration.get("dataMode") != "synthetic" or configuration.get("nativeCaptureEnabled") is not False
+                or configuration.get("dataMode") != "synthetic"
                 or any(configuration.get(key) for key in (
                     "schedulingGoogleClientId", "schedulingGoogleCallbackUri"))):
             raise ValueError("Independent beta requires isolated identity storage and only its approved capabilities.")
+        if capture_enabled:
+            if (configuration.get("nativeCaptureEnabled") is not True
+                    or configuration.get("microphoneCaptureEnabled") is not True
+                    or configuration.get("cosmaneuraWebOrigin") != manifest.get("coreWebOrigin")
+                    or list(configuration.get("captureUploadOrigins") or []) != list(manifest.get("captureUploadOrigins") or [])):
+                raise ValueError("Independent Core capture opt-in requires reviewed Core origin and matching upload wiring.")
+        elif configuration.get("nativeCaptureEnabled") is not False:
+            raise ValueError("Independent beta keeps Core capture dark until VITE_WORKSPACE_CAPTURE_ENABLED is opted in.")
         microsoft_enabled = "VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED" in manifest["enabledFlags"]
         fields = ("microsoftConnectionTenantId", "microsoftConnectionClientId", "microsoftConnectionCallbackUri")
         identifier = r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"

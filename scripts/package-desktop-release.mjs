@@ -10,7 +10,7 @@ import {basename, dirname, extname, isAbsolute, join, relative, resolve, sep} fr
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {promisify} from 'node:util';
 import {validateOperationalNativeIdentity, validateOperationalNativeDataMode, operationalNativeAuthSettings} from '../clients/desktop/native-identity-config.mjs';
-import {INDEPENDENT_BETA_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE,validateBetaFeatureManifest} from '../clients/shared/beta-feature-profile.mjs';
+import {INDEPENDENT_BETA_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE,REVIEWED_CORE_CAPTURE_ORIGIN,validateBetaFeatureManifest} from '../clients/shared/beta-feature-profile.mjs';
 import {verifyNativeHelper} from '../clients/desktop/spawn-auth-helper.mjs';
 import {verifyDesktopCapturePackage,CAPTURE_HELPERS} from '../clients/desktop/native-capture-package.mjs';
 
@@ -255,6 +255,10 @@ export function validateOperationalReleaseProfile(config, manifest, info) {
     const google=config.googleConnectionClientId??'', callback=config.googleConnectionCallbackUri??'';
     if (Boolean(google)!==Boolean(callback) || google && (typeof google!=='string' ||
       !/^[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com$/.test(google) || callback!==config.apiOrigin+'/connections/google/callback')) fail();
+    // Core capture stays dark unless the independent profile opted in.
+    if (profile.captureMode!=='disabled' && (profile.captureMode!=='browser_microphone' || config.nativeCaptureEnabled!==true ||
+        config.microphoneCaptureEnabled!==true || config.cosmaneuraWebOrigin!==REVIEWED_CORE_CAPTURE_ORIGIN ||
+        JSON.stringify(config.captureUploadOrigins??[])!==JSON.stringify(profile.captureUploadOrigins))) fail();
   }
   if (profile.captureMode==='disabled' && (config.nativeCaptureEnabled!==false || config.microphoneCaptureEnabled===true ||
       config.captureUploadOrigins?.length || config.cosmaneuraWebOrigin)) fail();

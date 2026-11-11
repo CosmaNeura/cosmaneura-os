@@ -49,9 +49,22 @@ def microsoft_values():
         "microsoft_connection_encryption_key": SecretStr(base64.urlsafe_b64encode(b"m" * 32).decode())}
 
 
+def core_capture_values():
+    return {"workspace_capture_backend": "core", "workspace_capture_notes_enabled": True,
+            "workspace_agent_tools_enabled": True,
+            "core_capture_origin": "https://staging-app.cosmaneura.com",
+            "core_web_origin": "https://staging-app.cosmaneura.com",
+            "core_capture_scope": "api://invented-core-audience/.default",
+            "core_capture_managed_identity_client_id": "00000000-0000-4000-8000-0000000000aa",
+            # Explicit independent-beta proxy opt-in + CosmaBot API origin.
+            "workspace_capture_proxy_enabled": True,
+            "workspace_capture_proxy_origin": "https://api.invented-cosmabot.test"}
+
+
 @pytest.mark.parametrize("features", [model_values(), google_values(), microsoft_values(),
     microsoft_values() | {"microsoft_connection_tenant_id": "organizations"},
-    model_values() | google_values() | microsoft_values()])
+    model_values() | google_values() | microsoft_values(),
+    model_values() | google_values() | core_capture_values()])
 def test_explicit_optional_features_preserve_independent_profile(clerk_standalone, features):
     runtime = clerk_standalone.runtime.model_copy(update=features)
     runtime.validate_runtime_configuration()
@@ -61,7 +74,12 @@ def test_explicit_optional_features_preserve_independent_profile(clerk_standalon
     assert runtime.workspace_microsoft_message_available == ("workspace_microsoft_connection_enabled" in features)
     assert runtime.workspace_microsoft_calendar_available == ("workspace_microsoft_connection_enabled" in features)
     assert not runtime.workspace_core_connection_available
-    assert not runtime.workspace_agent_tools_enabled
+    if "workspace_capture_backend" in features:
+        assert runtime.workspace_agent_tools_enabled
+        assert runtime.workspace_capture_available
+    else:
+        assert not runtime.workspace_agent_tools_enabled
+        assert not runtime.workspace_capture_available
     assert not runtime.workspace_routines_enabled
     assert not runtime.sync_worker
 
@@ -76,12 +94,53 @@ def test_explicit_optional_features_preserve_independent_profile(clerk_standalon
     {"workspace_llm_endpoint": MODEL_ORIGIN.replace("https", "http") + "/openai/v1"},
     {"workspace_llm_endpoint": "https://user@invented-cosmabot.openai.azure.com/openai/v1"},
     {"workspace_llm_deployment": "other-model"}, {"workspace_llm_api_key": None},
-    {"workspace_llm_backend": "disabled"}, {"workspace_agent_tools_enabled": True},
+    {"workspace_llm_backend": "disabled"},
     {"workspace_routines_enabled": True}, {"core_capture_origin": "https://core.example.invalid"},
+    {"workspace_capture_corrections_enabled": True},
 ])
 def test_model_incomplete_or_broadened_configuration_fails(clerk_standalone, change):
     runtime = clerk_standalone.runtime.model_copy(update=model_values() | change)
     assert runtime.runtime_configuration_errors()
+
+
+@pytest.mark.parametrize("change", [
+    {"core_capture_origin": "https://app.cosmaneura.com"},
+    {"core_web_origin": "https://app.cosmaneura.com"},
+    {"core_capture_scope": "https://not-api-scope"},
+    {"core_capture_managed_identity_client_id": "not-a-uuid"},
+    {"workspace_capture_notes_enabled": False},
+    {"workspace_agent_tools_enabled": False},
+    {"workspace_core_connection_enabled": True},
+    {"core_connection_tenant_ref": "authority_tenant_01arz3ndektsv4rrffq69g5fav"},
+    {"workspace_capture_corrections_enabled": True},
+    {"workspace_session_prep_enabled": True},
+    {"workspace_capture_proxy_enabled": False},
+    {"workspace_capture_proxy_origin": "https://cosmaneurastaginguploads.blob.core.windows.net"},
+    {"workspace_capture_proxy_origin": "https://staging-app.cosmaneura.com"},
+    {"workspace_capture_proxy_origin": ""},
+])
+def test_core_capture_incomplete_or_broadened_configuration_fails(clerk_standalone, change):
+    runtime = clerk_standalone.runtime.model_copy(update=model_values() | google_values() | core_capture_values() | change)
+    assert runtime.runtime_configuration_errors()
+
+
+def test_independent_core_capture_opt_in_with_empty_proxy_refuses_at_config(clerk_standalone):
+    """Opt-in on + empty proxy must fail at Settings validation, not at upload time."""
+    runtime = clerk_standalone.runtime.model_copy(
+        update=model_values() | google_values() | core_capture_values() | {
+            "workspace_capture_proxy_origin": "",
+        }
+    )
+    errors = runtime.runtime_configuration_errors()
+    assert errors
+    assert any("proxy origin" in error.lower() for error in errors)
+
+
+def test_agent_tools_alone_without_core_capture_still_allowed_with_model(clerk_standalone):
+    runtime = clerk_standalone.runtime.model_copy(update=model_values() | {"workspace_agent_tools_enabled": True})
+    runtime.validate_runtime_configuration()
+    assert runtime.workspace_agent_tools_enabled
+    assert not runtime.workspace_capture_available
 
 
 @pytest.mark.parametrize("change", [

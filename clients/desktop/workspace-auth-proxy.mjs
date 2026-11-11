@@ -9,8 +9,11 @@ const ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const BOT = `(?:chief|scribe|visit_prep|follow_up|${ID})`;
 const READ = new RegExp(`^/(?:workspaces(?:/${ID}(?:/(?:appointments(?:/(?:pages/)?${ID})?|prep-work(?:/${ID})?))?)?|provider-team(?:/(?:identity|setup|resources|usage|routines/${BOT}(?:/runs/${ID})?))?|practice-work(?:/(?:pages/)?${ID})?)$`);
 const WRITE = new RegExp(`^/(?:provider-team(?:/(?:rehearsal|routines/${BOT}))?|practice-work/${ID}/(?:handoffs|complete)|workspaces(?:/${ID}/(?:entries|conversation(?:/resolve)?|work-links|handoffs/${ID}/(?:retry(?:/resolve)?|review|revision)|notes(?:/${ID}/review)?|note/team-source(?:/resolve)?|follow-ups(?:/${ID}/(?:decide|complete))?|appointments(?:/(?:current|${ID}/(?:decide|execute)))?|prep-work(?:/${ID}/(?:decide|verify))?|scheduling/availability|capture/(?:admission|operations|notes|note-links|prep|existing|source-packets)))?)$`);
+// Independent-beta: browser never hits Core/Scribe blob; desktop PUTs ciphertext to CosmaBot API.
+const CIPHERTEXT_UPLOAD = new RegExp(`^/workspaces/${ID}/capture/ciphertexts/${ID}$`);
 const CLINICAL_TEAM = new RegExp(`^/workspaces/${ID}/note/team-source(?:/resolve)?$`);
 const SCRIBE_SOURCE = new RegExp(`^/workspaces/${ID}/capture/(existing|source-packets)$`);
+const MAX_CIPHERTEXT_UPLOAD_BYTES = 327_680;
 const MODEL_COMMAND = new RegExp(`^/workspaces/${ID}/(?:conversation(?:/resolve)?|handoffs/${ID}/retry(?:/resolve)?)$`);
 const HANDOFF_REVIEW = new RegExp(`^/workspaces/${ID}/handoffs/${ID}/(?:review|revision)$`);
 const WORKSPACE_READ = new RegExp(`^/workspaces/${ID}$`);
@@ -24,10 +27,14 @@ export function permittedAuthenticatedApiPath(url, method) {
         parsed.password || parsed.hash || !parsed.pathname.startsWith('/api/')) return null;
     const path = parsed.pathname.slice(4) + parsed.search;
     const connector = connectorApiRoute(path,method);
-    if ((connector?.strictResponse || path === '/provider-team/identity' || isModelActivityPath(path) || SCRIBE_SOURCE.test(path) || CLINICAL_TEAM.test(path)) &&
+    if ((connector?.strictResponse || path === '/provider-team/identity' || isModelActivityPath(path) || SCRIBE_SOURCE.test(path) || CLINICAL_TEAM.test(path) || CIPHERTEXT_UPLOAD.test(path)) &&
         (url !== 'app://cosmas/api' + path || url.includes('?') && connector?.canonicalQuery !== true)) return null;
     if (connector) return path;
-    return !parsed.search && (method === 'GET' && (READ.test(path) || isModelActivityPath(path)) || method === 'POST' && WRITE.test(path)) ? path : null;
+    return !parsed.search && (
+      method === 'GET' && (READ.test(path) || isModelActivityPath(path))
+      || method === 'POST' && WRITE.test(path)
+      || method === 'PUT' && CIPHERTEXT_UPLOAD.test(path)
+    ) ? path : null;
   } catch { return null; }
 }
 function unavailable(status) {
@@ -108,7 +115,9 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   if (!revision || !REVISION.test(revision) ||
       ['Authorization', 'X-Box-Id', 'X-Actor-Principal-Id', 'Cookie', 'Content-Encoding'].some(name => request.headers.has(name)) ||
       request.headers.has('Origin') && request.headers.get('Origin') !== 'app://cosmas') return unavailable(401);
-  const contentType = connector?.binaryRequest ? 'application/pdf' : 'application/json';
+  const ciphertextUpload = request.method === 'PUT' && CIPHERTEXT_UPLOAD.test(path);
+  const contentType = connector?.binaryRequest ? 'application/pdf'
+    : ciphertextUpload ? 'application/octet-stream' : 'application/json';
   if (request.headers.get('Content-Type')?.split(';', 1)[0].trim() !== contentType) return unavailable(400);
   const identityPath = path === '/provider-team/identity';
   const activityPath = isModelActivityPath(path);
@@ -149,7 +158,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
     const appointmentPath = path.endsWith('/appointments') || path.includes('/appointments/');
     const prepWorkPath = path.endsWith('/prep-work') || path.includes('/prep-work/');
     const routinePath = path.startsWith('/provider-team/routines/');
-    const maximumInput = clinicalTeam ? MAX_CLINICAL_TEAM_REQUEST_BYTES : handoffReview ? 12288 : identityPath || activityPath ? 0 : scribeSource ? MAX_SCRIBE_SOURCE_REQUEST_BYTES : connector ? connector.input : modelReceipt ? (path.includes('/conversation') ? 65536 : 2048) : teamPath ? 4194304 : teamInfoPath ? 2048 : prepWorkPath ? (path.endsWith('/prep-work') ? 32768 : 2048) : (path.endsWith('/capture/admission') || path.endsWith('/scheduling/availability') || appointmentPath || routinePath) ? 2048 : path.endsWith('/capture/notes') ? 270336 :
+    const maximumInput = ciphertextUpload ? MAX_CIPHERTEXT_UPLOAD_BYTES : clinicalTeam ? MAX_CLINICAL_TEAM_REQUEST_BYTES : handoffReview ? 12288 : identityPath || activityPath ? 0 : scribeSource ? MAX_SCRIBE_SOURCE_REQUEST_BYTES : connector ? connector.input : modelReceipt ? (path.includes('/conversation') ? 65536 : 2048) : teamPath ? 4194304 : teamInfoPath ? 2048 : prepWorkPath ? (path.endsWith('/prep-work') ? 32768 : 2048) : (path.endsWith('/capture/admission') || path.endsWith('/scheduling/availability') || appointmentPath || routinePath) ? 2048 : path.endsWith('/capture/notes') ? 270336 :
       path.endsWith('/capture/operations') ? 4194304 : path.includes('/capture/') ? 1048576 : 128000;
     const body = await boundedBytes(request.body, maximumInput, signal);
     if (request.method === 'GET' && body.length) return unavailable(400);
