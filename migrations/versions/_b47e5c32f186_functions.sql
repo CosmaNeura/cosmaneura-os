@@ -661,6 +661,26 @@ BEGIN
     END LOOP;
   END;
 
+  -- Refuse ticket/row PKs that collide with a box id or a recording id (except
+  -- private_recordings themselves). Local file scans never use ticket ids; this
+  -- closes the plan-side bait that inflated dry-run ticket counts.
+  DECLARE
+    v_collide boolean;
+  BEGIN
+    FOR v_table IN SELECT jsonb_object_keys(v_plan) LOOP
+      CONTINUE WHEN v_table = 'private_recordings';
+      SELECT EXISTS (
+        SELECT 1
+          FROM jsonb_array_elements_text(COALESCE(v_plan -> v_table, '[]'::jsonb)) AS t(id)
+         WHERE EXISTS (SELECT 1 FROM public.box_contexts b WHERE b.id::text = t.id)
+            OR EXISTS (SELECT 1 FROM public.private_recordings r WHERE r.id::text = t.id)
+      ) INTO v_collide;
+      IF v_collide THEN
+        RAISE EXCEPTION 'admin authority required';
+      END IF;
+    END LOOP;
+  END;
+
   RETURN jsonb_build_object(
     'tables', v_counts,
     'pks', v_plan,
@@ -1220,9 +1240,17 @@ BEGIN
   IF p_box IS NULL OR NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;
+  -- Owner/admin only (R2b): staff- and agent-bound logins cannot touch pending rows.
   IF NOT EXISTS (
-    SELECT 1 FROM public.patient_deletion_admin_bindings b
-     WHERE b.db_role = session_user AND b.box_id = p_box
+    SELECT 1
+      FROM public.patient_deletion_admin_bindings b
+      JOIN public.principals p ON p.id = b.principal_id
+     WHERE b.db_role = session_user
+       AND b.box_id = p_box
+       AND p.principal_type = 'human'
+       AND p.state = 'active'
+       AND p.is_owner
+       AND p.box_id = p_box
   ) THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;
@@ -1268,8 +1296,15 @@ BEGIN
     RAISE EXCEPTION 'admin authority required';
   END IF;
   IF NOT EXISTS (
-    SELECT 1 FROM public.patient_deletion_admin_bindings b
-     WHERE b.db_role = session_user AND b.box_id = p_box
+    SELECT 1
+      FROM public.patient_deletion_admin_bindings b
+      JOIN public.principals p ON p.id = b.principal_id
+     WHERE b.db_role = session_user
+       AND b.box_id = p_box
+       AND p.principal_type = 'human'
+       AND p.state = 'active'
+       AND p.is_owner
+       AND p.box_id = p_box
   ) THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;
@@ -1332,7 +1367,12 @@ BEGIN
   END IF;
   SELECT b.box_id INTO v_box
     FROM public.patient_deletion_admin_bindings b
-   WHERE b.db_role = session_user;
+    JOIN public.principals p ON p.id = b.principal_id
+   WHERE b.db_role = session_user
+     AND p.principal_type = 'human'
+     AND p.state = 'active'
+     AND p.is_owner
+     AND p.box_id = b.box_id;
   IF v_box IS NULL THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;
@@ -1401,8 +1441,15 @@ BEGIN
     RETURN;
   END IF;
   IF NOT EXISTS (
-    SELECT 1 FROM public.patient_deletion_admin_bindings b
-     WHERE b.db_role = session_user AND b.box_id = v_box
+    SELECT 1
+      FROM public.patient_deletion_admin_bindings b
+      JOIN public.principals p ON p.id = b.principal_id
+     WHERE b.db_role = session_user
+       AND b.box_id = v_box
+       AND p.principal_type = 'human'
+       AND p.state = 'active'
+       AND p.is_owner
+       AND p.box_id = v_box
   ) THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;

@@ -26,6 +26,7 @@ from cosmas_os.adapters.local import LocalBlobAdapter
 from cosmas_os.api import app as app_module
 from cosmas_os.api.app import app
 from cosmas_os.application import note_review, workspace
+from cosmas_os.application import patient_deletion as patient_deletion_mod
 from cosmas_os.application import services as svc
 from cosmas_os.application.database_preparation import (
     _apply_runtime_privileges,
@@ -35,7 +36,7 @@ from cosmas_os.application.patient_deletion import delete_patient_records, stora
 from cosmas_os.cli import app as cli_app
 from cosmas_os.config import settings
 from cosmas_os.db import make_session_factory
-from cosmas_os.domain.enums import DecisionKind, PrincipalState, PrincipalType
+from cosmas_os.domain.enums import DecisionKind, PrincipalState, PrincipalType, TicketState
 from cosmas_os.domain.rules import AuthorizationError, DomainError
 from cosmas_os.google_message_models import (
     GoogleMessageReadRequest,
@@ -3537,3 +3538,234 @@ def test_rootless_preview_counts_blob_keys(practice) -> None:
     assert int(rootless["files"]["uploads"]) == int(with_roots["files"]["uploads"])
     assert int(rootless["files"]["uploads"]) >= 2
     assert session.get(PatientLink, patient_a) is not None
+
+
+def test_colliding_ticket_pks_cannot_delete_other_practice_files(practice) -> None:
+    """Beta run3b: ticket PKs equal to practice-2 box / C recording must not prune C."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_a = str(casey["patient_id"])
+    box_1 = str(practice["box_id"])
+
+    other = svc.Container(session, blob=blob)
+    foreign = svc.provision_box(other, "Invented Scan Collision Practice")
+    foreign_owner = str(foreign["owner_id"])
+    box_2 = str(foreign["box_id"])
+    foreign_scribe = str(foreign["agents"]["scribe"])
+    casey_c = _visit(
+        other,
+        box=box_2,
+        owner=foreign_owner,
+        scribe_id=foreign_scribe,
+        blob=blob,
+        label="Invented Collision Patient C",
+        slug="collision-c-" + uuid4().hex[:8],
+        note="synthetic-collision-c-note",
+        message="synthetic-collision-c-message",
+        transcript="synthetic-collision-c-transcript",
+    )
+    recording_c = str(casey_c["recording_id"])
+    c_files = list(_paths(blob, casey_c).values()) + _upload_paths(
+        session, blob, str(casey_c["ticket_id"])
+    )
+    assert all(path.is_file() for path in c_files)
+
+    baseline = delete_patient_records(
+        session,
+        actor_principal_id=owner,
+        patient_link_id=patient_a,
+        confirm=False,
+        blob=blob,
+        file_roots=storage_roots(blob),
+    )
+    baseline_files = baseline["files"]
+    assert int(baseline_files["uploads"]) >= 2
+    assert int(baseline_files["audio"]) >= 1
+
+    # Local scan must ignore ticket-shaped path segments even when those UUIDs
+    # appear in practice-2 file paths (the Beta run3b bait).
+    scan_ids = patient_deletion_mod._FileScanIds(
+        recording_ids=frozenset({str(casey["recording_id"])}),
+        artifact_ids=frozenset(
+            str(value)
+            for value in session.scalars(
+                select(Artifact.id).where(Artifact.ticket_id == str(casey["ticket_id"]))
+            )
+        ),
+        workspace_ids=frozenset({str(casey["workspace_id"])}),
+    )
+    scanned = patient_deletion_mod._scan(blob.root, box_id=box_1, ids=scan_ids)
+    scanned_set = {path.resolve() for path in scanned}
+    assert all(path.resolve() not in scanned_set for path in c_files)
+
+    chaser = session.scalar(
+        select(Principal.id).where(Principal.box_id == box_1, Principal.agent_key == "chaser")
+    )
+    assert chaser is not None
+    for bait_id in (box_2, recording_c):
+        session.add(
+            Ticket(
+                id=bait_id,
+                box_id=box_1,
+                lane="artifact_chase",
+                state=TicketState.DRAFT.value,
+                created_by_principal_id=chaser,
+                patient_link_id=patient_a,
+            )
+        )
+    session.commit()
+
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        delete_patient_records(
+            session,
+            actor_principal_id=owner,
+            patient_link_id=patient_a,
+            confirm=False,
+            blob=blob,
+            file_roots=storage_roots(blob),
+        )
+    session.rollback()
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        _calls(session, owner, patient_a, blob, confirm=True)
+    session.rollback()
+    assert all(path.is_file() for path in c_files)
+    assert session.get(PatientLink, patient_a) is not None
+    assert session.get(PatientLink, str(casey_c["patient_id"])) is not None
+
+    session.execute(
+        text("DELETE FROM public.tickets WHERE id = ANY(CAST(:ids AS uuid[]))"),
+        {"ids": [box_2, recording_c]},
+    )
+    session.commit()
+    after = delete_patient_records(
+        session,
+        actor_principal_id=owner,
+        patient_link_id=patient_a,
+        confirm=False,
+        blob=blob,
+        file_roots=storage_roots(blob),
+    )
+    assert after["files"] == baseline_files
+    _calls(session, owner, patient_a, blob, confirm=True)
+    assert all(path.is_file() for path in c_files)
+    assert session.get(PatientLink, patient_a) is None
+    assert session.get(PatientLink, str(casey_c["patient_id"])) is not None
+
+
+def test_staff_and_agent_cannot_mutate_pending_files(practice) -> None:
+    """R2b: pending_record/clear/delete require the bound owner, not staff/agent."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    staff_id = str(practice["staff_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_a = str(casey["patient_id"])
+    box_1 = str(practice["box_id"])
+    agent_id = str(practice["agents"]["scribe"])
+    upload = _upload_paths(session, blob, str(casey["ticket_id"]))[0]
+    relative = str(upload.relative_to(blob.root))
+
+    runtime_url = os.environ.get("DATABASE_URL", settings.database_url)
+    parsed = make_url(runtime_url)
+    password = parsed.password
+    assert isinstance(password, str) and password
+    database = str(session.scalar(text("SELECT current_database()")))
+    quoted = session.scalar(text("SELECT quote_literal(:password)"), {"password": password})
+    assert isinstance(quoted, str)
+
+    for label, principal in (("staff", staff_id), ("agent", agent_id)):
+        role = f"patient_{label}_pend_" + uuid4().hex[:10]
+        engine = None
+        try:
+            _autocommit(
+                session,
+                f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT "
+                f"PASSWORD {quoted}",
+            )
+            _autocommit(session, f"GRANT CONNECT ON DATABASE {_quote(database)} TO {role}")
+            _autocommit(session, f"GRANT USAGE ON SCHEMA public TO {role}")
+            _ensure_patient_deletion_role(session)
+            _ensure_patient_deletion_admin_login(session, role)
+            session.execute(
+                text(
+                    """
+                    INSERT INTO public.patient_deletion_admin_bindings
+                      (db_role, principal_id, box_id)
+                    VALUES (:role, CAST(:principal AS uuid), CAST(:box AS uuid))
+                    ON CONFLICT (db_role) DO UPDATE
+                      SET principal_id = EXCLUDED.principal_id,
+                          box_id = EXCLUDED.box_id
+                    """
+                ),
+                {"role": role, "principal": principal, "box": box_1},
+            )
+            session.commit()
+            staff_url = parsed.set(username=role).render_as_string(hide_password=False)
+            engine = create_engine(staff_url, echo=False, hide_parameters=True)
+            with engine.begin() as connection:
+                with pytest.raises(Exception, match="admin authority required"):
+                    connection.execute(
+                        text(
+                            "SELECT public.patient_deletion_pending_record("
+                            "CAST(:patient AS uuid), CAST(:box AS uuid), CAST(:files AS jsonb))"
+                        ),
+                        {
+                            "patient": patient_a,
+                            "box": box_1,
+                            "files": json.dumps([{"kind": "uploads", "path": relative}]),
+                        },
+                    )
+            with engine.begin() as connection:
+                with pytest.raises(Exception, match="admin authority required"):
+                    connection.execute(
+                        text(
+                            "SELECT public.patient_deletion_pending_clear("
+                            "CAST(:patient AS uuid), CAST(:paths AS text[]))"
+                        ),
+                        {"patient": patient_a, "paths": [relative]},
+                    )
+            pending_id = session.scalar(
+                text(
+                    "INSERT INTO public.patient_deletion_pending_files "
+                    "(patient_link_id, box_id, kind, relative_path) "
+                    "VALUES (CAST(:patient AS uuid), CAST(:box AS uuid), 'uploads', :path) "
+                    "RETURNING id::text"
+                ),
+                {"patient": patient_a, "box": box_1, "path": f"owner-only-{label}.png"},
+            )
+            session.commit()
+            with engine.begin() as connection:
+                with pytest.raises(Exception, match="admin authority required"):
+                    connection.execute(
+                        text("SELECT public.patient_deletion_pending_delete(CAST(:id AS uuid))"),
+                        {"id": pending_id},
+                    )
+            still = session.scalar(
+                text(
+                    "SELECT count(*) FROM public.patient_deletion_pending_files "
+                    "WHERE id = CAST(:id AS uuid)"
+                ),
+                {"id": pending_id},
+            )
+            assert int(still or 0) == 1
+        finally:
+            if engine is not None:
+                engine.dispose()
+            for statement in _documented_admin_login_grants(role):
+                _autocommit(
+                    session,
+                    statement.replace("GRANT ", "REVOKE ", 1).replace(" TO ", " FROM ", 1),
+                )
+            _autocommit(session, f"REVOKE ALL ON SCHEMA public FROM {role}")
+            _autocommit(session, f"REVOKE ALL ON DATABASE {_quote(database)} FROM {role}")
+            session.execute(
+                text("DELETE FROM public.patient_deletion_admin_bindings WHERE db_role = :role"),
+                {"role": role},
+            )
+            session.commit()
+            _autocommit(session, f"DROP ROLE IF EXISTS {role}")

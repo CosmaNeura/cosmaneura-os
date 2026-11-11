@@ -120,7 +120,7 @@ def delete_patient_records(
 
     if not confirm:
         plan = _plan(session, patient_id)
-        files = _collect_files_for_plan(session, plan, file_roots)
+        files = _collect_files_for_plan(session, plan, file_roots, box_id=patient_box)
         return _report(
             patient_id,
             confirm=False,
@@ -132,7 +132,7 @@ def delete_patient_records(
         )
 
     plan = _plan(session, patient_id)
-    files = _collect_files_for_plan(session, plan, file_roots)
+    files = _collect_files_for_plan(session, plan, file_roots, box_id=patient_box)
     file_counts = _file_counts(files, file_roots)
     try:
         _record_pending_files(session, patient_id, patient_box, files, file_roots)
@@ -147,7 +147,7 @@ def delete_patient_records(
 
     tables = _table_counts(result.get("tables"))
     try:
-        _delete_files(blob, files, file_roots, _deleted_ids_from_plan(plan))
+        _delete_files(blob, files, file_roots, plan=plan, box_id=patient_box)
         _clear_pending_files(session, patient_id, files, file_roots)
         session.commit()
     except DomainError as exc:
@@ -374,17 +374,76 @@ def _apply_secure_deletion(session: Session, patient_id: str) -> dict[str, objec
     return raw
 
 
-def _deleted_ids_from_plan(plan: Mapping[str, object]) -> set[str]:
-    found: set[str] = set()
+@dataclass(frozen=True)
+class _FileScanIds:
+    """Ids that may appear in on-disk paths — never tickets or unrelated PKs."""
+
+    recording_ids: frozenset[str]
+    artifact_ids: frozenset[str]
+    workspace_ids: frozenset[str]
+
+
+def _pks_for_table(plan: Mapping[str, object], table: str) -> frozenset[str]:
     pks = plan.get("pks")
-    if isinstance(pks, dict):
-        for values in pks.values():
-            if isinstance(values, list):
-                found.update(str(value) for value in values)
-    tables = plan.get("tables")
-    if isinstance(tables, dict):
-        found.update(str(key) for key in tables)
-    return found
+    if not isinstance(pks, dict):
+        return frozenset()
+    values = pks.get(table)
+    if not isinstance(values, list):
+        return frozenset()
+    return frozenset(str(value) for value in values)
+
+
+def _file_scan_ids_from_plan(plan: Mapping[str, object]) -> _FileScanIds:
+    return _FileScanIds(
+        recording_ids=_pks_for_table(plan, "private_recordings"),
+        artifact_ids=_pks_for_table(plan, "artifacts"),
+        workspace_ids=_pks_for_table(plan, "encounter_workspaces"),
+    )
+
+
+def _path_matches_patient_files(parts: tuple[str, ...], *, box_id: str, ids: _FileScanIds) -> bool:
+    """Match a relative path only in the expected segment for each artifact kind."""
+
+    if not parts:
+        return False
+    first = parts[0]
+    # Uploads: <box_id>/<artifact_id>/...
+    if len(parts) >= 3 and first == box_id and parts[1] in ids.artifact_ids:
+        return True
+    # Uploads: <box_id>/uploads/<artifact_id>/...
+    if (
+        len(parts) >= 4
+        and first == box_id
+        and parts[1].lower() == "uploads"
+        and parts[2] in ids.artifact_ids
+    ):
+        return True
+    # Audio: <box_id>/<recording_id>/audio/...
+    if (
+        len(parts) >= 4
+        and first == box_id
+        and parts[1] in ids.recording_ids
+        and parts[2].lower() == "audio"
+    ):
+        return True
+    # Audio (local layout): <recording_id>/audio/...
+    if len(parts) >= 3 and first in ids.recording_ids and parts[1].lower() == "audio":
+        return True
+    # Exports: <box_id>/<workspace_id>/exports/...
+    if (
+        len(parts) >= 4
+        and first == box_id
+        and parts[1] in ids.workspace_ids
+        and parts[2].lower() == "exports"
+    ):
+        return True
+    # Exports (local layout): <workspace_id>/exports/...
+    if len(parts) >= 3 and first in ids.workspace_ids and parts[1].lower() == "exports":
+        return True
+    # Vendor documents: <box_id>/vendor-documents/...
+    if len(parts) >= 2 and first == box_id and parts[1].lower() == "vendor-documents":
+        return True
+    return False
 
 
 def _relative_for(path: Path, roots: Sequence[Path]) -> str | None:
@@ -543,6 +602,8 @@ def _collect_files_for_plan(
     session: Session,
     plan: Mapping[str, object],
     file_roots: Sequence[Path],
+    *,
+    box_id: str,
 ) -> list[_StoredFile]:
     pks = plan.get("pks")
     if not isinstance(pks, dict):
@@ -567,9 +628,9 @@ def _collect_files_for_plan(
             if kind not in {"audio", "uploads", "exports"} or not _safe_relative(path):
                 continue
             _add_file(stored, _StoredFile(kind, path, None, path), file_roots)
-    deleted_ids = _deleted_ids_from_plan(plan)
+    scan_ids = _file_scan_ids_from_plan(plan)
     for root in file_roots:
-        for path in _scan(root, deleted_ids):
+        for path in _scan(root, box_id=box_id, ids=scan_ids):
             relative = _relative_for(path, file_roots)
             _add_file(
                 stored,
@@ -627,7 +688,7 @@ def _inside(root: Path, relative: str) -> Path | None:
     return None
 
 
-def _scan(root: Path, deleted_ids: set[str]) -> list[Path]:
+def _scan(root: Path, *, box_id: str, ids: _FileScanIds) -> list[Path]:
     try:
         base = root.resolve()
     except OSError:
@@ -650,10 +711,10 @@ def _scan(root: Path, deleted_ids: set[str]) -> list[Path]:
             if path.is_symlink() or name.endswith(".meta"):
                 continue
             try:
-                relative_parts = set(path.resolve().relative_to(base).parts)
+                relative_parts = path.resolve().relative_to(base).parts
             except OSError:
                 continue
-            if relative_parts & deleted_ids:
+            if _path_matches_patient_files(relative_parts, box_id=box_id, ids=ids):
                 found.append(path)
     return found
 
@@ -674,7 +735,9 @@ def _delete_files(
     blob: BlobDeleter | None,
     files: Sequence[_StoredFile],
     roots: Sequence[Path],
-    deleted_ids: set[str],
+    *,
+    plan: Mapping[str, object],
+    box_id: str,
 ) -> None:
     seen: set[str] = set()
     for item in files:
@@ -686,8 +749,9 @@ def _delete_files(
                 raise DomainError("stored files could not be deleted") from None
         if item.path is not None:
             _unlink(item.path)
+    scan_ids = _file_scan_ids_from_plan(plan)
     for root in roots:
-        _prune(root, deleted_ids)
+        _prune(root, box_id=box_id, ids=scan_ids)
 
 
 def _unlink(path: Path) -> None:
@@ -701,7 +765,37 @@ def _unlink(path: Path) -> None:
         raise DomainError("stored files could not be deleted") from None
 
 
-def _prune(root: Path, deleted_ids: set[str]) -> None:
+def _dir_matches_patient_files(parts: tuple[str, ...], *, box_id: str, ids: _FileScanIds) -> bool:
+    """Empty dirs under matched file trees may be removed after unlink."""
+
+    if not parts:
+        return False
+    if _path_matches_patient_files(parts + ("_",), box_id=box_id, ids=ids):
+        return True
+    if len(parts) == 1 and (parts[0] in ids.recording_ids or parts[0] in ids.workspace_ids):
+        return True
+    if (
+        len(parts) == 2
+        and parts[0] == box_id
+        and (
+            parts[1] in ids.artifact_ids
+            or parts[1] in ids.recording_ids
+            or parts[1] in ids.workspace_ids
+            or parts[1].lower() in {"uploads", "vendor-documents"}
+        )
+    ):
+        return True
+    if (
+        len(parts) == 3
+        and parts[0] == box_id
+        and parts[1].lower() == "uploads"
+        and parts[2] in ids.artifact_ids
+    ):
+        return True
+    return False
+
+
+def _prune(root: Path, *, box_id: str, ids: _FileScanIds) -> None:
     try:
         base = root.resolve()
     except OSError:
@@ -716,7 +810,7 @@ def _prune(root: Path, deleted_ids: set[str]) -> None:
             relative = current.resolve().relative_to(base)
         except OSError:
             raise DomainError("stored files could not be deleted") from None
-        if not (set(relative.parts) & deleted_ids):
+        if not _dir_matches_patient_files(relative.parts, box_id=box_id, ids=ids):
             continue
         try:
             if not any(current.iterdir()):

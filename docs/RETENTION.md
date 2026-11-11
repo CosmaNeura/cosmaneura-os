@@ -86,11 +86,13 @@ psql "$POSTGRES_ADMIN_URL" \
 ```
 
 If `cosmas_patient_deletion` already exists (for example created earlier by a
-superuser), a superuser must first grant it to the owner `WITH ADMIN OPTION`
-before the owner can run step 3:
+superuser), a superuser must first grant it to the database owner role by name
+`WITH ADMIN OPTION`. Do not use `TO current_user`. Run the grant as a
+superuser, naming the database owner role (the role that owns the SECURITY
+DEFINER functions), then run step 3 as that owner:
 
 ```sql
-GRANT cosmas_patient_deletion TO current_user WITH ADMIN OPTION;
+GRANT cosmas_patient_deletion TO <database_owner_role> WITH ADMIN OPTION;
 ```
 
 4. As the database owner / superuser, bind `session_user` to the practice owner
