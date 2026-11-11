@@ -257,8 +257,11 @@ def composition_bindings(repository, source, blueprint):
         elif item["role"] == "derived-production-native-auth":
             counterpart = "apps/capture/" + item["path"]
             original = git(repository, "show", source["commit"] + ":" + counterpart)
-            if (hashlib.sha256(original).hexdigest() != item["scaffold_input_sha256"]
-                    or digest(repository / item["derivation_source"]) != item["derivation_source_sha256"]):
+            auth_profile_source = item.get("auth_profile_source")
+            if (not isinstance(auth_profile_source, str) or auth_profile_source == ""
+                    or hashlib.sha256(original).hexdigest() != item["scaffold_input_sha256"]
+                    or digest(repository / item["derivation_source"]) != item["derivation_source_sha256"]
+                    or digest(repository / auth_profile_source) != item.get("auth_profile_source_sha256")):
                 raise ValueError("Production native auth stamp drifted from the frozen Info.plist.")
             expected = production_native_auth_stamp(plistlib.loads(original))
             if plistlib.loads(destination.read_bytes()) != expected:
@@ -302,9 +305,10 @@ def arguments(argv=None):
         "--installation-profile",
         choices=sorted(INSTALLATION_PROFILES),
         help=(
-            "Optional closed installation profile. production stamps CosmasNativeAuth.enabled "
-            "and production Clerk/API origins; staging refuses production origins; beta keeps "
-            "the historical identity-driven default."
+            "Optional closed installation profile. production stamps production Clerk/API "
+            "origins and enables CosmasNativeAuth only with a validated publishable key; "
+            "staging refuses production origins; beta keeps the historical identity-driven "
+            "default."
         ),
     )
     parser.add_argument("--node", type=Path, required=True, help="Existing local Node 24 executable; no downloads")

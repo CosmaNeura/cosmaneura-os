@@ -143,7 +143,9 @@ def _apply_production_native_auth_stamp(
         raise ValueError("Production native auth stamp did not change CosmasNativeAuth.")
     record = next(item for item in placed if item["path"] == info_path)
     derivation_path = "scripts/compose-portable-iphone.py"
+    auth_profile_path = "scripts/native_iphone_auth_profile.py"
     derivation = _regular_file(repository, repository / derivation_path)
+    auth_profile = _regular_file(repository, repository / auth_profile_path)
     record.update(
         {
             "role": "derived-production-native-auth",
@@ -151,10 +153,13 @@ def _apply_production_native_auth_stamp(
             "scaffold_input_sha256": original_sha256,
             "derivation_source": derivation_path,
             "derivation_source_sha256": _digest(derivation),
+            "auth_profile_source": auth_profile_path,
+            "auth_profile_source_sha256": _digest(auth_profile),
             "wiring_note": (
-                "Production installation profile stamped CosmasNativeAuth.enabled "
-                "and clerk.beta.cosmas.ai / api.beta.cosmas.ai / beta.cosmas.ai origins; "
-                "frozen scaffold Info.plist unchanged."
+                "Production installation profile stamped clerk.beta.cosmas.ai / "
+                "api.beta.cosmas.ai origins with CosmasNativeAuth.enabled=false until "
+                "a validated publishable key is supplied at owned prepare; frozen "
+                "scaffold Info.plist and CosmaneuraWebOrigin unchanged."
             ),
         }
     )
@@ -537,7 +542,8 @@ def compose(
         if installation_profile is not None and installation_profile not in INSTALLATION_PROFILES:
             raise ValueError("Use the production, beta, or staging installation profile.")
         # Default / beta / staging keep the frozen CosmasNativeAuth bytes. Only an
-        # explicit production profile stamps enabled=true and production origins.
+        # explicit production profile stamps production Clerk/API origins (auth
+        # stays disabled until owned prepare supplies a validated key).
         if installation_profile == PRODUCTION_INSTALLATION_PROFILE:
             _apply_production_native_auth_stamp(repository, output, placed)
         manifest = {

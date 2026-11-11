@@ -15,7 +15,8 @@ from pathlib import Path
 
 PRACTICE_KEY = "CosmasNativePracticeConnection"
 ORIGIN_HOST = r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}"
-PRODUCTION_PRACTICE_FRONTEND = "https://clerk.cosmas.ai"
+# CTO decision log, 11 Nov 2026, per John 30 Oct: production on beta.cosmas.ai.
+PRODUCTION_PRACTICE_FRONTEND = "https://clerk.beta.cosmas.ai"
 PRODUCTION_PRACTICE_ACCOUNT = "https://enrollment-api.cosmas.ai"
 PRODUCTION_PRACTICE_POLICY = "practice-uuid-production-v1"
 STAGING_PRACTICE_ACCOUNT = "https://enrollment-api.staging.cosmas.ai"
@@ -79,7 +80,7 @@ def _practice_realm_and_policy(value: dict) -> str:
                 or value["accountOrigin"] != PRODUCTION_PRACTICE_ACCOUNT
                 or policy != PRODUCTION_PRACTICE_POLICY):
             raise ValueError(
-                "Production native practice requires enrollment-api.cosmas.ai, clerk.cosmas.ai, "
+                "Production native practice requires enrollment-api.cosmas.ai, clerk.beta.cosmas.ai, "
                 "a non-empty Clerk audience, and practice-uuid-production-v1.")
         _practice_publishable_key(realm["publishableKey"], host, live=True)
         return policy
@@ -93,10 +94,10 @@ def native_practice_configuration(value: object) -> dict:
     nor changes the compiled Beta identity, callback or native request origin.
     Staging keeps operational-staging-v1 with an empty audience and pins
     accountOrigin to enrollment-api.staging.cosmas.ai. Production binds
-    operational-beta-v1 to enrollment-api.cosmas.ai, clerk.cosmas.ai, a non-empty
-    audience, and practice-uuid-production-v1. Runtime acceptance of that
-    production policy also requires the matching native-auth / shared-profile
-    changes (#311 / #315).
+    operational-beta-v1 to enrollment-api.cosmas.ai, clerk.beta.cosmas.ai, a
+    non-empty audience, and practice-uuid-production-v1. Runtime acceptance of
+    that production policy also requires the matching native-auth /
+    shared-profile changes (#311 / #315).
     """
     required = {"enabled", "accountOrigin", "realm", "apiOrigins"}
     if (not isinstance(value, dict) or not required <= value.keys()

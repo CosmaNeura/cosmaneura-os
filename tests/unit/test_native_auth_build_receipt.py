@@ -181,7 +181,7 @@ def test_operational_helper_keeps_auth_and_explicitly_controls_capture(tmp_path,
 
 
 def _production_practice_json(path: Path) -> Path:
-    host = "clerk.cosmas.ai"
+    host = "clerk.beta.cosmas.ai"
     path.write_text(json.dumps({
         "enabled": True,
         "accountOrigin": "https://enrollment-api.cosmas.ai",

@@ -34,7 +34,7 @@ def staging_practice():
 
 
 def production_practice():
-    host = "clerk.cosmas.ai"
+    host = "clerk.beta.cosmas.ai"
     return {
         "enabled": True,
         "accountOrigin": "https://enrollment-api.cosmas.ai",

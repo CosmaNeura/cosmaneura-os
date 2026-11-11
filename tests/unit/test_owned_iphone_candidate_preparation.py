@@ -36,7 +36,7 @@ def practice_configuration():
 
 
 def production_practice_configuration():
-    host = "clerk.cosmas.ai"
+    host = "clerk.beta.cosmas.ai"
     return {
         "enabled": True,
         "accountOrigin": "https://enrollment-api.cosmas.ai",

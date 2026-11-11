@@ -75,8 +75,11 @@ public struct NativeClerkAccountConfiguration: Sendable, Equatable {
         if profile == .simulatorStaging {
             guard host == "clerk.staging.cosmas.ai" else { throw NativeAuthError.unavailable }
         } else if profile == .operationalBeta {
-            // Production Infos pin live Clerk to clerk.cosmas.ai (matches Python packaging).
-            guard host == "clerk.cosmas.ai" else { throw NativeAuthError.unavailable }
+            // frontendOrigin is the stamped production value; this exact-host
+            // guard is the closed allowlist for operational-beta-v1.
+            // CTO decision log, 11 Nov 2026, per John 30 Oct: production on
+            // beta.cosmas.ai, separate Clerk. clerk.cosmas.ai stays reserved.
+            guard host == "clerk.beta.cosmas.ai" else { throw NativeAuthError.unavailable }
         } else {
             guard host.hasSuffix(".clerk.accounts.dev") else { throw NativeAuthError.unavailable }
         }

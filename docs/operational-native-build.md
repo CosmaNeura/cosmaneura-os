@@ -50,7 +50,7 @@ and `keychainNamespace`. Choose exactly one closed environment:
 | Environment | `profile` | Clerk key / frontend | `audience` | `accountOrigin` | `registeredPracticeOrigins` |
 | --- | --- | --- | --- | --- | --- |
 | Synthetic staging | `operational-staging-v1` | `pk_test_` encoding its `.clerk.accounts.dev` frontend | empty | `https://enrollment-api.staging.cosmas.ai` | `exact` or `synthetic-practice-uuid-staging-v1` |
-| Real-data production | `operational-beta-v1` | `pk_live_` encoding `clerk.cosmas.ai` | non-empty Clerk session `aud` (same value as production `CLERK_AUDIENCE`) | `https://enrollment-api.cosmas.ai` | `practice-uuid-production-v1` |
+| Real-data production | `operational-beta-v1` | `pk_live_` encoding `clerk.beta.cosmas.ai` | non-empty Clerk session `aud` (same value as production `CLERK_AUDIENCE`) | `https://enrollment-api.cosmas.ai` | `practice-uuid-production-v1` |
 
 The reviewed stable `keychainNamespace` is 64 lowercase hexadecimal characters in
 either environment. No credential or server secret belongs in this file.
@@ -251,7 +251,7 @@ practice-connection candidate, additionally supply
 That file uses the same closed `CosmasNativePracticeConnection` schema as the
 owned iPhone candidate (staging `operational-staging-v1` or production
 `operational-beta-v1` with `practice-uuid-production-v1`, non-empty audience,
-`https://enrollment-api.cosmas.ai`, and `https://clerk.cosmas.ai`). Omission is
+`https://enrollment-api.cosmas.ai`, and `https://clerk.beta.cosmas.ai`). Omission is
 the default. Synthetic `--verification-variant` helpers cannot carry this key.
 Embedding the Info does not by itself implement the Mac `CosmasDesktopPractice`
 host.
