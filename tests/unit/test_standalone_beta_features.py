@@ -56,7 +56,8 @@ def core_capture_values():
             "core_web_origin": "https://staging-app.cosmaneura.com",
             "core_capture_scope": "api://invented-core-audience/.default",
             "core_capture_managed_identity_client_id": "00000000-0000-4000-8000-0000000000aa",
-            # CosmaBot API origin only — never Scribe/Core blob (no Cosmas CORS).
+            # Explicit independent-beta proxy opt-in + CosmaBot API origin.
+            "workspace_capture_proxy_enabled": True,
             "workspace_capture_proxy_origin": "https://api.invented-cosmabot.test"}
 
 
@@ -113,6 +114,7 @@ def test_model_incomplete_or_broadened_configuration_fails(clerk_standalone, cha
     {"core_connection_tenant_ref": "authority_tenant_01arz3ndektsv4rrffq69g5fav"},
     {"workspace_capture_corrections_enabled": True},
     {"workspace_session_prep_enabled": True},
+    {"workspace_capture_proxy_enabled": False},
     {"workspace_capture_proxy_origin": "https://cosmaneurastaginguploads.blob.core.windows.net"},
     {"workspace_capture_proxy_origin": "https://staging-app.cosmaneura.com"},
     {"workspace_capture_proxy_origin": ""},

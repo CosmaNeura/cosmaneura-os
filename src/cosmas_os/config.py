@@ -211,6 +211,11 @@ class Settings(BaseSettings):
     core_capture_origin: str = ""
     core_capture_scope: str = ""
     core_capture_managed_identity_client_id: str = ""
+    # Independent-beta CosmaBot ciphertext upload proxy (default OFF). Maps to
+    # VITE_WORKSPACE_CAPTURE_ENABLED / hosting core_capture. Never inferred from
+    # workspace_capture_backend alone — Core backend with a proxy origin and this
+    # flag off keeps main authorize_upload URLs byte-for-byte.
+    workspace_capture_proxy_enabled: bool = False
     # CosmaBot public API origin for ciphertext proxy URLs (independent-beta only).
     # Must equal the client VITE_CAPTURE_UPLOAD_ORIGINS / hosted API origin — never
     # a Core or Scribe blob host (browser→blob would need Cosmas CORS).
@@ -768,7 +773,8 @@ class Settings(BaseSettings):
                                       "workspace_google_calendar_enabled", "workspace_microsoft_connection_enabled",
                                       "workspace_microsoft_message_enabled", "workspace_microsoft_calendar_enabled",
                                       # Independent-beta launch: Chief tools + Core note capture only.
-                                      "workspace_agent_tools_enabled", "workspace_capture_notes_enabled"})
+                                      "workspace_agent_tools_enabled", "workspace_capture_notes_enabled",
+                                      "workspace_capture_proxy_enabled"})
         enabled_allowlist.update({"workspace_hosted_enabled", "workspace_apple_hosted_transport_enabled",
             "workspace_desktop_hosted_transport_enabled"} if real_clerk else {
             "workspace_apple_local_transport_enabled", "workspace_desktop_local_transport_enabled"})
@@ -783,7 +789,7 @@ class Settings(BaseSettings):
         core_capture_fields = {
             "core_capture_origin", "core_capture_scope",
             "core_capture_managed_identity_client_id", "core_web_origin",
-            "workspace_capture_proxy_origin",
+            "workspace_capture_proxy_enabled", "workspace_capture_proxy_origin",
         }
         for name in type(self).model_fields:
             value = getattr(self, name)
@@ -837,7 +843,9 @@ class Settings(BaseSettings):
             return ["Standalone Core capture requires the reviewed staging-app.cosmaneura.com origin"]
         if not self.workspace_capture_notes_enabled or not self.workspace_agent_tools_enabled:
             return ["Standalone Core capture requires capture notes and agent tools together"]
-        # Proxy origin is CosmaBot's own API — never Core web or Scribe blob.
+        # Explicit proxy opt-in + CosmaBot API origin — never Core web or Scribe blob.
+        if not self.workspace_capture_proxy_enabled:
+            return ["Standalone Core capture requires the CosmaBot upload proxy opt-in"]
         proxy = self.workspace_capture_proxy_origin
         proxy_host = (urlparse(proxy).hostname or "").lower()
         if (not self._is_exact_https_origin(proxy)

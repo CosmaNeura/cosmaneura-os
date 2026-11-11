@@ -1,7 +1,9 @@
-"""Upload proxy must never log audio, transcript, or ciphertext bodies."""
+"""Upload proxy must never log audio, transcript, ciphertext, or SAS query strings."""
 
 from __future__ import annotations
 
+import concurrent.futures
+import importlib
 import io
 import logging
 from datetime import UTC, datetime, timedelta
@@ -69,13 +71,20 @@ def db(engine):
         yield session
 
 
+def _signed_blob_url(marker: str) -> str:
+    return (
+        "https://cosmaneurastaginguploads.blob.core.windows.net/synth/"
+        f"{marker}?sv=2025-01-05&sig=invented-secret-{marker}&se=2099-01-01T00:00:00Z"
+    )
+
+
 def test_stream_ciphertext_does_not_log_audio_or_transcript_content(db, caplog):
     box, owner, workspace = _seed(db)
     receipt = UploadReceipt(
         authorization_receipt_id=uuid4(),
         object_id=uuid4(),
         additional_authenticated_data="e30",
-        upload_url="https://cosmaneurastaginguploads.blob.core.windows.net/synth?sig=1",
+        upload_url=_signed_blob_url("body"),
         expires_at=datetime.now(UTC) + timedelta(minutes=5),
     )
     minted = proxy.mint_proxy_upload(
@@ -108,64 +117,97 @@ def test_stream_ciphertext_does_not_log_audio_or_transcript_content(db, caplog):
     assert b"CANARY_AUDIO_TRANSCRIPT_BYTES_DO_NOT_LOG_".hex() not in joined
 
 
-def test_core_upload_httpx_logs_never_contain_query_or_sig(db):
+def test_core_upload_httpx_logs_redact_url_args_under_concurrent_debug(db):
+    """Real httpx LogRecord.args carry httpx.URL; concurrent DEBUG uploads must redact."""
     box, owner, workspace = _seed(db)
-    signed = (
-        "https://cosmaneurastaginguploads.blob.core.windows.net/synth/object"
-        "?sv=2025-01-05&sig=invented-secret-signature&se=2099-01-01T00:00:00Z"
-    )
-    assert "sig=" in signed and "?" in signed
-    assert "?" not in proxy.redact_core_upload_query(signed)
-    assert "sig=" not in proxy.redact_core_upload_query(signed)
-    receipt = UploadReceipt(
-        authorization_receipt_id=uuid4(),
-        object_id=uuid4(),
-        additional_authenticated_data="e30",
-        upload_url=signed,
-        expires_at=datetime.now(UTC) + timedelta(minutes=5),
-    )
-    minted = proxy.mint_proxy_upload(
-        db, receipt=receipt, box_id=box.id, workspace_id=workspace.id,
-        session_id=str(uuid4()), principal_id=owner.id,
-        proxy_origin="https://api.invented-cosmabot.test",
-    )
-    proxy_id = minted.upload_url.rsplit("/", 1)[-1]
-    seen = []
-    # Attach directly to httpx: suite tests may set propagate=False on that logger.
     httpx_logger = logging.getLogger("httpx")
+    before_level = httpx_logger.level
+    before_handlers = list(httpx_logger.handlers)
+    before_filters = list(httpx_logger.filters)
     stream = io.StringIO()
     capture = logging.StreamHandler(stream)
     capture.setLevel(logging.DEBUG)
     capture.setFormatter(logging.Formatter("%(message)s"))
-    previous = (httpx_logger.level, httpx_logger.disabled, list(httpx_logger.handlers))
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        # Emit while the Core upload client has the redaction filter installed.
-        logging.getLogger("httpx").warning("core upload PUT %s", str(request.url))
-        seen.append(str(request.url))
-        return httpx.Response(201, request=request)
-
-    transport = httpx.MockTransport(handler)
-    httpx_logger.disabled = False
     httpx_logger.addHandler(capture)
+    httpx_logger.setLevel(logging.DEBUG)
+    httpx_logger.disabled = False
+    box_id = str(box.id)
+    workspace_id = str(workspace.id)
+    principal_id = str(owner.id)
+    bind = db.get_bind()
+    proxy_ids: list[str] = []
     try:
-        proxy.stream_ciphertext_to_core(
-            db,
-            box_id=box.id,
-            workspace_id=workspace.id,
-            principal_id=owner.id,
-            proxy_id=proxy_id,
-            body=b"synthetic-ciphertext-bytes",
-            runtime=_Runtime(),
-            transport=transport,
+        for index in range(3):
+            signed = _signed_blob_url(f"concurrent-{index}")
+            assert isinstance(httpx.URL(signed), httpx.URL)
+            assert "sig=" in signed and "sv=" in signed and "?" in signed
+            receipt = UploadReceipt(
+                authorization_receipt_id=uuid4(),
+                object_id=uuid4(),
+                additional_authenticated_data="e30",
+                upload_url=signed,
+                expires_at=datetime.now(UTC) + timedelta(minutes=5),
+            )
+            minted = proxy.mint_proxy_upload(
+                db, receipt=receipt, box_id=box_id, workspace_id=workspace_id,
+                session_id=str(uuid4()), principal_id=principal_id,
+                proxy_origin="https://api.invented-cosmabot.test",
+            )
+            proxy_ids.append(minted.upload_url.rsplit("/", 1)[-1])
+
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(201, request=request)
         )
+
+        def upload(proxy_id: str) -> None:
+            # Each concurrent call uses its own session on the shared engine.
+            with Session(bind) as session:
+                proxy.stream_ciphertext_to_core(
+                    session,
+                    box_id=box_id,
+                    workspace_id=workspace_id,
+                    principal_id=principal_id,
+                    proxy_id=proxy_id,
+                    body=b"synthetic-ciphertext-bytes",
+                    runtime=_Runtime(),
+                    transport=transport,
+                )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            list(pool.map(upload, proxy_ids))
     finally:
         httpx_logger.removeHandler(capture)
-        httpx_logger.setLevel(previous[0])
-        httpx_logger.disabled = previous[1]
-    assert seen and "sig=" in seen[0]
+        httpx_logger.setLevel(before_level)
+
     captured = stream.getvalue()
-    assert captured.strip()
+    assert "HTTP Request:" in captured
     for line in captured.splitlines():
         assert "sig=" not in line
+        assert "sv=" not in line
         assert "?" not in line
+    assert httpx_logger.level == before_level
+    assert list(httpx_logger.handlers) == before_handlers
+    assert list(httpx_logger.filters) == before_filters
+    assert sum(
+        getattr(item, "marker", None) == proxy.CoreUploadHttpxFilter.marker
+        for item in httpx_logger.filters
+    ) == 1
+
+
+def test_httpx_query_filter_install_is_idempotent_across_reload():
+    first = proxy.install_httpx_query_filter()
+    second = proxy.install_httpx_query_filter()
+    assert first is second
+    reloaded = importlib.reload(proxy)
+    third = reloaded.install_httpx_query_filter()
+    fourth = reloaded.install_httpx_query_filter()
+    assert third is fourth
+    assert third is first
+    httpx_logger = logging.getLogger("httpx")
+    attached = [
+        item for item in httpx_logger.filters
+        if getattr(item, "marker", None) == reloaded.CoreUploadHttpxFilter.marker
+    ]
+    assert len(attached) == 1
+    # Keep the module under the original import name for later tests in this process.
+    importlib.reload(proxy)

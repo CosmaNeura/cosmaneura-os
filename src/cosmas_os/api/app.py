@@ -995,7 +995,7 @@ async def perform_workspace_capture(request: Request, workspace_id: UUID,
             session_id=str(body.session_id),
             principal_id=identity.principal_id,
             proxy_origin=settings.workspace_capture_proxy_origin,
-            capture_backend=settings.workspace_capture_backend,
+            proxy_enabled=settings.workspace_capture_proxy_enabled,
         )
     return JSONResponse(content={"session_id": str(body.session_id), "workspace_id": str(workspace_id),
         "operation": body.operation.kind, "receipt": receipt.model_dump(mode="json")},

@@ -1126,6 +1126,8 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
     lab_origin = f"http://127.0.0.1:{server.server_port}"
     router.upload_origin = lab_origin
     # Independent-beta upload proxy: browser PUTs to CosmaBot API origin only.
+    monkeypatch.setattr(configuration, "workspace_capture_proxy_enabled", True)
+    monkeypatch.setattr(runtime, "workspace_capture_proxy_enabled", True)
     monkeypatch.setattr(configuration, "workspace_capture_proxy_origin", lab_origin)
     monkeypatch.setattr(runtime, "workspace_capture_proxy_origin", lab_origin)
     report_root = Path(os.environ.get("COSMAS_SCRIBE_SPECIALIST_EVIDENCE_DIR", str(tmp_path)))
