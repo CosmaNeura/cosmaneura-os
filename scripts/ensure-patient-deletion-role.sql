@@ -5,8 +5,9 @@
 -- not enough for the REVOKE/GRANT on existing tables and SECURITY DEFINER
 -- functions owned by the migrator). Exact NOLOGIN role: cosmas_patient_deletion.
 --
--- Create that role if missing, revoke table rights, and grant EXECUTE on the
--- public delete + admin helper functions. Next admin LOGIN grant:
+-- Create cosmas_patient_deletion if missing, revoke table rights (including
+-- patient_deletion_pending_files), and grant EXECUTE on the public delete +
+-- admin helper functions. Next admin LOGIN grant:
 --   psql ... -v admin_login=cosmas_patient_deletion_admin -f scripts/ensure-patient-deletion-admin-login.sql
 -- Binding rows are inserted separately (see docs/RETENTION.md).
 
