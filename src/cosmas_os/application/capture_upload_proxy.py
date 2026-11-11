@@ -66,8 +66,6 @@ class _CoreUploadHttpxFilter(logging.Filter):
                 key: redact_core_upload_query(value) if isinstance(value, str) else value
                 for key, value in args.items()
             }
-        elif isinstance(args, str):
-            record.args = redact_core_upload_query(args)
         return True
 
 
