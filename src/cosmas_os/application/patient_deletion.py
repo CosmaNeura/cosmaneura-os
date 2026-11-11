@@ -445,9 +445,8 @@ def _path_matches_patient_files(parts: tuple[str, ...], *, box_id: str, ids: _Fi
     # Exports (local layout): <workspace_id>/exports/...
     if len(parts) >= 3 and first in ids.workspace_ids and parts[1].lower() == "exports":
         return True
-    # Vendor documents: <box_id>/vendor-documents/...
-    if len(parts) >= 2 and first == box_id and parts[1].lower() == "vendor-documents":
-        return True
+    # Vendor documents are never folder-scanned: only exact DB keys from
+    # patient_deletion_collect_file_keys (vendor_artifacts) may be deleted.
     return False
 
 
@@ -786,7 +785,7 @@ def _dir_matches_patient_files(parts: tuple[str, ...], *, box_id: str, ids: _Fil
             parts[1] in ids.artifact_ids
             or parts[1] in ids.recording_ids
             or parts[1] in ids.workspace_ids
-            or parts[1].lower() in {"uploads", "vendor-documents"}
+            or parts[1].lower() == "uploads"
         )
     ):
         return True
@@ -797,6 +796,8 @@ def _dir_matches_patient_files(parts: tuple[str, ...], *, box_id: str, ids: _Fil
         and parts[2] in ids.artifact_ids
     ):
         return True
+    # Never prune by walking vendor-documents/; those files are unlinked only
+    # via exact collected keys.
     return False
 
 

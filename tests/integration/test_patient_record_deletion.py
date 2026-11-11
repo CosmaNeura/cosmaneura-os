@@ -65,9 +65,11 @@ from cosmas_os.models import (
     Ticket,
     WorkspaceEntry,
     WorkspaceNote,
+    WorkspaceNoteReview,
 )
 from cosmas_os.private_recording_models import PrivateRecording, PrivateRecordingFinish
 from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
+from cosmas_os.vendor_models import VendorArtifact
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"synthetic-card"
 ROOT = Path(__file__).resolve().parents[2]
@@ -81,6 +83,7 @@ GUARD_FUNCTIONS = (
 )
 _ENSURE_ROLE_SQL = ROOT / "scripts" / "ensure-patient-deletion-role.sql"
 _ENSURE_ADMIN_LOGIN_SQL = ROOT / "scripts" / "ensure-patient-deletion-admin-login.sql"
+_DELETION_FUNCTIONS_SQL = ROOT / "migrations" / "versions" / "_b47e5c32f186_functions.sql"
 _DOCUMENTED_ADMIN_LOGIN_GRANTS = (
     "GRANT cosmas_patient_deletion TO {role}",
     "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) TO {role}",
@@ -427,12 +430,109 @@ def _upload_paths(session: Session, blob: LocalBlobAdapter, ticket_id: str) -> l
     return [blob.root / str(key) for key in keys]
 
 
+def _vendor_pdf_path(
+    blob: LocalBlobAdapter, box: str, workspace_id: str, owner: str, artifact_id: str
+) -> Path:
+    return blob.root / box / "vendor-documents" / workspace_id / owner / f"{artifact_id}.pdf"
+
+
+def _plant_vendor_pdf(
+    session: Session,
+    blob: LocalBlobAdapter,
+    *,
+    box: str,
+    owner: str,
+    workspace_id: str,
+    label: str,
+) -> dict[str, str | Path]:
+    """Insert a ready vendor_artifacts row and write its exact on-disk key."""
+
+    previous = session.scalar(
+        select(WorkspaceNote)
+        .where(WorkspaceNote.workspace_id == workspace_id)
+        .order_by(WorkspaceNote.version.desc())
+        .limit(1)
+    )
+    workspace_row = session.get(EncounterWorkspace, workspace_id)
+    assert workspace_row is not None
+    note_review.save(
+        session,
+        box,
+        owner,
+        workspace_id,
+        expected=int(workspace_row.revision),
+        key=f"vendor-note-{label}-{uuid4().hex[:8]}",
+        base_note_id=previous.id if previous is not None else None,
+        source_reply_id=None,
+        content=f"synthetic vendor note {label}",
+    )
+    note = session.scalar(
+        select(WorkspaceNote)
+        .where(WorkspaceNote.workspace_id == workspace_id)
+        .order_by(WorkspaceNote.version.desc())
+        .limit(1)
+    )
+    assert note is not None
+    workspace_row = session.get(EncounterWorkspace, workspace_id)
+    assert workspace_row is not None
+    if (
+        session.scalar(select(WorkspaceNoteReview.id).where(WorkspaceNoteReview.note_id == note.id))
+        is None
+    ):
+        note_review.review(
+            session,
+            box,
+            owner,
+            workspace_id,
+            note.id,
+            expected=int(workspace_row.revision),
+            key=f"vendor-review-{label}-{uuid4().hex[:8]}",
+            content_hash=note.content_hash,
+            source_hash=note.source_fingerprint,
+        )
+    artifact_id = str(uuid4())
+    pdf = f"%PDF-synthetic-{label}\n".encode()
+    digest = hashlib.sha256(pdf).hexdigest()
+    # Empty ledger row is enough for collect_file_keys; ready state needs attempt
+    # receipts we do not need for path-key deletion coverage.
+    session.add(
+        VendorArtifact(
+            artifact_id=artifact_id,
+            workspace_id=workspace_id,
+            box_id=box,
+            owner_id=owner,
+            note_id=note.id,
+            content_hash=note.content_hash,
+            source_fingerprint=note.source_fingerprint,
+            intent_sha256=digest,
+            sha256=digest,
+            byte_length=len(pdf),
+            media_type="application/pdf",
+            scope_version=1,
+            state="empty",
+            version=1,
+            active_generation=0,
+        )
+    )
+    session.commit()
+    path = _vendor_pdf_path(blob, box, workspace_id, owner, artifact_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(pdf)
+    return {
+        "artifact_id": artifact_id,
+        "path": path,
+        "workspace_id": workspace_id,
+        "relative": str(path.relative_to(blob.root)),
+    }
+
+
 @pytest.fixture
 def practice(engine, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "blob_root", str(tmp_path / "blobs"))
     blob = LocalBlobAdapter(tmp_path / "blobs")
     session = Session(engine)
     # Throwaway synth only: create John's deletion role here, never via CI workflows.
+    _reload_patient_deletion_functions(session)
     _ensure_patient_deletion_role(session)
     arranged = _arrange(session, blob)
     _bind_session_admin(session, str(arranged["owner_id"]), str(arranged["box_id"]))
@@ -1308,6 +1408,15 @@ def _ensure_patient_deletion_admin_login(session: Session, role: str) -> None:
 
     for statement in _documented_admin_login_grants(role):
         _autocommit(session, statement)
+
+
+def _reload_patient_deletion_functions(session: Session) -> None:
+    """Re-apply companion SQL so revised-in-place head bodies are live."""
+
+    sql = _DELETION_FUNCTIONS_SQL.read_text(encoding="utf-8")
+    bind = session.get_bind()
+    with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.execute(text(sql))
 
 
 def _ensure_patient_deletion_role(session: Session) -> None:
@@ -3769,3 +3878,188 @@ def test_staff_and_agent_cannot_mutate_pending_files(practice) -> None:
             )
             session.commit()
             _autocommit(session, f"DROP ROLE IF EXISTS {role}")
+
+
+def test_vendor_documents_only_delete_exact_db_keys(practice) -> None:
+    """Round 7: vendor-documents are never folder-scanned; bait tickets refuse."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    morgan = practice["morgan"]
+    assert isinstance(casey, dict) and isinstance(morgan, dict)
+    assert isinstance(blob, LocalBlobAdapter)
+    patient_a = str(casey["patient_id"])
+    box_1 = str(practice["box_id"])
+    workspace_b = str(morgan["workspace_id"])
+    chaser = session.scalar(
+        select(Principal.id).where(Principal.box_id == box_1, Principal.agent_key == "chaser")
+    )
+    assert chaser is not None
+
+    planted_a = _plant_vendor_pdf(
+        session, blob, box=box_1, owner=owner, workspace_id=str(casey["workspace_id"]), label="a"
+    )
+    planted_b = _plant_vendor_pdf(
+        session, blob, box=box_1, owner=owner, workspace_id=workspace_b, label="b"
+    )
+    # Orphan practice-wide bait file under vendor-documents (no DB row for A).
+    orphan = blob.root / box_1 / "vendor-documents" / workspace_b / owner / f"{uuid4()}.pdf"
+    orphan.parent.mkdir(parents=True, exist_ok=True)
+    orphan.write_bytes(b"%PDF-synthetic-orphan\n")
+    assert planted_a["path"].is_file()
+    assert planted_b["path"].is_file()
+    assert orphan.is_file()
+
+    # (a) ticket id = B workspace id → refuse; B's PDFs survive.
+    session.add(
+        Ticket(
+            id=workspace_b,
+            box_id=box_1,
+            lane="artifact_chase",
+            state=TicketState.DRAFT.value,
+            created_by_principal_id=chaser,
+            patient_link_id=patient_a,
+        )
+    )
+    session.commit()
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        _calls(session, owner, patient_a, blob, confirm=False)
+    session.rollback()
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        _calls(session, owner, patient_a, blob, confirm=True)
+    session.rollback()
+    assert planted_b["path"].is_file()
+    assert orphan.is_file()
+    session.execute(
+        text("DELETE FROM public.tickets WHERE id = CAST(:id AS uuid)"),
+        {"id": workspace_b},
+    )
+    session.commit()
+
+    # (b) ticket id = owner principal id → refuse; every non-A file survives.
+    session.add(
+        Ticket(
+            id=owner,
+            box_id=box_1,
+            lane="artifact_chase",
+            state=TicketState.DRAFT.value,
+            created_by_principal_id=chaser,
+            patient_link_id=patient_a,
+        )
+    )
+    session.commit()
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        _calls(session, owner, patient_a, blob, confirm=True)
+    session.rollback()
+    assert planted_b["path"].is_file()
+    assert orphan.is_file()
+    assert _paths(blob, morgan)["export"].is_file()
+    session.execute(text("DELETE FROM public.tickets WHERE id = CAST(:id AS uuid)"), {"id": owner})
+    session.commit()
+
+    # (c) legit A confirm: dry-run count matches delete; B/C vendor PDFs survive.
+    names = practice["names"]
+    assert isinstance(names, dict)
+    casey_c = _visit(
+        svc.Container(session, blob=blob),
+        box=box_1,
+        owner=owner,
+        scribe_id=str(practice["agents"]["scribe"]),
+        blob=blob,
+        label=str(names.get("morgan_label", "Invented Patient C")) + " C",
+        slug="vendor-c-" + uuid4().hex[:8],
+        note="synthetic-vendor-c-note",
+        message="synthetic-vendor-c-message",
+        transcript="synthetic-vendor-c-transcript",
+    )
+    planted_c = _plant_vendor_pdf(
+        session,
+        blob,
+        box=box_1,
+        owner=owner,
+        workspace_id=str(casey_c["workspace_id"]),
+        label="c",
+    )
+    preview = delete_patient_records(
+        session,
+        actor_principal_id=owner,
+        patient_link_id=patient_a,
+        confirm=False,
+        blob=blob,
+        file_roots=storage_roots(blob),
+    )
+    expected_files = dict(preview["files"])
+    # Folder-wide vendor match would inflate exports with B/C/orphan PDFs.
+    assert int(expected_files["exports"]) >= 2
+    plan = patient_deletion_mod._plan(session, patient_a)
+    collected_paths = {
+        item.relative_path
+        for item in patient_deletion_mod._collect_files_for_plan(
+            session,
+            plan,
+            storage_roots(blob),
+            box_id=box_1,
+        )
+        if item.relative_path is not None
+    }
+    assert planted_a["relative"] in collected_paths
+    assert str(planted_b["path"].relative_to(blob.root)) not in collected_paths
+    assert str(planted_c["path"].relative_to(blob.root)) not in collected_paths
+    assert str(orphan.relative_to(blob.root)) not in collected_paths
+    deleted = _calls(session, owner, patient_a, blob, confirm=True)
+    assert deleted["files"] == expected_files
+    assert not planted_a["path"].is_file()
+    assert planted_b["path"].is_file()
+    assert planted_c["path"].is_file()
+    assert orphan.is_file()
+    assert session.get(PatientLink, patient_a) is None
+    assert session.get(PatientLink, str(morgan["patient_id"])) is not None
+    assert session.get(PatientLink, str(casey_c["patient_id"])) is not None
+
+
+def test_recording_id_equal_to_box_id_is_refused(practice) -> None:
+    """Beta INFO: a recording whose id equals a box id must refuse the plan."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_a = str(casey["patient_id"])
+    box_1 = str(practice["box_id"])
+    other = svc.Container(session, blob=blob)
+    foreign = svc.provision_box(other, "Invented Recording Collision Practice")
+    box_2 = str(foreign["box_id"])
+    identity_id = session.scalar(
+        select(ExternalIdentity.id).where(ExternalIdentity.principal_id == owner)
+    )
+    scribe_id = str(practice["agents"]["scribe"])
+    team_id = session.scalar(
+        select(ProviderTeamRevision.id).where(ProviderTeamRevision.owner_id == owner)
+    )
+    assert identity_id is not None and team_id is not None
+    session.add(
+        PrivateRecording(
+            id=box_2,
+            workspace_id=str(casey["workspace_id"]),
+            box_id=box_1,
+            owner_id=owner,
+            external_identity_id=identity_id,
+            agent_id=scribe_id,
+            team_revision_id=team_id,
+            workspace_revision=1,
+            local_recording_id=str(uuid4()),
+            request_key=str(uuid4()),
+            request_sha256="b" * 64,
+            recovery_scope="c" * 64,
+            request={"synthetic": "recording-box-collision"},
+            started_at=datetime(2026, 9, 10, tzinfo=UTC),
+        )
+    )
+    session.commit()
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        _calls(session, owner, patient_a, blob, confirm=False)
+    session.rollback()
+    assert session.get(PatientLink, patient_a) is not None

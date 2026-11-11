@@ -661,19 +661,31 @@ BEGIN
     END LOOP;
   END;
 
-  -- Refuse ticket/row PKs that collide with a box id or a recording id (except
-  -- private_recordings themselves). Local file scans never use ticket ids; this
-  -- closes the plan-side bait that inflated dry-run ticket counts.
+  -- Refuse planned PKs that collide with box, recording, workspace, upload, or
+  -- principal ids. Own-table rows may keep their natural PK (a workspace id in
+  -- encounter_workspaces is fine); a bait ticket/row that reuses another
+  -- table's id is not. Recording rows whose id equals a box id also refuse.
   DECLARE
     v_collide boolean;
   BEGIN
     FOR v_table IN SELECT jsonb_object_keys(v_plan) LOOP
-      CONTINUE WHEN v_table = 'private_recordings';
       SELECT EXISTS (
         SELECT 1
           FROM jsonb_array_elements_text(COALESCE(v_plan -> v_table, '[]'::jsonb)) AS t(id)
          WHERE EXISTS (SELECT 1 FROM public.box_contexts b WHERE b.id::text = t.id)
-            OR EXISTS (SELECT 1 FROM public.private_recordings r WHERE r.id::text = t.id)
+            OR (
+              v_table IS DISTINCT FROM 'private_recordings'
+              AND EXISTS (SELECT 1 FROM public.private_recordings r WHERE r.id::text = t.id)
+            )
+            OR (
+              v_table IS DISTINCT FROM 'encounter_workspaces'
+              AND EXISTS (SELECT 1 FROM public.encounter_workspaces w WHERE w.id::text = t.id)
+            )
+            OR (
+              v_table IS DISTINCT FROM 'artifacts'
+              AND EXISTS (SELECT 1 FROM public.artifacts a WHERE a.id::text = t.id)
+            )
+            OR EXISTS (SELECT 1 FROM public.principals p WHERE p.id::text = t.id)
       ) INTO v_collide;
       IF v_collide THEN
         RAISE EXCEPTION 'admin authority required';
