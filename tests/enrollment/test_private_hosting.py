@@ -285,6 +285,9 @@ def test_google_web_plan_requires_runtime_refs_and_reuses_existing_minimal_profi
     words = shlex.split(recipe["steps"][0]["build"])
     env = dict(words[index + 1].split("=", 1) for index, word in enumerate(words) if word == "--build-arg")
     assert env["VITE_WORKSPACE_FEATURE_PROFILE"] == "independent-beta-v1"
+    assert env["VITE_WORKSPACE_CAPTURE_MODE"] == "browser_microphone"
+    assert env["VITE_COSMANEURA_WEB_ORIGIN"] == "https://staging-app.cosmaneura.com"
+    assert env["VITE_CAPTURE_UPLOAD_ORIGINS"] == hosted.plan.api_origin
     assert not any("SECRET" in name or name in {"google", "client_secret_file"} for name in env)
     assert str(optional.secret) not in json.dumps(recipe) and optional.secret.read_text() not in json.dumps(recipe)
     # Resolve the exact public recipe with the existing Dockerfile's fixed web aliases.
@@ -293,8 +296,11 @@ def test_google_web_plan_requires_runtime_refs_and_reuses_existing_minimal_profi
                             check=True, capture_output=True, text=True)
     manifest = json.loads(actual.stdout)
     assert manifest["profile"] == "independent-beta-v1" and manifest["organizationId"] == hosted.plan.organization_id
-    assert manifest["platformAccess"] == "disabled" and manifest["captureMode"] == "disabled"
-    assert {"VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED", "VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED", "VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED"} <= set(manifest["enabledFlags"])
+    assert manifest["platformAccess"] == "disabled" and manifest["captureMode"] == "browser_microphone"
+    assert manifest["coreWebOrigin"] == "https://staging-app.cosmaneura.com"
+    assert manifest["captureUploadOrigins"] == [hosted.plan.api_origin]
+    assert {"VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED", "VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED", "VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED",
+            "VITE_WORKSPACE_CAPTURE_ENABLED", "VITE_WORKSPACE_CAPTURE_NOTES_ENABLED"} <= set(manifest["enabledFlags"])
     assert not any(name in manifest["enabledFlags"] for name in ("VITE_CORE_CONNECTION_ENABLED", "VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED", "VITE_WORKSPACE_SCHEDULING_ENABLED"))
 
 
