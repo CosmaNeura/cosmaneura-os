@@ -12,16 +12,16 @@ BEGIN
 END $$;
 
 GRANT USAGE ON SCHEMA public TO cosmas_patient_deletion;
-GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO cosmas_patient_deletion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO cosmas_patient_deletion;
 
 DO $$
 BEGIN
-  IF to_regprocedure('public._cosmas_apply_patient_deletion_plan(uuid, jsonb)') IS NOT NULL THEN
-    GRANT EXECUTE ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb)
+  IF to_regprocedure('public._cosmas_apply_patient_deletion_mutate(uuid, uuid)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public._cosmas_apply_patient_deletion_mutate(uuid, uuid)
       TO cosmas_patient_deletion;
   END IF;
-  IF to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)') IS NOT NULL THEN
-    ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb)
+  IF to_regprocedure('public.delete_patient_keyed_records(uuid, uuid)') IS NOT NULL THEN
+    ALTER FUNCTION public.delete_patient_keyed_records(uuid, uuid)
       OWNER TO cosmas_patient_deletion;
   END IF;
 END $$;

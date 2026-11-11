@@ -5,19 +5,21 @@ nothing. A confirmed delete runs only through the admin database command: it
 calls the security-definer function owned by ``cosmas_patient_deletion``. The
 HTTP route must not confirm. A repeat call is safe.
 
+Confirmed deletes commit the database first, then remove stored files. Pending
+file rows (internal ids and relative paths only) are recorded in the same
+transaction so a later run can finish leftovers and report them by count.
+
 Backups are not opened or rewritten here. The append-only audit event stores
 the actor, the time, and the patient's internal id only.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 from uuid import UUID
@@ -27,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from cosmas_os.domain.enums import PrincipalState, PrincipalType
 from cosmas_os.domain.rules import AuthorizationError, DomainError
-from cosmas_os.models import AuditEvent, PatientLink, Principal
+from cosmas_os.models import PatientLink, Principal
 
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 _FILE_COLUMNS = {
@@ -41,7 +43,7 @@ _FILE_COLUMNS = {
     "export_path": "exports",
 }
 _AUDIO_SUFFIXES = {".wav", ".m4a", ".mp3", ".flac", ".ogg", ".aac"}
-_PRESERVE = frozenset({"audit_events", "alembic_version"})
+_PRESERVE = frozenset({"audit_events", "alembic_version", "patient_deletion_pending_files"})
 _MAX_STEPS = 10000
 
 
@@ -70,6 +72,7 @@ class _StoredFile:
     kind: str
     blob_key: str | None
     path: Path | None
+    relative_path: str | None = None
 
 
 def storage_roots(blob: object) -> list[Path]:
@@ -91,24 +94,39 @@ def delete_patient_records(
     confirm: bool,
     blob: BlobDeleter | None = None,
     file_roots: Sequence[Path] = (),
-    now: datetime | None = None,
+    now: object = None,
 ) -> dict[str, object]:
     """Count or delete every row and stored file keyed to one patient."""
 
+    del now  # Audit timestamp is written inside the database function.
+    # Validate the patient id before the role check so a malformed id refuses
+    # with the fixed reason even when the deletion role is missing.
+    patient_id = _patient_id(patient_link_id)
     actor = _require_admin(session, actor_principal_id, lock=confirm)
     if confirm:
-        # Fail closed before patient mutations when John has not set up the role.
         _require_deletion_role(session)
-    patient_id = _patient_id(patient_link_id)
+
+    pending_finished = 0
+    if confirm:
+        pending_finished = _finish_pending_files(session, blob, file_roots)
+
     statement = select(PatientLink).where(PatientLink.id == patient_id)
     if confirm:
         statement = statement.with_for_update().execution_options(populate_existing=True)
     patient = session.scalar(statement)
     if patient is None:
-        # Release the owner lock. A repeat call must not pin that row.
         if confirm:
             session.commit()
-        return _report(patient_id, confirm=confirm, deleted=False, tables={}, files={})
+            if pending_finished > 0:
+                return _report(
+                    patient_id,
+                    confirm=True,
+                    deleted=False,
+                    tables={},
+                    files={},
+                    pending_files_finished=pending_finished,
+                )
+        raise DomainError("patient not found")
     if patient.box_id != actor.box_id:
         raise AuthorizationError("admin authority required")
 
@@ -118,33 +136,37 @@ def delete_patient_records(
     file_counts = _file_counts(files)
     if not confirm:
         return _report(
-            patient_id, confirm=False, deleted=False, tables=counts, files=file_counts
+            patient_id,
+            confirm=False,
+            deleted=False,
+            tables=counts,
+            files=file_counts,
+            pending_files_finished=0,
         )
 
     try:
-        # Row changes run inside the security-definer function. This session
-        # only supplies the ordered plan, then removes files and writes the
-        # deletion audit after the patient identifiers are already gone.
-        _apply_secure_deletion(session, patient_id, rows)
-        _delete_files(blob, files, file_roots, _deleted_ids(rows))
-        session.expunge_all()
-        session.add(
-            AuditEvent(
-                box_id=actor.box_id,
-                aggregate_type="patient_link",
-                aggregate_id=patient_id,
-                event_type="patient.records_deleted",
-                actor_principal_id=actor.id,
-                outcome="deleted",
-                detail={},
-                created_at=now or datetime.now(UTC),
-            )
-        )
+        _record_pending_files(session, patient_id, files, file_roots)
+        _apply_secure_deletion(session, patient_id, actor.id)
         session.commit()
     except Exception:
         session.rollback()
         raise
-    return _report(patient_id, confirm=True, deleted=True, tables=counts, files=file_counts)
+
+    try:
+        _delete_files(blob, files, file_roots, _deleted_ids(rows))
+        _clear_pending_files(session, patient_id, files, file_roots)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    return _report(
+        patient_id,
+        confirm=True,
+        deleted=True,
+        tables=counts,
+        files=file_counts,
+        pending_files_finished=pending_finished,
+    )
 
 
 def _require_deletion_role(session: Session) -> None:
@@ -158,7 +180,9 @@ def _require_deletion_role(session: Session) -> None:
                     SELECT 1
                       FROM pg_proc p
                       JOIN pg_roles owner ON owner.oid = p.proowner
-                     WHERE p.oid = to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)')
+                     WHERE p.oid = to_regprocedure(
+                             'public.delete_patient_keyed_records(uuid, uuid)'
+                           )
                        AND owner.rolname = 'cosmas_patient_deletion'
                )
             """
@@ -191,7 +215,7 @@ def _patient_id(value: str) -> str:
     try:
         return str(UUID(value))
     except (TypeError, ValueError):
-        raise DomainError("patient not found") from None
+        raise DomainError("invalid patient id") from None
 
 
 def _report(
@@ -201,6 +225,7 @@ def _report(
     deleted: bool,
     tables: Mapping[str, int],
     files: Mapping[str, int],
+    pending_files_finished: int,
 ) -> dict[str, object]:
     return {
         "dry_run": not confirm,
@@ -212,6 +237,7 @@ def _report(
             "uploads": int(files.get("uploads", 0)),
             "exports": int(files.get("exports", 0)),
         },
+        "pending_files_finished": int(pending_files_finished),
     }
 
 
@@ -321,13 +347,13 @@ def _collect_rows(session: Session, patient_id: str) -> dict[str, set[tuple[str,
             child_key = keys.get(edge.child)
             if child_key is None:
                 raise DomainError("patient records could not be deleted")
-            found = _child_rows(session, edge, parent_key, child_key, parent_rows, columns, patient_id)
+            found = _child_rows(
+                session, edge, parent_key, child_key, parent_rows, columns, patient_id
+            )
             fresh = found - rows[edge.child]
             if fresh:
                 rows[edge.child].update(fresh)
                 dirty.add(edge.child)
-    # Generic path: every public table with patient_link_id for this patient,
-    # including rows the FK walk can miss when only a composite path exists.
     for table, table_columns in columns.items():
         if table in _PRESERVE or "patient_link_id" not in table_columns:
             continue
@@ -346,7 +372,6 @@ def _collect_rows(session: Session, patient_id: str) -> dict[str, set[tuple[str,
             if identity not in rows[table]:
                 rows[table].add(identity)
                 dirty.add(table)
-    # Walk again from any newly discovered patient_link_id rows.
     while dirty:
         steps += 1
         if steps > _MAX_STEPS:
@@ -362,7 +387,9 @@ def _collect_rows(session: Session, patient_id: str) -> dict[str, set[tuple[str,
             child_key = keys.get(edge.child)
             if child_key is None:
                 raise DomainError("patient records could not be deleted")
-            found = _child_rows(session, edge, parent_key, child_key, parent_rows, columns, patient_id)
+            found = _child_rows(
+                session, edge, parent_key, child_key, parent_rows, columns, patient_id
+            )
             fresh = found - rows[edge.child]
             if fresh:
                 rows[edge.child].update(fresh)
@@ -424,64 +451,141 @@ def _key_clause(
     return " OR ".join(groups), params
 
 
-def _deletion_plan(
-    session: Session, rows: Mapping[str, set[tuple[str, ...]]]
-) -> list[dict[str, object]]:
-    """Child-first deletes. Nullable foreign keys are cleared before a cycle."""
-
-    keys, edges, _columns = _load_catalog(session)
-    plan: list[dict[str, object]] = []
-    remaining = {table for table, found in rows.items() if found and table not in _PRESERVE}
-    edges_left = [
-        edge
-        for edge in edges
-        if not edge.deferrable and edge.child in remaining and edge.parent in remaining and edge.child != edge.parent
-    ]
-    while remaining:
-        blocked = {edge.parent for edge in edges_left if edge.child in remaining and edge.parent in remaining}
-        ready = sorted(table for table in remaining if table not in blocked)
-        if not ready:
-            nullable = next((edge for edge in edges_left if all(edge.nullable)), None)
-            if nullable is None:
-                raise DomainError("patient records could not be deleted")
-            plan.append(
-                {
-                    "op": "null",
-                    "table": nullable.child,
-                    "columns": list(nullable.child_cols),
-                    "pk": list(keys[nullable.child].columns),
-                    "rows": [list(row) for row in rows[nullable.child]],
-                }
-            )
-            edges_left = [edge for edge in edges_left if edge is not nullable]
-            continue
-        for table in ready:
-            plan.append(
-                {
-                    "op": "delete",
-                    "table": table,
-                    "pk": list(keys[table].columns),
-                    "rows": [list(row) for row in rows[table]],
-                }
-            )
-            remaining.remove(table)
-    return plan
-
-
-def _apply_secure_deletion(
-    session: Session, patient_id: str, rows: Mapping[str, set[tuple[str, ...]]]
-) -> None:
+def _apply_secure_deletion(session: Session, patient_id: str, actor_id: str) -> None:
     session.execute(
         text(
             "SELECT public.delete_patient_keyed_records("
-            "CAST(:patient AS uuid), CAST(:plan AS jsonb))"
+            "CAST(:patient AS uuid), CAST(:actor AS uuid))"
         ),
-        {"patient": patient_id, "plan": json.dumps(_deletion_plan(session, rows))},
+        {"patient": patient_id, "actor": actor_id},
     )
 
 
 def _deleted_ids(rows: Mapping[str, set[tuple[str, ...]]]) -> set[str]:
     return {value for found in rows.values() for key in found for value in key}
+
+
+def _relative_for(path: Path, roots: Sequence[Path]) -> str | None:
+    for root in roots:
+        try:
+            base = root.resolve()
+            relative = path.resolve().relative_to(base)
+        except (OSError, ValueError):
+            continue
+        text_path = relative.as_posix()
+        if _safe_relative(text_path):
+            return text_path
+    return None
+
+
+def _record_pending_files(
+    session: Session,
+    patient_id: str,
+    files: Sequence[_StoredFile],
+    roots: Sequence[Path],
+) -> None:
+    for item in files:
+        relative = item.relative_path
+        if relative is None and item.path is not None:
+            relative = _relative_for(item.path, roots)
+        if relative is None and item.blob_key is not None and _safe_relative(item.blob_key):
+            relative = item.blob_key
+        if relative is None or not _safe_relative(relative):
+            continue
+        if item.path is not None and not item.path.exists() and item.blob_key is None:
+            continue
+        session.execute(
+            text(
+                """
+                INSERT INTO public.patient_deletion_pending_files (
+                  patient_link_id, kind, relative_path
+                ) VALUES (
+                  CAST(:patient AS uuid), :kind, :path
+                )
+                """
+            ),
+            {"patient": patient_id, "kind": item.kind, "path": relative},
+        )
+
+
+def _clear_pending_files(
+    session: Session,
+    patient_id: str,
+    files: Sequence[_StoredFile],
+    roots: Sequence[Path],
+) -> None:
+    paths: set[str] = set()
+    for item in files:
+        relative = item.relative_path
+        if relative is None and item.path is not None:
+            relative = _relative_for(item.path, roots)
+        if relative is None and item.blob_key is not None and _safe_relative(item.blob_key):
+            relative = item.blob_key
+        if relative is not None:
+            paths.add(relative)
+    if not paths:
+        session.execute(
+            text(
+                "DELETE FROM public.patient_deletion_pending_files "
+                "WHERE patient_link_id = CAST(:patient AS uuid)"
+            ),
+            {"patient": patient_id},
+        )
+        return
+    session.execute(
+        text(
+            """
+            DELETE FROM public.patient_deletion_pending_files
+             WHERE patient_link_id = CAST(:patient AS uuid)
+               AND relative_path = ANY(CAST(:paths AS text[]))
+            """
+        ),
+        {"patient": patient_id, "paths": list(paths)},
+    )
+
+
+def _finish_pending_files(session: Session, blob: BlobDeleter | None, roots: Sequence[Path]) -> int:
+    rows = list(
+        session.execute(
+            text(
+                """
+                SELECT id::text, kind, relative_path
+                  FROM public.patient_deletion_pending_files
+                 ORDER BY created_at, id
+                FOR UPDATE
+                """
+            )
+        )
+    )
+    if not rows:
+        return 0
+    finished = 0
+    for pending_id, kind, relative_path in rows:
+        relative = str(relative_path)
+        if not _safe_relative(relative):
+            continue
+        deleted = False
+        if blob is not None:
+            try:
+                blob.delete(relative)
+                deleted = True
+            except Exception:
+                deleted = False
+        for root in roots:
+            path = _inside(root, relative)
+            if path is not None:
+                _unlink(path)
+                deleted = True
+        if deleted:
+            session.execute(
+                text(
+                    "DELETE FROM public.patient_deletion_pending_files WHERE id = CAST(:id AS uuid)"
+                ),
+                {"id": pending_id},
+            )
+            finished += 1
+            del kind
+    return finished
 
 
 def _collect_files(
@@ -495,9 +599,7 @@ def _collect_files(
         key = keys.get(table)
         if key is None or not found:
             continue
-        named = tuple(
-            column for column in _FILE_COLUMNS if column in columns.get(table, set())
-        )
+        named = tuple(column for column in _FILE_COLUMNS if column in columns.get(table, set()))
         if named:
             selected = ", ".join(f"t.{_quote(column)}::text" for column in named)
             for chunk in _chunks(tuple(found), 200):
@@ -508,8 +610,17 @@ def _collect_files(
                 ):
                     for column, value in zip(named, record, strict=True):
                         if isinstance(value, str) and value and _safe_relative(value):
-                            _add_file(stored, _StoredFile(_FILE_COLUMNS[column], value, None), file_roots)
-        if table == "vendor_artifacts" and {"box_id", "workspace_id", "owner_id", "artifact_id"} <= columns.get(table, set()):
+                            _add_file(
+                                stored,
+                                _StoredFile(_FILE_COLUMNS[column], value, None, value),
+                                file_roots,
+                            )
+        if table == "vendor_artifacts" and {
+            "box_id",
+            "workspace_id",
+            "owner_id",
+            "artifact_id",
+        } <= columns.get(table, set()):
             for chunk in _chunks(tuple(found), 200):
                 where, params = _key_clause("t", key.columns, chunk, "pk")
                 for box_id, workspace_id, owner_id, artifact_id in session.execute(
@@ -519,23 +630,29 @@ def _collect_files(
                     ),
                     params,
                 ):
-                    relative = f"{box_id}/vendor-documents/{workspace_id}/{owner_id}/{artifact_id}.pdf"
-                    _add_file(stored, _StoredFile("exports", relative, None), file_roots)
+                    relative = (
+                        f"{box_id}/vendor-documents/{workspace_id}/{owner_id}/{artifact_id}.pdf"
+                    )
+                    _add_file(
+                        stored,
+                        _StoredFile("exports", relative, None, relative),
+                        file_roots,
+                    )
     deleted_ids = _deleted_ids(rows)
     for root in file_roots:
         for path in _scan(root, deleted_ids):
-            _add_file(stored, _StoredFile(_kind_for(path), None, path), file_roots)
+            relative = _relative_for(path, file_roots)
+            _add_file(
+                stored,
+                _StoredFile(_kind_for(path), None, path, relative),
+                file_roots,
+            )
     return list(stored.values())
 
 
 def _safe_relative(value: str) -> bool:
     parts = Path(value).parts
-    return (
-        not Path(value).is_absolute()
-        and ".." not in parts
-        and bool(parts)
-        and parts[0] != ""
-    )
+    return not Path(value).is_absolute() and ".." not in parts and bool(parts) and parts[0] != ""
 
 
 def _add_file(stored: dict[str, _StoredFile], item: _StoredFile, roots: Sequence[Path]) -> None:
@@ -546,13 +663,18 @@ def _add_file(stored: dict[str, _StoredFile], item: _StoredFile, roots: Sequence
             if candidate is not None:
                 path = candidate
                 break
+    relative = item.relative_path
+    if relative is None and path is not None:
+        relative = _relative_for(path, roots)
+    if relative is None and item.blob_key is not None and _safe_relative(item.blob_key):
+        relative = item.blob_key
     identity = str(path.resolve()) if path is not None and path.exists() else item.blob_key
     if identity is None:
         return
     if path is not None and path.exists():
-        stored[identity] = _StoredFile(item.kind if item.blob_key is None else item.kind, item.blob_key, path)
+        stored[identity] = _StoredFile(item.kind, item.blob_key, path, relative)
     elif item.blob_key is not None and identity not in stored:
-        stored[identity] = item
+        stored[identity] = _StoredFile(item.kind, item.blob_key, None, relative)
 
 
 def _kind_for(path: Path) -> str:

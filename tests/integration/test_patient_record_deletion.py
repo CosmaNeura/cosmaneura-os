@@ -61,31 +61,7 @@ GUARD_FUNCTIONS = (
     "immutable_patient_setup",
     "reject_scheduling_account_change",
 )
-_ENSURE_ROLE_STATEMENTS = (
-    """
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cosmas_patient_deletion') THEN
-        CREATE ROLE cosmas_patient_deletion NOLOGIN NOINHERIT;
-      END IF;
-    END $$
-    """,
-    "GRANT USAGE ON SCHEMA public TO cosmas_patient_deletion",
-    "GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO cosmas_patient_deletion",
-    """
-    DO $$
-    BEGIN
-      IF to_regprocedure('public._cosmas_apply_patient_deletion_plan(uuid, jsonb)') IS NOT NULL THEN
-        GRANT EXECUTE ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb)
-          TO cosmas_patient_deletion;
-      END IF;
-      IF to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)') IS NOT NULL THEN
-        ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb)
-          OWNER TO cosmas_patient_deletion;
-      END IF;
-    END $$
-    """,
-)
+_ENSURE_ROLE_SQL = ROOT / "scripts" / "ensure-patient-deletion-role.sql"
 
 
 def _names(token: str) -> dict[str, str]:
@@ -99,6 +75,8 @@ def _names(token: str) -> dict[str, str]:
         "morgan_message": f"synthetic-morgan-message {token} from the front desk",
         "morgan_transcript": f"synthetic-morgan-transcript {token} of the invented visit",
     }
+
+
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
@@ -119,7 +97,8 @@ def _patient_link_counts(session: Session, patient_id: str) -> dict[str, int]:
     tables = session.scalars(
         text(
             "SELECT table_name FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND column_name = 'patient_link_id'"
+            "WHERE table_schema = 'public' AND column_name = 'patient_link_id' "
+            "AND table_name <> 'patient_deletion_pending_files'"
         )
     )
     counts: dict[str, int] = {}
@@ -149,9 +128,7 @@ def _text_hits(session: Session, needle: str) -> int:
         grouped.setdefault(str(table), []).append(str(column))
     found = 0
     for table, columns in grouped.items():
-        clause = " OR ".join(
-            f"strpos({_quote(column)}::text, :needle) > 0" for column in columns
-        )
+        clause = " OR ".join(f"strpos({_quote(column)}::text, :needle) > 0" for column in columns)
         found += int(
             session.scalar(
                 text(f"SELECT count(*) FROM public.{_quote(table)} WHERE {clause}"),
@@ -163,9 +140,10 @@ def _text_hits(session: Session, needle: str) -> int:
 
 
 def _record(session: Session, box: str, owner: str, scribe_id: str, workspace_id: str) -> str:
-    if session.scalar(
-        select(ExternalIdentity.id).where(ExternalIdentity.principal_id == owner)
-    ) is None:
+    if (
+        session.scalar(select(ExternalIdentity.id).where(ExternalIdentity.principal_id == owner))
+        is None
+    ):
         session.add(
             ExternalIdentity(
                 box_id=box,
@@ -184,9 +162,12 @@ def _record(session: Session, box: str, owner: str, scribe_id: str, workspace_id
     )
     if session.get(ProviderBot, scribe_id) is None:
         session.add(ProviderBot(agent_id=scribe_id, box_id=box, owner_id=owner, role="scribe"))
-    if session.scalar(
-        select(ProviderTeamRevision.id).where(ProviderTeamRevision.owner_id == owner)
-    ) is None:
+    if (
+        session.scalar(
+            select(ProviderTeamRevision.id).where(ProviderTeamRevision.owner_id == owner)
+        )
+        is None
+    ):
         session.add(
             ProviderTeamRevision(
                 box_id=box,
@@ -254,7 +235,9 @@ def _visit(
         container, box, owner, source_pair_key=f"csv:{slug}", label=label
     )
     ticket = svc.detect_and_open_chase(
-        container, box, container.session.scalar(
+        container,
+        box,
+        container.session.scalar(
             select(Principal.id).where(Principal.box_id == box, Principal.agent_key == "chaser")
         ),
         appointment_id,
@@ -264,23 +247,46 @@ def _visit(
     svc.simulate_upload_and_verify(container, ticket.id, owner, PNG, PNG)
     opened = workspace.create(container.session, box, owner, appointment_id, f"workspace-{slug}")
     workspace.append(
-        container.session, box, owner, opened["id"],
-        expected=opened["revision"], key=f"{slug}-transcript", kind="scratchpad", content=transcript,
+        container.session,
+        box,
+        owner,
+        opened["id"],
+        expected=opened["revision"],
+        key=f"{slug}-transcript",
+        kind="scratchpad",
+        content=transcript,
     )
     noted = note_review.save(
-        container.session, box, owner, opened["id"],
-        expected=opened["revision"] + 1, key=f"{slug}-note", base_note_id=None,
-        source_reply_id=None, content=note,
+        container.session,
+        box,
+        owner,
+        opened["id"],
+        expected=opened["revision"] + 1,
+        key=f"{slug}-note",
+        base_note_id=None,
+        source_reply_id=None,
+        content=note,
     )
     first_note = noted["workspace"]["note"]["latest"]["id"]
     note_review.save(
-        container.session, box, owner, opened["id"],
-        expected=noted["entry_revision"], key=f"{slug}-note-revised", base_note_id=first_note,
-        source_reply_id=None, content=note + " revised",
+        container.session,
+        box,
+        owner,
+        opened["id"],
+        expected=noted["entry_revision"],
+        key=f"{slug}-note-revised",
+        base_note_id=first_note,
+        source_reply_id=None,
+        content=note + " revised",
     )
     workspace.append(
-        container.session, box, owner, opened["id"],
-        expected=noted["entry_revision"] + 1, key=f"{slug}-message", kind="conversation",
+        container.session,
+        box,
+        owner,
+        opened["id"],
+        expected=noted["entry_revision"] + 1,
+        key=f"{slug}-message",
+        kind="conversation",
         content=message,
     )
     container.session.add(
@@ -330,13 +336,22 @@ def _arrange(session: Session, blob: LocalBlobAdapter) -> dict[str, object]:
         "blob": blob,
     }
     casey = _visit(
-        container, label=names["label"], slug="casey-" + names["label"].split()[-1],
-        note=names["note"], message=names["message"], transcript=names["transcript"], **common,
+        container,
+        label=names["label"],
+        slug="casey-" + names["label"].split()[-1],
+        note=names["note"],
+        message=names["message"],
+        transcript=names["transcript"],
+        **common,
     )
     morgan = _visit(
-        container, label=names["morgan_label"], slug="morgan-" + names["morgan_label"].split()[-1],
-        note=names["morgan_note"], message=names["morgan_message"],
-        transcript=names["morgan_transcript"], **common,
+        container,
+        label=names["morgan_label"],
+        slug="morgan-" + names["morgan_label"].split()[-1],
+        note=names["morgan_note"],
+        message=names["morgan_message"],
+        transcript=names["morgan_transcript"],
+        **common,
     )
     (blob.root / "keep").mkdir(parents=True)
     (blob.root / "keep" / "unrelated.txt").write_text("keep this file", encoding="utf-8")
@@ -400,9 +415,13 @@ def test_staff_and_agent_are_refused_by_the_api_and_the_cli(practice) -> None:
     agent = str(practice["agents"]["scribe"])
     casey = practice["casey"]
     names = practice["names"]
-    assert isinstance(casey, dict) and isinstance(names, dict) and isinstance(blob, LocalBlobAdapter)
+    assert (
+        isinstance(casey, dict) and isinstance(names, dict) and isinstance(blob, LocalBlobAdapter)
+    )
     patient_id = str(casey["patient_id"])
-    files = list(_paths(blob, casey).values()) + _upload_paths(session, blob, str(casey["ticket_id"]))
+    files = list(_paths(blob, casey).values()) + _upload_paths(
+        session, blob, str(casey["ticket_id"])
+    )
     assert all(path.is_file() for path in files)
     client = TestClient(app)
     path = f"/admin/patients/{patient_id}/records"
@@ -430,12 +449,17 @@ def test_staff_and_agent_are_refused_by_the_api_and_the_cli(practice) -> None:
 
     assert session.get(PatientLink, patient_id) is not None
     assert all(path.is_file() for path in files)
-    assert session.scalar(
-        select(func.count()).select_from(AuditEvent).where(
-            AuditEvent.event_type == "patient.records_deleted",
-            AuditEvent.aggregate_id == patient_id,
+    assert (
+        session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(
+                AuditEvent.event_type == "patient.records_deleted",
+                AuditEvent.aggregate_id == patient_id,
+            )
         )
-    ) == 0
+        == 0
+    )
 
 
 def test_dry_run_returns_counts_and_deletes_nothing(practice) -> None:
@@ -444,9 +468,13 @@ def test_dry_run_returns_counts_and_deletes_nothing(practice) -> None:
     owner = str(practice["owner_id"])
     casey = practice["casey"]
     names = practice["names"]
-    assert isinstance(casey, dict) and isinstance(names, dict) and isinstance(blob, LocalBlobAdapter)
+    assert (
+        isinstance(casey, dict) and isinstance(names, dict) and isinstance(blob, LocalBlobAdapter)
+    )
     patient_id = str(casey["patient_id"])
-    files = list(_paths(blob, casey).values()) + _upload_paths(session, blob, str(casey["ticket_id"]))
+    files = list(_paths(blob, casey).values()) + _upload_paths(
+        session, blob, str(casey["ticket_id"])
+    )
     before = _patient_link_counts(session, patient_id)
     assert before["appointment_observations"] == 1
     assert before["tickets"] == 1
@@ -487,12 +515,17 @@ def test_dry_run_returns_counts_and_deletes_nothing(practice) -> None:
     assert session.get(PatientLink, patient_id) is not None
     assert _patient_link_counts(session, patient_id) == before
     assert all(path.is_file() for path in files)
-    assert session.scalar(
-        select(func.count()).select_from(AuditEvent).where(
-            AuditEvent.event_type == "patient.records_deleted",
-            AuditEvent.aggregate_id == patient_id,
+    assert (
+        session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(
+                AuditEvent.event_type == "patient.records_deleted",
+                AuditEvent.aggregate_id == patient_id,
+            )
         )
-    ) == 0
+        == 0
+    )
 
 
 def test_confirm_removes_every_patient_keyed_table_and_that_patients_files(practice) -> None:
@@ -509,10 +542,18 @@ def test_confirm_removes_every_patient_keyed_table_and_that_patients_files(pract
         "encounter_workspaces",
         "scheduling_patient_accounts",
     } <= set(keyed)
-    assert all(keyed[table] == 1 for table in (
-        "appointment_observations", "tickets", "encounter_workspaces", "scheduling_patient_accounts",
-    ))
-    files = list(_paths(blob, casey).values()) + _upload_paths(session, blob, str(casey["ticket_id"]))
+    assert all(
+        keyed[table] == 1
+        for table in (
+            "appointment_observations",
+            "tickets",
+            "encounter_workspaces",
+            "scheduling_patient_accounts",
+        )
+    )
+    files = list(_paths(blob, casey).values()) + _upload_paths(
+        session, blob, str(casey["ticket_id"])
+    )
     assert all(path.is_file() for path in files)
 
     deleted = _calls(session, owner, patient_id, blob, confirm=True)
@@ -549,7 +590,9 @@ def test_second_patient_rows_and_files_stay(practice) -> None:
     owner = str(practice["owner_id"])
     casey = practice["casey"]
     morgan = practice["morgan"]
-    assert isinstance(casey, dict) and isinstance(morgan, dict) and isinstance(blob, LocalBlobAdapter)
+    assert (
+        isinstance(casey, dict) and isinstance(morgan, dict) and isinstance(blob, LocalBlobAdapter)
+    )
     morgan_id = str(morgan["patient_id"])
     before = _patient_link_counts(session, morgan_id)
     morgan_files = list(_paths(blob, morgan).values()) + _upload_paths(
@@ -578,16 +621,20 @@ def test_audit_row_records_only_who_when_and_the_internal_id(practice) -> None:
     owner = str(practice["owner_id"])
     casey = practice["casey"]
     names = practice["names"]
-    assert isinstance(casey, dict) and isinstance(names, dict) and isinstance(blob, LocalBlobAdapter)
+    assert (
+        isinstance(casey, dict) and isinstance(names, dict) and isinstance(blob, LocalBlobAdapter)
+    )
     patient_id = str(casey["patient_id"])
     _calls(session, owner, patient_id, blob, confirm=True)
 
-    rows = list(session.scalars(
-        select(AuditEvent).where(
-            AuditEvent.event_type == "patient.records_deleted",
-            AuditEvent.aggregate_id == patient_id,
+    rows = list(
+        session.scalars(
+            select(AuditEvent).where(
+                AuditEvent.event_type == "patient.records_deleted",
+                AuditEvent.aggregate_id == patient_id,
+            )
         )
-    ))
+    )
     assert len(rows) == 1
     audit = rows[0]
     assert audit.actor_principal_id == owner
@@ -619,18 +666,18 @@ def test_repeat_delete_is_a_safe_no_op(practice) -> None:
     owner = str(practice["owner_id"])
     casey = practice["casey"]
     morgan = practice["morgan"]
-    assert isinstance(casey, dict) and isinstance(morgan, dict) and isinstance(blob, LocalBlobAdapter)
+    assert (
+        isinstance(casey, dict) and isinstance(morgan, dict) and isinstance(blob, LocalBlobAdapter)
+    )
     patient_id = str(casey["patient_id"])
     morgan_id = str(morgan["patient_id"])
     morgan_files = list(_paths(blob, morgan).values())
     first = _calls(session, owner, patient_id, blob, confirm=True)
     assert first["deleted"] is True
 
-    second = _calls(session, owner, patient_id, blob, confirm=True)
-    assert second["deleted"] is False
-    assert second["dry_run"] is False
-    assert second["tables"] == {}
-    assert second["files"] == {"audio": 0, "uploads": 0, "exports": 0}
+    with pytest.raises(DomainError, match="patient not found"):
+        _calls(session, owner, patient_id, blob, confirm=True)
+    session.rollback()
     admin_role, admin_url = _separate_admin_identity(session)
     try:
         cli = CliRunner().invoke(
@@ -640,17 +687,22 @@ def test_repeat_delete_is_a_safe_no_op(practice) -> None:
         )
     finally:
         _drop_admin_identity(session, admin_role)
-    assert cli.exit_code == 0
-    assert json.loads(cli.stdout)["deleted"] is False
+    assert cli.exit_code == 1
+    assert (cli.stderr or "").strip() == "patient not found"
     assert session.get(PatientLink, patient_id) is None
     assert session.get(PatientLink, morgan_id) is not None
     assert all(path.is_file() for path in morgan_files)
-    assert session.scalar(
-        select(func.count()).select_from(AuditEvent).where(
-            AuditEvent.event_type == "patient.records_deleted",
-            AuditEvent.aggregate_id == patient_id,
+    assert (
+        session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(
+                AuditEvent.event_type == "patient.records_deleted",
+                AuditEvent.aggregate_id == patient_id,
+            )
         )
-    ) == 1
+        == 1
+    )
 
 
 GUARDED_TABLES = (
@@ -700,6 +752,7 @@ def _patient_link_tables(session: Session) -> list[str]:
             text(
                 "SELECT table_name FROM information_schema.columns "
                 "WHERE table_schema = 'public' AND column_name = 'patient_link_id' "
+                "AND table_name <> 'patient_deletion_pending_files' "
                 "ORDER BY table_name"
             )
         )
@@ -769,8 +822,7 @@ def _seed_patient_linked_row(
         raise AssertionError(f"{table} has no patient_link_id column")
     connection.execute(
         text(
-            f"INSERT INTO public.{_quote(table)} ({', '.join(names)}) "
-            f"VALUES ({', '.join(values)})"
+            f"INSERT INTO public.{_quote(table)} ({', '.join(names)}) VALUES ({', '.join(values)})"
         )
     )
 
@@ -833,10 +885,7 @@ def _seed_all_patient_linked_tables(session: Session, practice: dict[str, object
             dropped = _check_constraints(connection, tables)
             for table, name, _definition in dropped:
                 connection.execute(
-                    text(
-                        f"ALTER TABLE public.{_quote(table)} "
-                        f"DROP CONSTRAINT {_quote(name)}"
-                    )
+                    text(f"ALTER TABLE public.{_quote(table)} DROP CONSTRAINT {_quote(name)}")
                 )
             for table in tables:
                 existing = connection.scalar(
@@ -861,6 +910,12 @@ def _seed_all_patient_linked_tables(session: Session, practice: dict[str, object
                     raise AssertionError(
                         f"could not seed patient-linked table {table}: {exc}"
                     ) from exc
+            _seed_ehr_request_snapshot_cycle(
+                connection,
+                patient_id=patient_id,
+                box_id=box_id,
+                owner_id=owner_id,
+            )
             for table, name, definition in dropped:
                 connection.execute(
                     text(
@@ -876,10 +931,149 @@ def _seed_all_patient_linked_tables(session: Session, practice: dict[str, object
     counts = _patient_link_counts(session, patient_id)
     missing = [table for table in tables if counts.get(table, 0) < 1]
     if missing:
-        raise AssertionError(
-            "could not seed patient-linked table(s): " + ", ".join(missing)
+        raise AssertionError("could not seed patient-linked table(s): " + ", ".join(missing))
+    snapshots = int(
+        session.scalar(
+            text(
+                "SELECT count(*) FROM public.ehr_read_snapshots s "
+                "JOIN public.ehr_read_requests r ON r.id = s.observation_id "
+                "WHERE r.patient_link_id = CAST(:patient AS uuid)"
+            ),
+            {"patient": patient_id},
         )
+        or 0
+    )
+    if snapshots < 1:
+        raise AssertionError("could not seed ehr_read_snapshots for the patient")
     return tables
+
+
+def _seed_ehr_request_snapshot_cycle(
+    connection,
+    *,
+    patient_id: str,
+    box_id: str,
+    owner_id: str,
+) -> None:
+    """Attach a saved EHR snapshot (and a child request) to one patient request."""
+
+    request = connection.execute(
+        text(
+            """
+            SELECT id, box_id, owner_id FROM public.ehr_read_requests
+             WHERE patient_link_id = CAST(:patient AS uuid)
+             ORDER BY created_at NULLS LAST, id
+             LIMIT 1
+            """
+        ),
+        {"patient": patient_id},
+    ).first()
+    if request is None:
+        raise AssertionError("ehr_read_requests row missing for snapshot seed")
+    request_id, request_box, request_owner = (
+        str(request[0]),
+        str(request[1]),
+        str(request[2]),
+    )
+    snapshot_id = str(uuid4())
+    digest = "ab" * 32
+    connection.execute(
+        text(
+            """
+            INSERT INTO public.ehr_read_snapshots (
+              id, observation_id, payload, payload_sha256, source_sha256,
+              box_id, owner_id
+            ) VALUES (
+              CAST(:snapshot AS uuid), CAST(:request AS uuid), '{}'::jsonb,
+              :digest, :digest, CAST(:box AS uuid), CAST(:owner AS uuid)
+            )
+            ON CONFLICT DO NOTHING
+            """
+        ),
+        {
+            "snapshot": snapshot_id,
+            "request": request_id,
+            "digest": digest,
+            "box": request_box or box_id,
+            "owner": request_owner or owner_id,
+        },
+    )
+    # Child request that points at the saved snapshot closes the cycle the
+    # DEFERRABLE FKs must survive during one-transaction deletion.
+    existing_child = connection.scalar(
+        text(
+            """
+            SELECT 1 FROM public.ehr_read_requests
+             WHERE patient_link_id = CAST(:patient AS uuid)
+               AND parent_snapshot_id = CAST(:snapshot AS uuid)
+             LIMIT 1
+            """
+        ),
+        {"patient": patient_id, "snapshot": snapshot_id},
+    )
+    if existing_child:
+        return
+    parent = (
+        connection.execute(
+            text(
+                """
+            SELECT binding_id, account_id, connection_id, credential_generation,
+                   binding_digest, workspace_id
+              FROM public.ehr_read_requests
+             WHERE id = CAST(:request AS uuid)
+            """
+            ),
+            {"request": request_id},
+        )
+        .mappings()
+        .one()
+    )
+    connection.execute(
+        text(
+            """
+            INSERT INTO public.ehr_read_requests (
+              id, binding_id, account_id, connection_id, credential_generation,
+              binding_digest, kind, ordinal, idempotency_key, request_hash,
+              request_json, parent_snapshot_id, item_handle, workspace_id,
+              patient_link_id, valid_until, box_id, owner_id, transport
+            ) VALUES (
+              CAST(:id AS uuid), CAST(:binding AS uuid), CAST(:account AS uuid),
+              CAST(:connection AS uuid), CAST(:credential AS uuid), :digest,
+              'lab_report', :ordinal, :idempotency, :digest, '{}'::jsonb,
+              CAST(:snapshot AS uuid), CAST(:item AS uuid),
+              CAST(:workspace AS uuid), CAST(:patient AS uuid),
+              now() + interval '10 minutes', CAST(:box AS uuid), CAST(:owner AS uuid),
+              'mock'
+            )
+            """
+        ),
+        {
+            "id": str(uuid4()),
+            "binding": str(parent["binding_id"]),
+            "account": str(parent["account_id"]),
+            "connection": str(parent["connection_id"]),
+            "credential": str(parent["credential_generation"]),
+            "digest": str(parent["binding_digest"]) if parent["binding_digest"] else digest,
+            "ordinal": int(
+                connection.scalar(
+                    text(
+                        "SELECT COALESCE(MAX(ordinal), 0) + 1 "
+                        "FROM public.ehr_read_requests "
+                        "WHERE binding_id = CAST(:binding AS uuid)"
+                    ),
+                    {"binding": str(parent["binding_id"])},
+                )
+                or 1
+            ),
+            "idempotency": f"seedchild_{uuid4().hex[:8]}",
+            "snapshot": snapshot_id,
+            "item": str(uuid4()),
+            "workspace": str(parent["workspace_id"]) if parent["workspace_id"] else None,
+            "patient": patient_id,
+            "box": request_box or box_id,
+            "owner": request_owner or owner_id,
+        },
+    )
 
 
 def _guarded_triggers(connection) -> list[tuple[str, str]]:
@@ -923,9 +1117,11 @@ def _insert_guard_row(connection, table: str) -> None:
         names.append(_quote(str(name)))
         values.append(_literal(str(column_type)))
     if names:
-        connection.execute(text(
-            f"INSERT INTO public.{_quote(table)} ({', '.join(names)}) VALUES ({', '.join(values)})"
-        ))
+        connection.execute(
+            text(
+                f"INSERT INTO public.{_quote(table)} ({', '.join(names)}) VALUES ({', '.join(values)})"
+            )
+        )
     else:
         connection.execute(text(f"INSERT INTO public.{_quote(table)} DEFAULT VALUES"))
 
@@ -941,17 +1137,24 @@ def _run_statements(connection, statements: tuple[str, ...]) -> None:
         connection.execute(text(statement))
 
 
+def _run_ensure_patient_deletion_role_sql(connection) -> None:
+    """Execute John's real ensure script. No copy and no extra grants."""
+
+    sql = _ENSURE_ROLE_SQL.read_text(encoding="utf-8")
+    connection.execute(text(sql))
+
+
 def _ensure_patient_deletion_role(session: Session) -> None:
     """John's role setup, limited to this throwaway synthetic database session."""
 
     bind = session.get_bind()
     with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-        _run_statements(connection, _ENSURE_ROLE_STATEMENTS)
+        _run_ensure_patient_deletion_role_sql(connection)
 
 
 def _ensure_patient_deletion_role_on(engine) -> None:
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
-        _run_statements(connection, _ENSURE_ROLE_STATEMENTS)
+        _run_ensure_patient_deletion_role_sql(connection)
 
 
 def _drop_patient_deletion_role(admin_engine, databases: tuple[str, ...]) -> None:
@@ -969,12 +1172,12 @@ def _drop_patient_deletion_role(admin_engine, databases: tuple[str, ...]) -> Non
                 )
                 if connection.scalar(
                     text(
-                        "SELECT to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)')"
+                        "SELECT to_regprocedure('public.delete_patient_keyed_records(uuid, uuid)')"
                     )
                 ):
                     connection.execute(
                         text(
-                            "ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb) "
+                            "ALTER FUNCTION public.delete_patient_keyed_records(uuid, uuid) "
                             "OWNER TO CURRENT_USER"
                         )
                     )
@@ -986,17 +1189,17 @@ def _drop_patient_deletion_role(admin_engine, databases: tuple[str, ...]) -> Non
                     connection.execute(
                         text(
                             "DO $$ BEGIN "
-                            "IF to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)') "
+                            "IF to_regprocedure('public.delete_patient_keyed_records(uuid, uuid)') "
                             "IS NOT NULL THEN "
                             "REVOKE ALL ON FUNCTION "
-                            "public.delete_patient_keyed_records(uuid, jsonb) "
+                            "public.delete_patient_keyed_records(uuid, uuid) "
                             "FROM cosmas_patient_deletion; "
                             "END IF; "
                             "IF to_regprocedure("
-                            "'public._cosmas_apply_patient_deletion_plan(uuid, jsonb)') "
+                            "'public._cosmas_apply_patient_deletion_mutate(uuid, uuid)') "
                             "IS NOT NULL THEN "
                             "REVOKE ALL ON FUNCTION "
-                            "public._cosmas_apply_patient_deletion_plan(uuid, jsonb) "
+                            "public._cosmas_apply_patient_deletion_mutate(uuid, uuid) "
                             "FROM cosmas_patient_deletion; "
                             "END IF; "
                             "END $$"
@@ -1023,7 +1226,11 @@ def _runtime_engine(session: Session, role: str):
     )
     _autocommit(session, f'GRANT CONNECT ON DATABASE "{database}" TO {role}')
     _autocommit(session, f"GRANT USAGE ON SCHEMA public TO {role}")
-    return create_engine(url.set(drivername="postgresql+psycopg", username=role, password=password, database=database))
+    return create_engine(
+        url.set(
+            drivername="postgresql+psycopg", username=role, password=password, database=database
+        )
+    )
 
 
 def _drop_runtime_role(session: Session, role: str) -> None:
@@ -1050,10 +1257,12 @@ def test_runtime_role_cannot_delete_guarded_tables_with_the_flag() -> None:
     try:
         _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
         with admin.connect() as connection:
-            connection.execute(text(
-                f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
-                f"PASSWORD '{password}'"
-            ))
+            connection.execute(
+                text(
+                    f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
+                    f"PASSWORD '{password}'"
+                )
+            )
             connection.execute(text(f'GRANT CONNECT ON DATABASE "{database}" TO {role}'))
         with target.begin() as connection:
             connection.execute(text(f"GRANT USAGE ON SCHEMA public TO {role}"))
@@ -1070,31 +1279,40 @@ def test_runtime_role_cannot_delete_guarded_tables_with_the_flag() -> None:
                 {"tables": tables},
             ).all()
             for table, constraint in checks:
-                connection.execute(text(
-                    f"ALTER TABLE public.{_quote(str(table))} DROP CONSTRAINT {_quote(str(constraint))}"
-                ))
+                connection.execute(
+                    text(
+                        f"ALTER TABLE public.{_quote(str(table))} DROP CONSTRAINT {_quote(str(constraint))}"
+                    )
+                )
             connection.execute(text("SET LOCAL session_replication_role = replica"))
             for table in tables:
                 _insert_guard_row(connection, table)
-            connection.execute(text(
-                "GRANT SELECT, DELETE ON "
-                + ", ".join(f"public.{_quote(table)}" for table in tables)
-                + f" TO {role}"
-            ))
-        runtime = create_engine(url.set(
-            drivername="postgresql+psycopg", username=role, password=password, database=database
-        ))
+            connection.execute(
+                text(
+                    "GRANT SELECT, DELETE ON "
+                    + ", ".join(f"public.{_quote(table)}" for table in tables)
+                    + f" TO {role}"
+                )
+            )
+        runtime = create_engine(
+            url.set(
+                drivername="postgresql+psycopg", username=role, password=password, database=database
+            )
+        )
         for table, function in guarded:
             message = _GUARD_MESSAGE[function]
             with runtime.connect() as connection:
                 transaction = connection.begin()
                 refused = False
                 try:
-                    connection.execute(text("SELECT set_config('cosmas.patient_deletion', 'on', true)"))
-                    connection.execute(text(
-                        f"DELETE FROM public.{_quote(table)} "
-                        f"WHERE ctid = (SELECT ctid FROM public.{_quote(table)} LIMIT 1)"
-                    ))
+                    # Caller-settable gates are gone; a runtime role still cannot
+                    # delete guarded history even after SET ROLE attempts fail.
+                    connection.execute(
+                        text(
+                            f"DELETE FROM public.{_quote(table)} "
+                            f"WHERE ctid = (SELECT ctid FROM public.{_quote(table)} LIMIT 1)"
+                        )
+                    )
                 except (ProgrammingError, IntegrityError) as exc:
                     refused = message in str(exc)
                 finally:
@@ -1137,21 +1355,24 @@ def test_runtime_role_cannot_set_role_to_the_deletion_role(practice) -> None:
     role = "patient_runtime_" + uuid4().hex[:12]
     runtime = _runtime_engine(session, role)
     try:
-        chain = session.scalar(text(
-            "WITH RECURSIVE granted_roles AS ("
-            "  SELECT m.roleid FROM pg_auth_members m "
-            "  JOIN pg_roles member ON member.oid = m.member "
-            "  WHERE member.rolname = :role "
-            "  UNION "
-            "  SELECT m.roleid FROM pg_auth_members m "
-            "  JOIN granted_roles parent ON m.member = parent.roleid"
-            ") "
-            "SELECT EXISTS ("
-            "  SELECT 1 FROM granted_roles granted_role "
-            "  JOIN pg_roles granted ON granted.oid = granted_role.roleid "
-            "  WHERE granted.rolname = 'cosmas_patient_deletion'"
-            ")"
-        ), {"role": role})
+        chain = session.scalar(
+            text(
+                "WITH RECURSIVE granted_roles AS ("
+                "  SELECT m.roleid FROM pg_auth_members m "
+                "  JOIN pg_roles member ON member.oid = m.member "
+                "  WHERE member.rolname = :role "
+                "  UNION "
+                "  SELECT m.roleid FROM pg_auth_members m "
+                "  JOIN granted_roles parent ON m.member = parent.roleid"
+                ") "
+                "SELECT EXISTS ("
+                "  SELECT 1 FROM granted_roles granted_role "
+                "  JOIN pg_roles granted ON granted.oid = granted_role.roleid "
+                "  WHERE granted.rolname = 'cosmas_patient_deletion'"
+                ")"
+            ),
+            {"role": role},
+        )
         assert chain is False
         with runtime.connect() as connection:
             transaction = connection.begin()
@@ -1191,8 +1412,10 @@ def test_admin_cli_refuses_a_missing_or_runtime_database_url(practice, monkeypat
     )
     assert same.exit_code == 1
     assert "admin database identity is not configured" in (same.stderr or "")
-    renamed = make_url(runtime_url).set(query={"application_name": "patient-deletion"}).render_as_string(
-        hide_password=False
+    renamed = (
+        make_url(runtime_url)
+        .set(query={"application_name": "patient-deletion"})
+        .render_as_string(hide_password=False)
     )
     assert renamed != runtime_url
     monkeypatch.setenv("COSMAS_ADMIN_DATABASE_URL", renamed)
@@ -1209,25 +1432,43 @@ def test_runtime_role_cannot_execute_the_deletion_function(practice) -> None:
     role = "patient_runtime_" + uuid4().hex[:12]
     runtime = _runtime_engine(session, role)
     try:
-        assert session.scalar(text(
-            "SELECT NOT EXISTS (SELECT 1 FROM pg_auth_members m "
-            "JOIN pg_roles granted ON granted.oid = m.roleid "
-            "JOIN pg_roles member ON member.oid = m.member "
-            "WHERE granted.rolname = 'cosmas_patient_deletion' AND member.rolname = :role)"
-        ), {"role": role}) is True
+        assert (
+            session.scalar(
+                text(
+                    "SELECT NOT EXISTS (SELECT 1 FROM pg_auth_members m "
+                    "JOIN pg_roles granted ON granted.oid = m.roleid "
+                    "JOIN pg_roles member ON member.oid = m.member "
+                    "WHERE granted.rolname = 'cosmas_patient_deletion' AND member.rolname = :role)"
+                ),
+                {"role": role},
+            )
+            is True
+        )
         with runtime.begin() as connection:
             with pytest.raises(ProgrammingError, match="permission denied"):
                 connection.execute(text("SET ROLE cosmas_patient_deletion"))
         with runtime.begin() as connection:
-            connection.execute(text("SELECT set_config('cosmas.patient_deletion', 'on', true)"))
             with pytest.raises(ProgrammingError, match="permission denied"):
-                connection.execute(text(
-                    "SELECT public.delete_patient_keyed_records(CAST(:patient AS uuid), '[]'::jsonb)"
-                ), {"patient": practice["casey"]["patient_id"]})
-        assert session.scalar(text(
-            "SELECT has_function_privilege(:role, "
-            "'public.delete_patient_keyed_records(uuid, jsonb)', 'EXECUTE')"
-        ), {"role": role}) is False
+                connection.execute(
+                    text(
+                        "SELECT public.delete_patient_keyed_records("
+                        "CAST(:patient AS uuid), CAST(:actor AS uuid))"
+                    ),
+                    {
+                        "patient": practice["casey"]["patient_id"],
+                        "actor": practice["owner_id"],
+                    },
+                )
+        assert (
+            session.scalar(
+                text(
+                    "SELECT has_function_privilege(:role, "
+                    "'public.delete_patient_keyed_records(uuid, uuid)', 'EXECUTE')"
+                ),
+                {"role": role},
+            )
+            is False
+        )
     finally:
         runtime.dispose()
         _drop_runtime_role(session, role)
@@ -1298,12 +1539,16 @@ def _revision(target) -> str:
 def _guard_bodies(target) -> dict[str, str]:
     with target.connect() as connection:
         return {
-            name: str(connection.scalar(
-                text("SELECT pg_get_functiondef(p.oid) FROM pg_proc p "
-                     "JOIN pg_namespace n ON n.oid = p.pronamespace "
-                     "WHERE n.nspname = 'public' AND p.proname = :name"),
-                {"name": name},
-            ))
+            name: str(
+                connection.scalar(
+                    text(
+                        "SELECT pg_get_functiondef(p.oid) FROM pg_proc p "
+                        "JOIN pg_namespace n ON n.oid = p.pronamespace "
+                        "WHERE n.nspname = 'public' AND p.proname = :name"
+                    ),
+                    {"name": name},
+                )
+            )
             for name in GUARD_FUNCTIONS
         }
 
@@ -1321,7 +1566,7 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
         _ensure_patient_deletion_role_on(admin)
         _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
         assert _revision(target) == EXPECTED_SCHEMA_REVISION
-        assert all("cosmas.patient_deletion" in body for body in _guard_bodies(target).values())
+        assert all("cosmas_patient_deletion" in body for body in _guard_bodies(target).values())
         blob = LocalBlobAdapter(tmp_path / "blobs")
         with Session(target) as session:
             arranged = _arrange(session, blob)
@@ -1341,10 +1586,9 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
 
         _migrate(target, PARENT_REVISION, downgrade=True)
         assert _revision(target) == PARENT_REVISION
-        assert all("cosmas.patient_deletion" not in body for body in _guard_bodies(target).values())
+        assert all("cosmas_patient_deletion" not in body for body in _guard_bodies(target).values())
         with Session(target) as session:
             with pytest.raises(ProgrammingError, match="workspace history is immutable"):
-                session.execute(text("SELECT set_config('cosmas.patient_deletion', 'on', true)"))
                 session.execute(
                     text("DELETE FROM private_recording_finishes WHERE id = :id"),
                     {"id": finish_id},
@@ -1356,7 +1600,6 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
         assert _revision(target) == EXPECTED_SCHEMA_REVISION
         assert all("cosmas_patient_deletion" in body for body in _guard_bodies(target).values())
         with Session(target) as session:
-            session.execute(text("SELECT set_config('cosmas.patient_deletion', 'on', true)"))
             with pytest.raises(ProgrammingError, match="workspace history is immutable"):
                 session.execute(
                     text("DELETE FROM private_recording_finishes WHERE id = :id"),
@@ -1367,20 +1610,16 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
             session.execute(
                 text(
                     "SELECT public.delete_patient_keyed_records("
-                    "CAST(:patient AS uuid), CAST(:plan AS jsonb))"
+                    "CAST(:patient AS uuid), CAST(:actor AS uuid))"
                 ),
                 {
                     "patient": arranged["casey"]["patient_id"],
-                    "plan": json.dumps([{
-                        "op": "delete",
-                        "table": "private_recording_finishes",
-                        "pk": ["id"],
-                        "rows": [[str(finish_id)]],
-                    }]),
+                    "actor": arranged["owner_id"],
                 },
             )
             session.commit()
             assert session.get(PrivateRecordingFinish, finish_id) is None
+            assert session.get(PatientLink, arranged["casey"]["patient_id"]) is None
     finally:
         target.dispose()
         with admin.connect() as connection:
@@ -1408,14 +1647,17 @@ def test_migration_applies_when_deletion_role_is_missing(caplog) -> None:
                 text(
                     "SELECT r.rolname FROM pg_proc p "
                     "JOIN pg_roles r ON r.oid = p.proowner "
-                    "WHERE p.oid = 'public.delete_patient_keyed_records(uuid, jsonb)'::regprocedure"
+                    "WHERE p.oid = 'public.delete_patient_keyed_records(uuid, uuid)'::regprocedure"
                 )
             )
             assert owner is not None
             assert owner != DELETION_ROLE
-            assert connection.scalar(
-                text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": DELETION_ROLE}
-            ) is None
+            assert (
+                connection.scalar(
+                    text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": DELETION_ROLE}
+                )
+                is None
+            )
     finally:
         target.dispose()
         with admin.connect() as connection:
@@ -1442,7 +1684,9 @@ def test_confirm_refuses_when_deletion_role_is_missing(engine, tmp_path, monkeyp
         )
         assert all(path.is_file() for path in files)
         before = _patient_link_counts(session, patient_id)
-        _drop_patient_deletion_role(admin, (str(session.scalar(text("SELECT current_database()"))),))
+        _drop_patient_deletion_role(
+            admin, (str(session.scalar(text("SELECT current_database()"))),)
+        )
         with pytest.raises(DomainError, match="deletion role not configured"):
             _calls(session, str(arranged["owner_id"]), patient_id, blob, confirm=True)
         session.rollback()
@@ -1507,7 +1751,7 @@ def test_migration_applies_as_restricted_migrator_with_and_without_deletion_role
                     "SELECT r.rolname FROM pg_proc p "
                     "JOIN pg_roles r ON r.oid = p.proowner "
                     "WHERE p.oid = to_regprocedure("
-                    "'public.delete_patient_keyed_records(uuid, jsonb)')"
+                    "'public.delete_patient_keyed_records(uuid, uuid)')"
                 )
             )
             assert owner == without_role
@@ -1538,7 +1782,7 @@ def test_migration_applies_as_restricted_migrator_with_and_without_deletion_role
                     "SELECT r.rolname FROM pg_proc p "
                     "JOIN pg_roles r ON r.oid = p.proowner "
                     "WHERE p.oid = to_regprocedure("
-                    "'public.delete_patient_keyed_records(uuid, jsonb)')"
+                    "'public.delete_patient_keyed_records(uuid, uuid)')"
                 )
             )
             assert owner == with_role
@@ -1580,8 +1824,23 @@ def test_admin_cli_prints_each_fixed_refusal_reason(practice) -> None:
             env=env,
         )
         assert bad_patient.exit_code == 1
-        assert (bad_patient.stderr or "").strip() == "patient not found"
+        assert (bad_patient.stderr or "").strip() == "invalid patient id"
         assert "Traceback" not in (bad_patient.stderr or "")
+
+        missing_patient = CliRunner().invoke(
+            cli_app,
+            [
+                "delete-patient-records",
+                "00000000-0000-4000-8000-000000000099",
+                "--actor",
+                owner,
+                "--dry-run",
+            ],
+            env=env,
+        )
+        assert missing_patient.exit_code == 1
+        assert (missing_patient.stderr or "").strip() == "patient not found"
+        assert "Traceback" not in (missing_patient.stderr or "")
 
         not_admin = CliRunner().invoke(
             cli_app,
@@ -1712,22 +1971,27 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
         f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT PASSWORD {quoted}",
     )
     try:
+        # Login identity for the admin CLI only. Deletion-role grants come only
+        # from John's real ensure script (no copy, no extra grants).
         _autocommit(session, f"GRANT CONNECT ON DATABASE {_quote(database)} TO {role}")
         _autocommit(session, f"GRANT USAGE ON SCHEMA public TO {role}")
-        _autocommit(session, f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}")
+        _autocommit(
+            session,
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}",
+        )
         _autocommit(session, f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}")
         _autocommit(
             session,
-            "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) "
-            f"TO {role}",
+            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid, uuid) TO {role}",
         )
-        _autocommit(
-            session,
-            "GRANT EXECUTE ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb) "
-            f"TO {role}",
+        _ensure_patient_deletion_role(session)
+        can_insert_audit = session.scalar(
+            text(
+                "SELECT has_table_privilege('cosmas_patient_deletion', "
+                "'public.audit_events', 'INSERT')"
+            )
         )
-        # Own/has the deletion role without becoming a superuser.
-        _autocommit(session, f"GRANT {DELETION_ROLE} TO {role}")
+        assert can_insert_audit is True
         is_super = session.scalar(
             text("SELECT rolsuper FROM pg_roles WHERE rolname = :role"), {"role": role}
         )
@@ -1743,26 +2007,239 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
         report = json.loads(cli.stdout)
         assert report["deleted"] is True
         assert session.get(PatientLink, patient_id) is None
-        assert session.scalar(
-            select(func.count()).select_from(AuditEvent).where(
-                AuditEvent.event_type == "patient.records_deleted",
-                AuditEvent.aggregate_id == patient_id,
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(
+                    AuditEvent.event_type == "patient.records_deleted",
+                    AuditEvent.aggregate_id == patient_id,
+                )
             )
-        ) == 1
+            == 1
+        )
     finally:
         _autocommit(session, f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role}")
         _autocommit(session, f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {role}")
         _autocommit(
             session,
-            "REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) "
-            f"FROM {role}",
-        )
-        _autocommit(
-            session,
-            "REVOKE ALL ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb) "
-            f"FROM {role}",
+            f"REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid, uuid) FROM {role}",
         )
         _autocommit(session, f"REVOKE ALL ON SCHEMA public FROM {role}")
         _autocommit(session, f"REVOKE ALL ON DATABASE {_quote(database)} FROM {role}")
-        _autocommit(session, f"REVOKE {DELETION_ROLE} FROM {role}")
         _autocommit(session, f"DROP ROLE IF EXISTS {role}")
+
+
+def test_patient_with_saved_ehr_snapshot_can_be_deleted(practice) -> None:
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_id = str(casey["patient_id"])
+    box_id = str(practice["box_id"])
+    owner_id = str(practice["owner_id"])
+    bind = session.get_bind()
+    with bind.connect() as connection:
+        transaction = connection.begin()
+        try:
+            connection.execute(text("SET LOCAL session_replication_role = replica"))
+            dropped = _check_constraints(connection, ["ehr_read_requests"])
+            for table, name, _definition in dropped:
+                connection.execute(
+                    text(f"ALTER TABLE public.{_quote(table)} DROP CONSTRAINT {_quote(name)}")
+                )
+            # Seed a bare request if arrange left none with patient_link_id.
+            existing = connection.scalar(
+                text(
+                    "SELECT count(*) FROM public.ehr_read_requests "
+                    "WHERE patient_link_id = CAST(:patient AS uuid)"
+                ),
+                {"patient": patient_id},
+            )
+            if int(existing or 0) < 1:
+                _seed_patient_linked_row(
+                    connection,
+                    "ehr_read_requests",
+                    patient_id=patient_id,
+                    box_id=box_id,
+                    owner_id=owner_id,
+                    known={
+                        "workspace_id": str(casey["workspace_id"]),
+                        "ticket_id": str(casey["ticket_id"]),
+                    },
+                )
+            _seed_ehr_request_snapshot_cycle(
+                connection,
+                patient_id=patient_id,
+                box_id=box_id,
+                owner_id=owner_id,
+            )
+            for table, name, definition in dropped:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE public.{_quote(table)} "
+                        f"ADD CONSTRAINT {_quote(name)} {definition} NOT VALID"
+                    )
+                )
+            transaction.commit()
+        except Exception:
+            transaction.rollback()
+            raise
+    session.expire_all()
+    before_snapshots = int(
+        session.scalar(
+            text(
+                "SELECT count(*) FROM public.ehr_read_snapshots s "
+                "JOIN public.ehr_read_requests r ON r.id = s.observation_id "
+                "WHERE r.patient_link_id = CAST(:patient AS uuid)"
+            ),
+            {"patient": patient_id},
+        )
+        or 0
+    )
+    assert before_snapshots >= 1
+    deferred = session.execute(
+        text(
+            """
+            SELECT conname, condeferrable, condeferred
+              FROM pg_constraint
+             WHERE conname IN (
+               'ehr_read_snapshots_observation_id_box_id_owner_id_fkey',
+               'fk_ehr_read_request_parent'
+             )
+             ORDER BY conname
+            """
+        )
+    ).all()
+    assert len(deferred) == 2
+    assert all(row[1] is True for row in deferred)
+    _calls(session, owner, patient_id, blob, confirm=True)
+    assert session.get(PatientLink, patient_id) is None
+    after_snapshots = int(
+        session.scalar(
+            text(
+                "SELECT count(*) FROM public.ehr_read_snapshots s "
+                "JOIN public.ehr_read_requests r ON r.id = s.observation_id "
+                "WHERE r.patient_link_id = CAST(:patient AS uuid)"
+            ),
+            {"patient": patient_id},
+        )
+        or 0
+    )
+    assert after_snapshots == 0
+
+
+def test_pending_file_delete_failure_is_finished_on_rerun(practice, monkeypatch) -> None:
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_id = str(casey["patient_id"])
+    files = list(_paths(blob, casey).values()) + _upload_paths(
+        session, blob, str(casey["ticket_id"])
+    )
+    assert all(path.is_file() for path in files)
+
+    from cosmas_os.application import patient_deletion as deletion_mod
+
+    real_unlink = deletion_mod._unlink
+    failures = {"count": 0}
+
+    def _fail_once(path: Path) -> None:
+        if failures["count"] == 0:
+            failures["count"] += 1
+            raise deletion_mod.DomainError("stored files could not be deleted")
+        real_unlink(path)
+
+    monkeypatch.setattr(deletion_mod, "_unlink", _fail_once)
+    with pytest.raises(DomainError, match="stored files could not be deleted"):
+        _calls(session, owner, patient_id, blob, confirm=True)
+    session.rollback()
+    assert session.get(PatientLink, patient_id) is None
+    pending = int(
+        session.scalar(
+            text(
+                "SELECT count(*) FROM public.patient_deletion_pending_files "
+                "WHERE patient_link_id = CAST(:patient AS uuid)"
+            ),
+            {"patient": patient_id},
+        )
+        or 0
+    )
+    assert pending >= 1
+    assert any(path.is_file() for path in files)
+
+    monkeypatch.setattr(deletion_mod, "_unlink", real_unlink)
+    report = _calls(session, owner, patient_id, blob, confirm=True)
+    assert report["deleted"] is False
+    assert report["pending_files_finished"] >= 1
+    leftover = int(
+        session.scalar(
+            text(
+                "SELECT count(*) FROM public.patient_deletion_pending_files "
+                "WHERE patient_link_id = CAST(:patient AS uuid)"
+            ),
+            {"patient": patient_id},
+        )
+        or 0
+    )
+    assert leftover == 0
+    assert all(not path.exists() for path in files)
+
+
+def test_deletion_function_refuses_other_practice_patient(practice) -> None:
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_id = str(casey["patient_id"])
+    other = svc.Container(session, blob=blob)
+    foreign = svc.provision_box(other, "Invented Other Practice")
+    foreign_owner = str(foreign["owner_id"])
+    before = _patient_link_counts(session, patient_id)
+    with pytest.raises(ProgrammingError, match="admin authority required"):
+        session.execute(
+            text(
+                "SELECT public.delete_patient_keyed_records("
+                "CAST(:patient AS uuid), CAST(:actor AS uuid))"
+            ),
+            {"patient": patient_id, "actor": foreign_owner},
+        )
+        session.commit()
+    session.rollback()
+    assert _patient_link_counts(session, patient_id) == before
+    assert session.get(PatientLink, patient_id) is not None
+    # Same-practice owner still works through the application path.
+    _calls(session, owner, patient_id, blob, confirm=True)
+    assert session.get(PatientLink, patient_id) is None
+
+
+def test_deletion_function_has_no_plan_argument_overload(practice) -> None:
+    session = practice["session"]
+    rows = session.execute(
+        text(
+            """
+            SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args
+              FROM pg_proc p
+              JOIN pg_namespace n ON n.oid = p.pronamespace
+             WHERE n.nspname = 'public'
+               AND p.proname IN (
+                 'delete_patient_keyed_records',
+                 '_cosmas_apply_patient_deletion_mutate',
+                 '_cosmas_apply_patient_deletion_plan'
+               )
+             ORDER BY p.proname, args
+            """
+        )
+    ).all()
+    signatures = {(str(name), str(args)) for name, args in rows}
+    assert ("delete_patient_keyed_records", "p_patient uuid, p_actor uuid") in signatures
+    assert ("_cosmas_apply_patient_deletion_mutate", "p_patient uuid, p_actor uuid") in signatures
+    assert all("jsonb" not in args for _name, args in signatures)
+    assert all(name != "_cosmas_apply_patient_deletion_plan" for name, _args in signatures)
+    # Only the two-uuid entry exists for the public function.
+    public = [args for name, args in signatures if name == "delete_patient_keyed_records"]
+    assert public == ["p_patient uuid, p_actor uuid"]

@@ -1,14 +1,18 @@
 """Admin path to delete one patient's records through one definer function.
 
-Ordinary updates and deletes still fail. Append-only history deletes and the
-redaction update are allowed only while the local ``cosmas.patient_deletion``
-flag is on and ``current_user`` is ``cosmas_patient_deletion``. That role owns
-the security-definer entry function, cannot log in, and is never granted to the
-application runtime role.
+The public entry point is ``delete_patient_keyed_records(patient_id, actor_id)``.
+It checks from database rows that the actor is the practice owner for that
+patient, derives the deletion plan server-side, redacts older audit events,
+deletes the planned rows, and writes ``patient.records_deleted`` (IDs only).
+EXECUTE stays revoked from PUBLIC. ``search_path`` stays pinned.
 
-Planned row changes run through a second security-definer helper owned by the
-migrator. That helper sets ``session_replication_role = replica`` locally so
-satellite immutability guards cannot block a confirmed patient delete.
+Row mutations run through a migrator-owned helper with the same two-argument
+signature so ``session_replication_role = replica`` can skip satellite
+immutability triggers for one call. That helper also re-checks the actor.
+
+The EHR read request/snapshot cycle FKs are DEFERRABLE INITIALLY IMMEDIATE;
+the helper SETs them DEFERRED for the call so both sides delete in one
+transaction without a one-off ordered delete.
 
 This migration never creates ``cosmas_patient_deletion``. When that role already
 exists, the migration applies the grants and ownership handoff. When it is
@@ -31,6 +35,9 @@ depends_on = None
 _ROLE = "cosmas_patient_deletion"
 _LOG = logging.getLogger("alembic.runtime.migration")
 
+_EHR_SNAPSHOT_FK = "ehr_read_snapshots_observation_id_box_id_owner_id_fkey"
+_EHR_REQUEST_FK = "fk_ehr_read_request_parent"
+
 
 def upgrade() -> None:
     op.execute(
@@ -39,8 +46,7 @@ def upgrade() -> None:
         LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         BEGIN
           IF TG_OP IN ('DELETE', 'UPDATE')
-             AND CURRENT_USER = 'cosmas_patient_deletion'
-             AND pg_catalog.current_setting('cosmas.patient_deletion', true) = 'on' THEN
+             AND CURRENT_USER = 'cosmas_patient_deletion' THEN
             IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
             RETURN NEW;
           END IF;
@@ -54,8 +60,7 @@ def upgrade() -> None:
         LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         BEGIN
           IF TG_OP IN ('DELETE', 'UPDATE')
-             AND CURRENT_USER = 'cosmas_patient_deletion'
-             AND pg_catalog.current_setting('cosmas.patient_deletion', true) = 'on' THEN
+             AND CURRENT_USER = 'cosmas_patient_deletion' THEN
             IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
             RETURN NEW;
           END IF;
@@ -69,8 +74,7 @@ def upgrade() -> None:
         LANGUAGE plpgsql SET search_path = pg_catalog AS $$
         BEGIN
           IF TG_OP IN ('DELETE', 'UPDATE')
-             AND CURRENT_USER = 'cosmas_patient_deletion'
-             AND pg_catalog.current_setting('cosmas.patient_deletion', true) = 'on' THEN
+             AND CURRENT_USER = 'cosmas_patient_deletion' THEN
             IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
             RETURN NEW;
           END IF;
@@ -84,8 +88,7 @@ def upgrade() -> None:
         LANGUAGE plpgsql AS $$
         BEGIN
           IF TG_OP IN ('DELETE', 'UPDATE')
-             AND CURRENT_USER = 'cosmas_patient_deletion'
-             AND pg_catalog.current_setting('cosmas.patient_deletion', true) = 'on' THEN
+             AND CURRENT_USER = 'cosmas_patient_deletion' THEN
             IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
             RETURN NEW;
           END IF;
@@ -100,157 +103,319 @@ def upgrade() -> None:
         END $$
         """
     )
-    # Table-owner helper: disable user triggers around each planned change so
-    # satellite immutability guards cannot block a confirmed patient delete.
+
+    # Break the EHR request/snapshot cycle without a one-off ordered delete.
+    op.execute(
+        f"""
+        ALTER TABLE public.ehr_read_snapshots
+          DROP CONSTRAINT {_EHR_SNAPSHOT_FK},
+          ADD CONSTRAINT {_EHR_SNAPSHOT_FK}
+            FOREIGN KEY (observation_id, box_id, owner_id)
+            REFERENCES public.ehr_read_requests (id, box_id, owner_id)
+            DEFERRABLE INITIALLY IMMEDIATE
+        """
+    )
+    op.execute(
+        f"""
+        ALTER TABLE public.ehr_read_requests
+          DROP CONSTRAINT {_EHR_REQUEST_FK},
+          ADD CONSTRAINT {_EHR_REQUEST_FK}
+            FOREIGN KEY (parent_snapshot_id, box_id, owner_id)
+            REFERENCES public.ehr_read_snapshots (id, box_id, owner_id)
+            DEFERRABLE INITIALLY IMMEDIATE
+        """
+    )
+
     op.execute(
         """
-        CREATE OR REPLACE FUNCTION public._cosmas_apply_patient_deletion_plan(
-          p_patient uuid, p_plan jsonb
+        CREATE TABLE IF NOT EXISTS public.patient_deletion_pending_files (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          patient_link_id uuid NOT NULL,
+          kind varchar(16) NOT NULL,
+          relative_path text NOT NULL,
+          created_at timestamptz NOT NULL DEFAULT now(),
+          CONSTRAINT patient_deletion_pending_files_kind_check
+            CHECK (kind IN ('audio', 'uploads', 'exports')),
+          CONSTRAINT patient_deletion_pending_files_path_check
+            CHECK (
+              char_length(relative_path) BETWEEN 1 AND 1024
+              AND relative_path !~ '^[/\\\\]'
+              AND relative_path !~ '\\.\\.'
+            )
+        )
+        """
+    )
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_patient_deletion_pending_files_patient
+          ON public.patient_deletion_pending_files (patient_link_id)
+        """
+    )
+
+    # Migrator-owned helper: same (patient, actor) args, re-checks admin, no plan.
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION public._cosmas_apply_patient_deletion_mutate(
+          p_patient uuid, p_actor uuid
         ) RETURNS void
         LANGUAGE plpgsql
         SECURITY DEFINER
         SET search_path = pg_catalog, public
         AS $$
         DECLARE
-          spec jsonb;
-          rec jsonb;
-          tbl text;
-          col text;
-          cols text[];
-          conds text[];
-          preds text[];
-          sets text;
-          bad integer;
-          i integer;
+          v_box uuid;
+          v_owner boolean;
+          rec record;
+          pk_cols text[];
+          pk_list text;
         BEGIN
-          IF pg_catalog.current_setting('cosmas.patient_deletion', true) IS DISTINCT FROM 'on'
-             OR p_patient IS NULL
-             OR jsonb_typeof(p_plan) IS DISTINCT FROM 'array' THEN
+          IF p_patient IS NULL OR p_actor IS NULL THEN
             RAISE EXCEPTION 'patient records could not be deleted';
           END IF;
-          -- Owned by the migrator (superuser in normal installs). Skip user
-          -- triggers for this call so satellite immutability guards cannot
-          -- block a confirmed patient delete. LOCAL ends with the function.
+          SELECT pl.box_id INTO v_box
+            FROM public.patient_links pl WHERE pl.id = p_patient;
+          IF v_box IS NULL THEN
+            RAISE EXCEPTION 'patient not found';
+          END IF;
+          SELECT (p.principal_type = 'human'
+                  AND p.state = 'active'
+                  AND p.is_owner
+                  AND p.box_id = v_box)
+            INTO v_owner
+            FROM public.principals p WHERE p.id = p_actor;
+          IF v_owner IS DISTINCT FROM TRUE THEN
+            RAISE EXCEPTION 'admin authority required';
+          END IF;
+
           EXECUTE 'SET LOCAL session_replication_role = replica';
-          -- Scrub older audit rows keyed to the patient or to any row id in the
-          -- deletion plan (tickets, visits, recordings, and the rest). Never
-          -- delete audit_events; clear detail and replace the aggregate id.
-          WITH plan_ids AS (
-            SELECT DISTINCT pk_val AS aggregate_id
-              FROM jsonb_array_elements(p_plan) AS spec(value),
-                   jsonb_array_elements(spec.value->'rows') AS row_arr(value),
-                   jsonb_array_elements_text(row_arr.value) AS pk_val
-          )
-          UPDATE public.audit_events
-             SET aggregate_id = 'redacted', detail = '{}'::jsonb
-           WHERE event_type IS DISTINCT FROM 'patient.records_deleted'
-             AND (
-               aggregate_id = p_patient::text
-               OR aggregate_id IN (SELECT aggregate_id FROM plan_ids)
-             );
-          FOR spec IN SELECT value FROM jsonb_array_elements(p_plan) LOOP
-            tbl := spec->>'table';
-            IF tbl IS NULL OR tbl !~ '^[a-z_][a-z0-9_]*$'
-               OR tbl IN ('audit_events', 'alembic_version') THEN
-              RAISE EXCEPTION 'patient records could not be deleted';
-            END IF;
-            SELECT coalesce(array_agg(value ORDER BY ord), ARRAY[]::text[]) INTO cols
-              FROM jsonb_array_elements_text(spec->'pk') WITH ORDINALITY AS item(value, ord);
-            IF cols = ARRAY[]::text[] THEN
-              RAISE EXCEPTION 'patient records could not be deleted';
-            END IF;
-            FOREACH col IN ARRAY cols LOOP
-              IF col !~ '^[a-z_][a-z0-9_]*$' THEN
-                RAISE EXCEPTION 'patient records could not be deleted';
-              END IF;
-            END LOOP;
-            -- One statement for every row of a table. A note that points at
-            -- another note in the same table can be removed only when both
-            -- rows disappear together.
-            preds := ARRAY[]::text[];
-            FOR rec IN SELECT value FROM jsonb_array_elements(spec->'rows') LOOP
-              IF jsonb_typeof(rec) IS DISTINCT FROM 'array'
-                 OR jsonb_array_length(rec) IS DISTINCT FROM array_length(cols, 1) THEN
-                RAISE EXCEPTION 'patient records could not be deleted';
-              END IF;
-              conds := ARRAY[]::text[];
-              FOR i IN 1..array_length(cols, 1) LOOP
-                IF rec->>(i - 1) IS NULL THEN
-                  RAISE EXCEPTION 'patient records could not be deleted';
-                END IF;
-                conds := conds || format('%I::text = %L', cols[i], rec->>(i - 1));
-              END LOOP;
-              preds := preds || format('(%s)', array_to_string(conds, ' AND '));
-            END LOOP;
-            IF preds = ARRAY[]::text[] THEN
+          EXECUTE format(
+            'SET CONSTRAINTS %I, %I DEFERRED',
+            'ehr_read_snapshots_observation_id_box_id_owner_id_fkey',
+            'fk_ehr_read_request_parent'
+          );
+
+          CREATE TEMP TABLE _cosmas_del_ids (
+            aggregate_id text PRIMARY KEY
+          ) ON COMMIT DROP;
+          INSERT INTO _cosmas_del_ids(aggregate_id) VALUES (p_patient::text)
+          ON CONFLICT DO NOTHING;
+
+          -- Scrub ids from every patient_link_id table PK, plus ticket/workspace
+          -- children used as audit aggregate ids.
+          FOR rec IN
+            SELECT c.relname AS table_name,
+                   (SELECT array_agg(a.attname ORDER BY k.ord)
+                      FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+                      JOIN pg_attribute a
+                        ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS cols
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              JOIN pg_attribute pl
+                ON pl.attrelid = c.oid AND pl.attname = 'patient_link_id'
+               AND pl.attnum > 0 AND NOT pl.attisdropped
+              JOIN pg_constraint con
+                ON con.conrelid = c.oid AND con.contype = 'p'
+             WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+               AND c.relname <> 'patient_deletion_pending_files'
+          LOOP
+            pk_cols := rec.cols;
+            IF pk_cols IS NULL THEN
               CONTINUE;
             END IF;
-            IF spec->>'op' = 'null' THEN
-              IF jsonb_typeof(spec->'columns') IS DISTINCT FROM 'array'
-                 OR jsonb_array_length(spec->'columns') < 1 THEN
-                RAISE EXCEPTION 'patient records could not be deleted';
-              END IF;
-              SELECT count(*) INTO bad
-                FROM jsonb_array_elements_text(spec->'columns') AS item(value)
-               WHERE value !~ '^[a-z_][a-z0-9_]*$';
-              IF bad <> 0 THEN
-                RAISE EXCEPTION 'patient records could not be deleted';
-              END IF;
-              SELECT string_agg(format('%I = NULL', value), ', ') INTO sets
-                FROM jsonb_array_elements_text(spec->'columns') AS item(value);
-              EXECUTE format(
-                'UPDATE public.%I SET %s WHERE %s',
-                tbl, sets, array_to_string(preds, ' OR ')
-              );
-            ELSIF spec->>'op' = 'delete' THEN
-              EXECUTE format(
-                'DELETE FROM public.%I WHERE %s',
-                tbl, array_to_string(preds, ' OR ')
-              );
-            ELSE
-              RAISE EXCEPTION 'patient records could not be deleted';
-            END IF;
+            pk_list := array_to_string(
+              ARRAY(SELECT format('%I::text', col) FROM unnest(pk_cols) AS col),
+              ', '
+            );
+            EXECUTE format(
+              'INSERT INTO _cosmas_del_ids(aggregate_id) '
+              'SELECT DISTINCT u FROM public.%I t, '
+              'LATERAL unnest(ARRAY[%s]) AS u '
+              'WHERE t.patient_link_id = $1 '
+              'ON CONFLICT DO NOTHING',
+              rec.table_name, pk_list
+            ) USING p_patient;
           END LOOP;
+          INSERT INTO _cosmas_del_ids(aggregate_id)
+            SELECT pr.id::text FROM public.private_recordings pr
+             JOIN public.encounter_workspaces ew ON ew.id = pr.workspace_id
+            WHERE ew.patient_link_id = p_patient
+            ON CONFLICT DO NOTHING;
+          INSERT INTO _cosmas_del_ids(aggregate_id)
+            SELECT prf.id::text FROM public.private_recording_finishes prf
+             JOIN public.private_recordings pr ON pr.id = prf.recording_id
+             JOIN public.encounter_workspaces ew ON ew.id = pr.workspace_id
+            WHERE ew.patient_link_id = p_patient
+            ON CONFLICT DO NOTHING;
+          INSERT INTO _cosmas_del_ids(aggregate_id)
+            SELECT wn.id::text FROM public.workspace_notes wn
+             JOIN public.encounter_workspaces ew ON ew.id = wn.workspace_id
+            WHERE ew.patient_link_id = p_patient
+            ON CONFLICT DO NOTHING;
+          INSERT INTO _cosmas_del_ids(aggregate_id)
+            SELECT a.id::text FROM public.artifacts a
+             JOIN public.tickets t ON t.id = a.ticket_id
+            WHERE t.patient_link_id = p_patient
+            ON CONFLICT DO NOTHING;
+          INSERT INTO _cosmas_del_ids(aggregate_id)
+            SELECT d.id::text FROM public.decisions d
+             JOIN public.tickets t ON t.id = d.ticket_id
+            WHERE t.patient_link_id = p_patient
+            ON CONFLICT DO NOTHING;
+          INSERT INTO _cosmas_del_ids(aggregate_id)
+            SELECT o.id::text FROM public.operations o
+             JOIN public.tickets t ON t.id = o.ticket_id
+            WHERE t.patient_link_id = p_patient
+            ON CONFLICT DO NOTHING;
+          INSERT INTO _cosmas_del_ids(aggregate_id)
+            SELECT ar.id::text FROM public.action_revisions ar
+             JOIN public.tickets t ON t.id = ar.ticket_id
+            WHERE t.patient_link_id = p_patient
+            ON CONFLICT DO NOTHING;
+          INSERT INTO _cosmas_del_ids(aggregate_id)
+            SELECT s.id::text FROM public.ehr_read_snapshots s
+             JOIN public.ehr_read_requests r ON r.id = s.observation_id
+            WHERE r.patient_link_id = p_patient
+            ON CONFLICT DO NOTHING;
+
+          UPDATE public.audit_events ae
+             SET aggregate_id = 'redacted', detail = '{}'::jsonb
+           WHERE ae.event_type IS DISTINCT FROM 'patient.records_deleted'
+             AND ae.aggregate_id IN (SELECT aggregate_id FROM _cosmas_del_ids);
+
+          -- Dependents without patient_link_id, before their parents go away.
+          DELETE FROM public.workspace_note_reviews wnr
+            USING public.workspace_notes wn, public.encounter_workspaces ew
+           WHERE ew.patient_link_id = p_patient
+             AND wn.workspace_id = ew.id AND wnr.note_id = wn.id;
+          DELETE FROM public.workspace_notes wn
+            USING public.encounter_workspaces ew
+           WHERE ew.patient_link_id = p_patient AND wn.workspace_id = ew.id;
+          DELETE FROM public.workspace_replies wr
+            USING public.encounter_workspaces ew
+           WHERE ew.patient_link_id = p_patient AND wr.workspace_id = ew.id;
+          DELETE FROM public.workspace_entries we
+            USING public.encounter_workspaces ew
+           WHERE ew.patient_link_id = p_patient AND we.workspace_id = ew.id;
+          DELETE FROM public.private_recording_finishes prf
+            USING public.private_recordings pr, public.encounter_workspaces ew
+           WHERE ew.patient_link_id = p_patient
+             AND pr.workspace_id = ew.id AND prf.recording_id = pr.id;
+          DELETE FROM public.private_recordings pr
+            USING public.encounter_workspaces ew
+           WHERE ew.patient_link_id = p_patient AND pr.workspace_id = ew.id;
+          DELETE FROM public.artifacts a
+            USING public.tickets t
+           WHERE t.patient_link_id = p_patient AND a.ticket_id = t.id;
+          DELETE FROM public.operations o
+            USING public.tickets t
+           WHERE t.patient_link_id = p_patient AND o.ticket_id = t.id;
+          DELETE FROM public.decisions d
+            USING public.tickets t
+           WHERE t.patient_link_id = p_patient AND d.ticket_id = t.id;
+          DELETE FROM public.action_revisions ar
+            USING public.tickets t
+           WHERE t.patient_link_id = p_patient AND ar.ticket_id = t.id;
+          -- EHR snapshots sit in the request/snapshot cycle; delete them while
+          -- the two DEFERRABLE FKs are deferred so requests can leave too.
+          DELETE FROM public.ehr_read_snapshots s
+            USING public.ehr_read_requests r
+           WHERE r.patient_link_id = p_patient AND s.observation_id = r.id;
+
+          -- Every public clinical table with a patient_link_id column.
+          -- Skip patient_deletion_pending_files: those rows are committed with
+          -- the delete so a later run can finish leftover stored files.
+          FOR rec IN
+            SELECT c.relname AS table_name
+              FROM pg_class c
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              JOIN pg_attribute pl
+                ON pl.attrelid = c.oid AND pl.attname = 'patient_link_id'
+               AND pl.attnum > 0 AND NOT pl.attisdropped
+             WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+               AND c.relname <> 'patient_deletion_pending_files'
+             ORDER BY c.relname
+          LOOP
+            EXECUTE format(
+              'DELETE FROM public.%I WHERE patient_link_id = $1',
+              rec.table_name
+            ) USING p_patient;
+          END LOOP;
+
+          DELETE FROM public.patient_links WHERE id = p_patient;
+
+          INSERT INTO public.audit_events (
+            id, box_id, aggregate_type, aggregate_id, event_type,
+            actor_principal_id, outcome, detail, created_at
+          ) VALUES (
+            gen_random_uuid(), v_box, 'patient_link', p_patient::text,
+            'patient.records_deleted', p_actor, 'deleted', '{}'::jsonb, now()
+          );
         END $$
         """
     )
+
+    # Public entry: owned by the deletion role when available. No plan argument.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION public.delete_patient_keyed_records(
-          p_patient uuid, p_plan jsonb
+          p_patient uuid, p_actor uuid
         ) RETURNS void
         LANGUAGE plpgsql
         SECURITY DEFINER
         SET search_path = pg_catalog, public
         AS $$
+        DECLARE
+          v_box uuid;
+          v_owner boolean;
         BEGIN
-          IF p_patient IS NULL OR jsonb_typeof(p_plan) IS DISTINCT FROM 'array' THEN
+          IF p_patient IS NULL OR p_actor IS NULL THEN
             RAISE EXCEPTION 'patient records could not be deleted';
           END IF;
-          PERFORM pg_catalog.set_config('cosmas.patient_deletion', 'on', true);
-          PERFORM public._cosmas_apply_patient_deletion_plan(p_patient, p_plan);
+          SELECT pl.box_id INTO v_box
+            FROM public.patient_links pl WHERE pl.id = p_patient;
+          IF v_box IS NULL THEN
+            RAISE EXCEPTION 'patient not found';
+          END IF;
+          SELECT (p.principal_type = 'human'
+                  AND p.state = 'active'
+                  AND p.is_owner
+                  AND p.box_id = v_box)
+            INTO v_owner
+            FROM public.principals p WHERE p.id = p_actor;
+          IF v_owner IS DISTINCT FROM TRUE THEN
+            RAISE EXCEPTION 'admin authority required';
+          END IF;
+          PERFORM public._cosmas_apply_patient_deletion_mutate(p_patient, p_actor);
         END $$
         """
     )
+
+    # Drop any leftover plan-argument overloads from earlier shapes of this revision.
     op.execute(
-        "REVOKE ALL ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb) FROM PUBLIC"
+        """
+        DO $$
+        BEGIN
+          IF to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)') IS NOT NULL THEN
+            DROP FUNCTION public.delete_patient_keyed_records(uuid, jsonb);
+          END IF;
+          IF to_regprocedure('public._cosmas_apply_patient_deletion_plan(uuid, jsonb)') IS NOT NULL THEN
+            DROP FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb);
+          END IF;
+        END $$
+        """
     )
+
     op.execute(
-        "REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) FROM PUBLIC"
+        "REVOKE ALL ON FUNCTION public._cosmas_apply_patient_deletion_mutate(uuid, uuid) FROM PUBLIC"
     )
+    op.execute("REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid, uuid) FROM PUBLIC")
     op.execute(
-        "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) TO CURRENT_USER"
+        "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid, uuid) TO CURRENT_USER"
     )
-    # Soft-grant: only when John's role already exists. Never CREATE ROLE here.
-    # Ownership handoff needs SET privilege on the role (or a superuser). A
-    # restricted non-superuser migrator without SET must still succeed; a
-    # cluster-wide role left by synthetic fixtures must not break a later
-    # non-superuser compact migrate.
+
     bind = op.get_bind()
     role_exists = (
-        bind.execute(
-            text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": _ROLE}
-        ).scalar()
+        bind.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": _ROLE}).scalar()
         is not None
     )
     if not role_exists:
@@ -271,28 +436,46 @@ def upgrade() -> None:
         )
         op.execute(f"GRANT USAGE, CREATE ON SCHEMA public TO {_ROLE}")
         op.execute(
-            f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {_ROLE}"
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {_ROLE}"
         )
         op.execute(
-            "GRANT EXECUTE ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb) "
+            "GRANT EXECUTE ON FUNCTION public._cosmas_apply_patient_deletion_mutate(uuid, uuid) "
             f"TO {_ROLE}"
         )
         if can_handoff:
             op.execute(
-                f"ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb) "
-                f"OWNER TO {_ROLE}"
+                f"ALTER FUNCTION public.delete_patient_keyed_records(uuid, uuid) OWNER TO {_ROLE}"
             )
             op.execute(f"REVOKE CREATE ON SCHEMA public FROM {_ROLE}")
         else:
-            # Role exists (often from an earlier synth fixture on this cluster) but
-            # this migrator cannot SET ROLE to it. Skip ownership; keep grants.
             _LOG.info("cosmas_patient_deletion grant skipped")
             op.execute(f"REVOKE CREATE ON SCHEMA public FROM {_ROLE}")
 
 
 def downgrade() -> None:
+    op.execute("DROP FUNCTION IF EXISTS public.delete_patient_keyed_records(uuid, uuid)")
     op.execute("DROP FUNCTION IF EXISTS public.delete_patient_keyed_records(uuid, jsonb)")
+    op.execute("DROP FUNCTION IF EXISTS public._cosmas_apply_patient_deletion_mutate(uuid, uuid)")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_apply_patient_deletion_plan(uuid, jsonb)")
+    op.execute("DROP TABLE IF EXISTS public.patient_deletion_pending_files")
+    op.execute(
+        f"""
+        ALTER TABLE public.ehr_read_requests
+          DROP CONSTRAINT {_EHR_REQUEST_FK},
+          ADD CONSTRAINT {_EHR_REQUEST_FK}
+            FOREIGN KEY (parent_snapshot_id, box_id, owner_id)
+            REFERENCES public.ehr_read_snapshots (id, box_id, owner_id)
+        """
+    )
+    op.execute(
+        f"""
+        ALTER TABLE public.ehr_read_snapshots
+          DROP CONSTRAINT {_EHR_SNAPSHOT_FK},
+          ADD CONSTRAINT {_EHR_SNAPSHOT_FK}
+            FOREIGN KEY (observation_id, box_id, owner_id)
+            REFERENCES public.ehr_read_requests (id, box_id, owner_id)
+        """
+    )
     op.execute(
         f"""
         DO $$
@@ -304,7 +487,6 @@ def downgrade() -> None:
         END $$
         """
     )
-    # The role stays. John owns create/drop of cosmas_patient_deletion.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION public.reject_workspace_history_change() RETURNS trigger

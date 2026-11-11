@@ -115,6 +115,7 @@ def bootstrap_beta_identity_cmd(
     try:
         if reserve_first_owner:
             from cosmas_os.application.practice_setup import reserve_first_owner as reserve
+
             reserve(session, settings, manifest)
             typer.echo("reviewed first-owner reservation complete; no owner access granted")
         else:
@@ -128,11 +129,15 @@ def bootstrap_beta_identity_cmd(
 def bootstrap_standalone_synthetic_practice_cmd(
     manifest_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
     phase: str = typer.Option(..., "--phase"),
-    confirm_reviewed_synthetic_only: bool = typer.Option(False, "--confirm-reviewed-synthetic-only"),
+    confirm_reviewed_synthetic_only: bool = typer.Option(
+        False, "--confirm-reviewed-synthetic-only"
+    ),
 ) -> None:
     """Host-only reserve/seed of a fresh invented practice in an owned empty DB."""
     if not confirm_reviewed_synthetic_only or phase not in {"reserve", "seed"}:
-        raise typer.BadParameter("reviewed synthetic confirmation and reserve/seed phase are required")
+        raise typer.BadParameter(
+            "reviewed synthetic confirmation and reserve/seed phase are required"
+        )
     from cosmas_os.application.standalone_practice import (
         StandalonePracticeError,
         StandalonePracticeManifest,
@@ -142,7 +147,11 @@ def bootstrap_standalone_synthetic_practice_cmd(
 
     repository_root = Path(__file__).resolve().parents[2]
     resolved = manifest_path.resolve()
-    if manifest_path.is_symlink() or resolved == repository_root or repository_root in resolved.parents:
+    if (
+        manifest_path.is_symlink()
+        or resolved == repository_root
+        or repository_root in resolved.parents
+    ):
         raise typer.BadParameter("use a protected manifest outside the repository")
     try:
         descriptor = os.open(resolved, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
@@ -150,9 +159,14 @@ def bootstrap_standalone_synthetic_practice_cmd(
         raise typer.BadParameter("manifest must be a protected regular file") from None
     with os.fdopen(descriptor, "rb") as opened:
         info = os.fstat(opened.fileno())
-        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077
-                or info.st_size > 32768):
-            raise typer.BadParameter("manifest must be a regular file, at most 32768 bytes and mode 0600 or stricter")
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) & 0o077
+            or info.st_size > 32768
+        ):
+            raise typer.BadParameter(
+                "manifest must be a regular file, at most 32768 bytes and mode 0600 or stricter"
+            )
         encoded = opened.read(32768)
         after = os.fstat(opened.fileno())
         if after.st_size != info.st_size or len(encoded) != info.st_size:
@@ -744,6 +758,7 @@ def delete_patient_records_cmd(
             "deletion role not configured",
             "admin authority required",
             "patient not found",
+            "invalid patient id",
             "confirm required",
         }
     )
@@ -772,7 +787,9 @@ def delete_patient_records_cmd(
         raise typer.Exit(1) from None
     except DomainError as exc:
         reason = str(exc)
-        typer.echo(reason if reason in _CLI_REFUSALS else "patient records could not be deleted", err=True)
+        typer.echo(
+            reason if reason in _CLI_REFUSALS else "patient records could not be deleted", err=True
+        )
         raise typer.Exit(1) from None
     except Exception:
         typer.echo("patient records could not be deleted", err=True)

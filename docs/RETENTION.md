@@ -23,8 +23,13 @@ Confirmed deletes refuse and change nothing when the deletion role is missing.
 
 John runs `scripts/ensure-patient-deletion-role.sql` himself. That idempotent
 script creates the `cosmas_patient_deletion` NOLOGIN role if needed and applies
-the grants. Agents and CI never run it on a real database. The migration skips
-the grant with one log line when the role is absent.
+the grants (`SELECT`, `INSERT`, `UPDATE`, `DELETE` on public tables, including
+`INSERT` on `audit_events`, plus ownership of
+`delete_patient_keyed_records(uuid, uuid)`). Agents and CI never run it on a
+real database. The migration skips the grant with one log line when the role is
+absent. Confirmed deletes commit the database first, then remove stored files;
+pending file paths are recorded in the same transaction so a later run can
+finish leftovers.
 
 Backups are not edited. Deleted data ages out of backups under the backup
 retention policy. T-RETENTION adds that policy.
