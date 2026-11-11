@@ -44,16 +44,18 @@ class StandaloneNativeProfile(unittest.TestCase):
             "organizationId": "org_invented_standalone", "audience": "cosmabot-standalone-api",
         }
         independent = self.feature_profile == "independent-beta-v1"
-        core_origin = "https://staging-app.cosmaneura.com" if independent else ""
-        # Independent-beta: CosmaBot API origin is the sole capture upload origin.
-        uploads = [self.identity["apiOrigin"]] if independent else []
+        # IndependentAppleProfile opts into Core capture; default independent stays dark.
+        core_capture = independent and getattr(self, "core_capture_enabled", False)
+        core_origin = "https://staging-app.cosmaneura.com" if core_capture else ""
+        uploads = [self.identity["apiOrigin"]] if core_capture else []
         result = subprocess.run([
             "node", "--input-type=module", "-e",
             "const m=await import(process.argv[1]);process.stdout.write(JSON.stringify(m.workspaceIdentityInputs("
             "JSON.parse(process.argv[2]),{webOrigin:'https://workspace.example.invalid',coreWebOrigin:process.argv[4],"
-            "captureUploadOrigins:JSON.parse(process.argv[5]),dataMode:'synthetic',featureProfile:process.argv[3]})));",
+            "captureUploadOrigins:JSON.parse(process.argv[5]),dataMode:'synthetic',featureProfile:process.argv[3],"
+            "coreCaptureEnabled:process.argv[6]==='true'})));",
             (ROOT / "scripts/prepare-workspace-identity.mjs").as_uri(), json.dumps(self.identity), self.feature_profile,
-            core_origin, json.dumps(uploads),
+            core_origin, json.dumps(uploads), "true" if core_capture else "false",
         ], capture_output=True, text=True, check=True)
         files = json.loads(result.stdout)
         for client in ("desktop", "apple"):

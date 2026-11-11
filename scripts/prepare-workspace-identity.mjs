@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {STAGING_NATIVE_PROFILE,validateOperationalNativeIdentity,validateOperationalNativeDataMode} from '../clients/desktop/native-identity-config.mjs';
-import {BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE,REVIEWED_CORE_CAPTURE_ORIGIN,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
+import {BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE,INDEPENDENT_CORE_CAPTURE_OPT_IN,REVIEWED_CORE_CAPTURE_ORIGIN,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 
 // OpenTofu jsonencode orders object keys and escapes these five characters.
 export function identityDigest(identity) {
@@ -13,7 +13,7 @@ export function identityDigest(identity) {
 }
 
 /** Reuse the existing native schema; all output values are public configuration. */
-export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode,nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile,microsoftConnectionEnabled=false}) {
+export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode,nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile,microsoftConnectionEnabled=false,coreCaptureEnabled=false}) {
   if(![BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE].includes(nativeFeatureProfile))throw new Error('Unknown native feature profile');
   const independent=featureProfile===INDEPENDENT_BETA_FEATURE_PROFILE;
   const standalone=[STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE].includes(featureProfile);
@@ -23,18 +23,23 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
   if(dataMode===undefined)dataMode='authorized_beta';
   if(typeof microsoftConnectionEnabled!=='boolean'||microsoftConnectionEnabled&&featureProfile!==INDEPENDENT_BETA_FEATURE_PROFILE)
     throw new Error('Microsoft standalone work requires its explicit independent beta profile');
+  if(typeof coreCaptureEnabled!=='boolean'||coreCaptureEnabled&&featureProfile!==INDEPENDENT_BETA_FEATURE_PROFILE)
+    throw new Error('Independent Core capture requires its explicit independent beta profile');
   const desktop=validateOperationalNativeIdentity(candidate,'desktop',candidate?.apiOrigin);
   validateOperationalNativeDataMode(dataMode,desktop);
   const apple=validateOperationalNativeIdentity({...desktop,client:'apple'},'apple',desktop.apiOrigin);
   if(!Array.isArray(captureUploadOrigins))throw new Error('Explicit upload origins required');
   if(standalone&&!independent&&(coreWebOrigin!==''||captureUploadOrigins.length!==0))throw new Error('Standalone practice cannot configure Core or capture uploads');
-  if(independent&&(coreWebOrigin!==REVIEWED_CORE_CAPTURE_ORIGIN||captureUploadOrigins.length===0)){
-    throw new Error('Independent beta requires the reviewed Core web origin and capture upload origins');
+  if(independent&&coreCaptureEnabled&&(coreWebOrigin!==REVIEWED_CORE_CAPTURE_ORIGIN||captureUploadOrigins.length===0)){
+    throw new Error('Independent Core capture requires the reviewed Core web origin and capture upload origins');
+  }
+  if(independent&&!coreCaptureEnabled&&(coreWebOrigin!==''||captureUploadOrigins.length!==0)){
+    throw new Error('Independent beta keeps Core capture dark until VITE_WORKSPACE_CAPTURE_ENABLED is opted in');
   }
   const builds={};
   for(const client of ['web','desktop','apple']) {
     const staging=client!=='web'&&nativeFeatureProfile===NATIVE_STAGING_FEATURE_PROFILE;
-    const captureOff=!independent&&(standalone||staging);
+    const captureOff=!coreCaptureEnabled&&(standalone||staging);
     builds[client]=resolveBetaFeatureProfile({
       VITE_WORKSPACE_FEATURE_PROFILE:standalone?featureProfile:staging?nativeFeatureProfile:BETA_FEATURE_PROFILE,
       VITE_WORKSPACE_HOSTED_CLIENT:client,VITE_WORKSPACE_DATA_MODE:dataMode,
@@ -44,6 +49,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
       VITE_CLERK_PUBLISHABLE_KEY:desktop.publishableKey,
       ...(standalone&&client==='web'?{VITE_WORKSPACE_ORGANIZATION_ID:desktop.organizationId}:{}),
       ...(microsoftConnectionEnabled?{VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED:'true',VITE_MICROSOFT_MESSAGE_ENABLED:'true'}:{}),
+      ...(independent?{[INDEPENDENT_CORE_CAPTURE_OPT_IN]:coreCaptureEnabled?'true':'false'}:{}),
       VITE_COSMANEURA_WEB_ORIGIN:captureOff?'':coreWebOrigin,
       VITE_CAPTURE_UPLOAD_ORIGINS:captureOff?'':captureUploadOrigins.join(','),
       VITE_WORKSPACE_CAPTURE_MODE:captureOff?'disabled':client==='apple'?'ios_native':'browser_microphone',
@@ -55,6 +61,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
     'VITE_CAPTURE_UPLOAD_ORIGINS','VITE_WORKSPACE_CAPTURE_MODE'].map(key=>[key,builds.web.env[key]]));
   if(standalone)Object.assign(webArgs,{VITE_WORKSPACE_FEATURE_PROFILE:featureProfile,VITE_MESSAGES_ENABLED:'true',
     VITE_WORKSPACE_ORGANIZATION_ID:desktop.organizationId});
+  if(independent)Object.assign(webArgs,{[INDEPENDENT_CORE_CAPTURE_OPT_IN]:coreCaptureEnabled?'true':'false'});
   if(microsoftConnectionEnabled)Object.assign(webArgs,{VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED:'true',VITE_MICROSOFT_MESSAGE_ENABLED:'true'});
   return {
     'desktop-identity.json':desktop,

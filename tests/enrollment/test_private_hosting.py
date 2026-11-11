@@ -285,9 +285,11 @@ def test_google_web_plan_requires_runtime_refs_and_reuses_existing_minimal_profi
     words = shlex.split(recipe["steps"][0]["build"])
     env = dict(words[index + 1].split("=", 1) for index, word in enumerate(words) if word == "--build-arg")
     assert env["VITE_WORKSPACE_FEATURE_PROFILE"] == "independent-beta-v1"
-    assert env["VITE_WORKSPACE_CAPTURE_MODE"] == "browser_microphone"
-    assert env["VITE_COSMANEURA_WEB_ORIGIN"] == "https://staging-app.cosmaneura.com"
-    assert env["VITE_CAPTURE_UPLOAD_ORIGINS"] == hosted.plan.api_origin
+    # Core capture opt-in stays OFF by default (matches main).
+    assert env["VITE_WORKSPACE_CAPTURE_MODE"] == "disabled"
+    assert env["VITE_COSMANEURA_WEB_ORIGIN"] == ""
+    assert env["VITE_CAPTURE_UPLOAD_ORIGINS"] == ""
+    assert env["VITE_WORKSPACE_CAPTURE_ENABLED"] == "false"
     assert not any("SECRET" in name or name in {"google", "client_secret_file"} for name in env)
     assert str(optional.secret) not in json.dumps(recipe) and optional.secret.read_text() not in json.dumps(recipe)
     # Resolve the exact public recipe with the existing Dockerfile's fixed web aliases.
@@ -296,12 +298,48 @@ def test_google_web_plan_requires_runtime_refs_and_reuses_existing_minimal_profi
                             check=True, capture_output=True, text=True)
     manifest = json.loads(actual.stdout)
     assert manifest["profile"] == "independent-beta-v1" and manifest["organizationId"] == hosted.plan.organization_id
-    assert manifest["platformAccess"] == "disabled" and manifest["captureMode"] == "browser_microphone"
+    assert manifest["platformAccess"] == "disabled" and manifest["captureMode"] == "disabled"
+    assert manifest["coreWebOrigin"] == "" and manifest["captureUploadOrigins"] == []
+    assert {"VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED", "VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED", "VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED"} <= set(manifest["enabledFlags"])
+    assert "VITE_WORKSPACE_CAPTURE_ENABLED" not in manifest["enabledFlags"]
+    assert not any(name in manifest["enabledFlags"] for name in ("VITE_CORE_CONNECTION_ENABLED", "VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED", "VITE_WORKSPACE_SCHEDULING_ENABLED"))
+
+
+def test_google_web_plan_core_capture_opt_in_emits_reviewed_origin_and_api_upload(hosted, tmp_path):
+    optional = google_host(hosted, tmp_path)
+    optional.config.core_capture = True
+    backend = optional.allocator.backend
+    state = backend._open(optional.deployment)
+    state["deployment"]["practice"]["secret_references"].update(box_references(optional.deployment, GOOGLE_SECRET_NAMES))
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as tar:
+        data = b"image: aquasec/trivy@sha256:" + b"1" * 64
+        item = tarfile.TarInfo(".github/workflows/synth-ci.yml")
+        item.size = len(data)
+        tar.addfile(item, io.BytesIO(data))
+    def cli(arguments, **kwargs):
+        if arguments[0] == "git":
+            reply = archive.getvalue() if "archive" in arguments else hosted.config.release["source_commit"].encode()
+            return subprocess.CompletedProcess(arguments, 0, stdout=reply, stderr=b"")
+        raise subprocess.CalledProcessError(1, arguments)
+    backend.run = cli
+    with pytest.raises(RuntimeError, match="provider operation pending"):
+        build_allocated_web(backend, state)
+    recipe = json.loads((backend.directory / "web-context" / "allocated-web-task.json").read_text())
+    words = shlex.split(recipe["steps"][0]["build"])
+    env = dict(words[index + 1].split("=", 1) for index, word in enumerate(words) if word == "--build-arg")
+    assert env["VITE_WORKSPACE_CAPTURE_ENABLED"] == "true"
+    assert env["VITE_WORKSPACE_CAPTURE_MODE"] == "browser_microphone"
+    assert env["VITE_COSMANEURA_WEB_ORIGIN"] == "https://staging-app.cosmaneura.com"
+    assert env["VITE_CAPTURE_UPLOAD_ORIGINS"] == hosted.plan.api_origin
+    script = "import {resolveBetaFeatureProfile} from './clients/shared/beta-feature-profile.mjs';const env=JSON.parse(process.argv[1]);delete env.APP_IMAGE;env.VITE_WORKSPACE_HOSTED_CLIENT='web';env.VITE_API_BASE=env.VITE_WORKSPACE_HOSTED_API_ORIGIN;console.log(JSON.stringify(resolveBetaFeatureProfile(env).manifest));"
+    actual = subprocess.run(["node", "--input-type=module", "-e", script, json.dumps(env)], cwd=hosted.source,
+                            check=True, capture_output=True, text=True)
+    manifest = json.loads(actual.stdout)
+    assert manifest["captureMode"] == "browser_microphone"
     assert manifest["coreWebOrigin"] == "https://staging-app.cosmaneura.com"
     assert manifest["captureUploadOrigins"] == [hosted.plan.api_origin]
-    assert {"VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED", "VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED", "VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED",
-            "VITE_WORKSPACE_CAPTURE_ENABLED", "VITE_WORKSPACE_CAPTURE_NOTES_ENABLED"} <= set(manifest["enabledFlags"])
-    assert not any(name in manifest["enabledFlags"] for name in ("VITE_CORE_CONNECTION_ENABLED", "VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED", "VITE_WORKSPACE_SCHEDULING_ENABLED"))
+    assert {"VITE_WORKSPACE_CAPTURE_ENABLED", "VITE_WORKSPACE_CAPTURE_NOTES_ENABLED"} <= set(manifest["enabledFlags"])
 
 
 def test_actual_allocator_destination_is_accepted_by_shared_native_profile_contract(hosted):

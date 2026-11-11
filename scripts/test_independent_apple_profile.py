@@ -12,6 +12,8 @@ import test_standalone_native_profile as fixtures
 
 class IndependentAppleProfile(fixtures.StandaloneNativeProfile):
     feature_profile = "independent-beta-v1"
+    # Existing independent Apple qualification keeps the Core capture opt-in ON.
+    core_capture_enabled = True
 
     def apple_options(self):
         return {**super().apple_options(),
@@ -24,7 +26,7 @@ class IndependentAppleProfile(fixtures.StandaloneNativeProfile):
             "--capture-upload-origin", self.identity["apiOrigin"], "--microphone-capture", *extra])
 
     def test_helper_metadata_keeps_auth_and_disables_capture_and_composer_checks_it(self):
-        # Independent-beta enables Core capture on the helper; plain standalone covers the disabled case.
+        # Independent-beta keeps helper capture dark by default (opt-in is profile/env, not helper packaging).
         products = self.root / "products"
         resources = products / "CosmasNativeAuthQualification_ClerkKit.bundle"
         resources.mkdir(parents=True)
@@ -50,8 +52,7 @@ class IndependentAppleProfile(fixtures.StandaloneNativeProfile):
         with patch.object(sys, "argv", args), patch.object(fixtures.helper._binding, "verify", return_value=manifest):
             fixtures.helper.main()
         info = plistlib.loads((output / "Contents/Info.plist").read_bytes())
-        self.assertEqual(info["CosmasConfiguredCapture"],
-                         {"enabled": True, "apiOrigin": self.identity["apiOrigin"]})
+        self.assertEqual(info["CosmasConfiguredCapture"], {"enabled": False})
         self.assertTrue(info["CosmasNativeAuth"]["enabled"])
 
     def test_main_bundle_and_explicit_google_pair_reach_the_native_policy_boundary(self):

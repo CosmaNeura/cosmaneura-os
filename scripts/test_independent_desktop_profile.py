@@ -60,16 +60,19 @@ class IndependentDesktopProfile(unittest.TestCase):
             "CosmasConfiguredCapture": capture, "LSMinimumSystemVersion": "14.0",
         }))
 
-    def write_profile(self, profile="independent-beta-v1"):
+    def write_profile(self, profile="independent-beta-v1", *, core_capture=True):
         independent = profile == "independent-beta-v1"
-        self._write_helper(capture_enabled=independent)
+        capture = independent and core_capture
+        self._write_helper(capture_enabled=capture)
         env = {"VITE_WORKSPACE_FEATURE_PROFILE": profile, "VITE_WORKSPACE_HOSTED_CLIENT": "desktop",
                "VITE_WORKSPACE_DATA_MODE": "synthetic", "VITE_WORKSPACE_HOSTED_API_ORIGIN": self.identity["apiOrigin"],
                "VITE_API_BASE": "app://cosmas/api", "VITE_WORKSPACE_WEB_ORIGIN": "",
-               "VITE_COSMANEURA_WEB_ORIGIN": "https://staging-app.cosmaneura.com" if independent else "",
-               "VITE_CAPTURE_UPLOAD_ORIGINS": self.identity["apiOrigin"] if independent else "",
-               "VITE_WORKSPACE_CAPTURE_MODE": "browser_microphone" if independent else "disabled",
+               "VITE_COSMANEURA_WEB_ORIGIN": "https://staging-app.cosmaneura.com" if capture else "",
+               "VITE_CAPTURE_UPLOAD_ORIGINS": self.identity["apiOrigin"] if capture else "",
+               "VITE_WORKSPACE_CAPTURE_MODE": "browser_microphone" if capture else "disabled",
                "VITE_CLERK_PUBLISHABLE_KEY": self.identity["publishableKey"]}
+        if independent:
+            env["VITE_WORKSPACE_CAPTURE_ENABLED"] = "true" if capture else "false"
         output = subprocess.check_output(["node", "--input-type=module", "-e",
                                           "const m=await import(process.argv[1]);process.stdout.write(JSON.stringify("
                                           "m.resolveBetaFeatureProfile(JSON.parse(process.argv[2])).manifest));",
@@ -80,8 +83,8 @@ class IndependentDesktopProfile(unittest.TestCase):
             "version": 1, **{key: manifest[key] for key in ("client", "dataMode", "apiOrigin", "apiBase", "pageOrigin")},
         }))
 
-    def arguments(self, output, extra=(), profile="independent-beta-v1"):
-        capture = () if profile != "independent-beta-v1" else (
+    def arguments(self, output, extra=(), profile="independent-beta-v1", *, core_capture=True):
+        capture = () if not (profile == "independent-beta-v1" and core_capture) else (
             "--cosmaneura-web-origin", "https://staging-app.cosmaneura.com",
             "--capture-upload-origin", self.identity["apiOrigin"], "--microphone-capture")
         return ["prepare-desktop-synthetic.py",
@@ -90,8 +93,8 @@ class IndependentDesktopProfile(unittest.TestCase):
                 "--data-mode", "synthetic", "--native-identity-config", str(self.identity_path),
                 "--app-version", "0.1.143", "--build-number", "1103", *capture, *extra]
 
-    def compose(self, profile="independent-beta-v1"):
-        self.write_profile(profile)
+    def compose(self, profile="independent-beta-v1", *, core_capture=True):
+        self.write_profile(profile, core_capture=core_capture)
         output = self.root / profile
         # The three retained source templates are replaced with inert invented
         # text. Actual public validation, compilation, file copying and emitted
@@ -105,7 +108,7 @@ class IndependentDesktopProfile(unittest.TestCase):
         fake_capture.prepare = lambda *_args, **_kwargs: None
         # Native capture ownership packaging needs macOS tooling; keep the Linux
         # unit path on public profile/config checks and invent the capture stage.
-        with patch.object(sys, "argv", self.arguments(output, profile=profile)), \
+        with patch.object(sys, "argv", self.arguments(output, profile=profile, core_capture=core_capture)), \
                 patch.object(composer._source_module, "provenance", return_value=provenance), \
                 patch.object(composer.subprocess, "check_output", side_effect=source_template), \
                 patch.dict("sys.modules", {"native_capture_build": fake_capture}):

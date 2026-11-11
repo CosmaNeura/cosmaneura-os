@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {validateOperationalReleaseProfile} from './package-desktop-release.mjs';
-import {REVIEWED_CORE_CAPTURE_ORIGIN,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
+import {INDEPENDENT_CORE_CAPTURE_OPT_IN,REVIEWED_CORE_CAPTURE_ORIGIN,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 
 const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
   apiOrigin: 'https://api.example.invalid', frontendOrigin: 'https://identity.example.invalid',
@@ -9,29 +9,31 @@ const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
   organizationId: 'org_invented_practice', audience: 'invented-cosmabot-api'};
 const info = {CFBundleIdentifier: 'com.cosmasos.beta.desktop', CFBundleShortVersionString: '0.1.143', CFBundleVersion: '1103'};
 const uploadOrigin = identity.apiOrigin;
-function fixture(profile = 'independent-beta-v1', microsoft = false) {
+function fixture(profile = 'independent-beta-v1', {microsoft = false, coreCapture = false} = {}) {
   const independent = profile === 'independent-beta-v1';
   const manifest = resolveBetaFeatureProfile({VITE_WORKSPACE_FEATURE_PROFILE: profile,
     VITE_WORKSPACE_HOSTED_CLIENT: 'desktop', VITE_WORKSPACE_DATA_MODE: 'synthetic',
     VITE_WORKSPACE_HOSTED_API_ORIGIN: identity.apiOrigin, VITE_API_BASE: 'app://cosmas/api',
     VITE_WORKSPACE_WEB_ORIGIN: '',
-    VITE_COSMANEURA_WEB_ORIGIN: independent ? REVIEWED_CORE_CAPTURE_ORIGIN : '',
-    VITE_CAPTURE_UPLOAD_ORIGINS: independent ? uploadOrigin : '',
-    VITE_WORKSPACE_CAPTURE_MODE: independent ? 'browser_microphone' : 'disabled',
+    VITE_COSMANEURA_WEB_ORIGIN: independent && coreCapture ? REVIEWED_CORE_CAPTURE_ORIGIN : '',
+    VITE_CAPTURE_UPLOAD_ORIGINS: independent && coreCapture ? uploadOrigin : '',
+    VITE_WORKSPACE_CAPTURE_MODE: independent && coreCapture ? 'browser_microphone' : 'disabled',
     VITE_CLERK_PUBLISHABLE_KEY: identity.publishableKey,
+    ...(independent?{[INDEPENDENT_CORE_CAPTURE_OPT_IN]:coreCapture?'true':'false'}:{}),
     ...(microsoft?{VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED:'true',VITE_MICROSOFT_MESSAGE_ENABLED:'true'}:{})}).manifest;
   const config = {nativeIdentity: identity, mode: 'hosted-beta-authenticated', dataMode: 'synthetic',
     apiOrigin: identity.apiOrigin, appVersion: info.CFBundleShortVersionString, buildNumber: info.CFBundleVersion,
-    nativeCaptureEnabled: independent, microphoneCaptureEnabled: independent || undefined,
-    cosmaneuraWebOrigin: independent ? REVIEWED_CORE_CAPTURE_ORIGIN : '',
-    captureUploadOrigins: independent ? [uploadOrigin] : undefined,
+    nativeCaptureEnabled: Boolean(independent && coreCapture),
+    microphoneCaptureEnabled: independent && coreCapture ? true : undefined,
+    cosmaneuraWebOrigin: independent && coreCapture ? REVIEWED_CORE_CAPTURE_ORIGIN : '',
+    captureUploadOrigins: independent && coreCapture ? [uploadOrigin] : undefined,
     installation: {bundleIdentifier: info.CFBundleIdentifier,
       ...(independent ? {storageScope: 'identity-v1'} : {})}};
   return {manifest, config};
 }
 
 test('independent desktop Microsoft release requires the selected capability and exact native broker inputs',()=>{
-  const {manifest,config}=fixture('independent-beta-v1',true);
+  const {manifest,config}=fixture('independent-beta-v1',{microsoft:true});
   const microsoft={microsoftConnectionTenantId:'10000000-0000-4000-8000-000000000001',
     microsoftConnectionClientId:'10000000-0000-4000-8000-000000000002',
     microsoftConnectionCallbackUri:identity.apiOrigin+'/connections/microsoft/callback'};
@@ -43,8 +45,9 @@ test('independent desktop Microsoft release requires the selected capability and
     assert.throws(()=>validateOperationalReleaseProfile({...config,...microsoft,...change},manifest,info));
 });
 
-test('independent desktop release requires Core capture, identity namespace and accepts the approved Google pair', () => {
+test('independent desktop release default keeps Core capture dark and accepts the approved Google pair', () => {
   const {manifest, config} = fixture();
+  assert.equal(manifest.captureMode, 'disabled');
   assert.deepEqual(validateOperationalReleaseProfile(config, manifest, info), identity);
   assert.deepEqual(validateOperationalReleaseProfile({...config,
     googleConnectionClientId: 'invented.apps.googleusercontent.com',
@@ -61,11 +64,22 @@ test('independent desktop release requires Core capture, identity namespace and 
   ]) assert.throws(() => validateOperationalReleaseProfile({...config, ...change}, manifest, info));
 });
 
-test('independent desktop release rejects unqualified capabilities and wrong Core capture wiring', () => {
-  const {manifest, config} = fixture();
+test('independent desktop Core capture opt-in requires reviewed origin and matching upload wiring', () => {
+  const {manifest, config} = fixture('independent-beta-v1', {coreCapture: true});
+  assert.equal(manifest.captureMode, 'browser_microphone');
+  assert.deepEqual(validateOperationalReleaseProfile(config, manifest, info), identity);
   for (const changed of [{nativeCaptureEnabled: false}, {microphoneCaptureEnabled: false},
     {captureUploadOrigins: ['https://other-uploads.example.invalid']},
-    {cosmaneuraWebOrigin: 'https://app.cosmaneura.com'}, {cosmaneuraWebOrigin: 'https://core.example.invalid'},
+    {cosmaneuraWebOrigin: 'https://app.cosmaneura.com'}, {cosmaneuraWebOrigin: 'https://core.example.invalid'}]) {
+    assert.throws(() => validateOperationalReleaseProfile({...config, ...changed}, manifest, info));
+  }
+});
+
+test('independent desktop release rejects unqualified capabilities', () => {
+  const {manifest, config} = fixture();
+  for (const changed of [{nativeCaptureEnabled: true}, {microphoneCaptureEnabled: true},
+    {captureUploadOrigins: ['https://other-uploads.example.invalid']},
+    {cosmaneuraWebOrigin: 'https://app.cosmaneura.com'},
     ...['microsoftConnectionTenantId', 'microsoftConnectionClientId', 'microsoftConnectionCallbackUri',
       'schedulingGoogleClientId', 'schedulingGoogleCallbackUri'].map(key => ({[key]: 'invented-setting'}))]) {
     assert.throws(() => validateOperationalReleaseProfile({...config, ...changed}, manifest, info));
