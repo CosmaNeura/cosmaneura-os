@@ -473,8 +473,35 @@ jobs:
   synth-gate:
     name: synth-ci-gate
     runs-on: ubuntu-latest
+    if: always()
     needs: [python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey]
     steps:
+      - name: Require every needed job succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = []
+          for name, meta in sorted(needs.items()):
+              result = meta.get("result")
+              print(f"{name}: {result}")
+              if result != "success":
+                  failed.append(f"{name}={result}")
+          if failed:
+              print(
+                  "Gate failed because needed jobs were not all success: "
+                  + ", ".join(failed),
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print("All needed jobs succeeded")
+          PY
       - name: Confirm all synth gates passed
         run: |
           echo "python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey all green"
