@@ -10,8 +10,10 @@
 #   ./scripts/run-iphone-sim-record-test.sh 349
 #   ./scripts/run-iphone-sim-record-test.sh 179e739f0278a05706531ffb1288cb1df7acf507b
 #
-# Abbreviated SHAs are resolved only when already present in the tooling
+# Abbreviated SHAs are resolved only when already present in the runner
 # checkout's object database; otherwise pass a full SHA or PR number.
+# The checked-out tip is tested exactly — no overlays of identity, auth,
+# native, Swift, or tooling files into the target tree.
 #
 # Prerequisites on the Mac:
 #   - Full Xcode (not Command Line Tools alone). If `xcodebuild -version` fails
@@ -154,6 +156,38 @@ if [[ "${1:-}" == "--select-runtime-and-iphone" ]]; then
   exit 0
 fi
 
+# Linux CI helper: assert required runner paths exist under ROOT (no overlays).
+if [[ "${1:-}" == "--verify-required-paths" ]]; then
+  root="${2:?repository root}"
+  missing=0
+  while IFS= read -r rel; do
+    [[ -z "$rel" ]] && continue
+    if [[ ! -e "${root}/${rel}" ]]; then
+      echo "missing required path: ${rel}" >&2
+      missing=1
+    fi
+  done <<'PATHS'
+scripts/compose-portable-iphone.py
+scripts/prepare-synthetic-iphone-web-bundle.mjs
+scripts/configure-synthetic-iphone-simulator.py
+scripts/install-client-deps.sh
+clients/shared/operational-native-identity.mjs
+clients/apple/ui-tests
+clients/apple/ui-tests/generate-uitest-project.py
+clients/apple/ui-tests/CosmasSyntheticUITests/MicrophonePermissionUITests.swift
+clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift
+clients/apple/startup-recovery/CosmasBridgeViewController.swift
+clients/apple/startup-recovery/CosmasWorkspaceViewController.swift
+clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
+PATHS
+  if [[ "$missing" -ne 0 ]]; then
+    echo "Target is missing required paths; runner will not overlay files." >&2
+    exit 1
+  fi
+  echo "required-paths-ok"
+  exit 0
+fi
+
 if [[ "${1:-}" == "--select-runtime-for-device" ]]; then
   # Back-compat for fixture: pick newest non-restricted runtime that supports DEVICE.
   device_type_id="${2:?device type id}"
@@ -234,8 +268,7 @@ if [[ -z "$REF_ARG" ]]; then
   exit 2
 fi
 
-TOOLING_ROOT="$(CDPATH='' cd "$(dirname "$0")/.." && pwd)"
-TOOLING_SHA="$(git -C "$TOOLING_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+RUNNER_ROOT="$(CDPATH='' cd "$(dirname "$0")/.." && pwd)"
 REPO_URL="${COSMAS_REPO_URL:-https://github.com/CosmaNeura/cosmaneura-os.git}"
 SIM_NAME_OVERRIDE="${COSMAS_SIM_NAME:-}"
 ARTIFACTS="${COSMAS_ARTIFACTS:-}"
@@ -244,7 +277,6 @@ REUSED_SIM_UDID=""
 SIM_UDID=""
 WORK=""
 TEST_STATUS=0
-OVERLAID_FILES=()
 
 # shellcheck disable=SC2317 # invoked via EXIT trap
 cleanup() {
@@ -428,7 +460,7 @@ OUT="$WORK/out"
 mkdir -p "$OUT"
 
 echo "==> Throwaway workdir: $WORK"
-echo "==> Tooling checkout: $TOOLING_ROOT @ ${TOOLING_SHA}"
+echo "==> Runner checkout (script only; never copied into the target): $RUNNER_ROOT"
 
 git clone --filter=blob:none "$REPO_URL" "$SRC"
 cd "$SRC"
@@ -447,16 +479,16 @@ resolve_target_ref() {
     git checkout --detach FETCH_HEAD
     return 0
   fi
-  # Abbreviated SHA: only when the tooling checkout already has the object.
+  # Abbreviated SHA: only when the runner checkout already has the object.
   if [[ "$ref" =~ ^[0-9a-fA-F]{7,39}$ ]]; then
     local full
-    if full="$(git -C "$TOOLING_ROOT" rev-parse --verify "${ref}^{commit}" 2>/dev/null)"; then
-      echo "==> Resolved abbreviated SHA ${ref} -> ${full} from tooling checkout"
+    if full="$(git -C "$RUNNER_ROOT" rev-parse --verify "${ref}^{commit}" 2>/dev/null)"; then
+      echo "==> Resolved abbreviated SHA ${ref} -> ${full} from runner checkout"
       git fetch --depth=1 origin "$full"
       git checkout --detach FETCH_HEAD
       return 0
     fi
-    echo "Abbreviated SHA '${ref}' is not resolvable from this tooling checkout." >&2
+    echo "Abbreviated SHA '${ref}' is not resolvable from this runner checkout." >&2
     echo "Pass a full 40-character SHA or a PR number." >&2
     exit 2
   fi
@@ -466,83 +498,48 @@ resolve_target_ref() {
 
 resolve_target_ref "$REF_ARG"
 HEAD_SHA="$(git rev-parse HEAD)"
-echo "==> Target SHA $HEAD_SHA"
+echo "==> Target SHA $HEAD_SHA (tested exactly; no overlays)"
 
-# Overlay tooling only when hooks are absent, or as a conflict-failing patch.
-overlay_if_absent() {
-  local rel="$1"
-  if [[ -e "$SRC/$rel" ]]; then
-    echo "    keep target $rel"
-    return 0
-  fi
-  echo "    overlay absent $rel"
-  mkdir -p "$(dirname "$SRC/$rel")"
-  cp -R "$TOOLING_ROOT/$rel" "$SRC/$rel"
-  OVERLAID_FILES+=("$rel")
-}
-
-overlay_patch_or_absent() {
+# Require target paths as-is. Never copy/patch/overlay runner or native files.
+require_target_path() {
   local rel="$1"
   if [[ ! -e "$SRC/$rel" ]]; then
-    overlay_if_absent "$rel"
-    return 0
-  fi
-  if cmp -s "$TOOLING_ROOT/$rel" "$SRC/$rel" 2>/dev/null; then
-    echo "    identical $rel"
-    return 0
-  fi
-  # Apply a unified diff with relative paths; fail on conflict (never silent replace).
-  local diff_file
-  diff_file="$(mktemp)"
-  if diff -u "$SRC/$rel" "$TOOLING_ROOT/$rel" \
-      | sed "1s|.*|--- a/${rel}|;2s|.*|+++ b/${rel}|" >"$diff_file"; then
-    rm -f "$diff_file"
-    return 0
-  fi
-  if ! (cd "$SRC" && patch --batch --forward --dry-run -p1 <"$diff_file" >/dev/null 2>&1); then
-    echo "Overlay patch would conflict for $rel; refusing silent replace of target SHA sources." >&2
-    rm -f "$diff_file"
+    echo "Target ${HEAD_SHA} is missing required path: ${rel}" >&2
+    echo "The runner tests the checked-out tip exactly and will not overlay files." >&2
+    echo "Bring the tip up to date (or pass a SHA that already contains ${rel}), then re-run." >&2
     exit 1
   fi
-  (cd "$SRC" && patch --batch --forward -p1 <"$diff_file" >/dev/null)
-  OVERLAID_FILES+=("$rel (patched)")
-  echo "    patched $rel"
-  rm -f "$diff_file"
 }
 
-echo "==> Conditional overlays from tooling ${TOOLING_SHA}"
-overlay_if_absent scripts/compose-portable-iphone.py
-overlay_if_absent scripts/prepare-synthetic-iphone-web-bundle.mjs
-overlay_if_absent scripts/configure-synthetic-iphone-simulator.py
-# Target tips before *.synthetic.example support keep an older identity
-# validator; patch it with the tooling copy so prepare-synthetic can run.
-overlay_patch_or_absent clients/shared/operational-native-identity.mjs
-overlay_patch_or_absent clients/apple/startup-recovery/CosmasWorkspaceViewController.swift
-overlay_patch_or_absent clients/apple/startup-recovery/CosmasBridgeViewController.swift
-overlay_patch_or_absent clients/apple/startup-recovery/SyntheticDemoFixtureGate.swift
-overlay_if_absent clients/apple/ui-tests
-overlay_patch_or_absent clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
-if [[ ! -f clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift ]]; then
-  overlay_if_absent clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift
-fi
-if [[ ! -f clients/apple/native-auth/Tests/CosmasNativeAuthTests/ClerkKeychainCredentialsTests.swift ]]; then
-  overlay_if_absent clients/apple/native-auth/Tests/CosmasNativeAuthTests/ClerkKeychainCredentialsTests.swift
+echo "==> Verifying required target paths (no overlays)"
+require_target_path scripts/compose-portable-iphone.py
+require_target_path scripts/prepare-synthetic-iphone-web-bundle.mjs
+require_target_path scripts/configure-synthetic-iphone-simulator.py
+require_target_path scripts/install-client-deps.sh
+require_target_path clients/shared/operational-native-identity.mjs
+require_target_path clients/apple/ui-tests
+require_target_path clients/apple/ui-tests/generate-uitest-project.py
+require_target_path clients/apple/ui-tests/CosmasSyntheticUITests/MicrophonePermissionUITests.swift
+require_target_path clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift
+require_target_path clients/apple/startup-recovery/CosmasBridgeViewController.swift
+require_target_path clients/apple/startup-recovery/CosmasWorkspaceViewController.swift
+require_target_path clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
+
+TARGET_STATUS="$(git -C "$SRC" status --porcelain)"
+if [[ -z "${TARGET_STATUS}" ]]; then
+  echo "==> Target tree unmodified after checkout (${HEAD_SHA})"
+else
+  echo "Target tree is dirty after checkout; refusing to continue:" >&2
+  printf '%s\n' "${TARGET_STATUS}" >&2
+  exit 1
 fi
 
 {
-  echo "tooling_sha=${TOOLING_SHA}"
   echo "target_sha=${HEAD_SHA}"
-  echo "overlaid_files<<"
-  if [[ ${#OVERLAID_FILES[@]} -eq 0 ]]; then
-    echo "(none)"
-  else
-    printf '%s\n' "${OVERLAID_FILES[@]}"
-  fi
-  echo ">>"
-} | tee "$ARTIFACTS/overlay-receipt.txt"
-if [[ ${#OVERLAID_FILES[@]} -gt 0 ]]; then
-  echo "NOTE: native/tooling files were overlaid or patched; do not claim an unmodified target SHA." | tee -a "$ARTIFACTS/overlay-receipt.txt"
-fi
+  echo "target_unmodified=yes"
+  echo "native_overlay=no"
+} | tee "$ARTIFACTS/target-receipt.txt"
+printf '%s\n' "$HEAD_SHA" > "$ARTIFACTS/tested-sha.txt"
 
 echo "==> Install frozen web/capture client deps (synthetic build only)"
 corepack enable
@@ -639,19 +636,15 @@ extract_screenshots() {
 extract_screenshots
 {
   echo "target_sha=${HEAD_SHA}"
-  echo "tooling_sha=${TOOLING_SHA}"
   echo "test_status=${TEST_STATUS}"
   echo "simulator=${SIM_NAME} (${SIM_UDID})"
-  if [[ ${#OVERLAID_FILES[@]} -gt 0 ]]; then
-    echo "native_overlay=yes"
-  else
-    echo "native_overlay=no"
-  fi
+  echo "native_overlay=no"
+  echo "target_unmodified=yes"
 } | tee "$ARTIFACTS/result.txt"
 printf '%s\n' "$HEAD_SHA" > "$ARTIFACTS/tested-sha.txt"
 
 echo "==> Done. Artifacts: $ARTIFACTS"
-echo "    SHA: $HEAD_SHA"
+echo "    tested SHA: $HEAD_SHA"
 echo "    App: $APP_PATH"
 echo "    Sim: ${SIM_NAME} (${SIM_UDID})"
 echo "    Test status: ${TEST_STATUS}"

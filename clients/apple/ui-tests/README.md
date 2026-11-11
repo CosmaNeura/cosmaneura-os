@@ -25,9 +25,12 @@ export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer   # when needed
 ```
 
 That clones into a fresh temp directory (never `~/Desktop/cosmaneura-os`),
-composes the unsigned `com.cosmasos.synthetic` Simulator app with a synthetic
-web bundle, creates a throwaway Simulator (or reuses an exact `COSMAS_SIM_NAME`
-match without re-selecting a runtime), resets microphone privacy for
+checks out the target tip exactly (no overlays of identity/native/Swift/tooling
+into the tree), requires the tip already contain compose/prepare/ui-test and
+`ClerkKeychainCredentials` paths, records the exact tested SHA, composes the
+unsigned `com.cosmasos.synthetic` Simulator app with a synthetic web bundle,
+creates a throwaway Simulator (or reuses an exact `COSMAS_SIM_NAME` match
+without re-selecting a runtime), resets microphone privacy for
 `com.cosmasos.synthetic`, builds with host-arch `ONLY_ACTIVE_ARCH` flags, and runs
 `MicrophonePermissionUITests`. Every START_CAPTURE / SKIP_DEMO hook stays
 `#if DEBUG` + launch-argument gated so those symbols are omitted from Release

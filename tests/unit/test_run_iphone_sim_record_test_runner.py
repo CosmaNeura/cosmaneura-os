@@ -143,19 +143,70 @@ def test_ref_handling_rejects_unresolvable_abbrev_without_remote_fetch() -> None
     assert "Abbreviated SHA" in text
 
 
-def test_overlay_receipt_and_failure_screenshot_paths_exist() -> None:
+def test_runner_has_no_overlay_mechanism() -> None:
     text = RUNNER.read_text(encoding="utf-8")
-    assert "overlay-receipt.txt" in text
-    assert "tooling_sha=" in text
-    assert "overlaid_files<<" in text
-    assert "xcresulttool export attachments" in text
-    assert "result.txt" in text
+    assert "overlay_if_absent" not in text
+    assert "overlay_patch_or_absent" not in text
+    assert "OVERLAID_FILES" not in text
+    assert "overlay-receipt.txt" not in text
+    assert "will not overlay" in text or "will not overlay files" in text
+    assert "require_target_path" in text
     assert "tested-sha.txt" in text
-    assert "exit \"${TEST_STATUS}\"" in text or 'exit "${TEST_STATUS}"' in text
+    assert "target-receipt.txt" in text
+    assert "native_overlay=no" in text
+    assert "xcresulttool export attachments" in text
     assert "com.cosmasos.synthetic" in text
     assert "cosmas-mic-uitest-" in text
-    # Identity must be patched when target lacks *.synthetic.example support.
-    assert "overlay_patch_or_absent clients/shared/operational-native-identity.mjs" in text
+    # Must not copy runner/native sources into the target tree.
+    assert "cp -R \"$RUNNER_ROOT" not in text
+    assert "cp -R \"$TOOLING_ROOT" not in text
+
+
+def test_verify_required_paths_ok_on_current_tree() -> None:
+    completed = _run("--verify-required-paths", str(ROOT))
+    assert completed.returncode == 0, completed.stderr
+    assert "required-paths-ok" in completed.stdout
+
+
+def test_verify_required_paths_names_missing_file(tmp_path: Path) -> None:
+    # Empty tree: every required path is missing; message must name one.
+    completed = _run("--verify-required-paths", str(tmp_path))
+    assert completed.returncode != 0
+    assert "missing required path:" in completed.stderr
+    assert "ClerkKeychainCredentials.swift" in completed.stderr or "prepare-synthetic" in completed.stderr
+    assert "will not overlay" in completed.stderr
+
+
+def test_runner_records_exact_tested_sha_without_modifying_checkout(tmp_path: Path) -> None:
+    """Simulate post-checkout receipt writing: clean tree + exact SHA artifacts."""
+    text = RUNNER.read_text(encoding="utf-8")
+    assert 'git -C "$SRC" status --porcelain' in text
+    assert "Target tree unmodified after checkout" in text
+    assert "tested-sha.txt" in text and "HEAD_SHA" in text
+    assert "tested SHA" in text or "Target SHA $HEAD_SHA" in text
+
+    # Behavioural: a clean git worktree stays clean; record SHA to artifacts.
+    repo = tmp_path / "target"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "synth@synthetic.example"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "Synthetic"], cwd=repo, check=True)
+    (repo / "README").write_text("synth\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
+    assert status == ""
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    (artifacts / "tested-sha.txt").write_text(sha + "\n", encoding="utf-8")
+    (artifacts / "target-receipt.txt").write_text(
+        f"target_sha={sha}\ntarget_unmodified=yes\nnative_overlay=no\n",
+        encoding="utf-8",
+    )
+    assert (artifacts / "tested-sha.txt").read_text(encoding="utf-8").strip() == sha
+    assert "native_overlay=no" in (artifacts / "target-receipt.txt").read_text(encoding="utf-8")
+    assert subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True) == ""
 
 
 def test_runner_node_test_mjs_passes() -> None:
