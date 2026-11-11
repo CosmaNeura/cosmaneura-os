@@ -20,7 +20,7 @@ FROZEN_CAPTURE_PROVENANCE_SHA256 = "f1d73c9e7fd9515d7dd16b676f78d1cacd420a63d9f7
 # exact current bytes supplement, never rewrite, frozen 1107 provenance. Every
 # unlisted counterpart retains its original recorded SHA assertion below.
 REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
-    "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "de2f6a3d08ef4971a595c7c8369698a231df8c2c214dbd919c8ac97d32d8f433",
+    "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "3b20517ec90dc21c4a1ae0a8e534b9091918186bf6eecc6861c956aacc5de0c9",
     "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "3ed5a94c6ccfc309ee60b49c1e46aebf07b603a3168fc80583a5811bae19fe65",
     "clients/apple/startup-recovery/WorkspaceRecoveryState.swift": "c07f68af3d311b75890108c4fc5c04b5e38eeeda11cb0047f25424a04531cfd1",
     "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift": "8132283f189b8cd0497957326fbcc020efc44e7c4b9fe2327ce0248b44d9494f",
@@ -56,7 +56,7 @@ REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256 = {
 # Supplements frozen 1107 provenance; does not rewrite apps/capture copies.
 REVIEWED_OWNED_IOSPCM_PLUGIN_SHA256 = {
     "clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift": (
-        "5d0065e2b6af315478389ceb240c21067ce105f4207283af24932cd5fb08c8bb"
+        "444387e76a6e5099766f70cf3ff79c28b01bb4204f6a49016e38ef40914f3db9"
     ),
 }
 

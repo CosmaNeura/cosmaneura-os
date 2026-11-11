@@ -1,11 +1,17 @@
-"""CI-runnable checks for the Mac iPhone Simulator record-test runner."""
+"""CI-runnable behavioural checks for the Mac iPhone Simulator record-test runner."""
+
+from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-iphone-sim-record-test.sh"
+RUNNER_TEST_MJS = ROOT / "scripts" / "run-iphone-sim-record-test.test.mjs"
 
 IPHONE_18_PRO_MAX = "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max"
 IPHONE_DUO = "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo"
@@ -59,63 +65,60 @@ SIMCTL_RUNTIMES_JSON_FOUR = {
     ]
 }
 
-
-def test_runner_requires_node_24_before_corepack():
-    text = RUNNER.read_text(encoding="utf-8")
-    assert "resolve_node24" in text
-    assert "Node.js 24 is required before corepack enable" in text
-    assert text.index("resolve_node24") < text.index("corepack enable")
-    assert "COSMAS_NODE_BIN" in text
-
-
-def test_runner_documents_developer_dir_and_fails_without_xcodebuild():
-    text = RUNNER.read_text(encoding="utf-8")
-    assert "DEVELOPER_DIR" in text
-    assert "Command Line Tools" in text
-    assert "xcodebuild -version" in text
-    assert "xcodebuild not found on PATH" in text
+SIMCTL_DEVICETYPES_JSON = {
+    "devicetypes": [
+        {"name": "iPhone 18 Pro Max", "identifier": IPHONE_18_PRO_MAX},
+        {"name": "iPhone 16", "identifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16"},
+        {"name": "iPhone Duo", "identifier": IPHONE_DUO},
+    ]
+}
 
 
-def test_runner_sets_host_arch_aware_xcodebuild_flags():
-    text = RUNNER.read_text(encoding="utf-8")
-    assert "ONLY_ACTIVE_ARCH=YES" in text
-    assert "ARCHS=arm64" in text
-    assert "EXCLUDED_ARCHS=x86_64" in text
-    assert '"${ARCH_SETTINGS[@]}"' in text
-
-
-def test_runner_creates_and_deletes_throwaway_simulator():
-    text = RUNNER.read_text(encoding="utf-8")
-    assert "simctl create" in text
-    assert "CREATED_SIM_UDID" in text
-    assert "simctl delete" in text
-    assert "newest_iphone_devicetype" in text
-    assert "select_ios_runtime_for_device" in text
-    assert "simctl list runtimes -j" in text
-    assert "COSMAS_SIM_NAME" in text
-
-
-def _select_runtime(device_type_id: str, path: Path) -> subprocess.CompletedProcess[str]:
+def _run(*args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(RUNNER), "--select-runtime-for-device", device_type_id, str(path)],
+        ["bash", str(RUNNER), *args],
         capture_output=True,
         text=True,
+        check=check,
     )
 
 
-def test_select_runtime_skips_iphone19_device_specific_and_picks_ios_27_2(tmp_path: Path):
+def test_bash_n_and_shellcheck_clean() -> None:
+    assert RUNNER.is_file()
+    bash_n = subprocess.run(["bash", "-n", str(RUNNER)], capture_output=True, text=True)
+    assert bash_n.returncode == 0, bash_n.stderr
+    shellcheck = shutil.which("shellcheck")
+    if shellcheck is None:
+        raise AssertionError("shellcheck is required for Linux CI coverage of the Mac runner")
+    sc = subprocess.run([shellcheck, str(RUNNER)], capture_output=True, text=True)
+    assert sc.returncode == 0, sc.stdout + sc.stderr
+
+
+def test_select_runtime_and_iphone_picks_newest_non_restricted(tmp_path: Path) -> None:
+    runtimes = tmp_path / "runtimes.json"
+    devices = tmp_path / "devicetypes.json"
+    runtimes.write_text(json.dumps(SIMCTL_RUNTIMES_JSON_FOUR), encoding="utf-8")
+    devices.write_text(json.dumps(SIMCTL_DEVICETYPES_JSON), encoding="utf-8")
+    completed = _run("--select-runtime-and-iphone", str(runtimes), str(devices))
+    assert completed.returncode == 0, completed.stderr
+    runtime_id, device_id, device_name = completed.stdout.strip().split("\t")
+    assert runtime_id == "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
+    assert "iPhone19-4" not in runtime_id
+    assert device_id == IPHONE_18_PRO_MAX
+    assert "Pro Max" in device_name
+
+
+def test_select_runtime_skips_iphone19_device_specific_and_picks_ios_27_2(tmp_path: Path) -> None:
     path = tmp_path / "runtimes-four.json"
     path.write_text(json.dumps(SIMCTL_RUNTIMES_JSON_FOUR), encoding="utf-8")
-
-    completed = _select_runtime(IPHONE_18_PRO_MAX, path)
+    completed = _run("--select-runtime-for-device", IPHONE_18_PRO_MAX, str(path))
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "com.apple.CoreSimulator.SimRuntime.iOS-27-2"
     assert "iPhone19-4" not in completed.stdout
 
 
-def test_select_runtime_fails_clearly_when_device_unsupported(tmp_path: Path):
+def test_select_runtime_fails_clearly_when_device_unsupported(tmp_path: Path) -> None:
     path = tmp_path / "runtimes-duo-only.json"
-    # Only the Duo-restricted runtime remains.
     payload = {
         "runtimes": [
             rt
@@ -124,7 +127,47 @@ def test_select_runtime_fails_clearly_when_device_unsupported(tmp_path: Path):
         ]
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
-    completed = _select_runtime(IPHONE_18_PRO_MAX, path)
+    completed = _run("--select-runtime-for-device", IPHONE_18_PRO_MAX, str(path))
     assert completed.returncode != 0
     assert "No available iOS Simulator runtime supports device type" in completed.stderr
     assert IPHONE_18_PRO_MAX in completed.stderr
+
+
+def test_ref_handling_rejects_unresolvable_abbrev_without_remote_fetch() -> None:
+    """Abbreviated SHAs resolve locally; remote fetch uses the expanded full SHA."""
+    text = RUNNER.read_text(encoding="utf-8")
+    assert "Pass a full 40-character SHA or a PR number" in text
+    assert "rev-parse --verify" in text
+    assert 'pull/${ref}/head' in text or "pull/${ref}/head" in text
+    assert 'git fetch --depth=1 origin "$full"' in text
+    assert "Abbreviated SHA" in text
+
+
+def test_overlay_receipt_and_failure_screenshot_paths_exist() -> None:
+    text = RUNNER.read_text(encoding="utf-8")
+    assert "overlay-receipt.txt" in text
+    assert "tooling_sha=" in text
+    assert "overlaid_files<<" in text
+    assert "xcresulttool export attachments" in text
+    assert "result.txt" in text
+    assert "tested-sha.txt" in text
+    assert "exit \"${TEST_STATUS}\"" in text or 'exit "${TEST_STATUS}"' in text
+    assert "com.cosmasos.synthetic" in text
+    assert "cosmas-mic-uitest-" in text
+
+
+def test_runner_node_test_mjs_passes() -> None:
+    node = shutil.which("node")
+    if node is None:
+        raise AssertionError("node is required; refusing silent skip for runner .test.mjs")
+    assert RUNNER_TEST_MJS.is_file()
+    completed = subprocess.run(
+        [node, "--test", str(RUNNER_TEST_MJS)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env={**os.environ, "COSMAS_RUNNER_FIXTURE_DIR": tempfile.mkdtemp(prefix="cosmas-runner-mjs-")},
+    )
+    assert completed.returncode == 0, completed.stdout + "\n" + completed.stderr

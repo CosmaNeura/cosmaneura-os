@@ -8,19 +8,34 @@ import XCTest
 /// Invented engagement only; no PHI.
 ///
 /// Preconditions (Mac runner handles these):
-///   xcrun simctl privacy <udid> reset microphone
+///   xcrun simctl privacy <udid> reset microphone com.cosmasos.synthetic
 final class MicrophonePermissionUITests: XCTestCase {
     private var app: XCUIApplication!
     private let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+        try requireEnglishSimulator()
         app = XCUIApplication(bundleIdentifier: "com.cosmasos.synthetic")
+        if #available(iOS 17.0, *) {
+            app.resetAuthorizationStatus(for: .microphone)
+        }
     }
 
     override func tearDownWithError() throws {
         app?.terminate()
         app = nil
+    }
+
+    private func requireEnglishSimulator() throws {
+        let preferred = Locale.preferredLanguages.first ?? ""
+        let english = preferred.hasPrefix("en")
+            || Locale.current.language.languageCode?.identifier == "en"
+        if !english {
+            XCTFail(
+                "Simulator language must be English for Don't Allow / Microphone copy; got preferred=\(preferred) locale=\(Locale.current.identifier)"
+            )
+        }
     }
 
     /// iOS 27 may present TCC as a SpringBoard alert or sheet (sometimes both
@@ -66,17 +81,26 @@ final class MicrophonePermissionUITests: XCTestCase {
     func testLaunchWithCaptureOffShowsNoMicrophonePrompt() throws {
         app.launchArguments = ["-COSMAS_SKIP_SYNTHETIC_DEMO"]
         app.launch()
-        // Real workspace path: demo surface must NOT appear.
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         XCTAssertFalse(
             app.otherElements["cosmas.uiTest.surface"].waitForExistence(timeout: 3),
             "Skip-demo launch must not present CosmasSyntheticDemoSurface"
         )
-        // Give Capacitor plugin load() time; with lazy mic, no TCC prompt here.
+        XCTAssertTrue(
+            app.otherElements["cosmas.uiTest.iospcm.loaded"].waitForExistence(timeout: 8),
+            "Skip-demo launch must expose the loaded IOSPCM plugin marker"
+        )
+        // Give Capacitor plugin load() time; no START_CAPTURE means no prompt.
         RunLoop.current.run(until: Date().addingTimeInterval(4))
         screenshot("01-launch-capture-off-no-mic-prompt")
         XCTAssertNil(
             micPermissionPrompt(timeout: 1),
             "Launch with capture off must not show a microphone permission prompt"
+        )
+        XCTAssertTrue(
+            app.otherElements["cosmas.uiTest.micPermission.undetermined"].exists
+                || app.otherElements["cosmas.uiTest.micPermission.unknown"].exists,
+            "Mic permission must still be undetermined when capture has not started"
         )
     }
 
@@ -86,12 +110,11 @@ final class MicrophonePermissionUITests: XCTestCase {
             "-COSMAS_UI_TEST_START_CAPTURE",
         ]
         app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
         XCTAssertFalse(
             app.otherElements["cosmas.uiTest.surface"].waitForExistence(timeout: 3),
             "Capture-start path must use the real native plugin bridge, not the demo surface"
         )
-        // Capture evidence before the assertion so a missing prompt still leaves
-        // a screenshot in the xcresult / runner artifacts.
         screenshot("02-start-recording-before-mic-assert")
         let prompt = micPermissionPrompt(timeout: 12)
         XCTAssertNotNil(
@@ -99,12 +122,20 @@ final class MicrophonePermissionUITests: XCTestCase {
             "Starting recording must present the microphone permission prompt"
         )
         screenshot("02-start-recording-mic-prompt")
-        // Dismiss without granting so the Simulator stays reset-friendly.
         let dontAllow = dontAllowButton(in: prompt!)
         XCTAssertTrue(
             dontAllow.waitForExistence(timeout: 5),
             "Microphone permission prompt must expose Don't Allow"
         )
         dontAllow.tap()
+        XCTAssertNil(
+            micPermissionPrompt(timeout: 3),
+            "Don't Allow must dismiss the microphone permission prompt"
+        )
+        XCTAssertTrue(app.state == .runningForeground, "App must still be running after Don't Allow")
+        XCTAssertTrue(
+            app.otherElements["cosmas.uiTest.micPermission.denied"].waitForExistence(timeout: 8),
+            "Denied mic permission marker must become visible after Don't Allow"
+        )
     }
 }

@@ -60,6 +60,8 @@ export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 # Optional Node 24 pin when PATH is wrong:
 # export COSMAS_NODE_BIN=/opt/homebrew/opt/node@24/bin/node
 ./scripts/run-iphone-sim-record-test.sh 349
+./scripts/run-iphone-sim-record-test.sh 179e739f0278a05706531ffb1288cb1df7acf507b
+# Abbreviated SHAs only when already in this tooling checkout; otherwise full SHA or PR.
 ```
 
 Synthetic web bundle only (`pk_test_` + `*.synthetic.example`, no secrets):

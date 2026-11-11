@@ -5,11 +5,11 @@ import XCTest
 /// Caller (outside this package, in the bundled PCM Capacitor plugin):
 /// `clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift`
 /// `load()` at lines 41–54 constructs `IOSPCMBridgeCore` → `LiveAppleAudioSystem`,
-/// which creates `AVAudioEngine()` at
+/// which still creates `AVAudioEngine()` at
 /// `clients/capture/native-configured/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift:63`
 /// during Capacitor plugin registration. That path does **not** call
 /// `requestRecordPermission` (no prompt) but still touches `AVAudioSession` /
-/// `AVAudioEngine`, which surfaces as a silent `kTCCServiceMicrophone` preflight.
+/// `AVAudioEngine`, which can surface as a silent `kTCCServiceMicrophone` preflight.
 ///
 /// CosmaBot-side mitigation (clients/apple):
 /// Debug `com.cosmasos.synthetic` presents `CosmasSyntheticDemoSurface` and
@@ -17,9 +17,12 @@ import XCTest
 /// never loads `IOSPCMCapacitorPlugin` on that default configuration — no mic touch.
 ///
 /// `-COSMAS_SKIP_SYNTHETIC_DEMO` opens the real bridge/plugin path for the
-/// automatic mic-permission XCUITest. Lazy AVAudioEngine (T-REL-7b) keeps
-/// launch-with-capture-off free of a microphone permission prompt; start
-/// recording requests permission only then.
+/// automatic mic-permission XCUITest. T-REL-7b lazy AVAudioEngine is **not**
+/// present at this tip (`LiveAVFoundationSystem` still assigns
+/// `private var engine = AVAudioEngine()`), so Release/TestFlight residual risk
+/// remains: loading IOSPCM can still touch the audio engine before start.
+/// Start-recording requests permission only through the plugin's shared
+/// `requestStartRecordingMicPermission` entry.
 final class MicrophoneLaunchPreflightTests: XCTestCase {
     func testDebugSyntheticDemoReturnsBeforeWorkspaceBridge() throws {
         let root = URL(fileURLWithPath: #filePath)
@@ -48,6 +51,21 @@ final class MicrophoneLaunchPreflightTests: XCTestCase {
         XCTAssertTrue(
             source.contains("CosmasSyntheticDemoSurface.skipLaunchArgument"),
             "Synthetic UI-test boot must skip practice-host failure before openWorkspace"
+        )
+    }
+
+    func testLiveAppleAudioSystemStillConstructsEngineEagerly() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // startup-recovery
+            .deletingLastPathComponent() // apple
+            .deletingLastPathComponent() // clients
+        let live = root
+            .appendingPathComponent("clients/capture/native-configured/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift")
+        let text = try String(contentsOf: live, encoding: .utf8)
+        XCTAssertTrue(
+            text.contains("private var engine = AVAudioEngine()"),
+            "Residual Release/TestFlight risk: AVAudioEngine is still constructed eagerly (T-REL-7b lazy path not at this tip)"
         )
     }
 }

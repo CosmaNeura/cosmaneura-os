@@ -11,6 +11,11 @@ import {
 } from './prepare-synthetic-iphone-web-bundle.mjs';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {resolveHostedWorkspace} from '../clients/shared/hosted-workspace-config.mjs';
+import {
+  OPERATIONAL_NATIVE_PROFILE,
+  STAGING_NATIVE_PROFILE,
+  validateOperationalNativeIdentity,
+} from '../clients/shared/operational-native-identity.mjs';
 
 test('synthetic iPhone inputs use pk_test dummy and *.synthetic.example only', () => {
   const files = syntheticIphoneRendererInputs();
@@ -39,6 +44,38 @@ test('assertSyntheticOnly refuses live keys and non-example origins', () => {
   assert.throws(
     () => assertSyntheticOnly({...identity, apiOrigin: 'https://api.cosmas.ai'}),
     /non-synthetic material: cosmas\.ai/,
+  );
+});
+
+test('staging accepts *.synthetic.example and production rejects it', () => {
+  const frontendOrigin = 'https://clerk.synthetic.example';
+  const apiOrigin = 'https://api.synthetic.example';
+  const hostname = 'clerk.synthetic.example';
+  const pkTest = 'pk_test_' + Buffer.from(hostname + '$').toString('base64');
+  const pkLive = 'pk_live_' + Buffer.from(hostname + '$').toString('base64');
+  const staging = validateOperationalNativeIdentity({
+    version: 1,
+    profile: STAGING_NATIVE_PROFILE,
+    client: 'apple',
+    apiOrigin,
+    publishableKey: pkTest,
+    frontendOrigin,
+    organizationId: 'org_synthetic_iphone_sim',
+    audience: '',
+  }, 'apple', apiOrigin);
+  assert.equal(staging.profile, STAGING_NATIVE_PROFILE);
+  assert.throws(
+    () => validateOperationalNativeIdentity({
+      version: 1,
+      profile: OPERATIONAL_NATIVE_PROFILE,
+      client: 'apple',
+      apiOrigin,
+      publishableKey: pkLive,
+      frontendOrigin,
+      organizationId: 'org_synthetic_iphone_sim',
+      audience: 'cosmas-os-beta-api',
+    }, 'apple', apiOrigin),
+    /incomplete or inconsistent/,
   );
 });
 

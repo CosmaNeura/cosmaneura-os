@@ -1,4 +1,6 @@
+#if DEBUG
 import Foundation
+#endif
 
 /// Compile-time gate for the Debug synthetic Simulator demo surface.
 /// Release builds compile `isCompiledIntoThisBinary` to `false` so TestFlight

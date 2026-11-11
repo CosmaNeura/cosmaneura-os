@@ -8,22 +8,20 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/prepare-synthetic-iphone-web-bundle.mjs"
 TEST = ROOT / "scripts/prepare-synthetic-iphone-web-bundle.test.mjs"
 
 
-@pytest.fixture(scope="module")
-def node() -> str:
+def _require_node() -> str:
     found = shutil.which("node")
     if found is None:
-        pytest.skip("node is required for synthetic iPhone web-bundle checks")
+        raise AssertionError("node is required for synthetic iPhone web-bundle checks")
     return found
 
 
-def test_synthetic_web_bundle_generator_unit_suite(node: str) -> None:
+def test_synthetic_web_bundle_generator_unit_suite() -> None:
+    node = _require_node()
     result = subprocess.run(
         [node, "--test", str(TEST)],
         cwd=ROOT,
@@ -33,9 +31,12 @@ def test_synthetic_web_bundle_generator_unit_suite(node: str) -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + "\n" + result.stderr
+    blob = result.stdout + result.stderr
+    assert "staging accepts *.synthetic.example" in blob or "synthetic.example" in blob
 
 
-def test_synthetic_inputs_are_pk_test_and_synthetic_example_only(node: str) -> None:
+def test_synthetic_inputs_are_pk_test_and_synthetic_example_only() -> None:
+    node = _require_node()
     result = subprocess.run(
         [
             node,
