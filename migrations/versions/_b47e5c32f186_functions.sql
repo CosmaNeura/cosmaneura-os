@@ -152,18 +152,18 @@ AS $$
             ('shared', 'finance_connection_versions'),
             ('shared', 'finance_event_candidates'),
             ('shared', 'google_calendar_observation_requests'),
-            ('shared', 'google_calendar_snapshots'),
             ('shared', 'google_connection_attempts'),
             ('shared', 'google_connection_credentials'),
             ('shared', 'google_message_read_requests'),
-            ('shared', 'google_message_snapshots'),
             ('shared', 'microsoft_calendar_observation_requests'),
-            ('shared', 'microsoft_calendar_snapshots'),
             ('shared', 'microsoft_connection_attempts'),
             ('shared', 'microsoft_connection_credentials'),
             ('shared', 'microsoft_message_read_requests'),
-            ('shared', 'microsoft_message_snapshots'),
             ('shared', 'portal_setups'),
+            ('exclusive', 'google_calendar_snapshots'),
+            ('exclusive', 'google_message_snapshots'),
+            ('exclusive', 'microsoft_calendar_snapshots'),
+            ('exclusive', 'microsoft_message_snapshots'),
             ('shared', 'practice_access_requests'),
             ('shared', 'practice_invitations'),
             ('shared', 'practice_invite_revocations'),
@@ -182,6 +182,23 @@ AS $$
             ('shared', 'vendor_connection_versions'),
             ('shared', 'vendor_event_candidates')
   ) AS t(kind, table_name);
+$$;
+
+-- EXCLUSIVE_CONTENT review edges. patient_col NULL means the review table only
+-- participates in retain checks (never discovers candidates for this patient).
+CREATE OR REPLACE FUNCTION public._cosmas_patient_deletion_exclusive_refs()
+RETURNS TABLE(content_table text, review_table text, snapshot_col text, patient_col text)
+LANGUAGE sql
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+  SELECT * FROM (VALUES
+            ('google_message_snapshots', 'google_message_source_reviews', 'snapshot_id', 'patient_link_id'),
+            ('microsoft_message_snapshots', 'microsoft_message_source_reviews', 'snapshot_id', 'patient_link_id'),
+            ('google_calendar_snapshots', 'google_calendar_source_reviews', 'snapshot_id', 'patient_link_id'),
+            ('google_calendar_snapshots', 'google_calendar_private_source_reviews', 'snapshot_id', NULL),
+            ('microsoft_calendar_snapshots', 'microsoft_calendar_source_reviews', 'snapshot_id', 'patient_link_id')
+  ) AS t(content_table, review_table, snapshot_col, patient_col);
 $$;
 
 
@@ -208,6 +225,7 @@ DECLARE
   v_owned text[] := ARRAY(SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'owned' ORDER BY 1);
   v_preserve text[] := ARRAY(SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'preserve' ORDER BY 1);
   v_shared text[] := ARRAY(SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'shared' ORDER BY 1);
+  v_exclusive text[] := ARRAY(SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'exclusive' ORDER BY 1);
   v_declared text[] := ARRAY[
     'ehr_read_snapshots_observation_id_box_id_owner_id_fkey',
     'fk_ehr_read_request_parent',
@@ -231,6 +249,7 @@ DECLARE
   v_sql text;
   v_steps int := 0;
   v_counts jsonb := '{}'::jsonb;
+  v_retained jsonb := '{}'::jsonb;
   v_child_pk text;
   v_parent_pk text;
   v_join text;
@@ -243,6 +262,12 @@ DECLARE
   v_parent_cols text[];
   v_child_pk_cols text[];
   v_parent_pk_cols text[];
+  v_candidates text[];
+  v_delete_ids text[];
+  v_keep int;
+  v_id text;
+  v_other boolean;
+  xref record;
 BEGIN
   IF p_patient IS NULL THEN
     RAISE EXCEPTION 'patient records could not be deleted';
@@ -280,7 +305,12 @@ BEGIN
 
   SELECT x INTO v_unclassified
     FROM unnest(v_reachable) AS x
-   WHERE NOT (x = ANY (v_owned) OR x = ANY (v_preserve) OR x = ANY (v_shared))
+   WHERE NOT (
+     x = ANY (v_owned)
+     OR x = ANY (v_preserve)
+     OR x = ANY (v_shared)
+     OR x = ANY (v_exclusive)
+   )
    ORDER BY 1 LIMIT 1;
   IF v_unclassified IS NOT NULL THEN
     RAISE EXCEPTION 'schema not classified for patient deletion';
@@ -542,7 +572,69 @@ BEGIN
     END IF;
   END LOOP;
 
-  RETURN jsonb_build_object('tables', v_counts, 'pks', v_plan);
+  -- EXCLUSIVE_CONTENT: delete when every review referencing the row is this patient's.
+  FOR v_table IN SELECT * FROM unnest(v_exclusive) ORDER BY 1 LOOP
+    v_candidates := ARRAY[]::text[];
+    FOR xref IN
+      SELECT * FROM public._cosmas_patient_deletion_exclusive_refs()
+       WHERE content_table = v_table AND patient_col IS NOT NULL
+    LOOP
+      v_sql := format(
+        'SELECT ARRAY(SELECT DISTINCT %I::text FROM public.%I WHERE %I = $1 ORDER BY 1)',
+        xref.snapshot_col, xref.review_table, xref.patient_col
+      );
+      EXECUTE v_sql INTO v_new USING p_patient;
+      v_new := COALESCE(v_new, ARRAY[]::text[]);
+      SELECT ARRAY(
+        SELECT DISTINCT x FROM unnest(COALESCE(v_candidates, ARRAY[]::text[]) || v_new) AS x ORDER BY 1
+      ) INTO v_candidates;
+    END LOOP;
+    v_delete_ids := ARRAY[]::text[];
+    v_keep := 0;
+    FOREACH v_id IN ARRAY COALESCE(v_candidates, ARRAY[]::text[]) LOOP
+      v_other := FALSE;
+      FOR xref IN
+        SELECT * FROM public._cosmas_patient_deletion_exclusive_refs()
+         WHERE content_table = v_table
+      LOOP
+        IF xref.patient_col IS NULL THEN
+          v_sql := format(
+            'SELECT EXISTS (SELECT 1 FROM public.%I WHERE %I::text = $1)',
+            xref.review_table, xref.snapshot_col
+          );
+          EXECUTE v_sql INTO v_found USING v_id;
+        ELSE
+          v_sql := format(
+            'SELECT EXISTS (SELECT 1 FROM public.%I WHERE %I::text = $1 AND %I IS DISTINCT FROM $2)',
+            xref.review_table, xref.snapshot_col, xref.patient_col
+          );
+          EXECUTE v_sql INTO v_found USING v_id, p_patient;
+        END IF;
+        IF v_found THEN
+          v_other := TRUE;
+          EXIT;
+        END IF;
+      END LOOP;
+      IF v_other THEN
+        v_keep := v_keep + 1;
+      ELSE
+        v_delete_ids := array_append(v_delete_ids, v_id);
+      END IF;
+    END LOOP;
+    IF coalesce(array_length(v_delete_ids, 1), 0) > 0 THEN
+      v_plan := v_plan || jsonb_build_object(v_table, to_jsonb(v_delete_ids));
+      v_counts := v_counts || jsonb_build_object(v_table, array_length(v_delete_ids, 1));
+    END IF;
+    IF v_keep > 0 THEN
+      v_retained := v_retained || jsonb_build_object(v_table, v_keep);
+    END IF;
+  END LOOP;
+
+  RETURN jsonb_build_object(
+    'tables', v_counts,
+    'pks', v_plan,
+    'exclusive_retained', v_retained
+  );
 END
 $p$;
 
@@ -560,6 +652,7 @@ BEGIN
   RETURN jsonb_build_object(
     'tables', COALESCE(v_built -> 'tables', '{}'::jsonb),
     'pks', COALESCE(v_built -> 'pks', '{}'::jsonb),
+    'exclusive_retained', COALESCE(v_built -> 'exclusive_retained', '{}'::jsonb),
     'patient_link_id', p_patient::text
   );
 END
@@ -856,6 +949,7 @@ BEGIN
 
   RETURN jsonb_build_object(
     'tables', v_actual,
+    'exclusive_retained', COALESCE(v_built -> 'exclusive_retained', '{}'::jsonb),
     'patient_link_id', p_patient::text,
     'actor_principal_id', v_actor::text
   );

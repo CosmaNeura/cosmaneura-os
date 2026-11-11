@@ -131,6 +131,7 @@ def delete_patient_records(
             tables=_table_counts(plan.get("tables")),
             files=_file_counts(files),
             pending_files_finished=0,
+            exclusive_retained=_table_counts(plan.get("exclusive_retained")),
         )
 
     plan = _plan(session, patient_id)
@@ -164,6 +165,7 @@ def delete_patient_records(
         tables=tables,
         files=file_counts,
         pending_files_finished=pending_finished,
+        exclusive_retained=_table_counts(result.get("exclusive_retained")),
     )
 
 
@@ -259,8 +261,16 @@ def _report(
     tables: Mapping[str, int],
     files: Mapping[str, int],
     pending_files_finished: int,
+    exclusive_retained: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
-    return {
+    retained = dict(exclusive_retained or {})
+    message_retained = int(retained.get("google_message_snapshots", 0)) + int(
+        retained.get("microsoft_message_snapshots", 0)
+    )
+    calendar_retained = int(retained.get("google_calendar_snapshots", 0)) + int(
+        retained.get("microsoft_calendar_snapshots", 0)
+    )
+    out: dict[str, object] = {
         "dry_run": not confirm,
         "patient_link_id": patient_id,
         "deleted": deleted,
@@ -271,7 +281,11 @@ def _report(
             "exports": int(files.get("exports", 0)),
         },
         "pending_files_finished": int(pending_files_finished),
+        "exclusive_retained": retained,
+        "message snapshots retained, still used by another patient": message_retained,
+        "calendar snapshots retained, still used by another patient": calendar_retained,
     }
+    return out
 
 
 def _quote(name: str) -> str:

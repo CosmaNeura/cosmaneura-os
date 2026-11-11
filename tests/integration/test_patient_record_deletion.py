@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -30,6 +31,16 @@ from cosmas_os.cli import app as cli_app
 from cosmas_os.config import settings
 from cosmas_os.domain.enums import DecisionKind, PrincipalState, PrincipalType
 from cosmas_os.domain.rules import AuthorizationError, DomainError
+from cosmas_os.google_message_models import (
+    GoogleMessageReadRequest,
+    GoogleMessageSnapshot,
+    GoogleMessageSourceReview,
+)
+from cosmas_os.microsoft_message_models import (
+    MicrosoftMessageReadRequest,
+    MicrosoftMessageSnapshot,
+    MicrosoftMessageSourceReview,
+)
 from cosmas_os.models import (
     ActionRevision,
     AppointmentObservation,
@@ -2431,7 +2442,7 @@ def test_guc_bypass_cannot_edit_notes_or_audit(practice) -> None:
 
 
 def test_unclassified_reachable_table_refuses_delete(practice) -> None:
-    """T14: a new table referencing tickets must refuse deletion."""
+    """T14: a reachable table not on PATIENT_OWNED/EXCLUSIVE_CONTENT/PRESERVE/SHARED refuses."""
 
     session = practice["session"]
     blob = practice["blob"]
@@ -2496,3 +2507,299 @@ def test_deletion_function_has_no_plan_argument_overload(practice) -> None:
     # Only the two-uuid entry exists for the public function.
     public = [args for name, args in signatures if name == "delete_patient_keyed_records"]
     assert public == ["p_patient uuid"]
+
+
+def _message_models(provider: str):
+    if provider == "google":
+        return (
+            GoogleMessageReadRequest,
+            GoogleMessageSnapshot,
+            GoogleMessageSourceReview,
+            "google_message",
+        )
+    if provider == "microsoft":
+        return (
+            MicrosoftMessageReadRequest,
+            MicrosoftMessageSnapshot,
+            MicrosoftMessageSourceReview,
+            "microsoft_message",
+        )
+    raise AssertionError(provider)
+
+
+def _seed_message_snapshot_review(
+    session: Session,
+    *,
+    provider: str,
+    box: str,
+    owner: str,
+    workspace_id: str,
+    patient_id: str,
+    snapshot_id: str | None = None,
+    ordinal: int = 1,
+) -> str:
+    """Attach a synthetic message snapshot review for exclusive-content tests.
+
+    Custody triggers require live credentials and exact digests; tests insert
+    under session_replication_role=replica so the exclusive-content path is
+    what is under test, not the provider custody guards.
+    """
+
+    _read_model, _snapshot_model, _review_model, entry_kind = _message_models(provider)
+    del _read_model, _snapshot_model, _review_model
+    account_id = session.scalar(
+        select(ExternalIdentity.id).where(ExternalIdentity.principal_id == owner)
+    )
+    assert account_id is not None
+    digest = "a" * 64
+    read_table = f"{provider}_message_read_requests"
+    snap_table = f"{provider}_message_snapshots"
+    review_table = f"{provider}_message_source_reviews"
+    workspace = session.get(EncounterWorkspace, workspace_id)
+    assert workspace is not None
+    expected = int(workspace.revision)
+    content = f"synthetic {provider} exclusive review {uuid4().hex[:8]}"
+    content_sha = hashlib.sha256(content.encode()).hexdigest()
+    entry_id = str(uuid4())
+    review_id = str(uuid4())
+    bind = session.get_bind()
+    with bind.connect() as connection:
+        transaction = connection.begin()
+        try:
+            connection.execute(text("SET LOCAL session_replication_role = replica"))
+            if snapshot_id is None:
+                read_id = str(uuid4())
+                snapshot_id = str(uuid4())
+                connection.execute(
+                    text(
+                        f"""
+                        INSERT INTO public.{_quote(read_table)} (
+                          id, account_id, ordinal, kind, idempotency_key,
+                          request_hash, binding_digest, grant_sha256, connected_at,
+                          box_id, owner_id
+                        ) VALUES (
+                          CAST(:id AS uuid), CAST(:account AS uuid), :ordinal, 'list',
+                          :key, :digest, :digest, :digest, timestamptz '2026-09-10T00:00:00Z',
+                          CAST(:box AS uuid), CAST(:owner AS uuid)
+                        )
+                        """
+                    ),
+                    {
+                        "id": read_id,
+                        "account": account_id,
+                        "ordinal": ordinal,
+                        "key": f"{provider}-list-{ordinal}-{uuid4().hex[:8]}",
+                        "digest": digest,
+                        "box": box,
+                        "owner": owner,
+                    },
+                )
+                connection.execute(
+                    text(
+                        f"""
+                        INSERT INTO public.{_quote(snap_table)} (
+                          id, read_id, payload, payload_sha256, source_sha256,
+                          box_id, owner_id
+                        ) VALUES (
+                          CAST(:id AS uuid), CAST(:read AS uuid),
+                          CAST(:payload AS jsonb), :digest, :digest,
+                          CAST(:box AS uuid), CAST(:owner AS uuid)
+                        )
+                        """
+                    ),
+                    {
+                        "id": snapshot_id,
+                        "read": read_id,
+                        "payload": json.dumps(
+                            {
+                                "kind": "mail",
+                                "subject": "Invented exclusive message",
+                                "content": "synthetic exclusive-content body",
+                            }
+                        ),
+                        "digest": digest,
+                        "box": box,
+                        "owner": owner,
+                    },
+                )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO public.workspace_entries (
+                      id, workspace_id, box_id, actor_id, revision, kind, content,
+                      idempotency_key, request_hash
+                    ) VALUES (
+                      CAST(:id AS uuid), CAST(:workspace AS uuid), CAST(:box AS uuid),
+                      CAST(:owner AS uuid), :revision, :kind, :content, :key, :digest
+                    )
+                    """
+                ),
+                {
+                    "id": entry_id,
+                    "workspace": workspace_id,
+                    "box": box,
+                    "owner": owner,
+                    "revision": expected + 1,
+                    "kind": entry_kind,
+                    "content": content,
+                    "key": f"{provider}-entry-{uuid4().hex}",
+                    "digest": digest,
+                },
+            )
+            connection.execute(
+                text(
+                    f"""
+                    INSERT INTO public.{_quote(review_table)} (
+                      id, entry_id, snapshot_id, patient_link_id, expected_revision,
+                      workspace_revision, idempotency_key, request_hash, source_sha256,
+                      content_sha256, reviewed_patient, reviewed_exact_message,
+                      reviewed_untrusted_source, workspace_id, box_id, owner_id
+                    ) VALUES (
+                      CAST(:id AS uuid), CAST(:entry AS uuid), CAST(:snapshot AS uuid),
+                      CAST(:patient AS uuid), :expected, :workspace_revision, :key,
+                      :digest, :digest, :content_sha, true, true, true,
+                      CAST(:workspace AS uuid), CAST(:box AS uuid), CAST(:owner AS uuid)
+                    )
+                    """
+                ),
+                {
+                    "id": review_id,
+                    "entry": entry_id,
+                    "snapshot": snapshot_id,
+                    "patient": patient_id,
+                    "expected": expected,
+                    "workspace_revision": expected + 1,
+                    "key": f"{provider}-review-{uuid4().hex}",
+                    "digest": digest,
+                    "content_sha": content_sha,
+                    "workspace": workspace_id,
+                    "box": box,
+                    "owner": owner,
+                },
+            )
+            connection.execute(
+                text(
+                    """
+                    UPDATE public.encounter_workspaces
+                       SET revision = :revision
+                     WHERE id = CAST(:workspace AS uuid)
+                    """
+                ),
+                {"revision": expected + 1, "workspace": workspace_id},
+            )
+            transaction.commit()
+        except Exception:
+            transaction.rollback()
+            raise
+    session.expire_all()
+    assert snapshot_id is not None
+    return snapshot_id
+
+
+@pytest.mark.parametrize("provider", ["google", "microsoft"])
+def test_exclusive_message_snapshot_deleted_when_only_reviewer(practice, provider) -> None:
+    """T15: delete A when A is the snapshot's only reviewer; snapshot is gone."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    box = str(practice["box_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_id = str(casey["patient_id"])
+    workspace_id = str(casey["workspace_id"])
+    snapshot_id = _seed_message_snapshot_review(
+        session,
+        provider=provider,
+        box=box,
+        owner=owner,
+        workspace_id=workspace_id,
+        patient_id=patient_id,
+        ordinal=10,
+    )
+    _, snapshot_model, review_model, _ = _message_models(provider)
+    dry = _calls(session, owner, patient_id, blob, confirm=False)
+    table_key = f"{provider}_message_snapshots"
+    assert int(dry["tables"].get(table_key, 0)) == 1
+    assert dry["message snapshots retained, still used by another patient"] == 0
+    assert session.get(snapshot_model, snapshot_id) is not None
+    report = _calls(session, owner, patient_id, blob, confirm=True)
+    assert report["deleted"] is True
+    assert int(report["tables"].get(table_key, 0)) == 1
+    assert report["message snapshots retained, still used by another patient"] == 0
+    assert session.get(snapshot_model, snapshot_id) is None
+    assert (
+        session.scalar(
+            select(func.count()).select_from(review_model).where(
+                review_model.patient_link_id == patient_id
+            )
+        )
+        == 0
+    )
+
+
+@pytest.mark.parametrize("provider", ["google", "microsoft"])
+def test_exclusive_message_snapshot_retained_when_second_patient_reviews(
+    practice, provider
+) -> None:
+    """T16: A and B review the same snapshot; delete A; snapshot stays; retained=1."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    box = str(practice["box_id"])
+    casey = practice["casey"]
+    morgan = practice["morgan"]
+    assert (
+        isinstance(casey, dict)
+        and isinstance(morgan, dict)
+        and isinstance(blob, LocalBlobAdapter)
+    )
+    casey_id = str(casey["patient_id"])
+    morgan_id = str(morgan["patient_id"])
+    snapshot_id = _seed_message_snapshot_review(
+        session,
+        provider=provider,
+        box=box,
+        owner=owner,
+        workspace_id=str(casey["workspace_id"]),
+        patient_id=casey_id,
+        ordinal=20,
+    )
+    _seed_message_snapshot_review(
+        session,
+        provider=provider,
+        box=box,
+        owner=owner,
+        workspace_id=str(morgan["workspace_id"]),
+        patient_id=morgan_id,
+        snapshot_id=snapshot_id,
+        ordinal=21,
+    )
+    _, snapshot_model, review_model, _ = _message_models(provider)
+    dry = _calls(session, owner, casey_id, blob, confirm=False)
+    table_key = f"{provider}_message_snapshots"
+    assert table_key not in dry["tables"] or int(dry["tables"].get(table_key, 0)) == 0
+    assert dry["message snapshots retained, still used by another patient"] == 1
+    assert int(dry["exclusive_retained"].get(table_key, 0)) == 1
+    report = _calls(session, owner, casey_id, blob, confirm=True)
+    assert report["deleted"] is True
+    assert report["message snapshots retained, still used by another patient"] == 1
+    assert session.get(snapshot_model, snapshot_id) is not None
+    assert (
+        session.scalar(
+            select(func.count()).select_from(review_model).where(
+                review_model.patient_link_id == casey_id
+            )
+        )
+        == 0
+    )
+    assert (
+        session.scalar(
+            select(func.count()).select_from(review_model).where(
+                review_model.patient_link_id == morgan_id,
+                review_model.snapshot_id == snapshot_id,
+            )
+        )
+        == 1
+    )

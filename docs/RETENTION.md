@@ -19,6 +19,7 @@ clinical rows keyed to that patient are removed. Older audit events stay, with
 the patient id replaced, and ticket, visit, and recording-keyed events scrubbed
 the same way. The new deletion event records who deleted it, when,
 and that internal id only. It does not record the patient's name or note text.
+a patient delete also removes that patient's per-visit model usage rows; practice-level usage totals computed before the delete are unaffected.
 Confirmed deletes refuse and change nothing when the deletion role is missing.
 
 Confirmed deletes commit the database first, then remove stored files;

@@ -1,10 +1,12 @@
 """Checked-in patient-deletion table classification (250-R).
 
 Runtime discovery still walks pg_catalog. The SECURITY DEFINER functions delete
-only PATIENT_OWNED rows. Reachable tables on neither PATIENT_OWNED nor
-PRESERVE/SHARED refuse with "schema not classified for patient deletion".
-SHARED/PRESERVE rows are never deleted for a patient purge; outbound FKs from
-SHARED onto patient-owned rows are nulled (or follow the FK action).
+PATIENT_OWNED rows, and EXCLUSIVE_CONTENT rows only when every referencing
+review belongs to the patient being deleted. Reachable tables on neither
+PATIENT_OWNED, EXCLUSIVE_CONTENT, PRESERVE, nor SHARED refuse with
+"schema not classified for patient deletion". SHARED/PRESERVE rows are never
+deleted for a patient purge; outbound FKs from SHARED onto patient-owned rows
+are nulled (or follow the FK action).
 """
 
 from __future__ import annotations
@@ -117,6 +119,15 @@ PATIENT_OWNED: frozenset[str] = frozenset({
     "workspace_title_revisions",
 })
 
+# Owner-scoped content that may back more than one patient's reviews.
+# Delete only when every referencing review belongs to the patient being deleted.
+EXCLUSIVE_CONTENT: frozenset[str] = frozenset({
+    "google_calendar_snapshots",
+    "google_message_snapshots",
+    "microsoft_calendar_snapshots",
+    "microsoft_message_snapshots",
+})
+
 PRESERVE: frozenset[str] = frozenset({
     "alembic_version",
     "audit_events",
@@ -146,17 +157,13 @@ SHARED: frozenset[str] = frozenset({
     "finance_connection_versions",
     "finance_event_candidates",
     "google_calendar_observation_requests",
-    "google_calendar_snapshots",
     "google_connection_attempts",
     "google_connection_credentials",
     "google_message_read_requests",
-    "google_message_snapshots",
     "microsoft_calendar_observation_requests",
-    "microsoft_calendar_snapshots",
     "microsoft_connection_attempts",
     "microsoft_connection_credentials",
     "microsoft_message_read_requests",
-    "microsoft_message_snapshots",
     "portal_setups",
     "practice_access_requests",
     "practice_invitations",
@@ -177,4 +184,4 @@ SHARED: frozenset[str] = frozenset({
     "vendor_event_candidates",
 })
 
-CLASSIFIED: frozenset[str] = PATIENT_OWNED | PRESERVE | SHARED
+CLASSIFIED: frozenset[str] = PATIENT_OWNED | EXCLUSIVE_CONTENT | PRESERVE | SHARED

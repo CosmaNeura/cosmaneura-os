@@ -1,11 +1,11 @@
 """Admin path to delete one patient's records through one definer function.
 
 250-R: FK-ordered delete without session_replication_role or temp tables.
-Coverage comes from pg_catalog with fail-closed PATIENT_OWNED / PRESERVE /
-SHARED classification. Actor is bound to session_user via
-patient_deletion_admin_bindings. Immutability triggers allow changes only when
-current_user is the mutate-function owner and a patient_deletion_in_progress
-row exists for txid_current().
+Coverage comes from pg_catalog with fail-closed PATIENT_OWNED /
+EXCLUSIVE_CONTENT / PRESERVE / SHARED classification. Actor is bound to
+session_user via patient_deletion_admin_bindings. Immutability triggers allow
+changes only when current_user is the mutate-function owner and a
+patient_deletion_in_progress row exists for txid_current().
 
 Public entry: delete_patient_keyed_records(patient_id) RETURNS jsonb.
 Read-only plan: delete_patient_keyed_records_plan(patient_id) RETURNS jsonb.
@@ -120,7 +120,7 @@ def _patch_owned_table_guards(connection) -> None:
                AND c.relname IN (
                      SELECT table_name
                        FROM public._cosmas_patient_deletion_classes()
-                      WHERE kind = 'owned'
+                      WHERE kind IN ('owned', 'exclusive')
                    )
                AND p.prokind = 'f'
             """
@@ -353,6 +353,7 @@ def upgrade() -> None:
     for fn in (
         "public._cosmas_pk_text_expr(text, text[])",
         "public._cosmas_patient_deletion_classes()",
+        "public._cosmas_patient_deletion_exclusive_refs()",
         "public._cosmas_patient_deletion_active()",
         "public._cosmas_patient_deletion_build_plan(uuid)",
         "public.delete_patient_keyed_records_plan(uuid)",
@@ -372,6 +373,9 @@ def upgrade() -> None:
     )
     op.execute(
         "GRANT EXECUTE ON FUNCTION public._cosmas_patient_deletion_classes() TO PUBLIC"
+    )
+    op.execute(
+        "GRANT EXECUTE ON FUNCTION public._cosmas_patient_deletion_exclusive_refs() TO PUBLIC"
     )
 
     bind = op.get_bind()
@@ -413,6 +417,7 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_apply_patient_deletion_mutate(uuid)")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_patient_deletion_build_plan(uuid)")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_patient_deletion_active()")
+    op.execute("DROP FUNCTION IF EXISTS public._cosmas_patient_deletion_exclusive_refs()")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_patient_deletion_classes()")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_pk_text_expr(text, text[])")
     op.execute("DROP FUNCTION IF EXISTS public.delete_patient_keyed_records(uuid, uuid)")
