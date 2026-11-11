@@ -13,16 +13,22 @@ drives the real Capacitor / `IOSPCMCapacitorPlugin` path. Reset mic privacy firs
 
 ## One Mac command (any PR head, throwaway temp)
 
-From a checkout that contains the runner (this PR), against PR 349 or any SHA:
+From a checkout that contains the runner (this PR), against PR 349 or any SHA.
+Needs full Xcode (`DEVELOPER_DIR` if xcode-select is CLT-only) and Node.js 24:
 
 ```sh
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer   # when needed
 ./scripts/run-iphone-sim-record-test.sh 349
 ./scripts/run-iphone-sim-record-test.sh 179e739f
 ```
 
 That clones into a fresh temp directory (never `~/Desktop/cosmaneura-os`),
 composes the unsigned `com.cosmasos.synthetic` Simulator app with a synthetic
-web bundle, resets microphone privacy, and runs `MicrophonePermissionUITests`.
+web bundle, creates a throwaway Simulator (or honors `COSMAS_SIM_NAME`), resets
+microphone privacy, builds with host-arch `ONLY_ACTIVE_ARCH` flags, and runs
+`MicrophonePermissionUITests`. Every START_CAPTURE / SKIP_DEMO hook stays
+`#if DEBUG` + launch-argument gated so Release/live binaries stay byte-identical
+for those paths.
 
 ## Synthetic web bundle (one command)
 

@@ -51,9 +51,14 @@ xcodebuild \
 
 Portable compose path (owned clients + frozen scaffold), synthetic web bundle,
 and automatic mic-permission Simulator test — one Mac command against any PR
-head in a throwaway temp folder (never an existing Desktop checkout):
+head in a throwaway temp folder (never an existing Desktop checkout). Requires
+full Xcode (not CLT alone) and Node.js 24 on PATH:
 
 ```sh
+# If xcode-select points at Command Line Tools only:
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+# Optional Node 24 pin when PATH is wrong:
+# export COSMAS_NODE_BIN=/opt/homebrew/opt/node@24/bin/node
 ./scripts/run-iphone-sim-record-test.sh 349
 ```
 
