@@ -1,5 +1,6 @@
 -- Optional follow-on for John's admin LOGIN. Run as the database owner /
--- superuser with psql:
+-- superuser with CREATEROLE (RETENTION.md steps 1–3). Exact NOLOGIN role is
+-- cosmas_patient_deletion; LOGIN name comes from -v admin_login=... :
 --   psql "$ADMIN_URL" -v admin_login=cosmas_patient_deletion_admin \
 --     -v ON_ERROR_STOP=1 -f scripts/ensure-patient-deletion-admin-login.sql
 -- Suggested example login name only; do not hard-code a single role in the product.
