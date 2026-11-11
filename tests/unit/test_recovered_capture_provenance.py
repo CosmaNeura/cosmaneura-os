@@ -20,8 +20,8 @@ FROZEN_CAPTURE_PROVENANCE_SHA256 = "f1d73c9e7fd9515d7dd16b676f78d1cacd420a63d9f7
 # exact current bytes supplement, never rewrite, frozen 1107 provenance. Every
 # unlisted counterpart retains its original recorded SHA assertion below.
 REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
-    "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "5067448784d2410cd38798a516eb2bca0667442c0e776f2eb1d71f6f197cafe1",
-    "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "2533a5c011d12173635937a607b46a1f827c3d015fab5862261f49da31214492",
+    "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "e66f55a0adfc890613c9be29c0dd777e115c40ec5a0ac9c0a4d93f67aa01aa7e",
+    "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "5f79cd0913e6289ac1c296080c64ad678d0b5a6311b21f76c6d962ce1facf5f0",
     "clients/apple/startup-recovery/WorkspaceRecoveryState.swift": "c07f68af3d311b75890108c4fc5c04b5e38eeeda11cb0047f25424a04531cfd1",
     "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift": "8132283f189b8cd0497957326fbcc020efc44e7c4b9fe2327ce0248b44d9494f",
     "clients/apple/native-auth/Bridge/NativeProviderConnection.swift": "61b1c30c279a940f3ffab824a74fe21aba01cdc053d63ed59530b9d12bde2ce9",
@@ -248,21 +248,8 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     assert manifest["generated_web_assets"] == "absent"
     assert not (output / "apps/capture/ios/App/App/public").exists()
     frozen_count = json.loads(PROVENANCE.read_text(encoding="utf-8"))["native_source_file_count"]
-    additions = (
-        "Sources/CosmasNativeAuth/NativePracticeProfile.swift",
-        "Sources/CosmasNativeAuth/NativePracticeActivationOwner.swift",
-        "Sources/CosmasNativeAuth/NativePracticeConnectionContracts.swift",
-        "Sources/CosmasNativeAuth/NativePracticeWorkspaceBootstrap.swift",
-        "Sources/CosmasNativeAuth/NativePracticeAccountTransport.swift",
-        "Sources/CosmasNativeAuth/NativePracticeSelectionStore.swift",
-        "Bridge/CosmasNativePracticeConnectionPlugin.swift",
-        "Bridge/NativePracticeConnectionController.swift",
-        "Tests/CosmasNativeAuthTests/NativePracticeProfileTests.swift",
-        "Tests/CosmasNativeAuthTests/NativePracticeBootstrapTests.swift",
-        "Tests/CosmasNativeAuthTests/NativePracticeConnectionContractTests.swift",
-        "Tests/CosmasNativeAuthTests/NativePracticeOriginAndSelectionTests.swift",
-        "Tests/CosmasNativeAuthTests/NativePracticeProductionTests.swift",
-    )
+    additions = module.NATIVE_PRACTICE_ADDITIONS
+    assert "Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift" in additions
     assert tuple(manifest["native_practice_additions"]) == additions
     vendor_files = [
         item for item in manifest["files"]
