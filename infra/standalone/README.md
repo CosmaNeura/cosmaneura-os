@@ -74,13 +74,21 @@ synth-ci does **not** run the standalone Node render suites or
 Enrollment Node tests under `infra/enrollment/` are CI-guarded; these standalone
 files are local-only until a separate CI-list ticket lands.
 
-Local commands (all must pass):
+`test_settings_contract.py` is red on main (and on this branch) at the
+`booleans - set(public) == set()` assertion: eight Settings booleans stay
+unrendered and default False. A separate ticket will render those switches
+explicitly false. Do not treat a full-module unittest of that file as green
+until that lands. The opt-in on-state method below is independent of that
+assertion and is expected to pass.
+
+Local commands that must pass:
 
 ```bash
 node --test infra/standalone/render.test.mjs \
   infra/standalone/render-beta.test.mjs \
   infra/standalone/render-capture-tools.test.mjs
-uv run python -m unittest infra.standalone.test_settings_contract -v
+uv run python -m unittest \
+  infra.standalone.test_settings_contract.HostSettingsContract.test_synthetic_beta_capture_tools_opt_in_matches_runtime_and_keeps_real_patient_off -v
 ```
 
 | File | CI today | Local |
@@ -88,4 +96,5 @@ uv run python -m unittest infra.standalone.test_settings_contract -v
 | `render.test.mjs` | not run by synth-ci | `node --test …` above |
 | `render-beta.test.mjs` | not run by synth-ci | `node --test …` above |
 | `render-capture-tools.test.mjs` | not run by synth-ci | `node --test …` above |
-| `test_settings_contract.py` | not run by synth-ci | `uv run python -m unittest …` above |
+| `test_settings_contract.py` (full module) | not run by synth-ci; red on main pending separate ticket that renders eight bool switches false | do not require full-module green |
+| on-state opt-in method in `test_settings_contract.py` | not run by synth-ci | `uv run python -m unittest …` above |

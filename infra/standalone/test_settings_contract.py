@@ -13,19 +13,6 @@ from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# Public standalone render leaves these Settings booleans unrendered; they keep
-# their process defaults (False). Do not emit new keys just to satisfy this set.
-UNRENDERED_BOOLEAN_DEFAULTS_FALSE = frozenset({
-    "COSMAS_EHR_REAL_DATA_ENABLED",
-    "GOOGLE_CONNECTION_BROKER_ENABLED",
-    "REAL_PATIENT_RECORDING_ENABLED",
-    "WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED",
-    "WORKSPACE_CAPTURE_PROXY_ENABLED",
-    "WORKSPACE_EFAX_SANDBOX_ENABLED",
-    "WORKSPACE_ENROLLMENT_MANAGED",
-    "WORKSPACE_RX_SANDBOX_ENABLED",
-})
-
 
 class ExplicitSettings(Settings):
     @classmethod
@@ -87,9 +74,7 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
                 contract = rendered["contract"]
                 self.assertEqual(set(public) - {key.upper() for key in Settings.model_fields}, set())
                 booleans = {key.upper() for key, field in Settings.model_fields.items() if field.annotation is bool}
-                self.assertEqual(booleans - set(public), UNRENDERED_BOOLEAN_DEFAULTS_FALSE)
-                for name in UNRENDERED_BOOLEAN_DEFAULTS_FALSE:
-                    self.assertIs(Settings.model_fields[name.lower()].default, False)
+                self.assertEqual(booleans - set(public), set())
                 self.assertEqual(contract["database"]["schema_revision"], EXPECTED_SCHEMA_REVISION)
                 # Invented process-only values; no file, account or database is opened.
                 database = contract["database"]
