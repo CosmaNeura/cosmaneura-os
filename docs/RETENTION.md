@@ -85,6 +85,14 @@ psql "$POSTGRES_ADMIN_URL" \
   -f scripts/ensure-patient-deletion-admin-login.sql
 ```
 
+If `cosmas_patient_deletion` already exists (for example created earlier by a
+superuser), a superuser must first grant it to the owner `WITH ADMIN OPTION`
+before the owner can run step 3:
+
+```sql
+GRANT cosmas_patient_deletion TO current_user WITH ADMIN OPTION;
+```
+
 4. As the database owner / superuser, bind `session_user` to the practice owner
    principal (IDs only):
 

@@ -630,6 +630,37 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- patient_links.box_id is runtime-writable; every planned row that carries
+  -- box_id must still belong to the patient's practice.
+  DECLARE
+    v_pbox uuid;
+    v_cross boolean;
+    v_pkc text[];
+  BEGIN
+    SELECT pl.box_id INTO v_pbox FROM public.patient_links pl WHERE pl.id = p_patient;
+    FOR v_table IN SELECT jsonb_object_keys(v_plan) LOOP
+      CONTINUE WHEN NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_attribute a
+         WHERE a.attrelid = pg_catalog.format('public.%I', v_table)::regclass
+           AND a.attname = 'box_id' AND NOT a.attisdropped
+      );
+      SELECT array_agg(a.attname ORDER BY k.ord) INTO v_pkc
+        FROM pg_catalog.pg_constraint pk
+        JOIN unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
+        JOIN pg_catalog.pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
+       WHERE pk.conrelid = pg_catalog.format('public.%I', v_table)::regclass
+         AND pk.contype = 'p';
+      EXECUTE format(
+        'SELECT EXISTS (SELECT 1 FROM public.%I t WHERE %s = ANY ($1) AND t.box_id IS DISTINCT FROM $2)',
+        v_table, public._cosmas_pk_text_expr('t', v_pkc)
+      ) INTO v_cross
+        USING ARRAY(SELECT jsonb_array_elements_text(v_plan -> v_table)), v_pbox;
+      IF v_cross THEN
+        RAISE EXCEPTION 'admin authority required';
+      END IF;
+    END LOOP;
+  END;
+
   RETURN jsonb_build_object(
     'tables', v_counts,
     'pks', v_plan,
@@ -748,6 +779,7 @@ BEGIN
   UPDATE public.audit_events ae
      SET aggregate_id = 'redacted', detail = '{}'::jsonb
    WHERE ae.event_type IS DISTINCT FROM 'patient.records_deleted'
+     AND ae.box_id = v_box
      AND ae.aggregate_id = ANY (v_agg);
 
   -- Null self-referential FKs among owned rows first.
@@ -1034,6 +1066,7 @@ DECLARE
   v_caller_box uuid;
   v_has_box boolean;
   v_has_patient boolean;
+  v_rowpk text;
 BEGIN
   IF p_pks IS NULL OR jsonb_typeof(p_pks) <> 'object' THEN
     RETURN '[]'::jsonb;
@@ -1132,16 +1165,20 @@ BEGIN
           ELSE 'uploads'
         END;
         v_sql := format(
-          'SELECT t.%I::text FROM public.%I t WHERE %s = ANY ($1) AND t.%I IS NOT NULL',
-          v_col, v_table, v_pk_expr, v_col
+          'SELECT t.%I::text, %s FROM public.%I t WHERE %s = ANY ($1) AND t.%I IS NOT NULL',
+          v_col, v_pk_expr, v_table, v_pk_expr, v_col
         );
-        FOR v_path IN EXECUTE v_sql USING v_values LOOP
+        FOR v_path, v_rowpk IN EXECUTE v_sql USING v_values LOOP
           IF v_path IS NULL OR v_path = '' OR position('/' in v_path) = 1
              OR position('..' in v_path) > 0 THEN
             CONTINUE;
           END IF;
+          -- Key columns are runtime-writable: only trust a key that names its own
+          -- row ({box}/{id}/... or {box}/.../{id}.ext) inside the caller's practice.
+          IF NOT (v_rowpk = ANY (string_to_array(regexp_replace(v_path, '\.[^/]*$', ''), '/'))) THEN
+            CONTINUE;
+          END IF;
           IF v_caller_box IS NOT NULL
-             AND v_path ~ '^[0-9a-fA-F-]{36}/vendor-documents/'
              AND split_part(v_path, '/', 1) IS DISTINCT FROM v_caller_box::text THEN
             CONTINUE;
           END IF;
@@ -1221,6 +1258,8 @@ DECLARE
   item jsonb;
   v_path text;
   v_kind text;
+  v_ids text[];
+  v_segs text[];
 BEGIN
   IF p_patient IS NULL OR p_box IS NULL THEN
     RAISE EXCEPTION 'admin authority required';
@@ -1243,6 +1282,10 @@ BEGIN
   IF p_files IS NULL OR jsonb_typeof(p_files) <> 'array' THEN
     RETURN;
   END IF;
+  v_ids := ARRAY(
+    SELECT jsonb_array_elements_text(value)
+      FROM jsonb_each(public._cosmas_patient_deletion_build_plan(p_patient) -> 'pks')
+  ) || ARRAY[p_patient::text];
   FOR item IN SELECT * FROM jsonb_array_elements(p_files) LOOP
     v_path := coalesce(item ->> 'path', '');
     v_kind := coalesce(item ->> 'kind', '');
@@ -1252,8 +1295,13 @@ BEGIN
     IF position('/' in v_path) = 1 OR position('..' in v_path) > 0 THEN
       RAISE EXCEPTION 'admin authority required';
     END IF;
-    IF v_path ~ '^[0-9a-fA-F-]{36}/vendor-documents/'
-       AND split_part(v_path, '/', 1) IS DISTINCT FROM p_box::text THEN
+    -- Same rule as the file scan: the path must name one of this patient's
+    -- planned rows, and a path rooted at a practice must be rooted at p_box.
+    v_segs := string_to_array(regexp_replace(v_path, '\.[^/]*$', ''), '/');
+    IF NOT (v_segs && v_ids)
+       OR (split_part(v_path, '/', 1) ~ '^[0-9a-fA-F-]{36}$'
+           AND split_part(v_path, '/', 1) <> p_box::text
+           AND NOT (split_part(v_path, '/', 1) = ANY (v_ids))) THEN
       RAISE EXCEPTION 'admin authority required';
     END IF;
     INSERT INTO public.patient_deletion_pending_files (

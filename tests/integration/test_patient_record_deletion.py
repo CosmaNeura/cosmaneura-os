@@ -3278,3 +3278,262 @@ def test_temp_pg_constraint_cannot_redirect_patient_deletion(practice) -> None:
     assert session.get(PatientLink, patient_a) is None
     assert session.get(PatientLink, patient_b) is not None
     assert _patient_link_counts(session, patient_b)["tickets"] == 1
+
+
+def test_rewritten_blob_key_cannot_delete_other_practice_file(practice) -> None:
+    """Route (c): collect_file_keys ignores rewritten keys that omit the row id."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_a = str(casey["patient_id"])
+    ticket_a = str(casey["ticket_id"])
+    own_uploads = _upload_paths(session, blob, ticket_a)
+    assert all(path.is_file() for path in own_uploads)
+
+    other = svc.Container(session, blob=blob)
+    foreign = svc.provision_box(other, "Invented Blob Rewrite Practice")
+    foreign_owner = str(foreign["owner_id"])
+    foreign_patient = svc.attest_patient_link(
+        other,
+        foreign["box_id"],
+        foreign_owner,
+        source_pair_key="csv:blob-rewrite-patient",
+        label="Invented Blob Rewrite Patient",
+    )
+    session.commit()
+    box_2 = str(foreign["box_id"])
+    foreign_rel = f"{box_2}/{foreign_patient.id}/front.png"
+    foreign_file = blob.root / foreign_rel
+    foreign_file.parent.mkdir(parents=True, exist_ok=True)
+    foreign_file.write_bytes(PNG)
+    assert foreign_file.is_file()
+
+    artifact_id = session.scalar(select(Artifact.id).where(Artifact.ticket_id == ticket_a).limit(1))
+    assert artifact_id is not None
+    session.execute(
+        text("UPDATE public.artifacts SET blob_key = :key WHERE id = CAST(:id AS uuid)"),
+        {"key": foreign_rel, "id": artifact_id},
+    )
+    session.commit()
+
+    report = _calls(session, owner, patient_a, blob, confirm=True)
+    assert report["deleted"] is True
+    assert foreign_file.is_file()
+    assert session.get(PatientLink, str(foreign_patient.id)) is not None
+
+
+def test_pending_record_rejects_cross_practice_and_other_patient_paths(practice) -> None:
+    """Route (c): pending_record requires a planned row id and caller's practice root."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    casey = practice["casey"]
+    morgan = practice["morgan"]
+    assert (
+        isinstance(casey, dict) and isinstance(morgan, dict) and isinstance(blob, LocalBlobAdapter)
+    )
+    patient_a = str(casey["patient_id"])
+    patient_b = str(morgan["patient_id"])
+    box_1 = str(practice["box_id"])
+
+    other = svc.Container(session, blob=blob)
+    foreign = svc.provision_box(other, "Invented Pending Path Practice")
+    foreign_owner = str(foreign["owner_id"])
+    foreign_patient = svc.attest_patient_link(
+        other,
+        foreign["box_id"],
+        foreign_owner,
+        source_pair_key="csv:pending-path-patient",
+        label="Invented Pending Path Patient",
+    )
+    session.commit()
+    box_2 = str(foreign["box_id"])
+    patient_c = str(foreign_patient.id)
+    foreign_path = f"{box_2}/{patient_c}/back.png"
+    same_practice_other = f"{box_1}/{patient_a}/front.png"
+
+    with pytest.raises(Exception, match="admin authority required"):
+        session.execute(
+            text(
+                "SELECT public.patient_deletion_pending_record("
+                "CAST(:patient AS uuid), CAST(:box AS uuid), CAST(:files AS jsonb))"
+            ),
+            {
+                "patient": patient_b,
+                "box": box_1,
+                "files": json.dumps([{"kind": "uploads", "path": foreign_path}]),
+            },
+        )
+    session.rollback()
+    with pytest.raises(Exception, match="admin authority required"):
+        session.execute(
+            text(
+                "SELECT public.patient_deletion_pending_record("
+                "CAST(:patient AS uuid), CAST(:box AS uuid), CAST(:files AS jsonb))"
+            ),
+            {
+                "patient": patient_b,
+                "box": box_1,
+                "files": json.dumps([{"kind": "uploads", "path": same_practice_other}]),
+            },
+        )
+    session.rollback()
+    leftover = int(
+        session.scalar(
+            text(
+                "SELECT count(*) FROM public.patient_deletion_pending_files "
+                "WHERE relative_path IN (:a, :b)"
+            ),
+            {"a": foreign_path, "b": same_practice_other},
+        )
+        or 0
+    )
+    assert leftover == 0
+
+
+def test_moved_patient_box_id_refuses_plan_and_keeps_foreign_audit(practice) -> None:
+    """Routes (a)/(b): plan refuses cross-box planned rows; audit scrub stays in v_box."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_a = str(casey["patient_id"])
+    ticket_a = str(casey["ticket_id"])
+    box_1 = str(practice["box_id"])
+
+    other = svc.Container(session, blob=blob)
+    foreign = svc.provision_box(other, "Invented Move Practice")
+    foreign_owner = str(foreign["owner_id"])
+    box_2 = str(foreign["box_id"])
+    foreign_patient = svc.attest_patient_link(
+        other,
+        foreign["box_id"],
+        foreign_owner,
+        source_pair_key="csv:move-patient",
+        label="Invented Move Patient",
+    )
+    session.commit()
+    patient_e = str(foreign_patient.id)
+    appointment_id = svc.import_schedule(
+        other, foreign["box_id"], _csv(f"move-{uuid4().hex[:8]}", "Invented Move Visit")
+    )[0]
+    ticket = svc.detect_and_open_chase(
+        other,
+        foreign["box_id"],
+        other.session.scalar(
+            select(Principal.id).where(
+                Principal.box_id == foreign["box_id"], Principal.agent_key == "chaser"
+            )
+        ),
+        appointment_id,
+        foreign_patient.id,
+    )
+    session.commit()
+    ticket_e = str(ticket.id)
+    foreign_audit = AuditEvent(
+        box_id=box_2,
+        aggregate_type="ticket",
+        aggregate_id=ticket_e,
+        event_type="ticket.synthetic_move",
+        actor_principal_id=foreign_owner,
+        outcome="recorded",
+        detail={"note": "synthetic-move-audit"},
+    )
+    # Same aggregate id in practice 2 must not scrub when deleting practice-1 Casey.
+    cross_audit = AuditEvent(
+        box_id=box_2,
+        aggregate_type="ticket",
+        aggregate_id=ticket_a,
+        event_type="ticket.synthetic_cross_box",
+        actor_principal_id=foreign_owner,
+        outcome="recorded",
+        detail={"note": "synthetic-cross-box-audit"},
+    )
+    session.add(foreign_audit)
+    session.add(cross_audit)
+    session.commit()
+    foreign_audit_id = foreign_audit.id
+    cross_audit_id = cross_audit.id
+
+    session.execute(
+        text(
+            "UPDATE public.patient_links SET box_id = CAST(:box AS uuid) WHERE id = CAST(:id AS uuid)"
+        ),
+        {"box": box_1, "id": patient_e},
+    )
+    session.commit()
+    assert (
+        session.scalar(
+            text("SELECT box_id::text FROM public.patient_links WHERE id = CAST(:id AS uuid)"),
+            {"id": patient_e},
+        )
+        == box_1
+    )
+    assert (
+        session.scalar(
+            text("SELECT box_id::text FROM public.tickets WHERE id = CAST(:id AS uuid)"),
+            {"id": ticket_e},
+        )
+        == box_2
+    )
+
+    with pytest.raises(Exception, match="admin authority required"):
+        session.execute(
+            text("SELECT public.delete_patient_keyed_records_plan(CAST(:patient AS uuid))"),
+            {"patient": patient_e},
+        )
+    session.rollback()
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        _calls(session, owner, patient_e, blob, confirm=True)
+    session.rollback()
+    assert session.get(Ticket, ticket_e) is not None
+    assert session.get(PatientLink, patient_e) is not None
+
+    _calls(session, owner, patient_a, blob, confirm=True)
+    session.expire_all()
+    kept = session.get(AuditEvent, cross_audit_id)
+    assert kept is not None
+    assert kept.aggregate_id == ticket_a
+    assert kept.detail == {"note": "synthetic-cross-box-audit"}
+    assert kept.box_id == box_2
+    moved_kept = session.get(AuditEvent, foreign_audit_id)
+    assert moved_kept is not None
+    assert moved_kept.aggregate_id == ticket_e
+    assert moved_kept.detail == {"note": "synthetic-move-audit"}
+
+
+def test_rootless_preview_counts_blob_keys(practice) -> None:
+    """Gap (d): Azure-style empty file_roots still preview-counts keyed blobs."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_a = str(casey["patient_id"])
+    with_roots = delete_patient_records(
+        session,
+        actor_principal_id=owner,
+        patient_link_id=patient_a,
+        confirm=False,
+        blob=blob,
+        file_roots=storage_roots(blob),
+    )
+    rootless = delete_patient_records(
+        session,
+        actor_principal_id=owner,
+        patient_link_id=patient_a,
+        confirm=False,
+        blob=blob,
+        file_roots=[],
+    )
+    # Audio/exports are often found only by scanning local roots; keyed uploads
+    # must still preview-count when roots are empty (Azure-style blob stores).
+    assert int(rootless["files"]["uploads"]) == int(with_roots["files"]["uploads"])
+    assert int(rootless["files"]["uploads"]) >= 2
+    assert session.get(PatientLink, patient_a) is not None

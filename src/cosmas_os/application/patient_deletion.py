@@ -126,14 +126,14 @@ def delete_patient_records(
             confirm=False,
             deleted=False,
             tables=_table_counts(plan.get("tables")),
-            files=_file_counts(files),
+            files=_file_counts(files, file_roots),
             pending_files_finished=0,
             exclusive_retained=_table_counts(plan.get("exclusive_retained")),
         )
 
     plan = _plan(session, patient_id)
     files = _collect_files_for_plan(session, plan, file_roots)
-    file_counts = _file_counts(files)
+    file_counts = _file_counts(files, file_roots)
     try:
         _record_pending_files(session, patient_id, patient_box, files, file_roots)
         result = _apply_secure_deletion(session, patient_id)
@@ -658,10 +658,14 @@ def _scan(root: Path, deleted_ids: set[str]) -> list[Path]:
     return found
 
 
-def _file_counts(files: Sequence[_StoredFile]) -> dict[str, int]:
+def _file_counts(files: Sequence[_StoredFile], roots: Sequence[Path]) -> dict[str, int]:
     counts = {"audio": 0, "uploads": 0, "exports": 0}
     for item in files:
-        if item.path is not None and item.path.exists():
+        # Rootless blob stores (Azure) have no local path; _delete_files still
+        # deletes every blob_key, so count it.
+        if (item.path is not None and item.path.exists()) or (
+            not roots and item.blob_key is not None
+        ):
             counts[item.kind] += 1
     return counts
 
