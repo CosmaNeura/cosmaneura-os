@@ -49,6 +49,21 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
+Portable compose path (owned clients + frozen scaffold), synthetic web bundle,
+and automatic mic-permission Simulator test — one Mac command against any PR
+head in a throwaway temp folder (never an existing Desktop checkout):
+
+```sh
+./scripts/run-iphone-sim-record-test.sh 349
+```
+
+Synthetic web bundle only (`pk_test_` + `*.synthetic.example`, no secrets):
+
+```sh
+node scripts/prepare-synthetic-iphone-web-bundle.mjs \
+  --output /absolute/path/to/fresh-synthetic-apple-renderer
+```
+
 Owned iPhone builds use Capacitor 8.5.0 from
 `clients/apple/vendor/capacitor-swift-pm-8.5.0` (local path binary targets;
 release-asset SHA-256 recorded in that directory's SOURCE_MANIFEST.json).

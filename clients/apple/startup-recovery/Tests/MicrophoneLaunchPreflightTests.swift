@@ -11,15 +11,15 @@ import XCTest
 /// `requestRecordPermission` (no prompt) but still touches `AVAudioSession` /
 /// `AVAudioEngine`, which surfaces as a silent `kTCCServiceMicrophone` preflight.
 ///
-/// CosmaBot-side mitigation in this PR (clients/apple only):
+/// CosmaBot-side mitigation (clients/apple):
 /// Debug `com.cosmasos.synthetic` presents `CosmasSyntheticDemoSurface` and
 /// returns before `openWorkspace()` / `CosmasBridgeViewController`, so Capacitor
-/// never loads `IOSPCMCapacitorPlugin` on that configuration — no mic touch.
+/// never loads `IOSPCMCapacitorPlugin` on that default configuration — no mic touch.
 ///
-/// Residual: Release/TestFlight capture-off builds that open the WebView still
-/// register the plugin. Deferring live AVFoundation until an explicit start
-/// requires editing `IOSPCMCapacitorPlugin.load()` (clients/capture), which is
-/// outside this PR's clients/apple-only scope.
+/// `-COSMAS_SKIP_SYNTHETIC_DEMO` opens the real bridge/plugin path for the
+/// automatic mic-permission XCUITest. Lazy AVAudioEngine (T-REL-7b) keeps
+/// launch-with-capture-off free of a microphone permission prompt; start
+/// recording requests permission only then.
 final class MicrophoneLaunchPreflightTests: XCTestCase {
     func testDebugSyntheticDemoReturnsBeforeWorkspaceBridge() throws {
         let root = URL(fileURLWithPath: #filePath)

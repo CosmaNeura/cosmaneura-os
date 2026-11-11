@@ -7,10 +7,12 @@
 
 /* Begin PBXBuildFile section */
 		A10000000000000000000011 /* VisitTimerAndChiefIconUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000C /* VisitTimerAndChiefIconUITests.swift */; };
+		A10000000000000000000013 /* MicrophonePermissionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* MicrophonePermissionUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A1000000000000000000000C /* VisitTimerAndChiefIconUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisitTimerAndChiefIconUITests.swift; sourceTree = "<group>"; };
+		A10000000000000000000012 /* MicrophonePermissionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophonePermissionUITests.swift; sourceTree = "<group>"; };
 		A10000000000000000000010 /* CosmasSyntheticUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CosmasSyntheticUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -37,6 +39,7 @@
 			isa = PBXGroup;
 			children = (
 				A1000000000000000000000C /* VisitTimerAndChiefIconUITests.swift */,
+				A10000000000000000000012 /* MicrophonePermissionUITests.swift */,
 			);
 			path = CosmasSyntheticUITests;
 			sourceTree = "<group>";
@@ -118,6 +121,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000011 /* VisitTimerAndChiefIconUITests.swift in Sources */,
+				A10000000000000000000013 /* MicrophonePermissionUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

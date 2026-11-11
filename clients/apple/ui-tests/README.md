@@ -7,6 +7,33 @@ rows) without sign-in or network. That surface is wrapped in `#if DEBUG` and
 scoped to the synthetic bundle id, so Release/TestFlight binaries compile it out
 (see `prove_release_excludes_demo_fixture.py` and `SyntheticDemoFixtureGate`).
 
+`MicrophonePermissionUITests` skips that demo (`-COSMAS_SKIP_SYNTHETIC_DEMO`) and
+drives the real Capacitor / `IOSPCMCapacitorPlugin` path. Reset mic privacy first:
+`xcrun simctl privacy <udid> reset microphone`.
+
+## One Mac command (any PR head, throwaway temp)
+
+From a checkout that contains the runner (this PR), against PR 349 or any SHA:
+
+```sh
+./scripts/run-iphone-sim-record-test.sh 349
+./scripts/run-iphone-sim-record-test.sh 179e739f
+```
+
+That clones into a fresh temp directory (never `~/Desktop/cosmaneura-os`),
+composes the unsigned `com.cosmasos.synthetic` Simulator app with a synthetic
+web bundle, resets microphone privacy, and runs `MicrophonePermissionUITests`.
+
+## Synthetic web bundle (one command)
+
+```sh
+node scripts/prepare-synthetic-iphone-web-bundle.mjs \
+  --output /absolute/path/to/fresh-synthetic-apple-renderer
+```
+
+Inputs are `pk_test_` + `*.synthetic.example` only. Pass
+`<output>/renderer/dist` through `scripts/configure-synthetic-iphone-simulator.py`.
+
 ## Generate / run from a repo checkout
 
 ```sh

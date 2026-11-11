@@ -2,6 +2,7 @@ import UIKit
 import WebKit
 import Capacitor
 import CosmaneuraIOSPCMCapacitor
+import AVFAudio
 #if canImport(CosmasWorkspaceAuthPlugin)
 import CosmasWorkspaceAuthPlugin
 #endif
@@ -194,6 +195,16 @@ import CosmasNativeAuth
         catch { quarantine(); onFailure?(); return }
         startedNavigation = true
         super.viewDidLoad()
+        #if DEBUG
+        // Synthetic Simulator XCUITest only: after the real IOSPCM plugin path is
+        // loaded, optionally request mic permission the same way plugin start does.
+        // Never compiled into Release/TestFlight.
+        if Bundle.main.bundleIdentifier == "com.cosmasos.synthetic",
+           ProcessInfo.processInfo.arguments.contains("-COSMAS_UI_TEST_START_CAPTURE"),
+           capturePlugin != nil {
+            Task { _ = await AVAudioApplication.requestRecordPermission() }
+        }
+        #endif
     }
 
     fileprivate func receive(_ message: WKScriptMessage) {

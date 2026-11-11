@@ -571,9 +571,17 @@ import CosmasNativeAuth
 @MainActor final class CosmasSyntheticDemoSurface: UIViewController {
     /// Optional XCUITest opt-in; Debug synthetic also enables without it.
     static let launchArgument = "-COSMAS_UI_TEST_FIXTURES"
+    /// Skip the invented demo surface and open the real Capacitor workspace /
+    /// native plugin path (IOSPCMCapacitorPlugin). Used by the mic-permission
+    /// Simulator XCUITest; Release builds never compile this type.
+    static let skipLaunchArgument = "-COSMAS_SKIP_SYNTHETIC_DEMO"
+    /// After the real bridge loads, request microphone permission through the
+    /// same AVAudioApplication API the native plugin start path uses.
+    static let startCaptureLaunchArgument = "-COSMAS_UI_TEST_START_CAPTURE"
 
     static var isEnabled: Bool {
         Bundle.main.bundleIdentifier == "com.cosmasos.synthetic"
+            && !ProcessInfo.processInfo.arguments.contains(skipLaunchArgument)
     }
 
     /// Proof hook for unit tests: this type exists only under DEBUG.
