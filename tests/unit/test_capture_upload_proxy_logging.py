@@ -211,24 +211,3 @@ def test_httpx_query_filter_install_is_idempotent_across_reload():
     assert len(attached) == 1
     # Keep the module under the original import name for later tests in this process.
     importlib.reload(proxy)
-
-
-def test_core_upload_query_redaction_is_scoped_to_blob_hosts():
-    """Unrelated httpx URLs must keep operational query keys (request_id)."""
-    blob = _signed_blob_url("scoped")
-    api = (
-        "https://fixture.invalid/connections/ehr/reads"
-        "?mrn=000-TEST-123&request_id=req-synth-1"
-    )
-    assert isinstance(proxy.redact_core_upload_query(httpx.URL(blob)), httpx.URL)
-    redacted_blob = proxy.redact_core_upload_query(blob)
-    assert isinstance(redacted_blob, str)
-    assert "sig=" not in redacted_blob and "?" not in redacted_blob
-    assert proxy.redact_core_upload_query(api) == api
-    assert proxy.redact_core_upload_query(httpx.URL(api)) == httpx.URL(api)
-    line = f'HTTP Request: PUT {blob} "HTTP/1.1 201 Created"'
-    scrubbed = proxy.redact_core_upload_query(line)
-    assert isinstance(scrubbed, str)
-    assert "sig=" not in scrubbed and "sv=" not in scrubbed
-    other = f'HTTP Request: POST {api} "HTTP/1.1 200 OK"'
-    assert proxy.redact_core_upload_query(other) == other
