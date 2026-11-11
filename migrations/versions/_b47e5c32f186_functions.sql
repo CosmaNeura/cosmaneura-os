@@ -696,7 +696,10 @@ BEGIN
     RAISE EXCEPTION 'patient records could not be deleted';
   END IF;
 
-  SELECT pl.box_id INTO v_box FROM public.patient_links pl WHERE pl.id = p_patient;
+  SELECT pl.box_id INTO v_box
+    FROM public.patient_links pl
+   WHERE pl.id = p_patient
+   FOR UPDATE OF pl;
   IF v_box IS NULL THEN
     RAISE EXCEPTION 'patient not found';
   END IF;
@@ -969,3 +972,256 @@ BEGIN
   RETURN public._cosmas_apply_patient_deletion_mutate(p_patient);
 END
 $d$;
+
+-- Admin LOGIN needs only membership + EXECUTE on these helpers (L1).
+
+CREATE OR REPLACE FUNCTION public.patient_deletion_resolve_admin()
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $r$
+DECLARE
+  v_principal uuid;
+  v_box uuid;
+  v_ok boolean;
+BEGIN
+  IF NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  SELECT b.principal_id, b.box_id INTO v_principal, v_box
+    FROM public.patient_deletion_admin_bindings b
+   WHERE b.db_role = session_user;
+  IF v_principal IS NULL OR v_box IS NULL THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  SELECT (p.principal_type = 'human' AND p.state = 'active' AND p.is_owner AND p.box_id = v_box)
+    INTO v_ok
+    FROM public.principals p WHERE p.id = v_principal;
+  IF v_ok IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  RETURN jsonb_build_object(
+    'principal_id', v_principal::text,
+    'box_id', v_box::text
+  );
+END
+$r$;
+
+CREATE OR REPLACE FUNCTION public.patient_deletion_collect_file_keys(p_pks jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $c$
+DECLARE
+  v_out jsonb := '[]'::jsonb;
+  v_table text;
+  v_values text[];
+  v_pk_cols text[];
+  v_file_cols text[];
+  v_pk_expr text;
+  v_sql text;
+  v_kind text;
+  v_path text;
+  v_col text;
+  v_box text;
+  v_workspace text;
+  v_owner text;
+  v_artifact text;
+BEGIN
+  IF p_pks IS NULL OR jsonb_typeof(p_pks) <> 'object' THEN
+    RETURN '[]'::jsonb;
+  END IF;
+  FOR v_table IN SELECT jsonb_object_keys(p_pks) ORDER BY 1 LOOP
+    SELECT ARRAY(SELECT jsonb_array_elements_text(COALESCE(p_pks -> v_table, '[]'::jsonb)))
+      INTO v_values;
+    IF coalesce(array_length(v_values, 1), 0) = 0 THEN
+      CONTINUE;
+    END IF;
+    SELECT array_agg(a.attname ORDER BY k.ord)
+      INTO v_pk_cols
+      FROM pg_constraint pk
+      JOIN pg_class c ON c.oid = pk.conrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
+      JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
+     WHERE pk.contype = 'p' AND n.nspname = 'public' AND c.relname = v_table;
+    IF v_pk_cols IS NULL THEN
+      CONTINUE;
+    END IF;
+    v_pk_expr := public._cosmas_pk_text_expr('t', v_pk_cols);
+    SELECT array_agg(a.attname ORDER BY a.attname)
+      INTO v_file_cols
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relname = v_table
+       AND NOT a.attisdropped AND a.attnum > 0
+       AND a.attname = ANY (ARRAY[
+         'blob_key','file_key','storage_key','object_key',
+         'audio_key','audio_path','export_key','export_path'
+       ]);
+    IF coalesce(array_length(v_file_cols, 1), 0) > 0 THEN
+      FOREACH v_col IN ARRAY v_file_cols LOOP
+        v_kind := CASE
+          WHEN v_col IN ('audio_key', 'audio_path') THEN 'audio'
+          WHEN v_col IN ('export_key', 'export_path') THEN 'exports'
+          ELSE 'uploads'
+        END;
+        v_sql := format(
+          'SELECT t.%I::text FROM public.%I t WHERE %s = ANY ($1) AND t.%I IS NOT NULL',
+          v_col, v_table, v_pk_expr, v_col
+        );
+        FOR v_path IN EXECUTE v_sql USING v_values LOOP
+          IF v_path IS NULL OR v_path = '' OR position('/' in v_path) = 1
+             OR position('..' in v_path) > 0 THEN
+            CONTINUE;
+          END IF;
+          v_out := v_out || jsonb_build_array(
+            jsonb_build_object('kind', v_kind, 'path', v_path)
+          );
+        END LOOP;
+      END LOOP;
+    END IF;
+    IF v_table = 'vendor_artifacts' THEN
+      v_sql := format(
+        'SELECT t.box_id::text, t.workspace_id::text, t.owner_id::text, t.artifact_id::text
+           FROM public.vendor_artifacts t WHERE %s = ANY ($1)',
+        v_pk_expr
+      );
+      FOR v_box, v_workspace, v_owner, v_artifact IN EXECUTE v_sql USING v_values LOOP
+        v_path := format(
+          '%s/vendor-documents/%s/%s/%s.pdf',
+          v_box, v_workspace, v_owner, v_artifact
+        );
+        v_out := v_out || jsonb_build_array(
+          jsonb_build_object('kind', 'exports', 'path', v_path)
+        );
+      END LOOP;
+    END IF;
+  END LOOP;
+  RETURN v_out;
+END
+$c$;
+
+CREATE OR REPLACE FUNCTION public.patient_deletion_pending_list(p_box uuid)
+RETURNS TABLE(id uuid, kind text, relative_path text)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $l$
+BEGIN
+  IF p_box IS NULL OR NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.patient_deletion_admin_bindings b
+     WHERE b.db_role = session_user AND b.box_id = p_box
+  ) THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  RETURN QUERY
+    SELECT f.id, f.kind::text, f.relative_path::text
+      FROM public.patient_deletion_pending_files f
+     WHERE f.box_id = p_box
+     ORDER BY f.created_at, f.id
+     FOR UPDATE OF f;
+END
+$l$;
+
+CREATE OR REPLACE FUNCTION public.patient_deletion_pending_record(
+  p_patient uuid, p_box uuid, p_files jsonb
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $rec$
+DECLARE
+  item jsonb;
+BEGIN
+  IF NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.patient_deletion_admin_bindings b
+     WHERE b.db_role = session_user AND b.box_id = p_box
+  ) THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  IF p_files IS NULL OR jsonb_typeof(p_files) <> 'array' THEN
+    RETURN;
+  END IF;
+  FOR item IN SELECT * FROM jsonb_array_elements(p_files) LOOP
+    IF coalesce(item ->> 'path', '') = '' OR coalesce(item ->> 'kind', '') = '' THEN
+      CONTINUE;
+    END IF;
+    INSERT INTO public.patient_deletion_pending_files (
+      patient_link_id, box_id, kind, relative_path
+    ) VALUES (
+      p_patient, p_box, item ->> 'kind', item ->> 'path'
+    );
+  END LOOP;
+END
+$rec$;
+
+CREATE OR REPLACE FUNCTION public.patient_deletion_pending_clear(
+  p_patient uuid, p_paths text[]
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $clr$
+BEGIN
+  IF NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  IF coalesce(array_length(p_paths, 1), 0) = 0 THEN
+    DELETE FROM public.patient_deletion_pending_files
+     WHERE patient_link_id = p_patient;
+  ELSE
+    DELETE FROM public.patient_deletion_pending_files
+     WHERE patient_link_id = p_patient
+       AND relative_path = ANY (p_paths);
+  END IF;
+END
+$clr$;
+
+CREATE OR REPLACE FUNCTION public.patient_deletion_pending_delete(p_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $del$
+BEGIN
+  IF NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  DELETE FROM public.patient_deletion_pending_files WHERE id = p_id;
+END
+$del$;
+
+CREATE OR REPLACE FUNCTION public.patient_deletion_patient_box(p_patient uuid)
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $b$
+DECLARE
+  v_box text;
+BEGIN
+  IF p_patient IS NULL THEN
+    RAISE EXCEPTION 'patient not found';
+  END IF;
+  SELECT pl.box_id::text INTO v_box FROM public.patient_links pl WHERE pl.id = p_patient;
+  IF v_box IS NULL THEN
+    RAISE EXCEPTION 'patient not found';
+  END IF;
+  RETURN v_box;
+END
+$b$;

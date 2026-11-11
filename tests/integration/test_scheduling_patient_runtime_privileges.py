@@ -124,7 +124,7 @@ def assert_runtime_contract(r):
             "JOIN pg_roles member ON member.oid=m.member WHERE member.rolname=current_user)")) is True
         permitted = set(connection.scalars(text("SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
             "WHERE n.nspname='public' AND has_function_privilege(current_user,p.oid,'EXECUTE')")))
-        assert permitted == set(preparation._runtime_validator_oids(connection) or ()) and len(permitted) == 7
+        assert permitted == set(preparation._runtime_allowed_execute_oids(connection) or ())
         for signature in DEFINERS + INVOKERS:
             row = connection.execute(text("""SELECT p.prosecdef,p.proconfig,pg_get_userbyid(p.proowner),
                 has_function_privilege(current_user,p.oid,'EXECUTE'),

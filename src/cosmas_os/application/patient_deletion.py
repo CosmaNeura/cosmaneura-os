@@ -17,8 +17,8 @@ the actor, the time, and the patient's internal id only.
 
 from __future__ import annotations
 
+import json
 import os
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,26 +26,21 @@ from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from cosmas_os.domain.enums import PrincipalState, PrincipalType
 from cosmas_os.domain.rules import AuthorizationError, DomainError
-from cosmas_os.models import PatientLink, Principal
+from cosmas_os.models import Principal
 
-_IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
-_FILE_COLUMNS = {
-    "blob_key": "uploads",
-    "file_key": "uploads",
-    "storage_key": "uploads",
-    "object_key": "uploads",
-    "audio_key": "audio",
-    "audio_path": "audio",
-    "export_key": "exports",
-    "export_path": "exports",
-}
 _AUDIO_SUFFIXES = {".wav", ".m4a", ".mp3", ".flac", ".ogg", ".aac"}
-_PENDING_FILES_MSG = (
-    "database delete completed; stored files pending; rerun finishes them"
+_PENDING_FILES_MSG = "database delete completed; stored files pending; rerun finishes them"
+_DB_REASON_CODES = (
+    "schema not classified for patient deletion",
+    "admin authority required",
+    "patient not found",
+    "patient records could not be deleted",
+    "deletion role not configured",
 )
 
 
@@ -101,24 +96,26 @@ def delete_patient_records(
             session, blob, file_roots, box_id=str(actor.box_id)
         )
 
-    statement = select(PatientLink).where(PatientLink.id == patient_id)
-    if confirm:
-        statement = statement.with_for_update().execution_options(populate_existing=True)
-    patient = session.scalar(statement)
-    if patient is None:
-        if confirm:
+    # Lookup may RAISE inside SQL and abort the txn; use a savepoint so pending
+    # file deletes from above remain committable when the patient is already gone.
+    nested = session.begin_nested()
+    try:
+        patient_box = _patient_box(session, patient_id)
+        nested.commit()
+    except DomainError:
+        nested.rollback()
+        if confirm and pending_finished > 0:
             session.commit()
-            if pending_finished > 0:
-                return _report(
-                    patient_id,
-                    confirm=True,
-                    deleted=False,
-                    tables={},
-                    files={},
-                    pending_files_finished=pending_finished,
-                )
-        raise DomainError("patient not found")
-    if patient.box_id != actor.box_id:
+            return _report(
+                patient_id,
+                confirm=True,
+                deleted=False,
+                tables={},
+                files={},
+                pending_files_finished=pending_finished,
+            )
+        raise
+    if patient_box != str(actor.box_id):
         raise AuthorizationError("admin authority required")
 
     if not confirm:
@@ -138,12 +135,15 @@ def delete_patient_records(
     files = _collect_files_for_plan(session, plan, file_roots)
     file_counts = _file_counts(files)
     try:
-        _record_pending_files(session, patient_id, str(patient.box_id), files, file_roots)
+        _record_pending_files(session, patient_id, patient_box, files, file_roots)
         result = _apply_secure_deletion(session, patient_id)
         session.commit()
-    except Exception:
+    except (AuthorizationError, DomainError):
         session.rollback()
         raise
+    except Exception as exc:
+        session.rollback()
+        raise _map_delete_failure(exc) from None
 
     tables = _table_counts(result.get("tables"))
     try:
@@ -200,31 +200,77 @@ def _require_deletion_role(session: Session) -> None:
 
 
 def _resolve_bound_admin(session: Session) -> Principal:
-    row = session.execute(
-        text(
-            """
-            SELECT b.principal_id::text, b.box_id::text
-              FROM public.patient_deletion_admin_bindings b
-             WHERE b.db_role = session_user
-            """
+    """Resolve the bound practice owner via SECURITY DEFINER (no table SELECT)."""
+
+    try:
+        raw = session.scalar(text("SELECT public.patient_deletion_resolve_admin()"))
+    except SQLAlchemyError as exc:
+        mapped = _map_db_reason(exc)
+        if mapped is not None:
+            if str(mapped) == "admin authority required":
+                raise AuthorizationError("admin authority required") from None
+            raise mapped from None
+        raise AuthorizationError("admin authority required") from None
+    if not isinstance(raw, dict):
+        raise AuthorizationError("admin authority required")
+    principal_id = str(raw.get("principal_id") or "")
+    box_id = str(raw.get("box_id") or "")
+    if not principal_id or not box_id:
+        raise AuthorizationError("admin authority required")
+    # DEFINER already validated human/active/owner. Do not SELECT principals —
+    # the documented admin LOGIN has no table rights, and a denied SELECT would
+    # abort the transaction before pending-file helpers run.
+    return Principal(
+        id=principal_id,
+        box_id=box_id,
+        principal_type=PrincipalType.HUMAN.value,
+        display_name="bound-admin",
+        is_owner=True,
+        state=PrincipalState.ACTIVE.value,
+    )
+
+
+def _patient_box(session: Session, patient_id: str) -> str:
+    """Return the patient's box_id via SECURITY DEFINER (no table SELECT)."""
+
+    try:
+        box = session.scalar(
+            text("SELECT public.patient_deletion_patient_box(CAST(:patient AS uuid))"),
+            {"patient": patient_id},
         )
-    ).first()
-    if row is None:
-        raise AuthorizationError("admin authority required")
-    if not session.scalar(
-        text("SELECT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER')")
-    ):
-        raise AuthorizationError("admin authority required")
-    principal = session.scalar(select(Principal).where(Principal.id == str(row[0])))
-    if (
-        principal is None
-        or principal.principal_type != PrincipalType.HUMAN.value
-        or principal.state != PrincipalState.ACTIVE.value
-        or not principal.is_owner
-        or str(principal.box_id) != str(row[1])
-    ):
-        raise AuthorizationError("admin authority required")
-    return principal
+    except SQLAlchemyError as exc:
+        mapped = _map_db_reason(exc)
+        if mapped is not None:
+            raise mapped from None
+        raise DomainError("patient not found") from None
+    if box is None:
+        raise DomainError("patient not found")
+    return str(box)
+
+
+def _map_db_reason(exc: BaseException) -> DomainError | AuthorizationError | None:
+    text_blob = " ".join(
+        part
+        for part in (
+            str(exc),
+            str(getattr(exc, "orig", "") or ""),
+            str(getattr(getattr(exc, "orig", None), "diag", "") or ""),
+        )
+        if part
+    ).lower()
+    for reason in _DB_REASON_CODES:
+        if reason.lower() in text_blob:
+            if reason == "admin authority required":
+                return AuthorizationError(reason)
+            return DomainError(reason)
+    return None
+
+
+def _map_delete_failure(exc: BaseException) -> DomainError | AuthorizationError:
+    mapped = _map_db_reason(exc)
+    if mapped is not None:
+        return mapped
+    return DomainError("patient records could not be deleted")
 
 
 def _require_admin(session: Session, actor_principal_id: str, *, lock: bool) -> Principal:
@@ -288,12 +334,6 @@ def _report(
     return out
 
 
-def _quote(name: str) -> str:
-    if _IDENT.fullmatch(name) is None:
-        raise DomainError("patient records could not be deleted")
-    return '"' + name + '"'
-
-
 def _table_counts(value: object) -> dict[str, int]:
     if not isinstance(value, dict):
         return {}
@@ -301,10 +341,16 @@ def _table_counts(value: object) -> dict[str, int]:
 
 
 def _plan(session: Session, patient_id: str) -> dict[str, object]:
-    raw = session.scalar(
-        text("SELECT public.delete_patient_keyed_records_plan(CAST(:patient AS uuid))"),
-        {"patient": patient_id},
-    )
+    try:
+        raw = session.scalar(
+            text("SELECT public.delete_patient_keyed_records_plan(CAST(:patient AS uuid))"),
+            {"patient": patient_id},
+        )
+    except SQLAlchemyError as exc:
+        mapped = _map_db_reason(exc)
+        if mapped is not None:
+            raise mapped from None
+        raise DomainError("patient records could not be deleted") from None
     if not isinstance(raw, dict):
         raise DomainError("patient records could not be deleted")
     return raw
@@ -312,11 +358,17 @@ def _plan(session: Session, patient_id: str) -> dict[str, object]:
 
 def _apply_secure_deletion(session: Session, patient_id: str) -> dict[str, object]:
     # SET LOCAL ROLE reverts automatically at transaction end.
-    session.execute(text("SET LOCAL ROLE cosmas_patient_deletion"))
-    raw = session.scalar(
-        text("SELECT public.delete_patient_keyed_records(CAST(:patient AS uuid))"),
-        {"patient": patient_id},
-    )
+    try:
+        session.execute(text("SET LOCAL ROLE cosmas_patient_deletion"))
+        raw = session.scalar(
+            text("SELECT public.delete_patient_keyed_records(CAST(:patient AS uuid))"),
+            {"patient": patient_id},
+        )
+    except SQLAlchemyError as exc:
+        mapped = _map_db_reason(exc)
+        if mapped is not None:
+            raise mapped from None
+        raise DomainError("patient records could not be deleted") from None
     if not isinstance(raw, dict):
         raise DomainError("patient records could not be deleted")
     return raw
@@ -348,13 +400,10 @@ def _relative_for(path: Path, roots: Sequence[Path]) -> str | None:
     return None
 
 
-def _record_pending_files(
-    session: Session,
-    patient_id: str,
-    box_id: str,
-    files: Sequence[_StoredFile],
-    roots: Sequence[Path],
-) -> None:
+def _pending_file_payload(
+    files: Sequence[_StoredFile], roots: Sequence[Path]
+) -> list[dict[str, str]]:
+    payload: list[dict[str, str]] = []
     for item in files:
         relative = item.relative_path
         if relative is None and item.path is not None:
@@ -365,18 +414,38 @@ def _record_pending_files(
             continue
         if item.path is not None and not item.path.exists() and item.blob_key is None:
             continue
+        payload.append({"kind": item.kind, "path": relative})
+    return payload
+
+
+def _record_pending_files(
+    session: Session,
+    patient_id: str,
+    box_id: str,
+    files: Sequence[_StoredFile],
+    roots: Sequence[Path],
+) -> None:
+    payload = _pending_file_payload(files, roots)
+    if not payload:
+        return
+    try:
         session.execute(
             text(
                 """
-                INSERT INTO public.patient_deletion_pending_files (
-                  patient_link_id, box_id, kind, relative_path
-                ) VALUES (
-                  CAST(:patient AS uuid), CAST(:box AS uuid), :kind, :path
+                SELECT public.patient_deletion_pending_record(
+                  CAST(:patient AS uuid),
+                  CAST(:box AS uuid),
+                  CAST(:files AS jsonb)
                 )
                 """
             ),
-            {"patient": patient_id, "box": box_id, "kind": item.kind, "path": relative},
+            {"patient": patient_id, "box": box_id, "files": json.dumps(payload)},
         )
+    except SQLAlchemyError as exc:
+        mapped = _map_db_reason(exc)
+        if mapped is not None:
+            raise mapped from None
+        raise
 
 
 def _clear_pending_files(
@@ -394,25 +463,23 @@ def _clear_pending_files(
             relative = item.blob_key
         if relative is not None:
             paths.add(relative)
-    if not paths:
+    try:
         session.execute(
             text(
-                "DELETE FROM public.patient_deletion_pending_files "
-                "WHERE patient_link_id = CAST(:patient AS uuid)"
+                """
+                SELECT public.patient_deletion_pending_clear(
+                  CAST(:patient AS uuid),
+                  CAST(:paths AS text[])
+                )
+                """
             ),
-            {"patient": patient_id},
+            {"patient": patient_id, "paths": list(paths)},
         )
-        return
-    session.execute(
-        text(
-            """
-            DELETE FROM public.patient_deletion_pending_files
-             WHERE patient_link_id = CAST(:patient AS uuid)
-               AND relative_path = ANY(CAST(:paths AS text[]))
-            """
-        ),
-        {"patient": patient_id, "paths": list(paths)},
-    )
+    except SQLAlchemyError as exc:
+        mapped = _map_db_reason(exc)
+        if mapped is not None:
+            raise mapped from None
+        raise
 
 
 def _finish_pending_files(
@@ -422,20 +489,21 @@ def _finish_pending_files(
     *,
     box_id: str,
 ) -> int:
-    rows = list(
-        session.execute(
-            text(
-                """
-                SELECT id::text, kind, relative_path
-                  FROM public.patient_deletion_pending_files
-                 WHERE box_id = CAST(:box AS uuid)
-                 ORDER BY created_at, id
-                FOR UPDATE
-                """
-            ),
-            {"box": box_id},
+    try:
+        rows = list(
+            session.execute(
+                text(
+                    "SELECT id::text, kind, relative_path "
+                    "FROM public.patient_deletion_pending_list(CAST(:box AS uuid))"
+                ),
+                {"box": box_id},
+            )
         )
-    )
+    except SQLAlchemyError as exc:
+        mapped = _map_db_reason(exc)
+        if mapped is not None:
+            raise mapped from None
+        raise
     if not rows:
         return 0
     finished = 0
@@ -456,12 +524,16 @@ def _finish_pending_files(
                 _unlink(path)
                 deleted = True
         if deleted:
-            session.execute(
-                text(
-                    "DELETE FROM public.patient_deletion_pending_files WHERE id = CAST(:id AS uuid)"
-                ),
-                {"id": pending_id},
-            )
+            try:
+                session.execute(
+                    text("SELECT public.patient_deletion_pending_delete(CAST(:id AS uuid))"),
+                    {"id": pending_id},
+                )
+            except SQLAlchemyError as exc:
+                mapped = _map_db_reason(exc)
+                if mapped is not None:
+                    raise mapped from None
+                raise
             finished += 1
             del kind
     return finished
@@ -475,89 +547,26 @@ def _collect_files_for_plan(
     pks = plan.get("pks")
     if not isinstance(pks, dict):
         pks = {}
-    columns: dict[str, set[str]] = {}
-    for table, column in session.execute(
-        text(
-            """
-            SELECT table_name, column_name
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-            """
-        )
-    ):
-        columns.setdefault(str(table), set()).add(str(column))
-    keys: dict[str, tuple[str, ...]] = {}
-    for table, pk_cols in session.execute(
-        text(
-            """
-            SELECT c.relname,
-                   (SELECT array_agg(a.attname ORDER BY k.ord)
-                      FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                      JOIN pg_attribute a
-                        ON a.attrelid = con.conrelid AND a.attnum = k.attnum)
-              FROM pg_constraint con
-              JOIN pg_class c ON c.oid = con.conrelid
-              JOIN pg_namespace n ON n.oid = c.relnamespace
-             WHERE con.contype = 'p' AND n.nspname = 'public'
-            """
-        )
-    ):
-        if pk_cols:
-            keys[str(table)] = tuple(str(col) for col in pk_cols)
     stored: dict[str, _StoredFile] = {}
-    for table, values in pks.items():
-        if not isinstance(values, list) or not values:
-            continue
-        key = keys.get(str(table))
-        if key is None:
-            continue
-        named = tuple(column for column in _FILE_COLUMNS if column in columns.get(str(table), set()))
-        if named:
-            selected = ", ".join(f"t.{_quote(column)}::text" for column in named)
-            pk_expr = (
-                f"t.{_quote(key[0])}::text"
-                if len(key) == 1
-                else " || ',' || ".join(f"t.{_quote(col)}::text" for col in key)
-            )
-            for record in session.execute(
-                text(
-                    f"SELECT {selected} FROM public.{_quote(str(table))} AS t "
-                    f"WHERE ({pk_expr}) = ANY(CAST(:pks AS text[]))"
-                ),
-                {"pks": [str(v) for v in values]},
-            ):
-                for column, value in zip(named, record, strict=True):
-                    if isinstance(value, str) and value and _safe_relative(value):
-                        _add_file(
-                            stored,
-                            _StoredFile(_FILE_COLUMNS[column], value, None, value),
-                            file_roots,
-                        )
-        if str(table) == "vendor_artifacts" and {
-            "box_id",
-            "workspace_id",
-            "owner_id",
-            "artifact_id",
-        } <= columns.get(str(table), set()):
-            pk_expr = (
-                f"t.{_quote(key[0])}::text"
-                if len(key) == 1
-                else " || ',' || ".join(f"t.{_quote(col)}::text" for col in key)
-            )
-            for box_id, workspace_id, owner_id, artifact_id in session.execute(
-                text(
-                    "SELECT t.box_id::text, t.workspace_id::text, t.owner_id::text, "
-                    "t.artifact_id::text FROM public.vendor_artifacts AS t "
-                    f"WHERE ({pk_expr}) = ANY(CAST(:pks AS text[]))"
-                ),
-                {"pks": [str(v) for v in values]},
-            ):
-                relative = f"{box_id}/vendor-documents/{workspace_id}/{owner_id}/{artifact_id}.pdf"
-                _add_file(
-                    stored,
-                    _StoredFile("exports", relative, None, relative),
-                    file_roots,
-                )
+    try:
+        raw = session.scalar(
+            text("SELECT public.patient_deletion_collect_file_keys(CAST(:pks AS jsonb))"),
+            {"pks": json.dumps(pks)},
+        )
+    except SQLAlchemyError as exc:
+        mapped = _map_db_reason(exc)
+        if mapped is not None:
+            raise mapped from None
+        raise DomainError("patient records could not be deleted") from None
+    if isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind") or "")
+            path = str(item.get("path") or "")
+            if kind not in {"audio", "uploads", "exports"} or not _safe_relative(path):
+                continue
+            _add_file(stored, _StoredFile(kind, path, None, path), file_roots)
     deleted_ids = _deleted_ids_from_plan(plan)
     for root in file_roots:
         for path in _scan(root, deleted_ids):

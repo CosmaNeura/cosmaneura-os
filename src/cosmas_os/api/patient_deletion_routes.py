@@ -12,6 +12,8 @@ from cosmas_os.application.patient_deletion import delete_patient_records, stora
 from cosmas_os.application.services import Container
 from cosmas_os.domain.rules import AuthorizationError, DomainError
 
+_NO_STORE = {"Cache-Control": "no-store"}
+
 
 class PatientDeletionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -37,6 +39,7 @@ def router(*, get_session, identity):
             raise HTTPException(
                 status_code=403,
                 detail="patient record deletion is only available to the admin command",
+                headers=_NO_STORE,
             )
         container = Container(session)
         try:
@@ -49,10 +52,12 @@ def router(*, get_session, identity):
                 file_roots=storage_roots(container.blob),
             )
         except AuthorizationError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from None
+            raise HTTPException(status_code=403, detail=str(exc), headers=_NO_STORE) from None
         except DomainError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
+            raise HTTPException(status_code=400, detail=str(exc), headers=_NO_STORE) from None
         except (SQLAlchemyError, OSError):
-            raise HTTPException(status_code=500, detail="internal error") from None
+            raise HTTPException(
+                status_code=500, detail="internal error", headers=_NO_STORE
+            ) from None
 
     return routes

@@ -1,8 +1,11 @@
 -- John's idempotent operator step for patient-record deletion.
 -- Agents and CI must never run this against a real database.
 --
+-- Run as the database owner / superuser (CREATEROLE alone is not enough for
+-- the REVOKE/GRANT on existing tables and SECURITY DEFINER functions).
+--
 -- Create the NOLOGIN role if missing, revoke table rights, and grant EXECUTE
--- on the public delete function only. Optional admin LOGIN grant:
+-- on the public delete + admin helper functions. Next admin LOGIN grant:
 --   psql ... -v admin_login=cosmas_patient_deletion_admin -f scripts/ensure-patient-deletion-admin-login.sql
 -- Binding rows are inserted separately (see docs/RETENTION.md).
 
@@ -24,6 +27,9 @@ BEGIN
   IF to_regclass('public.patient_deletion_admin_bindings') IS NOT NULL THEN
     REVOKE ALL ON TABLE public.patient_deletion_admin_bindings FROM cosmas_patient_deletion;
   END IF;
+  IF to_regclass('public.patient_deletion_pending_files') IS NOT NULL THEN
+    REVOKE ALL ON TABLE public.patient_deletion_pending_files FROM cosmas_patient_deletion;
+  END IF;
   IF to_regclass('public.alembic_version') IS NOT NULL THEN
     REVOKE ALL ON TABLE public.alembic_version FROM cosmas_patient_deletion;
   END IF;
@@ -41,6 +47,38 @@ BEGIN
   IF to_regprocedure('public.delete_patient_keyed_records(uuid)') IS NOT NULL THEN
     REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid)
+      TO cosmas_patient_deletion;
+  END IF;
+  IF to_regprocedure('public.delete_patient_keyed_records_plan(uuid)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid)
+      TO cosmas_patient_deletion;
+  END IF;
+  IF to_regprocedure('public.patient_deletion_resolve_admin()') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.patient_deletion_resolve_admin()
+      TO cosmas_patient_deletion;
+  END IF;
+  IF to_regprocedure('public.patient_deletion_patient_box(uuid)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.patient_deletion_patient_box(uuid)
+      TO cosmas_patient_deletion;
+  END IF;
+  IF to_regprocedure('public.patient_deletion_collect_file_keys(jsonb)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.patient_deletion_collect_file_keys(jsonb)
+      TO cosmas_patient_deletion;
+  END IF;
+  IF to_regprocedure('public.patient_deletion_pending_list(uuid)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.patient_deletion_pending_list(uuid)
+      TO cosmas_patient_deletion;
+  END IF;
+  IF to_regprocedure('public.patient_deletion_pending_record(uuid, uuid, jsonb)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.patient_deletion_pending_record(uuid, uuid, jsonb)
+      TO cosmas_patient_deletion;
+  END IF;
+  IF to_regprocedure('public.patient_deletion_pending_clear(uuid, text[])') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.patient_deletion_pending_clear(uuid, text[])
+      TO cosmas_patient_deletion;
+  END IF;
+  IF to_regprocedure('public.patient_deletion_pending_delete(uuid)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.patient_deletion_pending_delete(uuid)
       TO cosmas_patient_deletion;
   END IF;
   IF to_regprocedure('public.delete_patient_keyed_records(uuid, uuid)') IS NOT NULL THEN

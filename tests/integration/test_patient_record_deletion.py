@@ -23,12 +23,18 @@ from sqlalchemy.orm import Session
 from typer.testing import CliRunner
 
 from cosmas_os.adapters.local import LocalBlobAdapter
+from cosmas_os.api import app as app_module
 from cosmas_os.api.app import app
 from cosmas_os.application import note_review, workspace
 from cosmas_os.application import services as svc
+from cosmas_os.application.database_preparation import (
+    _apply_runtime_privileges,
+    _ensure_unprivileged_role,
+)
 from cosmas_os.application.patient_deletion import delete_patient_records, storage_roots
 from cosmas_os.cli import app as cli_app
 from cosmas_os.config import settings
+from cosmas_os.db import make_session_factory
 from cosmas_os.domain.enums import DecisionKind, PrincipalState, PrincipalType
 from cosmas_os.domain.rules import AuthorizationError, DomainError
 from cosmas_os.google_message_models import (
@@ -73,6 +79,19 @@ GUARD_FUNCTIONS = (
     "reject_scheduling_account_change",
 )
 _ENSURE_ROLE_SQL = ROOT / "scripts" / "ensure-patient-deletion-role.sql"
+_ENSURE_ADMIN_LOGIN_SQL = ROOT / "scripts" / "ensure-patient-deletion-admin-login.sql"
+_DOCUMENTED_ADMIN_LOGIN_GRANTS = (
+    "GRANT cosmas_patient_deletion TO {role}",
+    "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) TO {role}",
+    "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid) TO {role}",
+    "GRANT EXECUTE ON FUNCTION public.patient_deletion_resolve_admin() TO {role}",
+    "GRANT EXECUTE ON FUNCTION public.patient_deletion_patient_box(uuid) TO {role}",
+    "GRANT EXECUTE ON FUNCTION public.patient_deletion_collect_file_keys(jsonb) TO {role}",
+    "GRANT EXECUTE ON FUNCTION public.patient_deletion_pending_list(uuid) TO {role}",
+    "GRANT EXECUTE ON FUNCTION public.patient_deletion_pending_record(uuid, uuid, jsonb) TO {role}",
+    "GRANT EXECUTE ON FUNCTION public.patient_deletion_pending_clear(uuid, text[]) TO {role}",
+    "GRANT EXECUTE ON FUNCTION public.patient_deletion_pending_delete(uuid) TO {role}",
+)
 
 
 def _names(token: str) -> dict[str, str]:
@@ -381,7 +400,9 @@ def _count(session: Session, model, column: str, value: str) -> int:
     )
 
 
-def _calls(session: Session, actor: str | None, patient_id: str, blob: LocalBlobAdapter, *, confirm: bool):
+def _calls(
+    session: Session, actor: str | None, patient_id: str, blob: LocalBlobAdapter, *, confirm: bool
+):
     return delete_patient_records(
         session,
         actor_principal_id=actor,
@@ -508,24 +529,110 @@ def test_dry_run_returns_counts_and_deletes_nothing(practice) -> None:
     assert preview["tables"]["scheduling_patient_accounts"] == 1
     assert preview["files"] == {"audio": 1, "uploads": 2, "exports": 1}
 
-    api = TestClient(app).post(
-        f"/admin/patients/{patient_id}/records",
-        json={},
-        headers={"X-Box-Id": str(practice["box_id"]), "X-Actor-Principal-Id": owner},
+    # H2: HTTP dry-run must succeed under real runtime prep grants (plan EXECUTE,
+    # no delete EXECUTE). Override the app session to that runtime role.
+    admin_engine = session.get_bind()
+    runtime_role = "patient_http_rt_" + uuid4().hex[:10]
+    runtime_password = "invented-http-runtime-password-123456"
+    runtime_url = make_url(str(admin_engine.url)).set(
+        username=runtime_role, password=runtime_password
     )
-    assert api.status_code == 200
-    assert api.json()["dry_run"] is True
-    assert api.json()["deleted"] is False
-    assert api.json()["files"] == {"audio": 1, "uploads": 2, "exports": 1}
-    assert str(names["label"]) not in api.text
-    blocked = TestClient(app).post(
-        f"/admin/patients/{patient_id}/records",
-        json={"confirm": True},
-        headers={"X-Box-Id": str(practice["box_id"]), "X-Actor-Principal-Id": owner},
-    )
-    assert blocked.status_code == 403
-    assert "admin command" in blocked.text
-    assert str(names["label"]) not in blocked.text
+    quoted_role = admin_engine.dialect.identifier_preparer.quote_identifier(runtime_role)
+    runtime_engine = create_engine(runtime_url, echo=False, hide_parameters=True)
+    try:
+        with admin_engine.begin() as connection:
+            _ensure_unprivileged_role(connection, runtime_url)
+            _apply_runtime_privileges(connection, runtime_url)
+            _apply_runtime_privileges(connection, runtime_url)
+        RuntimeSession = make_session_factory(runtime_engine)
+
+        def _runtime_session():
+            scoped = RuntimeSession()
+            try:
+                yield scoped
+            finally:
+                scoped.close()
+
+        app.dependency_overrides[app_module.get_session] = _runtime_session
+        client = TestClient(app)
+        headers = {
+            "X-Box-Id": str(practice["box_id"]),
+            "X-Actor-Principal-Id": owner,
+        }
+        api = client.post(
+            f"/admin/patients/{patient_id}/records",
+            json={},
+            headers=headers,
+        )
+        assert api.status_code == 200, api.text
+        assert api.headers.get("cache-control") == "no-store"
+        assert api.json()["dry_run"] is True
+        assert api.json()["deleted"] is False
+        assert api.json()["files"] == {"audio": 1, "uploads": 2, "exports": 1}
+        assert api.json()["tables"]["patient_links"] == 1
+        assert str(names["label"]) not in api.text
+        blocked = client.post(
+            f"/admin/patients/{patient_id}/records",
+            json={"confirm": True},
+            headers=headers,
+        )
+        assert blocked.status_code == 403
+        assert blocked.headers.get("cache-control") == "no-store"
+        assert "admin command" in blocked.text
+        assert str(names["label"]) not in blocked.text
+        staff = client.post(
+            f"/admin/patients/{patient_id}/records",
+            json={},
+            headers={
+                "X-Box-Id": str(practice["box_id"]),
+                "X-Actor-Principal-Id": str(practice["staff_id"]),
+            },
+        )
+        assert staff.status_code == 403
+        assert staff.headers.get("cache-control") == "no-store"
+        extra = client.post(
+            f"/admin/patients/{patient_id}/records",
+            json={"confirm": False, "extra": True},
+            headers=headers,
+        )
+        assert extra.status_code == 422
+        assert extra.headers.get("cache-control") == "no-store"
+        bad = client.post(
+            "/admin/patients/not-a-uuid/records",
+            json={},
+            headers=headers,
+        )
+        assert bad.status_code == 400
+        assert bad.headers.get("cache-control") == "no-store"
+        other = svc.Container(session, blob=blob)
+        foreign = svc.provision_box(other, "Invented HTTP Other Practice")
+        foreign_owner = str(foreign["owner_id"])
+        foreign_patient = svc.attest_patient_link(
+            other,
+            foreign["box_id"],
+            foreign_owner,
+            source_pair_key="csv:http-foreign-patient",
+            label="Invented HTTP Foreign Patient",
+        )
+        session.commit()
+        foreign_id = str(foreign_patient.id)
+        cross = client.post(
+            f"/admin/patients/{foreign_id}/records",
+            json={},
+            headers=headers,
+        )
+        assert cross.status_code == 403
+        assert cross.headers.get("cache-control") == "no-store"
+    finally:
+        app.dependency_overrides.pop(app_module.get_session, None)
+        runtime_engine.dispose()
+        with admin_engine.begin() as connection:
+            if connection.scalar(
+                text("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=:role)"),
+                {"role": runtime_role},
+            ):
+                connection.execute(text(f"DROP OWNED BY {quoted_role}"))
+                connection.execute(text(f"DROP ROLE {quoted_role}"))
 
     assert session.get(PatientLink, patient_id) is not None
     assert _patient_link_counts(session, patient_id) == before
@@ -1184,6 +1291,24 @@ def _run_ensure_patient_deletion_role_sql(connection) -> None:
     connection.execute(text(sql))
 
 
+def _documented_admin_login_grants(role: str) -> tuple[str, ...]:
+    """Exact LOGIN grants from ensure-patient-deletion-admin-login.sql."""
+
+    script = _ENSURE_ADMIN_LOGIN_SQL.read_text(encoding="utf-8")
+    grants = tuple(statement.format(role=role) for statement in _DOCUMENTED_ADMIN_LOGIN_GRANTS)
+    for statement in grants:
+        needle = statement.split(" TO ", 1)[0]
+        assert needle in script, f"documented grant missing from admin-login script: {needle}"
+    return grants
+
+
+def _ensure_patient_deletion_admin_login(session: Session, role: str) -> None:
+    """Apply the documented admin LOGIN grants only (no table DML)."""
+
+    for statement in _documented_admin_login_grants(role):
+        _autocommit(session, statement)
+
+
 def _ensure_patient_deletion_role(session: Session) -> None:
     """John's role setup, limited to this throwaway synthetic database session."""
 
@@ -1229,9 +1354,7 @@ def _drop_patient_deletion_role(admin_engine, databases: tuple[str, ...]) -> Non
                     {"role": DELETION_ROLE},
                 )
                 if connection.scalar(
-                    text(
-                        "SELECT to_regprocedure('public.delete_patient_keyed_records(uuid)')"
-                    )
+                    text("SELECT to_regprocedure('public.delete_patient_keyed_records(uuid)')")
                 ):
                     connection.execute(
                         text(
@@ -1465,16 +1588,12 @@ def test_admin_cli_refuses_a_missing_or_runtime_database_url(practice, monkeypat
     patient_id = str(practice["casey"]["patient_id"])
     runtime_url = os.environ.get("DATABASE_URL", settings.database_url)
     monkeypatch.delenv("COSMAS_ADMIN_DATABASE_URL", raising=False)
-    missing = CliRunner().invoke(
-        cli_app, ["delete-patient-records", patient_id, "--confirm"]
-    )
+    missing = CliRunner().invoke(cli_app, ["delete-patient-records", patient_id, "--confirm"])
     assert missing.exit_code == 1
     assert "admin database identity is not configured" in (missing.stderr or "")
     assert "admin authority required" not in (missing.stderr or "")
     monkeypatch.setenv("COSMAS_ADMIN_DATABASE_URL", runtime_url)
-    same = CliRunner().invoke(
-        cli_app, ["delete-patient-records", patient_id, "--confirm"]
-    )
+    same = CliRunner().invoke(cli_app, ["delete-patient-records", patient_id, "--confirm"])
     assert same.exit_code == 1
     assert "admin database identity is not configured" in (same.stderr or "")
     renamed = (
@@ -1484,9 +1603,7 @@ def test_admin_cli_refuses_a_missing_or_runtime_database_url(practice, monkeypat
     )
     assert renamed != runtime_url
     monkeypatch.setenv("COSMAS_ADMIN_DATABASE_URL", renamed)
-    same_role = CliRunner().invoke(
-        cli_app, ["delete-patient-records", patient_id, "--confirm"]
-    )
+    same_role = CliRunner().invoke(cli_app, ["delete-patient-records", patient_id, "--confirm"])
     assert same_role.exit_code == 1
     assert "admin database identity is not configured" in (same_role.stderr or "")
     assert session.get(PatientLink, patient_id) is not None
@@ -1515,10 +1632,7 @@ def test_runtime_role_cannot_execute_the_deletion_function(practice) -> None:
         with runtime.begin() as connection:
             with pytest.raises(ProgrammingError, match="permission denied"):
                 connection.execute(
-                    text(
-                        "SELECT public.delete_patient_keyed_records("
-                        "CAST(:patient AS uuid))"
-                    ),
+                    text("SELECT public.delete_patient_keyed_records(CAST(:patient AS uuid))"),
                     {
                         "patient": practice["casey"]["patient_id"],
                     },
@@ -1630,7 +1744,9 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
         _ensure_patient_deletion_role_on(admin)
         _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
         assert _revision(target) == EXPECTED_SCHEMA_REVISION
-        assert all("_cosmas_patient_deletion_active" in body for body in _guard_bodies(target).values())
+        assert all(
+            "_cosmas_patient_deletion_active" in body for body in _guard_bodies(target).values()
+        )
         blob = LocalBlobAdapter(tmp_path / "blobs")
         with Session(target) as session:
             arranged = _arrange(session, blob)
@@ -1650,7 +1766,9 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
 
         _migrate(target, PARENT_REVISION, downgrade=True)
         assert _revision(target) == PARENT_REVISION
-        assert all("_cosmas_patient_deletion_active" not in body for body in _guard_bodies(target).values())
+        assert all(
+            "_cosmas_patient_deletion_active" not in body for body in _guard_bodies(target).values()
+        )
         with Session(target) as session:
             with pytest.raises(ProgrammingError, match="workspace history is immutable"):
                 session.execute(
@@ -1662,7 +1780,9 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
 
         _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
         assert _revision(target) == EXPECTED_SCHEMA_REVISION
-        assert all("_cosmas_patient_deletion_active" in body for body in _guard_bodies(target).values())
+        assert all(
+            "_cosmas_patient_deletion_active" in body for body in _guard_bodies(target).values()
+        )
         with Session(target) as session:
             with pytest.raises(ProgrammingError, match="workspace history is immutable"):
                 session.execute(
@@ -1672,9 +1792,7 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
                 session.commit()
             session.rollback()
             _ensure_patient_deletion_role(session)
-            _bind_session_admin(
-                session, str(arranged["owner_id"]), str(arranged["box_id"])
-            )
+            _bind_session_admin(session, str(arranged["owner_id"]), str(arranged["box_id"]))
             _calls(
                 session,
                 str(arranged["owner_id"]),
@@ -2066,24 +2184,12 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
         f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT PASSWORD {quoted}",
     )
     try:
-        # Login identity for the admin CLI only. Deletion-role grants come only
-        # from John's real ensure script (no copy, no extra grants).
+        # LOGIN needs CONNECT/USAGE plus the documented ensure-admin-login grants
+        # only — no table DML on the LOGIN.
         _autocommit(session, f"GRANT CONNECT ON DATABASE {_quote(database)} TO {role}")
         _autocommit(session, f"GRANT USAGE ON SCHEMA public TO {role}")
-        _autocommit(
-            session,
-            f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}",
-        )
-        _autocommit(session, f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}")
-        _autocommit(
-            session,
-            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) TO {role}",
-        )
-        _autocommit(
-            session,
-            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid) TO {role}",
-        )
         _ensure_patient_deletion_role(session)
+        _ensure_patient_deletion_admin_login(session, role)
         can_insert_audit = session.scalar(
             text(
                 "SELECT has_table_privilege('cosmas_patient_deletion', "
@@ -2098,11 +2204,18 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
             )
         )
         assert can_update_audit is False
+        login_can_select_bindings = session.scalar(
+            text(
+                "SELECT has_table_privilege(:role, "
+                "'public.patient_deletion_admin_bindings', 'SELECT')"
+            ),
+            {"role": role},
+        )
+        assert login_can_select_bindings is False
         is_super = session.scalar(
             text("SELECT rolsuper FROM pg_roles WHERE rolname = :role"), {"role": role}
         )
         assert is_super is False
-        _autocommit(session, f"GRANT cosmas_patient_deletion TO {role}")
         session.execute(
             text(
                 """
@@ -2139,16 +2252,10 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
             == 1
         )
     finally:
-        _autocommit(session, f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role}")
-        _autocommit(session, f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {role}")
-        _autocommit(
-            session,
-            f"REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid) FROM {role}",
-        )
-        _autocommit(
-            session,
-            f"REVOKE ALL ON FUNCTION public.delete_patient_keyed_records_plan(uuid) FROM {role}",
-        )
+        for statement in _documented_admin_login_grants(role):
+            _autocommit(
+                session, statement.replace("GRANT ", "REVOKE ", 1).replace(" TO ", " FROM ", 1)
+            )
         _autocommit(session, f"REVOKE ALL ON SCHEMA public FROM {role}")
         _autocommit(session, f"REVOKE ALL ON DATABASE {_quote(database)} FROM {role}")
         _autocommit(session, f"DROP ROLE IF EXISTS {role}")
@@ -2472,13 +2579,15 @@ def test_unclassified_reachable_table_refuses_delete(practice) -> None:
     )
     session.commit()
     try:
-        with pytest.raises(Exception, match="schema not classified for patient deletion"):
+        with pytest.raises(DomainError, match="schema not classified for patient deletion"):
             _calls(session, owner, patient_id, blob, confirm=True)
         session.rollback()
         assert session.get(PatientLink, patient_id) is not None
     finally:
-        session.execute(text("DROP TABLE IF EXISTS public.patient_deletion_probe_ticket_child"))
-        session.commit()
+        session.rollback()
+        _autocommit(
+            session, "DROP TABLE IF EXISTS public.patient_deletion_probe_ticket_child CASCADE"
+        )
 
 
 def test_deletion_function_has_no_plan_argument_overload(practice) -> None:
@@ -2730,9 +2839,9 @@ def test_exclusive_message_snapshot_deleted_when_only_reviewer(practice, provide
     assert session.get(snapshot_model, snapshot_id) is None
     assert (
         session.scalar(
-            select(func.count()).select_from(review_model).where(
-                review_model.patient_link_id == patient_id
-            )
+            select(func.count())
+            .select_from(review_model)
+            .where(review_model.patient_link_id == patient_id)
         )
         == 0
     )
@@ -2751,9 +2860,7 @@ def test_exclusive_message_snapshot_retained_when_second_patient_reviews(
     casey = practice["casey"]
     morgan = practice["morgan"]
     assert (
-        isinstance(casey, dict)
-        and isinstance(morgan, dict)
-        and isinstance(blob, LocalBlobAdapter)
+        isinstance(casey, dict) and isinstance(morgan, dict) and isinstance(blob, LocalBlobAdapter)
     )
     casey_id = str(casey["patient_id"])
     morgan_id = str(morgan["patient_id"])
@@ -2788,15 +2895,17 @@ def test_exclusive_message_snapshot_retained_when_second_patient_reviews(
     assert session.get(snapshot_model, snapshot_id) is not None
     assert (
         session.scalar(
-            select(func.count()).select_from(review_model).where(
-                review_model.patient_link_id == casey_id
-            )
+            select(func.count())
+            .select_from(review_model)
+            .where(review_model.patient_link_id == casey_id)
         )
         == 0
     )
     assert (
         session.scalar(
-            select(func.count()).select_from(review_model).where(
+            select(func.count())
+            .select_from(review_model)
+            .where(
                 review_model.patient_link_id == morgan_id,
                 review_model.snapshot_id == snapshot_id,
             )

@@ -2391,6 +2391,16 @@ from cosmas_os.standalone_runtime import StandaloneRequestBoundary  # noqa: E402
 
 app.include_router(patient_deletion_router(get_session=get_session, identity=_identity))
 
+
+@app.middleware("http")
+async def _patient_deletion_no_store(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/admin/patients/") and path.endswith("/records"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 app.add_middleware(StandaloneRequestBoundary, runtime=lambda: settings)
 app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
 allowed_headers.append("X-Cosmas-Workspace-Protocol")

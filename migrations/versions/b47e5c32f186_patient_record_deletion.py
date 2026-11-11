@@ -89,7 +89,6 @@ def _guard(name: str, message: str, *, scheduling: bool = False) -> str:
         """
 
 
-
 def _patch_owned_table_guards(connection) -> None:
     """Allow migrator-owned deletion to pass PATIENT_OWNED immutability triggers."""
 
@@ -130,9 +129,7 @@ def _patch_owned_table_guards(connection) -> None:
         if "_cosmas_patient_deletion_active()" in src:
             continue
         patched = src.replace("CREATE FUNCTION", "CREATE OR REPLACE FUNCTION", 1)
-        if re.search(r"(?i)\bdeclare\b", patched) and re.search(
-            r"(?i)\bbegin\b", patched
-        ):
+        if re.search(r"(?i)\bdeclare\b", patched) and re.search(r"(?i)\bbegin\b", patched):
             # Insert owner variable into the first DECLARE block.
             patched = re.sub(
                 r"(?i)\bDECLARE\b",
@@ -156,7 +153,6 @@ def _patch_owned_table_guards(connection) -> None:
         if "_cosmas_patient_deletion_active()" not in patched:
             raise RuntimeError(f"failed to patch trigger function {identity}")
         connection.execute(text(patched))
-
 
 
 def upgrade() -> None:
@@ -359,24 +355,38 @@ def upgrade() -> None:
         "public.delete_patient_keyed_records_plan(uuid)",
         "public._cosmas_apply_patient_deletion_mutate(uuid)",
         "public.delete_patient_keyed_records(uuid)",
+        "public.patient_deletion_resolve_admin()",
+        "public.patient_deletion_patient_box(uuid)",
+        "public.patient_deletion_collect_file_keys(jsonb)",
+        "public.patient_deletion_pending_list(uuid)",
+        "public.patient_deletion_pending_record(uuid, uuid, jsonb)",
+        "public.patient_deletion_pending_clear(uuid, text[])",
+        "public.patient_deletion_pending_delete(uuid)",
     ):
         op.execute(f"REVOKE ALL ON FUNCTION {fn} FROM PUBLIC")
 
+    op.execute("GRANT EXECUTE ON FUNCTION public._cosmas_patient_deletion_active() TO PUBLIC")
+    op.execute("GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid) TO PUBLIC")
     op.execute(
-        "GRANT EXECUTE ON FUNCTION public._cosmas_patient_deletion_active() TO PUBLIC"
+        "GRANT EXECUTE ON FUNCTION public.patient_deletion_collect_file_keys(jsonb) TO PUBLIC"
     )
-    op.execute(
-        "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid) TO PUBLIC"
-    )
+    op.execute("GRANT EXECUTE ON FUNCTION public.patient_deletion_patient_box(uuid) TO PUBLIC")
     op.execute(
         "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) TO CURRENT_USER"
     )
-    op.execute(
-        "GRANT EXECUTE ON FUNCTION public._cosmas_patient_deletion_classes() TO PUBLIC"
-    )
+    op.execute("GRANT EXECUTE ON FUNCTION public._cosmas_patient_deletion_classes() TO PUBLIC")
     op.execute(
         "GRANT EXECUTE ON FUNCTION public._cosmas_patient_deletion_exclusive_refs() TO PUBLIC"
     )
+    for fn in (
+        "public.patient_deletion_resolve_admin()",
+        "public.patient_deletion_patient_box(uuid)",
+        "public.patient_deletion_pending_list(uuid)",
+        "public.patient_deletion_pending_record(uuid, uuid, jsonb)",
+        "public.patient_deletion_pending_clear(uuid, text[])",
+        "public.patient_deletion_pending_delete(uuid)",
+    ):
+        op.execute(f"GRANT EXECUTE ON FUNCTION {fn} TO CURRENT_USER")
 
     bind = op.get_bind()
     role_exists = (
@@ -386,29 +396,26 @@ def upgrade() -> None:
     if not role_exists:
         _LOG.info("cosmas_patient_deletion is missing; grant skipped")
     else:
-        op.execute(
-            "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) "
-            f"TO {_ROLE}"
-        )
+        op.execute(f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {_ROLE}")
         op.execute(
             "REVOKE ALL ON FUNCTION public._cosmas_apply_patient_deletion_mutate(uuid) "
             f"FROM {_ROLE}"
         )
-        op.execute(
-            f"REVOKE ALL ON TABLE public.patient_deletion_in_progress FROM {_ROLE}"
-        )
-        op.execute(
-            f"REVOKE ALL ON TABLE public.patient_deletion_admin_bindings FROM {_ROLE}"
-        )
-        op.execute(
-            f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {_ROLE}"
-        )
+        op.execute(f"REVOKE ALL ON TABLE public.patient_deletion_in_progress FROM {_ROLE}")
+        op.execute(f"REVOKE ALL ON TABLE public.patient_deletion_admin_bindings FROM {_ROLE}")
         op.execute(f"GRANT USAGE ON SCHEMA public TO {_ROLE}")
-        op.execute(
-            "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) "
-            f"TO {_ROLE}"
-        )
-
+        for fn in (
+            "public.delete_patient_keyed_records(uuid)",
+            "public.delete_patient_keyed_records_plan(uuid)",
+            "public.patient_deletion_resolve_admin()",
+            "public.patient_deletion_patient_box(uuid)",
+            "public.patient_deletion_collect_file_keys(jsonb)",
+            "public.patient_deletion_pending_list(uuid)",
+            "public.patient_deletion_pending_record(uuid, uuid, jsonb)",
+            "public.patient_deletion_pending_clear(uuid, text[])",
+            "public.patient_deletion_pending_delete(uuid)",
+        ):
+            op.execute(f"GRANT EXECUTE ON FUNCTION {fn} TO {_ROLE}")
 
 
 def downgrade() -> None:
@@ -416,6 +423,13 @@ def downgrade() -> None:
     op.execute("DROP FUNCTION IF EXISTS public.delete_patient_keyed_records_plan(uuid)")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_apply_patient_deletion_mutate(uuid)")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_patient_deletion_build_plan(uuid)")
+    op.execute("DROP FUNCTION IF EXISTS public.patient_deletion_pending_delete(uuid)")
+    op.execute("DROP FUNCTION IF EXISTS public.patient_deletion_pending_clear(uuid, text[])")
+    op.execute("DROP FUNCTION IF EXISTS public.patient_deletion_pending_record(uuid, uuid, jsonb)")
+    op.execute("DROP FUNCTION IF EXISTS public.patient_deletion_pending_list(uuid)")
+    op.execute("DROP FUNCTION IF EXISTS public.patient_deletion_collect_file_keys(jsonb)")
+    op.execute("DROP FUNCTION IF EXISTS public.patient_deletion_patient_box(uuid)")
+    op.execute("DROP FUNCTION IF EXISTS public.patient_deletion_resolve_admin()")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_patient_deletion_active()")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_patient_deletion_exclusive_refs()")
     op.execute("DROP FUNCTION IF EXISTS public._cosmas_patient_deletion_classes()")

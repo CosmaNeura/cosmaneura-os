@@ -35,24 +35,39 @@ retention policy. T-RETENTION adds that policy.
 
 Agents and CI never run these steps against a real database. Suggested example
 login name only — choose any LOGIN distinct from the runtime `DATABASE_URL`
-user.
+user. The admin LOGIN needs membership in `cosmas_patient_deletion` plus
+`EXECUTE` on the public delete/plan/helper functions only. Binding reads,
+pending-file DML, and patient-box lookup run inside SECURITY DEFINER helpers.
+Never grant the LOGIN table DML on `audit_events`,
+`patient_deletion_admin_bindings`, or other clinical tables.
 
-1. As a Postgres role that can create logins, create the admin LOGIN (password
-   never in git):
+Which account runs each step:
+
+| Step | Runs as |
+|------|---------|
+| 1 Create LOGIN | Database owner / superuser (CREATEROLE alone is not enough for later REVOKE/GRANT on existing tables and SECURITY DEFINER functions) |
+| 2 Role grants (`ensure-patient-deletion-role.sql`) | Database owner / superuser |
+| 3 Admin LOGIN grants (`ensure-patient-deletion-admin-login.sql`) | Database owner / superuser |
+| 4 Binding INSERT | Database owner / superuser |
+| 5–6 CLI dry-run / confirm | The admin LOGIN from step 1 (`COSMAS_ADMIN_DATABASE_URL`) |
+
+1. As the database owner / superuser, create the admin LOGIN (password never in
+   git):
 
 ```bash
 psql "$POSTGRES_ADMIN_URL" -v ON_ERROR_STOP=1 \
   -c "CREATE ROLE cosmas_patient_deletion_admin LOGIN PASSWORD '...';"
 ```
 
-2. Apply the deletion role grants:
+2. As the database owner / superuser, apply the deletion role grants:
 
 ```bash
 psql "$POSTGRES_ADMIN_URL" -v ON_ERROR_STOP=1 \
   -f scripts/ensure-patient-deletion-role.sql
 ```
 
-3. Grant that LOGIN membership and EXECUTE on the delete + plan functions using the psql variable:
+3. As the database owner / superuser, grant that LOGIN membership and EXECUTE
+   only (psql variable; do not hard-code a single product role name):
 
 ```bash
 psql "$POSTGRES_ADMIN_URL" \
@@ -61,7 +76,8 @@ psql "$POSTGRES_ADMIN_URL" \
   -f scripts/ensure-patient-deletion-admin-login.sql
 ```
 
-4. Bind `session_user` to the practice owner principal (IDs only):
+4. As the database owner / superuser, bind `session_user` to the practice owner
+   principal (IDs only):
 
 ```sql
 INSERT INTO public.patient_deletion_admin_bindings (db_role, principal_id, box_id)
@@ -75,7 +91,7 @@ VALUES (
 5. Point `COSMAS_ADMIN_DATABASE_URL` at that LOGIN. The CLI refuses when its
    user equals the runtime `DATABASE_URL` user.
 
-6. Dry-run, then confirm:
+6. As that admin LOGIN, dry-run, then confirm:
 
 ```bash
 cosmas-os delete-patient-records <patient_link_id> --dry-run
@@ -83,4 +99,4 @@ cosmas-os delete-patient-records <patient_link_id> --confirm
 ```
 
 The actor is taken from the binding for `session_user`, not from a CLI flag.
-The SQL function also requires `pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER')`.
+The SQL helpers also require `pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER')`.
