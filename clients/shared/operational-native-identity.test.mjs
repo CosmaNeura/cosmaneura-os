@@ -31,3 +31,37 @@ test('registered profile and shared identity bundle for an actual browser withou
   assert.ok(Object.keys(result.metafile.inputs).every(path=>!path.includes('clients/desktop/')));
   assert.ok(Object.values(result.metafile.inputs).every(input=>input.imports.every(item=>!item.path.startsWith('node:'))));
 });
+
+function pkForHost(hostname, prefix) {
+  return prefix + Buffer.from(hostname + '$').toString('base64');
+}
+
+test('*.synthetic.example is accepted for staging and rejected for production', () => {
+  const frontendOrigin = 'https://clerk.synthetic.example';
+  const apiOrigin = 'https://api.synthetic.example';
+  const hostname = 'clerk.synthetic.example';
+  const staging = shared.validateOperationalNativeIdentity({
+    version: 1,
+    profile: shared.STAGING_NATIVE_PROFILE,
+    client: 'apple',
+    apiOrigin,
+    publishableKey: pkForHost(hostname, 'pk_test_'),
+    frontendOrigin,
+    organizationId: 'org_synthetic_iphone_sim',
+    audience: '',
+  }, 'apple', apiOrigin);
+  assert.equal(staging.frontendOrigin, frontendOrigin);
+  assert.throws(
+    () => shared.validateOperationalNativeIdentity({
+      version: 1,
+      profile: shared.OPERATIONAL_NATIVE_PROFILE,
+      client: 'apple',
+      apiOrigin,
+      publishableKey: pkForHost(hostname, 'pk_live_'),
+      frontendOrigin,
+      organizationId: 'org_synthetic_iphone_sim',
+      audience: 'cosmas-os-beta-api',
+    }, 'apple', apiOrigin),
+    /incomplete or inconsistent/,
+  );
+});

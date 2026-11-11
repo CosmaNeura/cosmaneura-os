@@ -334,6 +334,17 @@ jobs:
         run: |
           bash -n infra/beta/*.sh infra/beta/tests/*.sh
           bash infra/beta/tests/deployment-guards.sh
+      - name: iPhone Simulator runner shell syntax and shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          bash -n scripts/run-iphone-sim-record-test.sh
+          shellcheck scripts/run-iphone-sim-record-test.sh
+      - name: Synthetic iPhone runner and web-bundle node tests
+        run: |
+          node --test \
+            scripts/run-iphone-sim-record-test.test.mjs \
+            scripts/prepare-synthetic-iphone-web-bundle.test.mjs
       - name: Enrollment configuration contract
         run: |
           node --test infra/enrollment/render.test.mjs infra/enrollment/verify-staging-hosts.test.mjs web/scripts/enrollment-hosting.test.mjs infra/enrollment/workspaces/render.test.mjs

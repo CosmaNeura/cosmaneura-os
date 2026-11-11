@@ -22,20 +22,25 @@ export function validateOperationalNativeIdentity(value, client, apiOrigin) {
   const hostname = frontendOrigin ? new URL(frontendOrigin).hostname : '';
   const dedicatedStagingFrontend = STAGING_DEDICATED_CLERK_HOSTS.has(hostname);
   const developmentFrontend = !dedicatedStagingFrontend && hostname.endsWith('.clerk.accounts.dev');
-  const prefix = staging && developmentFrontend ? 'pk_test_' : 'pk_live_';
+  // Synthetic simulator inputs only: *.synthetic.example + pk_test_ dummy. Never a
+  // live Clerk host. Reserved RFC 2606 .example TLD keeps these non-routable.
+  const syntheticExampleFrontend = hostname.endsWith('.synthetic.example');
+  const testKeyFrontend = developmentFrontend || syntheticExampleFrontend;
+  const prefix = staging && testKeyFrontend ? 'pk_test_' : 'pk_live_';
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).length !== fields.length || fields.some(key => !Object.hasOwn(value, key)) ||
       value.version !== 1 || ![OPERATIONAL_NATIVE_PROFILE, STAGING_NATIVE_PROFILE].includes(value.profile) ||
       !['apple', 'desktop'].includes(client) || value.client !== client || value.apiOrigin !== apiOrigin ||
       !exactHostedOrigin(apiOrigin) || !frontendOrigin ||
-      (staging ? !(developmentFrontend || dedicatedStagingFrontend) : hostname.endsWith('.clerk.accounts.dev')) ||
+      (staging ? !(developmentFrontend || dedicatedStagingFrontend || syntheticExampleFrontend)
+        : hostname.endsWith('.clerk.accounts.dev') || syntheticExampleFrontend) ||
       !/^[a-z]/.test(hostname.split('.').at(-1)) ||
       typeof value.publishableKey !== 'string' || value.publishableKey.length > 1024 ||
       !value.publishableKey.startsWith(prefix) ||
       !/^[A-Za-z0-9+/_-]+={0,2}$/.test(value.publishableKey.slice(prefix.length)) ||
       typeof value.organizationId !== 'string' || !/^org_[A-Za-z0-9_]{1,251}$/.test(value.organizationId) ||
       typeof value.audience !== 'string' ||
-      (staging && developmentFrontend ? value.audience !== '' : !/^[\x21-\x7e]{1,255}$/.test(value.audience))) unavailable();
+      (staging && testKeyFrontend ? value.audience !== '' : !/^[\x21-\x7e]{1,255}$/.test(value.audience))) unavailable();
   try {
     const encoded = value.publishableKey.slice(prefix.length).replaceAll('-', '+').replaceAll('_', '/');
     if (atob(encoded) !== hostname + '$') unavailable();
