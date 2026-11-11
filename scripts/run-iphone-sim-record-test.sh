@@ -25,29 +25,97 @@
 #   DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 set -euo pipefail
 
-# Parse `xcrun simctl list runtimes` text from stdin; print the newest iOS
-# SimRuntime id. Regex extract avoids splitting on `()` which leaves a leading
-# ` - ` on macOS 27 lines like:
-#   iOS 27.0 (27.0 - 25A362) - com.apple.CoreSimulator.SimRuntime.iOS-27-0
-parse_newest_ios_runtime() {
-  awk '
-    /iOS/ {
-      if (match($0, /com\.apple\.CoreSimulator\.SimRuntime\.[A-Za-z0-9-]+/)) {
-        id = substr($0, RSTART, RLENGTH)
-        if (match($0, /iOS [0-9]+(\.[0-9]+)*/)) {
-          ver = substr($0, RSTART + 4, RLENGTH - 4)
-          split(ver, p, ".")
-          score = (p[1] + 0) * 10000 + (p[2] + 0) * 100 + (p[3] + 0)
-          print score "\t" id
-        }
-      }
-    }
-  ' | sort -nr | head -n 1 | cut -f2
+# From `simctl list runtimes -j` (+ device type id): pick the newest available
+# generic iOS runtime that lists the device in supportedDeviceTypes. Skips
+# device-specific runtimes such as iOS-27-2-iPhone19-4 (suffix after version
+# and/or a restricted supportedDeviceTypes list).
+select_ios_runtime_for_device() {
+  local device_type_id="$1"
+  local json_file="${2:-}"
+  local json
+  if [[ -n "${json_file}" ]]; then
+    json="$(cat "${json_file}")"
+  else
+    json="$(xcrun simctl list runtimes -j)"
+  fi
+  printf '%s' "${json}" | python3 -c '
+import json, re, sys
+
+device = sys.argv[1]
+data = json.load(sys.stdin)
+runtimes = data.get("runtimes", data if isinstance(data, list) else [])
+generic_ios = re.compile(
+    r"^com\.apple\.CoreSimulator\.SimRuntime\.iOS-\d+(?:-\d+)*$"
+)
+
+def available(rt: dict) -> bool:
+    if rt.get("isAvailable") is True:
+        return True
+    if rt.get("available") is True:
+        return True
+    return False
+
+def version_score(rt: dict) -> tuple:
+    raw = str(rt.get("version") or "")
+    parts = []
+    for piece in raw.split("."):
+        try:
+            parts.append(int(piece))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+def supports_device(rt: dict, device_id: str) -> bool:
+    supported = rt.get("supportedDeviceTypes") or []
+    if not isinstance(supported, list) or not supported:
+        return False
+    for entry in supported:
+        if isinstance(entry, dict) and entry.get("identifier") == device_id:
+            return True
+        if isinstance(entry, str) and entry == device_id:
+            return True
+    return False
+
+candidates = []
+for rt in runtimes:
+    if not isinstance(rt, dict):
+        continue
+    ident = rt.get("identifier") or ""
+    name = str(rt.get("name") or "")
+    platform = str(rt.get("platform") or "")
+    if not available(rt):
+        continue
+    if platform and platform.lower() not in ("ios", "iphoneos"):
+        # Some listings omit platform; fall back to name / identifier.
+        if "ios" not in name.lower() and ".ios-" not in ident.lower():
+            continue
+    elif not platform and "ios" not in name.lower() and ".ios-" not in ident.lower():
+        continue
+    # Device-specific runtime: suffix after the numeric iOS version (e.g. -iPhone19-4).
+    if not generic_ios.match(ident):
+        continue
+    if not supports_device(rt, device):
+        continue
+    candidates.append((version_score(rt), ident))
+
+if not candidates:
+    raise SystemExit(1)
+candidates.sort(reverse=True)
+print(candidates[0][1])
+' "${device_type_id}"
 }
 
 # Linux CI unit-test entry (no macOS / Xcode required).
-if [[ "${1:-}" == "--parse-runtimes-file" ]]; then
-  parse_newest_ios_runtime < "${2:?usage: $0 --parse-runtimes-file PATH}"
+if [[ "${1:-}" == "--select-runtime-for-device" ]]; then
+  device_type_id="${2:?usage: $0 --select-runtime-for-device DEVICE_TYPE_ID RUNTIMES_JSON}"
+  json_file="${3:?usage: $0 --select-runtime-for-device DEVICE_TYPE_ID RUNTIMES_JSON}"
+  if ! select_ios_runtime_for_device "${device_type_id}" "${json_file}"; then
+    echo "No available iOS Simulator runtime supports device type ${device_type_id}." >&2
+    echo "Skipped device-specific or incompatible runtimes (e.g. *-iPhone19-4)." >&2
+    exit 1
+  fi
   exit 0
 fi
 
@@ -272,18 +340,19 @@ newest_iphone_devicetype() {
     | cut -f2-3
 }
 
-newest_ios_runtime() {
-  xcrun simctl list runtimes | parse_newest_ios_runtime
-}
-
 echo "==> Creating / selecting Simulator"
 DEVICE_INFO="$(newest_iphone_devicetype)"
 DEVICE_TYPE_ID="$(echo "${DEVICE_INFO}" | cut -f1)"
 DEVICE_TYPE_NAME="$(echo "${DEVICE_INFO}" | cut -f2-)"
-RUNTIME_ID="$(newest_ios_runtime)"
-if [[ -z "${DEVICE_TYPE_ID}" || -z "${RUNTIME_ID}" ]]; then
-  echo "Could not resolve an iPhone device type + iOS runtime from simctl." >&2
+if [[ -z "${DEVICE_TYPE_ID}" ]]; then
+  echo "Could not resolve an iPhone device type from simctl." >&2
   echo "Install an iOS Simulator runtime in Xcode → Settings → Platforms." >&2
+  exit 1
+fi
+if ! RUNTIME_ID="$(select_ios_runtime_for_device "${DEVICE_TYPE_ID}")"; then
+  echo "No available iOS Simulator runtime supports device type ${DEVICE_TYPE_ID} (${DEVICE_TYPE_NAME})." >&2
+  echo "Skipped device-specific or incompatible runtimes (e.g. iOS-*-iPhone19-4 / Duo-only)." >&2
+  echo "Install a generic iOS runtime that supports this device in Xcode → Settings → Platforms." >&2
   exit 1
 fi
 echo "    device type: ${DEVICE_TYPE_NAME} (${DEVICE_TYPE_ID})"
