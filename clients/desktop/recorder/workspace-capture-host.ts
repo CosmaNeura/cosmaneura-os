@@ -177,7 +177,23 @@ export function installWorkspaceDesktopCapture(options:Options):{close():Promise
           current(o);if(![...o.sources].some(s=>s.sourceLeaseId===grant.sourceLeaseId&&!s.retiring))throw unavailable();
           const decision=await options.auth.sourceRequest('sourceAuthorize',{sourceLeaseId:grant.sourceLeaseId},revision);current(o);return decision;
         }},indicator:o.presentation,flowStore:flow,createSessionKey:flow.createSessionKey,queueStorage:queue,
-        uploadTarget:new HttpCiphertextUploadTarget([...options.uploadOrigins]),coverage,
+        // Independent-beta: CosmaBot API proxy origin only. Route PUT through the
+        // main-process auth proxy (never browser→Core/Scribe blob).
+        uploadTarget:new HttpCiphertextUploadTarget([...options.uploadOrigins],async(input,init)=>{
+          current(o);
+          const target=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);
+          if(options.uploadOrigins.length===1&&options.uploadOrigins[0]===options.apiOrigin
+            &&target.origin===options.apiOrigin){
+            const path=target.pathname+(target.search||'');
+            return options.request(new Request('app://cosmas/api'+path,{
+              method:init?.method??'PUT',
+              headers:{'Content-Type':'application/octet-stream','X-Cosmas-Desktop-Session':o.revision,
+                'X-Cosmas-Workspace-Protocol':'1','X-Cosmas-Draft-Recovery':'2'},
+              body:init?.body??null,signal:init?.signal?AbortSignal.any([o.abort.signal,init.signal]):o.abort.signal,
+            }));
+          }
+          return fetch(input,init);
+        }),coverage,
         native:{...options.audio,isSessionActive:()=>!o.abort.signal.aborted&&options.isSessionActive(),continuation:{
           getOwner:()=>{
             current(o);const sources=[...o.sources],source=sources[0];

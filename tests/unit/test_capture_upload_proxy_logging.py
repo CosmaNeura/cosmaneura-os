@@ -1,0 +1,107 @@
+"""Upload proxy must never log audio, transcript, or ciphertext bodies."""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import httpx
+import pytest
+from sqlalchemy.orm import Session
+
+from cosmas_os.application import capture_upload_proxy as proxy
+from cosmas_os.models import (
+    AppointmentObservation,
+    BoxContext,
+    EncounterWorkspace,
+    PatientLink,
+    Principal,
+)
+from cosmas_os.ports.capture_protocol import UploadReceipt
+
+
+class _Runtime:
+    clinic_approval_ref = None
+    baa_evidence_ref = None
+    phi_authorization_ref = None
+
+
+def _seed(session: Session):
+    box = BoxContext(display_name="Invented logging clinic")
+    session.add(box)
+    session.flush()
+    owner = Principal(
+        box_id=box.id, principal_type="human", display_name="Alex Owner",
+        is_owner=True, state="active",
+    )
+    session.add(owner)
+    session.flush()
+    patient = PatientLink(
+        box_id=box.id, source_pair_key="invented:" + str(uuid4()),
+        label="Invented person", state="confirmed",
+        confirmed_by_principal_id=owner.id, attested_at=datetime.now(UTC),
+        recording_class="synthetic",
+    )
+    session.add(patient)
+    session.flush()
+    appointment = AppointmentObservation(
+        box_id=box.id, external_id="invented-" + str(uuid4()), source="synthetic",
+        start_at=datetime.now(UTC), patient_label="Invented person",
+        patient_link_id=patient.id, coverage_status="missing",
+        recording_class="synthetic",
+    )
+    session.add(appointment)
+    session.flush()
+    workspace = EncounterWorkspace(
+        box_id=box.id, owner_id=owner.id, appointment_id=appointment.id,
+        patient_link_id=patient.id, create_key="upload-proxy-log-" + uuid4().hex,
+    )
+    session.add(workspace)
+    session.commit()
+    return box, owner, workspace
+
+
+@pytest.fixture
+def db(engine):
+    with Session(engine) as session:
+        yield session
+
+
+def test_stream_ciphertext_does_not_log_audio_or_transcript_content(db, caplog):
+    box, owner, workspace = _seed(db)
+    receipt = UploadReceipt(
+        authorization_receipt_id=uuid4(),
+        object_id=uuid4(),
+        additional_authenticated_data="e30",
+        upload_url="https://cosmaneurastaginguploads.blob.core.windows.net/synth?sig=1",
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    minted = proxy.mint_proxy_upload(
+        db, receipt=receipt, box_id=box.id, workspace_id=workspace.id,
+        session_id=str(uuid4()), principal_id=owner.id,
+        proxy_origin="https://api.invented-cosmabot.test",
+    )
+    proxy_id = minted.upload_url.rsplit("/", 1)[-1]
+    canary = b"CANARY_AUDIO_TRANSCRIPT_BYTES_DO_NOT_LOG_" + uuid4().bytes
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.content == canary
+        return httpx.Response(201, request=request)
+
+    transport = httpx.MockTransport(handler)
+    with caplog.at_level(logging.DEBUG):
+        proxy.stream_ciphertext_to_core(
+            db,
+            box_id=box.id,
+            workspace_id=workspace.id,
+            principal_id=owner.id,
+            proxy_id=proxy_id,
+            body=canary,
+            runtime=_Runtime(),
+            transport=transport,
+        )
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert canary.decode("latin1") not in joined
+    assert "CANARY_AUDIO_TRANSCRIPT_BYTES_DO_NOT_LOG_" not in joined
+    assert b"CANARY_AUDIO_TRANSCRIPT_BYTES_DO_NOT_LOG_".hex() not in joined

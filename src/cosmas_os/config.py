@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     baa_evidence_ref: str | None = None
     human_deploy_evidence_ref: str | None = None
     phi_authorization_ref: str | None = None
+    # Process env must stay false. Real-patient recording is a Box DB switch only
+    # and takes effect solely when clinic/BAA/PHI refs are present (T-REL-6).
+    real_patient_recording_enabled: bool = False
 
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)
@@ -208,6 +211,10 @@ class Settings(BaseSettings):
     core_capture_origin: str = ""
     core_capture_scope: str = ""
     core_capture_managed_identity_client_id: str = ""
+    # CosmaBot public API origin for ciphertext proxy URLs (independent-beta only).
+    # Must equal the client VITE_CAPTURE_UPLOAD_ORIGINS / hosted API origin — never
+    # a Core or Scribe blob host (browser→blob would need Cosmas CORS).
+    workspace_capture_proxy_origin: str = ""
     # Separate activation and caller configuration for Core's prepared artifact.
     workspace_session_prep_enabled: bool = False
     core_session_prep_scope: str = ""
@@ -551,9 +558,14 @@ class Settings(BaseSettings):
     def runtime_configuration_errors(self) -> list[str]:
         """Return configuration faults without exposing configured values."""
 
-        if self.cosmas_env in STANDALONE_ENVS:
-            return self._standalone_configuration_errors()
         errors: list[str] = []
+        if self.real_patient_recording_enabled:
+            errors.append(
+                "REAL_PATIENT_RECORDING_ENABLED must remain false in process "
+                "configuration; enable only via Box after clinic, BAA and PHI refs"
+            )
+        if self.cosmas_env in STANDALONE_ENVS:
+            return errors + self._standalone_configuration_errors()
         errors.extend(self.workspace_enrollment_configuration_errors())
         if (self.standalone_instance_id or self.standalone_root or self.standalone_jwks_path
                 or self.standalone_clerk_issuer_allowlist or self.standalone_model_origin_allowlist):
@@ -754,7 +766,9 @@ class Settings(BaseSettings):
         if real_clerk:
             enabled_allowlist.update({"workspace_google_connection_enabled", "workspace_google_message_enabled",
                                       "workspace_google_calendar_enabled", "workspace_microsoft_connection_enabled",
-                                      "workspace_microsoft_message_enabled", "workspace_microsoft_calendar_enabled"})
+                                      "workspace_microsoft_message_enabled", "workspace_microsoft_calendar_enabled",
+                                      # Independent-beta launch: Chief tools + Core note capture only.
+                                      "workspace_agent_tools_enabled", "workspace_capture_notes_enabled"})
         enabled_allowlist.update({"workspace_hosted_enabled", "workspace_apple_hosted_transport_enabled",
             "workspace_desktop_hosted_transport_enabled"} if real_clerk else {
             "workspace_apple_local_transport_enabled", "workspace_desktop_local_transport_enabled"})
@@ -764,8 +778,20 @@ class Settings(BaseSettings):
                 break
         empty_prefixes = ("core_", "azure_",
             "scheduling_", "managed_services_config_")
+        # Independent-beta Core capture: reviewed origin + MI identity only.
+        # Never Athena, prep, or other Core callers from this allowlist.
+        core_capture_fields = {
+            "core_capture_origin", "core_capture_scope",
+            "core_capture_managed_identity_client_id", "core_web_origin",
+            "workspace_capture_proxy_origin",
+        }
         for name in type(self).model_fields:
             value = getattr(self, name)
+            if name in core_capture_fields:
+                if value and self.workspace_capture_backend != "core":
+                    errors.append("Standalone Core capture fields require WORKSPACE_CAPTURE_BACKEND=core")
+                    break
+                continue
             reviewed_optional = real_clerk and name in {"workspace_llm_api_key", "google_connection_encryption_key",
                                                         "microsoft_connection_encryption_key"}
             if ((name.startswith(empty_prefixes) or (not real_clerk and name.startswith("microsoft_connection_"))
@@ -773,7 +799,9 @@ class Settings(BaseSettings):
                  or name.endswith("_encryption_key")) and value and not reviewed_optional):
                 errors.append("Standalone cannot contain external service addresses or credentials")
                 break
-        if (self.workspace_capture_backend != "disabled" or self.compact_web_root
+        if self.workspace_capture_backend == "core":
+            errors.extend(self._standalone_core_capture_errors())
+        elif (self.workspace_capture_backend != "disabled" or self.compact_web_root
                 or self.workspace_native_synthetic_enabled):
             errors.append("Standalone capture and alternate execution paths must be disabled")
         if real_clerk:
@@ -785,6 +813,39 @@ class Settings(BaseSettings):
                     for name in type(self).model_fields if name.startswith("google_connection_"))):
             errors.append("Offline standalone models and Google credentials must remain disabled")
         return errors
+
+    def _standalone_core_capture_errors(self) -> list[str]:
+        """Independent-beta Core capture: reviewed origin + exact scope/MI only.
+
+        Do not call workspace_capture_available here: that property reads
+        workspace_available, which re-enters standalone configuration errors.
+        """
+        # Observed Core web/API origin: docs/beta/WEB_RELEASE.md:171-176.
+        reviewed = "https://staging-app.cosmaneura.com"
+        try:
+            UUID(self.core_capture_managed_identity_client_id)
+            origin = urlparse(self.core_capture_origin)
+            valid_identity = origin.port in (None, 443) and not any(c.isspace() for c in self.core_capture_origin)
+        except ValueError:
+            valid_identity = False
+        if (not valid_identity or not self._is_exact_https_origin(self.core_capture_origin)
+                or not self.core_capture_scope.startswith("api://")
+                or not self.core_capture_scope.endswith("/.default")
+                or any(c.isspace() for c in self.core_capture_scope)):
+            return ["Standalone Core capture requires exact CORE_CAPTURE_ORIGIN, SCOPE and managed identity"]
+        if self.core_capture_origin != reviewed or self.core_web_origin != reviewed:
+            return ["Standalone Core capture requires the reviewed staging-app.cosmaneura.com origin"]
+        if not self.workspace_capture_notes_enabled or not self.workspace_agent_tools_enabled:
+            return ["Standalone Core capture requires capture notes and agent tools together"]
+        # Proxy origin is CosmaBot's own API — never Core web or Scribe blob.
+        proxy = self.workspace_capture_proxy_origin
+        proxy_host = (urlparse(proxy).hostname or "").lower()
+        if (not self._is_exact_https_origin(proxy)
+                or proxy.rstrip("/") == reviewed
+                or proxy_host.endswith(".blob.core.windows.net")
+                or proxy_host.endswith(".cosmaneura.com")):
+            return ["Standalone Core capture requires CosmaBot API proxy origin for uploads"]
+        return []
 
     def _standalone_model_errors(self) -> list[str]:
         if self.workspace_llm_backend == "disabled":

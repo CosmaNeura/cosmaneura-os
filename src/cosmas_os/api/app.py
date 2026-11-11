@@ -979,9 +979,60 @@ async def perform_workspace_capture(request: Request, workspace_id: UUID,
     ):
         raise HTTPException(404, "not found", headers={"Cache-Control": "no-store"})
     receipt = await _execute_workspace_capture(request, workspace_id, session, identity, port, body)
+    # T-REL-6: never return Core/Scribe blob URLs to the browser. Rewrite
+    # authorize_upload receipts to CosmaBot's own API proxy origin.
+    if body.operation.kind == "authorize_upload":
+        from cosmas_os.application import capture_upload_proxy as upload_proxy
+        from cosmas_os.ports.capture_protocol import UploadReceipt
+        if not isinstance(receipt, UploadReceipt):
+            raise ws.WorkspaceError("capture_request_unconfirmed", 503)
+        receipt = upload_proxy.mint_proxy_upload(
+            session,
+            receipt=receipt,
+            box_id=identity.box_id,
+            workspace_id=str(workspace_id),
+            session_id=str(body.session_id),
+            principal_id=identity.principal_id,
+            proxy_origin=settings.workspace_capture_proxy_origin,
+        )
     return JSONResponse(content={"session_id": str(body.session_id), "workspace_id": str(workspace_id),
         "operation": body.operation.kind, "receipt": receipt.model_dump(mode="json")},
         headers={"Cache-Control": "no-store"})
+
+
+@app.put("/workspaces/{workspace_id}/capture/ciphertexts/{proxy_id}",
+         dependencies=[Depends(_workspace_gate), Depends(_capture_gate)])
+async def put_workspace_capture_ciphertext(request: Request, workspace_id: UUID, proxy_id: UUID,
+    session: Session = Depends(get_session), identity: RequestIdentity = Depends(_identity)):
+    """Browser → CosmaBot API → Core blob (S2S). Synthetic ciphertext only."""
+    from cosmas_os.application import capture_upload_proxy as upload_proxy
+    from cosmas_os.application.capture_deadline import run_in_threadpool
+    content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    if content_type != "application/octet-stream":
+        raise ws.WorkspaceError("invalid_capture_request", 422)
+    length = request.headers.get("content-length")
+    if length is not None and (
+            not length.isascii() or not length.isdigit() or int(length) > upload_proxy.MAX_CIPHERTEXT_BYTES):
+        raise ws.WorkspaceError("invalid_capture_request", 422)
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > upload_proxy.MAX_CIPHERTEXT_BYTES:
+            raise ws.WorkspaceError("invalid_capture_request", 422)
+        body.extend(chunk)
+    if length is not None and len(body) != int(length):
+        raise ws.WorkspaceError("invalid_capture_request", 422)
+    await run_in_threadpool(
+        upload_proxy.stream_ciphertext_to_core,
+        session,
+        box_id=identity.box_id,
+        workspace_id=str(workspace_id),
+        principal_id=identity.principal_id,
+        proxy_id=str(proxy_id),
+        body=bytes(body),
+        runtime=settings,
+    )
+    # Empty JSON keeps desktop auth-proxy Content-Type checks satisfied.
+    return JSONResponse(content={}, status_code=201, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/workspaces/{workspace_id}/capture/notes", dependencies=[Depends(_workspace_gate), Depends(_capture_note_gate)])

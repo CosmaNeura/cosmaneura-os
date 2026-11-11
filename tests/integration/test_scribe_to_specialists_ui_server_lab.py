@@ -1064,13 +1064,16 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
             try:
                 parsed = urlsplit(self.path)
                 parts = parsed.path.split("/")
-                assert len(parts) == 5 and parts[1:3] == ["lab", "audio"]
-                receiver = receivers[parts[3]]
                 size = int(self.headers.get("Content-Length", "0"))
                 assert 0 < size <= 327680
-                receiver.upload(
-                    parts[4], parse_qs(parsed.query)["receipt"][0], self.rfile.read(size)
-                )
+                body = self.rfile.read(size)
+                # CosmaBot ciphertext proxy: browser → CosmaBot API → lab/audio S2S.
+                if len(parts) == 6 and parts[1] == "workspaces" and parts[3:5] == ["capture", "ciphertexts"]:
+                    response = client.put(self.path, headers=dict(self.headers), content=body)
+                    return self.respond(response.status_code, response.json())
+                assert len(parts) == 5 and parts[1:3] == ["lab", "audio"]
+                receiver = receivers[parts[3]]
+                receiver.upload(parts[4], parse_qs(parsed.query)["receipt"][0], body)
                 return self.respond(201, {"synthetic_uploaded": True})
             except Exception as error:
                 return self.respond(422, {"detail": type(error).__name__ + ": " + str(error)})
@@ -1120,7 +1123,11 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
     server = ThreadingHTTPServer(("127.0.0.1", 0), Bridge)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    router.upload_origin = f"http://127.0.0.1:{server.server_port}"
+    lab_origin = f"http://127.0.0.1:{server.server_port}"
+    router.upload_origin = lab_origin
+    # Independent-beta upload proxy: browser PUTs to CosmaBot API origin only.
+    monkeypatch.setattr(configuration, "workspace_capture_proxy_origin", lab_origin)
+    monkeypatch.setattr(runtime, "workspace_capture_proxy_origin", lab_origin)
     report_root = Path(os.environ.get("COSMAS_SCRIBE_SPECIALIST_EVIDENCE_DIR", str(tmp_path)))
     report_root.mkdir(parents=True, exist_ok=True)
     env = {k: os.environ[k] for k in ("PATH", "TMPDIR") if k in os.environ}
