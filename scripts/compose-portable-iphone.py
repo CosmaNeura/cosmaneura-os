@@ -8,11 +8,20 @@ snapshot, modify the scaffold, sign, or compile.
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import plistlib
 import re
 import shutil
 from pathlib import Path
+
+_profile_spec = importlib.util.spec_from_file_location(
+    "native_iphone_auth_profile", Path(__file__).with_name("native_iphone_auth_profile.py"))
+_profile = importlib.util.module_from_spec(_profile_spec)
+_profile_spec.loader.exec_module(_profile)
+PRODUCTION_INSTALLATION_PROFILE = _profile.PRODUCTION_INSTALLATION_PROFILE
+INSTALLATION_PROFILES = _profile.INSTALLATION_PROFILES
+production_native_auth_stamp = _profile.production_native_auth_stamp
 
 IMPLEMENTATION_OWNERS = ("clients/apple", "clients/capture")
 SUPPORTING_CLIENT = "clients/shared"
@@ -116,6 +125,39 @@ def _regular_file(repository: Path, path: Path) -> Path:
     if not _inside(resolved, repository):
         raise ValueError(f"Composition source escaped the repository: {path}")
     return resolved
+
+
+def _apply_production_native_auth_stamp(
+    repository: Path, output: Path, placed: list[dict[str, object]]
+) -> None:
+    """Stamp CosmasNativeAuth for the production profile only; frozen scaffold stays intact."""
+    info_path = "ios/App/App/Info.plist"
+    destination = output / APP_SCAFFOLD / info_path
+    if not destination.is_file() or destination.is_symlink():
+        raise ValueError("Composed app Info.plist is missing.")
+    original_sha256 = _digest(destination)
+    before = destination.read_bytes()
+    info = production_native_auth_stamp(plistlib.loads(before))
+    destination.write_bytes(plistlib.dumps(info, sort_keys=False))
+    if destination.read_bytes() == before:
+        raise ValueError("Production native auth stamp did not change CosmasNativeAuth.")
+    record = next(item for item in placed if item["path"] == info_path)
+    derivation_path = "scripts/compose-portable-iphone.py"
+    derivation = _regular_file(repository, repository / derivation_path)
+    record.update(
+        {
+            "role": "derived-production-native-auth",
+            "sha256": _digest(destination),
+            "scaffold_input_sha256": original_sha256,
+            "derivation_source": derivation_path,
+            "derivation_source_sha256": _digest(derivation),
+            "wiring_note": (
+                "Production installation profile stamped CosmasNativeAuth.enabled "
+                "and clerk.beta.cosmas.ai / api.beta.cosmas.ai / beta.cosmas.ai origins; "
+                "frozen scaffold Info.plist unchanged."
+            ),
+        }
+    )
 
 
 def _add_owned_app_privacy(repository: Path, output: Path, placed: list[dict[str, object]]) -> None:
@@ -372,7 +414,11 @@ def _add_owned_capacitor_vendor(repository: Path, output: Path, placed: list[dic
         raise ValueError("Composed iPhone inputs still name the remote Capacitor package.")
 
 
-def compose(repository: Path, output: Path) -> Path:
+def compose(
+    repository: Path,
+    output: Path,
+    installation_profile: str | None = None,
+) -> Path:
     """Copy the frozen scaffold and overlay owned client implementations."""
     repository = repository.resolve()
     output = output.resolve()
@@ -488,6 +534,12 @@ def compose(repository: Path, output: Path) -> Path:
             raise ValueError("Generated web assets do not belong in this source composition.")
         _add_owned_app_privacy(repository, output, placed)
         _add_owned_capacitor_vendor(repository, output, placed)
+        if installation_profile is not None and installation_profile not in INSTALLATION_PROFILES:
+            raise ValueError("Use the production, beta, or staging installation profile.")
+        # Default / beta / staging keep the frozen CosmasNativeAuth bytes. Only an
+        # explicit production profile stamps enabled=true and production origins.
+        if installation_profile == PRODUCTION_INSTALLATION_PROFILE:
+            _apply_production_native_auth_stamp(repository, output, placed)
         manifest = {
             "purpose": "portable-iphone-project-inputs",
             "qualified_install": False,
@@ -507,6 +559,9 @@ def compose(repository: Path, output: Path) -> Path:
             "project": f"{APP_SCAFFOLD}/ios/App/App.xcodeproj",
             "files": placed,
         }
+        if installation_profile == PRODUCTION_INSTALLATION_PROFILE:
+            # Keep default/beta/staging composition.json byte-compatible with main.
+            manifest["installation_profile"] = installation_profile
         (output / "composition.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     except Exception:
         _discard(output, repository)
@@ -518,9 +573,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, default=Path(__file__).parents[1])
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--installation-profile",
+        choices=sorted(INSTALLATION_PROFILES),
+        help=(
+            "Optional closed installation profile. Only 'production' stamps "
+            "CosmasNativeAuth.enabled and production Clerk/API origins; beta and "
+            "staging leave the frozen Info.plist CosmasNativeAuth bytes unchanged."
+        ),
+    )
     args = parser.parse_args()
     try:
-        project = compose(args.repository, args.output)
+        project = compose(
+            args.repository, args.output, installation_profile=args.installation_profile)
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     print(f"Prepared portable iPhone project inputs: {project}")
