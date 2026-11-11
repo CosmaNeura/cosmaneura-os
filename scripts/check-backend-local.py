@@ -268,9 +268,18 @@ def main() -> int:
         for profile, tests in groups.items():
             database = {"workspace": "w1a_local_checks", "deployment": "cosmas_os", "compact": "compact_test"}[profile]
             database_owner = "compact_synth" if profile == "compact" else owner
+            # John sets up cosmas_patient_deletion in real environments. Local
+            # synth mirrors that precondition before migrations; the migration
+            # itself never creates or grants the role.
+            deletion_role_file = output / "patient-deletion-role.sql"
+            deletion_role_sql = (REPO / "scripts/ensure-patient-deletion-role.sql").read_text()
             if profile == "compact":
                 role_file = output / "compact-role.sql"
-                role_file.write_text(f"CREATE ROLE compact_synth LOGIN PASSWORD '{password}';\n")
+                role_file.write_text(
+                    f"CREATE ROLE compact_synth LOGIN CREATEROLE PASSWORD '{password}';\n"
+                    + deletion_role_sql
+                    + "GRANT cosmas_patient_deletion TO compact_synth WITH SET TRUE;\n"
+                )
                 role_file.chmod(0o600)
                 try:
                     if checks.run("compact-role", [str(pg_bin / "psql"), "-X", "-v", "ON_ERROR_STOP=1",
@@ -280,6 +289,17 @@ def main() -> int:
                         continue
                 finally:
                     role_file.unlink(missing_ok=True)
+            else:
+                deletion_role_file.write_text(deletion_role_sql)
+                deletion_role_file.chmod(0o600)
+                try:
+                    if checks.run("patient-deletion-role", [str(pg_bin / "psql"), "-X", "-v", "ON_ERROR_STOP=1",
+                                                           "-h", "127.0.0.1", "-p", str(port), "-U", owner,
+                                                           "-d", "postgres", "-f", str(deletion_role_file)]):
+                        result = 1
+                        continue
+                finally:
+                    deletion_role_file.unlink(missing_ok=True)
             folder = output / profile
             folder.mkdir()
             for name in ("blobs", "model-evidence", "routine-evidence"):
@@ -327,6 +347,18 @@ def main() -> int:
             if checks.run(f"{profile}-migrations", [sys.executable, "-m", "alembic", "upgrade", "head"], 120, test_env):
                 result = 1
                 continue
+            if profile == "compact":
+                # The migration needs SET only long enough to hand the function
+                # to cosmas_patient_deletion. The compact login must not keep it.
+                revoke_file = output / "compact-deletion-role.sql"
+                revoke_file.write_text(
+                    "REVOKE cosmas_patient_deletion FROM compact_synth;\n"
+                )
+                if checks.run("compact-deletion-role", [str(pg_bin / "psql"), "-X", "-v", "ON_ERROR_STOP=1",
+                                                        "-h", "127.0.0.1", "-p", str(port), "-U", owner,
+                                                        "-d", "postgres", "-f", str(revoke_file)]):
+                    result = 1
+                    continue
             command = [sys.executable, "-m", "pytest", *tests, "-v", "-ra", "--tb=short",
                        "--basetemp", test_env["COSMAS_TEST_TMP_ROOT"],
                        "-o", f"cache_dir={folder / 'pytest-cache'}",
