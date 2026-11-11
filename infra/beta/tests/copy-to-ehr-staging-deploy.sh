@@ -637,6 +637,89 @@ else
   fail "execute installs client deps before the web build"
 fi
 
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  work="$root_dir/env-work"
+  mkdir -p "$work/src/web"
+  independent="$root_dir/independent.env"
+  operational="$root_dir/operational.env"
+  umask 077
+  cat >"$independent" <<'EOF'
+VITE_WORKSPACE_FEATURE_PROFILE=independent-beta-v1
+VITE_WORKSPACE_ORGANIZATION_ID=org_synthetic_beta
+VITE_WORKSPACE_CAPTURE_MODE=disabled
+VITE_COSMANEURA_WEB_ORIGIN=https://core.synthetic.example
+VITE_CAPTURE_UPLOAD_ORIGINS=https://upload.synthetic.example
+VITE_WORKSPACE_DATA_MODE=synthetic
+VITE_WORKSPACE_HOSTED_CLIENT=web
+VITE_WORKSPACE_HOSTED_API_ORIGIN=https://api.synthetic.example
+VITE_API_BASE=https://api.synthetic.example
+VITE_WORKSPACE_WEB_ORIGIN=https://app.synthetic.example
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_syntheticdummy
+EOF
+  cat >"$operational" <<'EOF'
+VITE_WORKSPACE_FEATURE_PROFILE=operational-beta-v1
+VITE_WORKSPACE_HOSTED_ENABLED=true
+VITE_WORKSPACE_CAPTURE_MODE=synthetic
+VITE_COSMANEURA_WEB_ORIGIN=https://core.synthetic.example
+VITE_CAPTURE_UPLOAD_ORIGINS=https://upload.synthetic.example
+VITE_WORKSPACE_DATA_MODE=synthetic
+VITE_WORKSPACE_HOSTED_CLIENT=web
+VITE_WORKSPACE_HOSTED_API_ORIGIN=https://api.synthetic.example
+VITE_API_BASE=https://api.synthetic.example
+VITE_WORKSPACE_WEB_ORIGIN=https://app.synthetic.example
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_syntheticdummy
+EOF
+  chmod 600 "$independent" "$operational"
+  independent_before=$(cksum "$independent")
+  operational_before=$(cksum "$operational")
+  keys=$(copy_to_ehr_read_web_env_keys "$independent")
+  printf '%s\n' "$keys" | grep -qx 'VITE_COSMANEURA_WEB_ORIGIN'
+  if printf '%s\n' "$keys" | grep -q 'syntheticdummy\|synthetic.example'; then exit 1; fi
+  copy_out="$work/src/web/.env.production"
+  stage_out="$root_dir/stage.out"
+  copy_to_ehr_stage_web_env "$independent" "$copy_out" >"$stage_out"
+  [[ ! -s "$stage_out" ]]
+  [[ "$(stat -c %a "$copy_out")" == "600" ]]
+  [[ "$(cksum "$independent")" == "$independent_before" ]]
+  grep -q '^VITE_WORKSPACE_FEATURE_PROFILE=independent-beta-v1$' "$copy_out"
+  grep -q '^VITE_WORKSPACE_ORGANIZATION_ID=org_synthetic_beta$' "$copy_out"
+  if grep -q '^VITE_COSMANEURA_WEB_ORIGIN=' "$copy_out"; then exit 1; fi
+  if grep -q '^VITE_CAPTURE_UPLOAD_ORIGINS=' "$copy_out"; then exit 1; fi
+  operational_out="$work/operational.env"
+  copy_to_ehr_stage_web_env "$operational" "$operational_out"
+  [[ "$(cksum "$operational")" == "$operational_before" ]]
+  cmp -s "$operational" "$operational_out"
+  standalone="$root_dir/standalone.env"
+  sed 's/^VITE_WORKSPACE_FEATURE_PROFILE=.*/VITE_WORKSPACE_FEATURE_PROFILE=standalone-practice-v1/' "$independent" >"$standalone"
+  chmod 600 "$standalone"
+  standalone_out="$work/standalone.env"
+  copy_to_ehr_stage_web_env "$standalone" "$standalone_out"
+  if grep -q '^VITE_COSMANEURA_WEB_ORIGIN=' "$standalone_out"; then exit 1; fi
+  if grep -q '^VITE_CAPTURE_UPLOAD_ORIGINS=' "$standalone_out"; then exit 1; fi
+  COPY_TO_EHR_WEB_ENV_COPY="$copy_out"
+  copy_to_ehr_cleanup_web_env_copy
+  [[ ! -e "$copy_out" ]]
+  [[ -f "$independent" ]]
+  body=$(declare -f copy_to_ehr_execute)
+  read_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_read_web_env_keys/{print NR; exit}')
+  trap_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_cleanup_web_env_copy/{print NR; exit}')
+  stage_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_stage_web_env/{print NR; exit}')
+  [[ -n "$read_line" && -n "$trap_line" && -n "$stage_line" ]]
+  [[ "$read_line" -lt "$stage_line" && "$trap_line" -lt "$stage_line" ]]
+  if printf '%s\n' "$body" | grep -q 'cp -p --'; then exit 1; fi
+)
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "independent profile build copy drops forced-empty origins"
+else
+  fail "independent profile build copy drops forced-empty origins"
+fi
+
 if [[ "$failures" -eq 0 ]]; then
   printf 'copy-to-ehr staging deploy tests passed\n'
   exit 0

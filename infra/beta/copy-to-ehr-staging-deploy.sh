@@ -279,6 +279,48 @@ sys.stdout.write("\n".join(keys) + "\n")
 PY
 }
 
+copy_to_ehr_cleanup_web_env_copy() {
+  if [[ -n "${COPY_TO_EHR_WEB_ENV_COPY:-}" ]]; then
+    rm -f -- "$COPY_TO_EHR_WEB_ENV_COPY"
+  fi
+}
+
+copy_to_ehr_stage_web_env() {
+  local source="$1" dest="$2"
+  [[ "$source" != "$dest" ]] || return 1
+  umask 077
+  python3 - "$source" "$dest" <<'PY'
+import os, sys
+source, dest = sys.argv[1:]
+if os.path.realpath(source) == os.path.realpath(dest):
+    sys.exit(1)
+drop_profiles = {"independent-beta-v1", "standalone-practice-v1"}
+drop_keys = {"VITE_COSMANEURA_WEB_ORIGIN", "VITE_CAPTURE_UPLOAD_ORIGINS"}
+profile = ""
+kept = []
+with open(source, "r", encoding="utf-8") as handle:
+    for raw in handle:
+        text = raw.strip()
+        key = ""
+        if text and not text.startswith("#") and "=" in text:
+            key, value = text.split("=", 1)
+            if key == "VITE_WORKSPACE_FEATURE_PROFILE":
+                profile = value
+        kept.append((raw if raw.endswith("\n") else raw + "\n", key))
+dropping = profile in drop_profiles
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+fd = os.open(dest, flags, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as handle:
+    for raw, key in kept:
+        if dropping and key in drop_keys:
+            continue
+        handle.write(raw)
+PY
+  chmod 600 "$dest"
+}
+
 copy_to_ehr_pg_dump() {
   local dump_file="$1" database="$2" err="${1}.err"
   if ! docker exec -u postgres "$COPY_TO_EHR_PG_CONTAINER" \
@@ -1136,7 +1178,8 @@ dry-run: git clone --quiet ${PUBLIC_GIT_URL} ${workdir}/src
 dry-run: git -C ${workdir}/src checkout --detach ${sha}
 dry-run: test "\$(git -C ${workdir}/src rev-parse HEAD)" = ${sha}
 dry-run: test -z "\$(git -C ${workdir}/src status --porcelain)"
-dry-run: cp -p -- ${web_env} ${workdir}/src/web/.env.production
+dry-run: write a mode 600 copy of the web env at ${workdir}/src/web/.env.production
+dry-run: independent-beta-v1 and standalone-practice-v1 omit VITE_COSMANEURA_WEB_ORIGIN and VITE_CAPTURE_UPLOAD_ORIGINS
 dry-run: ${workdir}/src/scripts/install-client-deps.sh
 dry-run: VITE_BUILD_SHA=${sha} corepack pnpm run build
 dry-run: node scripts/package-staging-web.mjs --dist web/dist --output ${workdir}/web-package
@@ -1298,8 +1341,9 @@ copy_to_ehr_execute() {
   [[ -f "$web_env" && ! -L "$web_env" ]] || copy_to_ehr_die "web env file is missing"
   keys=$(copy_to_ehr_read_web_env_keys "$web_env")
   printf '%s\n' "$keys" | sed 's/^/web env key: /'
-  cp -p -- "$web_env" "$workdir/src/web/.env.production"
-  chmod 600 "$workdir/src/web/.env.production"
+  COPY_TO_EHR_WEB_ENV_COPY="$workdir/src/web/.env.production"
+  trap copy_to_ehr_cleanup_web_env_copy EXIT
+  copy_to_ehr_stage_web_env "$web_env" "$COPY_TO_EHR_WEB_ENV_COPY"
   (
     cd "$workdir/src/web"
     "$workdir/src/scripts/install-client-deps.sh"
