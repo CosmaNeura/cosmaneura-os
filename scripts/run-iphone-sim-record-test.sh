@@ -25,6 +25,32 @@
 #   DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 set -euo pipefail
 
+# Parse `xcrun simctl list runtimes` text from stdin; print the newest iOS
+# SimRuntime id. Regex extract avoids splitting on `()` which leaves a leading
+# ` - ` on macOS 27 lines like:
+#   iOS 27.0 (27.0 - 25A362) - com.apple.CoreSimulator.SimRuntime.iOS-27-0
+parse_newest_ios_runtime() {
+  awk '
+    /iOS/ {
+      if (match($0, /com\.apple\.CoreSimulator\.SimRuntime\.[A-Za-z0-9-]+/)) {
+        id = substr($0, RSTART, RLENGTH)
+        if (match($0, /iOS [0-9]+(\.[0-9]+)*/)) {
+          ver = substr($0, RSTART + 4, RLENGTH - 4)
+          split(ver, p, ".")
+          score = (p[1] + 0) * 10000 + (p[2] + 0) * 100 + (p[3] + 0)
+          print score "\t" id
+        }
+      }
+    }
+  ' | sort -nr | head -n 1 | cut -f2
+}
+
+# Linux CI unit-test entry (no macOS / Xcode required).
+if [[ "${1:-}" == "--parse-runtimes-file" ]]; then
+  parse_newest_ios_runtime < "${2:?usage: $0 --parse-runtimes-file PATH}"
+  exit 0
+fi
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This runner requires macOS with Xcode and an iOS Simulator." >&2
   exit 2
@@ -247,26 +273,7 @@ newest_iphone_devicetype() {
 }
 
 newest_ios_runtime() {
-  xcrun simctl list runtimes \
-    | awk -F '[()]' '/iOS/ && /com\.apple\.CoreSimulator\.SimRuntime/ {
-        gsub(/^ +| +$/, "", $1);
-        id="";
-        for (i=2; i<=NF; i++) if ($i ~ /com\.apple\.CoreSimulator\.SimRuntime/) id=$i;
-        print $0 "\t" id
-      }' \
-    | awk -F '\t' '
-        {
-          line=$1; id=$2;
-          if (match(line, /iOS [0-9]+(\.[0-9]+)*/)) {
-            ver=substr(line, RSTART+4, RLENGTH-4);
-            split(ver, p, ".");
-            score=(p[1]+0)*10000 + (p[2]+0)*100 + (p[3]+0);
-            print score "\t" id "\t" ver
-          }
-        }' \
-    | sort -nr \
-    | head -n 1 \
-    | cut -f2
+  xcrun simctl list runtimes | parse_newest_ios_runtime
 }
 
 echo "==> Creating / selecting Simulator"
