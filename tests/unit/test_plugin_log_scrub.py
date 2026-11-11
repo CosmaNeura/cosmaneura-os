@@ -41,30 +41,14 @@ def _secrets() -> tuple[str, ...]:
     return (MRN, EMAIL, PHONE, SSN, DOB, NAME, NOTE, "stuffed penguin", "Ada")
 
 
-def _capture(
-    name: str,
-) -> tuple[
-    logging.Logger,
-    io.StringIO,
-    tuple[int, bool, list[logging.Handler], bool, list[logging.Filter]],
-]:
+def _capture(name: str) -> tuple[logging.Logger, io.StringIO, tuple[int, bool, list[logging.Handler], bool]]:
     arm_plugin_loggers()
     logger = logging.getLogger(name)
     # Alembic fileConfig disables loggers that already exist. The full suite
     # does that before this test, which would drop the record and leave an
     # empty capture.
-    previous = (
-        logger.level,
-        logger.propagate,
-        list(logger.handlers),
-        logger.disabled,
-        list(logger.filters),
-    )
+    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
     logger.handlers = []
-    # Capture-upload proxy installs a global httpx filter that strips every
-    # query string. Clear filters here so plugin scrub assertions still see
-    # keep keys such as request_id after redaction.
-    logger.filters = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
     logger.disabled = False
@@ -76,12 +60,10 @@ def _capture(
 
 
 def _restore(
-    logger: logging.Logger,
-    previous: tuple[int, bool, list[logging.Handler], bool, list[logging.Filter]],
+    logger: logging.Logger, previous: tuple[int, bool, list[logging.Handler], bool]
 ) -> None:
-    level, propagate, handlers, disabled, filters = previous
+    level, propagate, handlers, disabled = previous
     logger.handlers = handlers
-    logger.filters = filters
     logger.setLevel(level)
     logger.propagate = propagate
     logger.disabled = disabled
@@ -190,15 +172,8 @@ def test_httpx_and_runner_logs_scrub_urls_and_exceptions() -> None:
 
 def test_preexisting_httpx_handler_is_armed() -> None:
     logger = logging.getLogger("httpx")
-    previous = (
-        logger.level,
-        logger.propagate,
-        list(logger.handlers),
-        logger.disabled,
-        list(logger.filters),
-    )
+    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
     logger.handlers = []
-    logger.filters = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
     logger.disabled = False
