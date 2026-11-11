@@ -41,14 +41,33 @@ def _secrets() -> tuple[str, ...]:
     return (MRN, EMAIL, PHONE, SSN, DOB, NAME, NOTE, "stuffed penguin", "Ada")
 
 
-def _capture(name: str) -> tuple[logging.Logger, io.StringIO, tuple[int, bool, list[logging.Handler], bool]]:
+def _capture(
+    name: str,
+) -> tuple[
+    logging.Logger,
+    io.StringIO,
+    tuple[int, bool, list[logging.Handler], bool, list[logging.Filter]],
+]:
     arm_plugin_loggers()
     logger = logging.getLogger(name)
     # Alembic fileConfig disables loggers that already exist. The full suite
     # does that before this test, which would drop the record and leave an
     # empty capture.
-    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
+    #
+    # capture_upload_proxy also installs CoreUploadHttpxFilter on the shared
+    # httpx logger at import time. That filter strips every URL query before
+    # the plugin scrubber runs, so request_id disappears whenever an earlier
+    # suite test imported the proxy module. Clear logger filters for the
+    # capture window and restore them afterward.
+    previous = (
+        logger.level,
+        logger.propagate,
+        list(logger.handlers),
+        logger.disabled,
+        list(logger.filters),
+    )
     logger.handlers = []
+    logger.filters = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
     logger.disabled = False
@@ -60,10 +79,12 @@ def _capture(name: str) -> tuple[logging.Logger, io.StringIO, tuple[int, bool, l
 
 
 def _restore(
-    logger: logging.Logger, previous: tuple[int, bool, list[logging.Handler], bool]
+    logger: logging.Logger,
+    previous: tuple[int, bool, list[logging.Handler], bool, list[logging.Filter]],
 ) -> None:
-    level, propagate, handlers, disabled = previous
+    level, propagate, handlers, disabled, filters = previous
     logger.handlers = handlers
+    logger.filters = filters
     logger.setLevel(level)
     logger.propagate = propagate
     logger.disabled = disabled
@@ -172,8 +193,15 @@ def test_httpx_and_runner_logs_scrub_urls_and_exceptions() -> None:
 
 def test_preexisting_httpx_handler_is_armed() -> None:
     logger = logging.getLogger("httpx")
-    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
+    previous = (
+        logger.level,
+        logger.propagate,
+        list(logger.handlers),
+        logger.disabled,
+        list(logger.filters),
+    )
     logger.handlers = []
+    logger.filters = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
     logger.disabled = False
@@ -191,6 +219,25 @@ def test_preexisting_httpx_handler_is_armed() -> None:
         assert REQUEST in text
     finally:
         _restore(logger, previous)
+
+
+def test_httpx_scrub_keeps_request_id_after_core_upload_filter_import() -> None:
+    """Regression: earlier suite imports leave CoreUploadHttpxFilter on httpx."""
+    from cosmas_os.application import capture_upload_proxy as proxy
+
+    attached = proxy.install_httpx_query_filter()
+    httpx_logger = logging.getLogger("httpx")
+    assert any(
+        getattr(item, "marker", None) == proxy.CoreUploadHttpxFilter.marker
+        for item in httpx_logger.filters
+    )
+    assert attached.marker == proxy.CoreUploadHttpxFilter.marker
+    # Same assertions as the order-sensitive test: secrets go, request_id stays.
+    test_httpx_and_runner_logs_scrub_urls_and_exceptions()
+    assert any(
+        getattr(item, "marker", None) == proxy.CoreUploadHttpxFilter.marker
+        for item in httpx_logger.filters
+    )
 
 
 def test_stderr_writes_are_scrubbed_and_sign_in_text_remains(capsys: pytest.CaptureFixture[str]) -> None:
