@@ -37,6 +37,13 @@ test('dedicated host preparation binds every client, database, service, TLS and 
     assert.ok(contract.resource_identity[key].endsWith('/'+sample.instance_id));
   assert.equal(env.COSMAS_ENV,'standalone_clerk_synthetic');assert.equal(env.WORKSPACE_HOSTED_ENABLED,'true');
   assert.equal(env.BETA_BOX_ID,sample.box_id);
+  // Settings bools that default false when unset; render them explicitly false
+  // so host packages match the Settings contract (test_settings_contract.py).
+  for(const flag of ['WORKSPACE_CAPTURE_PROXY_ENABLED','GOOGLE_CONNECTION_BROKER_ENABLED',
+    'WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED','WORKSPACE_ENROLLMENT_MANAGED',
+    'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
+    'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED'])
+    assert.equal(env[flag],'false',flag);
   assert.deepEqual(files['instance.json'],{schema:'cosmabot-standalone-runtime/v1',instance_id:sample.instance_id});
   assert.equal(contract.resource_identity.file_marker.mode,'0600');
   assert.equal(env.STANDALONE_JWKS_PATH,'');assert.equal(env.STANDALONE_CLERK_ISSUER_ALLOWLIST,sample.identity.frontendOrigin);
@@ -88,6 +95,11 @@ test('staging session policy must be explicitly matched to existing development 
   candidate.identity.publishableKey='pk_test_'+Buffer.from('invented-own-practice.clerk.accounts.dev$').toString('base64');
   const files=render(candidate);assert.equal(files['api-public.json'].CLERK_SESSION_POLICY,'shared_staging');
   assert.equal(files['api-public.json'].CLERK_AUDIENCE,'');
+  for(const flag of ['WORKSPACE_CAPTURE_PROXY_ENABLED','GOOGLE_CONNECTION_BROKER_ENABLED',
+    'WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED','WORKSPACE_ENROLLMENT_MANAGED',
+    'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
+    'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED'])
+    assert.equal(files['api-public.json'][flag],'false',flag);
   assert.equal(files['clients/desktop-identity.json'].profile,'operational-staging-v1');
   assert.equal(files['host-preparation.json'].clerk_session_proof.default_session_token_required,true);
   assert.equal(files['host-preparation.json'].clerk_session_proof.named_jwt_template_is_not_a_substitute,true);
