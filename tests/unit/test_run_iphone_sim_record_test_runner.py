@@ -154,6 +154,8 @@ def test_overlay_receipt_and_failure_screenshot_paths_exist() -> None:
     assert "exit \"${TEST_STATUS}\"" in text or 'exit "${TEST_STATUS}"' in text
     assert "com.cosmasos.synthetic" in text
     assert "cosmas-mic-uitest-" in text
+    # Identity must be patched when target lacks *.synthetic.example support.
+    assert "overlay_patch_or_absent clients/shared/operational-native-identity.mjs" in text
 
 
 def test_runner_node_test_mjs_passes() -> None:

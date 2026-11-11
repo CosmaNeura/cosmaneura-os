@@ -514,7 +514,9 @@ echo "==> Conditional overlays from tooling ${TOOLING_SHA}"
 overlay_if_absent scripts/compose-portable-iphone.py
 overlay_if_absent scripts/prepare-synthetic-iphone-web-bundle.mjs
 overlay_if_absent scripts/configure-synthetic-iphone-simulator.py
-overlay_if_absent clients/shared/operational-native-identity.mjs
+# Target tips before *.synthetic.example support keep an older identity
+# validator; patch it with the tooling copy so prepare-synthetic can run.
+overlay_patch_or_absent clients/shared/operational-native-identity.mjs
 overlay_patch_or_absent clients/apple/startup-recovery/CosmasWorkspaceViewController.swift
 overlay_patch_or_absent clients/apple/startup-recovery/CosmasBridgeViewController.swift
 overlay_patch_or_absent clients/apple/startup-recovery/SyntheticDemoFixtureGate.swift
