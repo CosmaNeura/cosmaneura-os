@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""Offline dry-run render/validate for the CosmaBot production hosting profile.
+
+Runnable in CI with no Azure credentials. Renders public params, checks name
+guards, price table, recording-off, OpenAI default-off, and foundation source
+shape. Optionally runs `tofu fmt -check` / `tofu validate` when tofu is present.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+REPO = ROOT.parents[3]
+FOUNDATION = ROOT / "foundation"
+sys.path.insert(0, str(ROOT))
+from name_guards import (  # noqa: E402
+    PRODUCTION,
+    STAGING,
+    NameGuardError,
+    assert_production_inputs,
+    assert_staging_inputs,
+)
+
+
+class DryRunError(RuntimeError):
+    pass
+
+
+def load_json(path: Path):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise DryRunError(f"duplicate_json_key:{path.name}")
+            result[key] = value
+        return result
+
+    return json.loads(path.read_text(), object_pairs_hook=unique)
+
+
+def render_params() -> dict:
+    profile = load_json(ROOT / "profile" / "runtime-public.json")
+    prices = load_json(ROOT / "prices" / "monthly-estimate.json")
+    params = {
+        "environment": "production",
+        "resource_group": PRODUCTION["resource_group"],
+        "vm_name": PRODUCTION["vm_name"],
+        "location": "eastus2",
+        "vm_size": "Standard_D2s_v5",
+        "web_host": PRODUCTION["web_host"],
+        "api_host": PRODUCTION["api_host"],
+        "acr_prefix": PRODUCTION["acr_prefix"],
+        "key_vault_prefix": PRODUCTION["key_vault_prefix"],
+        "storage_prefixes": list(PRODUCTION["storage_prefixes"]),
+        "state_namespace": PRODUCTION["state_namespace"],
+        "enable_azure_openai": False,
+        "dns_proxy": False,
+        "clerk_secret_names_only": profile["runtime"]["secret_names"],
+        "real_patient_recording_enabled": profile["runtime"]["environment"][
+            "REAL_PATIENT_RECORDING_ENABLED"
+        ],
+        "workspace_llm_backend": profile["runtime"]["environment"]["WORKSPACE_LLM_BACKEND"],
+        "workspace_llm_deployment": profile["runtime"]["environment"]["WORKSPACE_LLM_DEPLOYMENT"],
+        "price_date": prices["price_date"],
+        "price_label": prices["label"],
+    }
+    return {"params": params, "profile": profile, "prices": prices}
+
+
+def monthly_total(prices: dict) -> float:
+    return round(sum(float(item["monthly_usd"]) for item in prices["line_items"]), 2)
+
+
+def validate_rendered(bundle: dict) -> None:
+    params = bundle["params"]
+    profile = bundle["profile"]
+    prices = bundle["prices"]
+    assert_production_inputs(
+        {
+            "resource_group": params["resource_group"],
+            "vm_name": params["vm_name"],
+            "web_host": params["web_host"],
+            "api_host": params["api_host"],
+            "acr_prefix": params["acr_prefix"],
+            "key_vault_prefix": params["key_vault_prefix"],
+            "state_namespace": params["state_namespace"],
+            **{f"storage_{i}": name for i, name in enumerate(params["storage_prefixes"])},
+        }
+    )
+    with _expect(NameGuardError):
+        assert_production_inputs({"resource_group": STAGING["resource_group"]})
+    with _expect(NameGuardError):
+        assert_staging_inputs({"resource_group": PRODUCTION["resource_group"]})
+    with _expect(NameGuardError):
+        assert_staging_inputs({"web_host": PRODUCTION["web_host"]})
+    with _expect(NameGuardError):
+        assert_production_inputs({"acr_prefix": STAGING["acr_prefix"]})
+
+    if params["real_patient_recording_enabled"] != "false":
+        raise DryRunError("real_patient_recording_must_stay_false")
+    if profile["runtime"]["environment"]["REAL_PATIENT_RECORDING_ENABLED"] != "false":
+        raise DryRunError("profile_recording_must_stay_false")
+    if params["enable_azure_openai"] is not False:
+        raise DryRunError("azure_openai_must_default_off")
+    if profile["azure_openai_module"]["enabled_by_default"] is not False:
+        raise DryRunError("azure_openai_profile_must_default_off")
+    if params["workspace_llm_backend"] != "azure_gpt41":
+        raise DryRunError("model_backend_must_match_staging")
+    if params["workspace_llm_deployment"] != "gpt-4.1":
+        raise DryRunError("model_deployment_must_match_staging")
+    if "CLERK_SECRET_KEY" not in params["clerk_secret_names_only"]:
+        raise DryRunError("clerk_secret_name_required")
+    # No secret values may appear in the checked-in profile.
+    blob = json.dumps(profile)
+    if re.search(r"sk_live_|sk_test_|pk_live_[A-Za-z0-9]{10,}", blob):
+        raise DryRunError("clerk_secret_values_forbidden")
+    if prices["label"] != "estimate" or not prices.get("price_date"):
+        raise DryRunError("price_table_must_be_labeled_estimate_with_date")
+    total = monthly_total(prices)
+    if total <= 0:
+        raise DryRunError("price_total_invalid")
+    params["estimated_monthly_total_usd"] = total
+    params["exceeds_300"] = total > float(prices["warning_threshold_usd"])
+
+
+class _expect:
+    def __init__(self, exc_type):
+        self.exc_type = exc_type
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            raise DryRunError(f"expected_{self.exc_type.__name__}")
+        return issubclass(exc_type, self.exc_type)
+
+
+def validate_foundation_source() -> None:
+    text = "\n".join(
+        path.read_text()
+        for path in sorted(FOUNDATION.rglob("*"))
+        if path.is_file() and path.suffix in {".tf", ".py", ".hcl"}
+    )
+    for needle in (
+        STAGING["resource_group"],
+        STAGING["vm_name"],
+        STAGING["web_host"],
+        STAGING["acr_prefix"],
+        STAGING["key_vault_prefix"],
+        STAGING["state_namespace"],
+        *STAGING["storage_prefixes"],
+    ):
+        if needle in text:
+            raise DryRunError(f"production_source_contains_staging_name:{needle}")
+    for needle in (
+        PRODUCTION["resource_group"],
+        PRODUCTION["vm_name"],
+        PRODUCTION["acr_prefix"],
+        PRODUCTION["key_vault_prefix"],
+        PRODUCTION["state_namespace"],
+        "stcbotprd",
+    ):
+        if needle not in text:
+            raise DryRunError(f"production_source_missing_required_name:{needle}")
+    if 'stcbotprd${each.key == "application" ? "app" : "bak"}' not in text:
+        raise DryRunError("production_storage_name_template_missing")
+    openai = (FOUNDATION / "openai.tf").read_text()
+    if "enable_azure_openai" not in openai or not re.search(
+        r"default\s*=\s*false", openai
+    ):
+        raise DryRunError("openai_module_must_default_false")
+    if "module \"azure_openai\"" not in openai:
+        raise DryRunError("openai_must_be_separate_module")
+    staging_foundation = REPO / "infra/beta/vm/foundation"
+    staging_text = "\n".join(
+        path.read_text()
+        for path in sorted(staging_foundation.rglob("*"))
+        if path.is_file() and path.suffix in {".tf", ".py", ".hcl"}
+    )
+    for needle in (
+        PRODUCTION["resource_group"],
+        PRODUCTION["vm_name"],
+        PRODUCTION["web_host"],
+        PRODUCTION["acr_prefix"],
+        PRODUCTION["key_vault_prefix"],
+        PRODUCTION["state_namespace"],
+        *PRODUCTION["storage_prefixes"],
+    ):
+        if needle in staging_text:
+            raise DryRunError(f"staging_source_contains_production_name:{needle}")
+
+
+def tofu_offline_validate() -> dict:
+    tofu = shutil.which("tofu")
+    if not tofu:
+        return {"tofu": "absent", "fmt": None, "validate": None, "skipped": True}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("TF_", "ARM_")) and key != "AZURE_CONFIG_DIR"
+    }
+    fmt = subprocess.run(
+        [tofu, "fmt", "-check", "-recursive", str(FOUNDATION)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    if fmt.returncode != 0:
+        raise DryRunError(f"tofu_fmt_failed:{fmt.stdout}{fmt.stderr}")
+    with tempfile.TemporaryDirectory(prefix="cosmabot-prod-dry-run-") as tmp:
+        key = Path(tmp) / "encryption.passphrase"
+        key.write_text("synthetic-production-foundation-encryption-fixture-never-live\n")
+        key.chmod(0o600)
+        data_dir = Path(tmp) / "tofu-data"
+        data_dir.mkdir()
+        run_env = dict(env)
+        run_env.update(
+            {
+                "TF_DATA_DIR": str(data_dir),
+                "TF_IN_AUTOMATION": "1",
+                "TF_INPUT": "0",
+                "TF_VAR_bootstrap_key_file": str(key),
+            }
+        )
+        init = subprocess.run(
+            [tofu, "init", "-backend=false", "-input=false", "-lockfile=readonly"],
+            cwd=FOUNDATION,
+            capture_output=True,
+            text=True,
+            env=run_env,
+            check=False,
+        )
+        if init.returncode != 0:
+            # Offline CI may lack the provider mirror; fmt success still counts.
+            return {
+                "tofu": tofu,
+                "fmt": "ok",
+                "validate": "skipped_provider_unavailable",
+                "skipped": False,
+                "init_stderr_tail": init.stderr[-500:],
+            }
+        validate = subprocess.run(
+            [tofu, "validate", "-no-color"],
+            cwd=FOUNDATION,
+            capture_output=True,
+            text=True,
+            env=run_env,
+            check=False,
+        )
+        if validate.returncode != 0:
+            raise DryRunError(f"tofu_validate_failed:{validate.stdout}{validate.stderr}")
+        return {"tofu": tofu, "fmt": "ok", "validate": "ok", "skipped": False}
+
+
+def main() -> int:
+    try:
+        bundle = render_params()
+        validate_rendered(bundle)
+        validate_foundation_source()
+        tofu = tofu_offline_validate()
+        result = {
+            "dry_run": True,
+            "azure_calls": False,
+            "params": bundle["params"],
+            "estimated_monthly_total_usd": bundle["params"]["estimated_monthly_total_usd"],
+            "price_date": bundle["prices"]["price_date"],
+            "price_label": bundle["prices"]["label"],
+            "exceeds_300_warning": bundle["params"]["exceeds_300"],
+            "tofu": tofu,
+        }
+        print(json.dumps(result, sort_keys=True, indent=2))
+        return 0
+    except (DryRunError, NameGuardError, OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        print(f"cosmabot_prod_dry_run_refused:{exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,36 @@
+{
+  "profile": "cosmabot-vm-prod-v1",
+  "web_origin": "https://beta.cosmas.ai",
+  "api_origin": "https://api.beta.cosmas.ai",
+  "dns": {
+    "records": [
+      {"name": "beta.cosmas.ai", "type": "A_or_CNAME", "proxy": false, "note": "DNS-only; no Cloudflare proxy"},
+      {"name": "api.beta.cosmas.ai", "type": "A_or_CNAME", "proxy": false, "note": "DNS-only; no Cloudflare proxy"}
+    ]
+  },
+  "runtime": {
+    "environment": {
+      "COSMAS_ENV": "early_adopter_beta",
+      "DATA_MODE": "synthetic",
+      "AUTH_MODE": "clerk_jwt",
+      "BLOB_BACKEND": "azure",
+      "WORKSPACE_LLM_BACKEND": "azure_gpt41",
+      "WORKSPACE_LLM_DEPLOYMENT": "gpt-4.1",
+      "REAL_PATIENT_RECORDING_ENABLED": "false"
+    },
+    "secret_names": [
+      "CLERK_SECRET_KEY",
+      "WORKSPACE_LLM_API_KEY",
+      "HUMAN_DEPLOY_EVIDENCE_REF"
+    ],
+    "notes": [
+      "Clerk values are read from Key Vault by secret NAME only; no secret values belong in this repository.",
+      "Model backend/deployment match the staging CosmaBot profile; do not change model deployments in this ticket.",
+      "REAL_PATIENT_RECORDING_ENABLED stays false in the production hosting profile."
+    ]
+  },
+  "azure_openai_module": {
+    "enabled_by_default": false,
+    "requires_separate_john_yes": true
+  }
+}

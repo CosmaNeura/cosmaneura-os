@@ -1,0 +1,60 @@
+{
+  "label": "estimate",
+  "price_date": "2026-09-25",
+  "currency": "USD",
+  "hours_per_month": 730,
+  "notes": [
+    "Checked-in retail estimate for the CosmaBot production VM foundation shape.",
+    "Same SKU envelope as the September 25, 2026 staging VM option (D2s_v5, Premium ACR, four private endpoints).",
+    "Not an Azure invoice, reservation quote, or spending cap. No credits, tax, or transfer assumed.",
+    "Azure OpenAI module is OFF by default and is excluded from this estimate."
+  ],
+  "line_items": [
+    {
+      "component": "Linux VM Standard_D2s_v5",
+      "quantity": "1 × 730 hours",
+      "monthly_usd": 70.08
+    },
+    {
+      "component": "Managed disks (64 GiB OS + 128 GiB data Standard SSD LRS)",
+      "quantity": "192 GiB",
+      "monthly_usd": 14.40
+    },
+    {
+      "component": "Standard static public IPv4",
+      "quantity": "1 × 730 hours",
+      "monthly_usd": 3.65
+    },
+    {
+      "component": "Premium ACR (private)",
+      "quantity": "1",
+      "monthly_usd": 50.69
+    },
+    {
+      "component": "Private endpoints (ACR, Key Vault, app Blob, backup Blob)",
+      "quantity": "4 × $0.01/hour",
+      "monthly_usd": 29.20
+    },
+    {
+      "component": "Private DNS zones (ACR, Key Vault, shared Blob)",
+      "quantity": "3 × $0.50",
+      "monthly_usd": 1.50
+    },
+    {
+      "component": "Metric alerts (three time series, gross)",
+      "quantity": "3",
+      "monthly_usd": 0.30
+    },
+    {
+      "component": "Log Analytics workspace (0.1 GB/day quota setting; usage extra)",
+      "quantity": "workspace fixed portion modeled as $0 in this table",
+      "monthly_usd": 0.0
+    },
+    {
+      "component": "Illustrative usage (10 GB app objects + 100 GB backups + 0.1 GB/day logs + 10k Key Vault ops)",
+      "quantity": "planning assumption",
+      "monthly_usd": 10.45
+    }
+  ],
+  "warning_threshold_usd": 300
+}
