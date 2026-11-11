@@ -1237,3 +1237,99 @@ def test_confirm_refuses_when_deletion_role_is_missing(engine, tmp_path, monkeyp
         _ensure_patient_deletion_role(session)
         session.close()
         admin.dispose()
+
+
+def test_migration_applies_as_restricted_migrator_with_and_without_deletion_role(caplog) -> None:
+    """Compact-style migrator: non-superuser DB owner, no SET on the deletion role."""
+
+    url = make_url(os.environ.get("DATABASE_URL", settings.database_url))
+    assert url.host in {"127.0.0.1", "localhost"}
+    shared = str(url.database)
+    password = "invented-compact-migrator-password"
+    quoted = None
+    admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        quoted = connection.scalar(text("SELECT quote_literal(:password)"), {"password": password})
+    assert isinstance(quoted, str)
+
+    def _restricted_database(suffix: str) -> tuple[str, str, object]:
+        database = f"patdel_restr_{suffix}_" + uuid4().hex[:10]
+        migrator = f"patdel_mig_{suffix}_" + uuid4().hex[:10]
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    f"CREATE ROLE {migrator} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                    f"NOINHERIT PASSWORD {quoted}"
+                )
+            )
+            connection.execute(text(f'CREATE DATABASE "{database}" OWNER {migrator}'))
+        engine = create_engine(
+            url.set(
+                drivername="postgresql+psycopg",
+                username=migrator,
+                password=password,
+                database=database,
+            )
+        )
+        return database, migrator, engine
+
+    without_db, without_role, without_engine = _restricted_database("no")
+    with_db, with_role, with_engine = _restricted_database("yes")
+    try:
+        _drop_patient_deletion_role(admin, (shared, without_db, with_db))
+        with caplog.at_level(logging.INFO, logger="alembic.runtime.migration"):
+            _migrate(without_engine, EXPECTED_SCHEMA_REVISION, downgrade=False)
+        assert _revision(without_engine) == EXPECTED_SCHEMA_REVISION
+        assert "cosmas_patient_deletion is missing; grant skipped" in caplog.text
+        with without_engine.connect() as connection:
+            assert connection.scalar(text("SELECT current_user")) == without_role
+            owner = connection.scalar(
+                text(
+                    "SELECT r.rolname FROM pg_proc p "
+                    "JOIN pg_roles r ON r.oid = p.proowner "
+                    "WHERE p.oid = to_regprocedure("
+                    "'public.delete_patient_keyed_records(uuid, jsonb)')"
+                )
+            )
+            assert owner == without_role
+
+        # Role exists on the cluster but this migrator cannot SET ROLE to it.
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    "DO $$ BEGIN "
+                    "IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cosmas_patient_deletion') THEN "
+                    "CREATE ROLE cosmas_patient_deletion NOLOGIN NOINHERIT; "
+                    "END IF; END $$"
+                )
+            )
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="alembic.runtime.migration"):
+            _migrate(with_engine, EXPECTED_SCHEMA_REVISION, downgrade=False)
+        assert _revision(with_engine) == EXPECTED_SCHEMA_REVISION
+        assert "cosmas_patient_deletion grant skipped" in caplog.text
+        with with_engine.connect() as connection:
+            assert connection.scalar(text("SELECT current_user")) == with_role
+            assert not connection.scalar(
+                text("SELECT pg_has_role(current_user, :role, 'SET')"),
+                {"role": DELETION_ROLE},
+            )
+            owner = connection.scalar(
+                text(
+                    "SELECT r.rolname FROM pg_proc p "
+                    "JOIN pg_roles r ON r.oid = p.proowner "
+                    "WHERE p.oid = to_regprocedure("
+                    "'public.delete_patient_keyed_records(uuid, jsonb)')"
+                )
+            )
+            assert owner == with_role
+    finally:
+        without_engine.dispose()
+        with_engine.dispose()
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{without_db}" WITH (FORCE)'))
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{with_db}" WITH (FORCE)'))
+            connection.execute(text(f"DROP ROLE IF EXISTS {without_role}"))
+            connection.execute(text(f"DROP ROLE IF EXISTS {with_role}"))
+        _ensure_patient_deletion_role_on(create_engine(url))
+        admin.dispose()
