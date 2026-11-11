@@ -105,3 +105,55 @@ def test_stream_ciphertext_does_not_log_audio_or_transcript_content(db, caplog):
     assert canary.decode("latin1") not in joined
     assert "CANARY_AUDIO_TRANSCRIPT_BYTES_DO_NOT_LOG_" not in joined
     assert b"CANARY_AUDIO_TRANSCRIPT_BYTES_DO_NOT_LOG_".hex() not in joined
+
+
+def test_core_upload_httpx_logs_never_contain_query_or_sig(db, caplog):
+    box, owner, workspace = _seed(db)
+    signed = (
+        "https://cosmaneurastaginguploads.blob.core.windows.net/synth/object"
+        "?sv=2025-01-05&sig=invented-secret-signature&se=2099-01-01T00:00:00Z"
+    )
+    assert "sig=" in signed and "?" in signed
+    assert "?" not in proxy.redact_core_upload_query(signed)
+    assert "sig=" not in proxy.redact_core_upload_query(signed)
+    receipt = UploadReceipt(
+        authorization_receipt_id=uuid4(),
+        object_id=uuid4(),
+        additional_authenticated_data="e30",
+        upload_url=signed,
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    minted = proxy.mint_proxy_upload(
+        db, receipt=receipt, box_id=box.id, workspace_id=workspace.id,
+        session_id=str(uuid4()), principal_id=owner.id,
+        proxy_origin="https://api.invented-cosmabot.test",
+    )
+    proxy_id = minted.upload_url.rsplit("/", 1)[-1]
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Emit while the Core upload client has the redaction filter installed.
+        logging.getLogger("httpx").warning("core upload PUT %s", str(request.url))
+        seen.append(str(request.url))
+        return httpx.Response(201, request=request)
+
+    transport = httpx.MockTransport(handler)
+    with caplog.at_level(logging.DEBUG, logger="httpx"):
+        proxy.stream_ciphertext_to_core(
+            db,
+            box_id=box.id,
+            workspace_id=workspace.id,
+            principal_id=owner.id,
+            proxy_id=proxy_id,
+            body=b"synthetic-ciphertext-bytes",
+            runtime=_Runtime(),
+            transport=transport,
+        )
+    assert seen and "sig=" in seen[0]
+    httpx_messages = [
+        record.getMessage() for record in caplog.records if record.name == "httpx"
+    ]
+    assert httpx_messages
+    for message in httpx_messages:
+        assert "sig=" not in message
+        assert "?" not in message

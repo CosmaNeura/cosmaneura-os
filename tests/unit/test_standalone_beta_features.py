@@ -122,6 +122,18 @@ def test_core_capture_incomplete_or_broadened_configuration_fails(clerk_standalo
     assert runtime.runtime_configuration_errors()
 
 
+def test_independent_core_capture_opt_in_with_empty_proxy_refuses_at_config(clerk_standalone):
+    """Opt-in on + empty proxy must fail at Settings validation, not at upload time."""
+    runtime = clerk_standalone.runtime.model_copy(
+        update=model_values() | google_values() | core_capture_values() | {
+            "workspace_capture_proxy_origin": "",
+        }
+    )
+    errors = runtime.runtime_configuration_errors()
+    assert errors
+    assert any("proxy origin" in error.lower() for error in errors)
+
+
 def test_agent_tools_alone_without_core_capture_still_allowed_with_model(clerk_standalone):
     runtime = clerk_standalone.runtime.model_copy(update=model_values() | {"workspace_agent_tools_enabled": True})
     runtime.validate_runtime_configuration()

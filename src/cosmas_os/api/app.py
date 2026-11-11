@@ -979,14 +979,15 @@ async def perform_workspace_capture(request: Request, workspace_id: UUID,
     ):
         raise HTTPException(404, "not found", headers={"Cache-Control": "no-store"})
     receipt = await _execute_workspace_capture(request, workspace_id, session, identity, port, body)
-    # T-REL-6: never return Core/Scribe blob URLs to the browser. Rewrite
-    # authorize_upload receipts to CosmaBot's own API proxy origin.
+    # T-REL-6 independent-beta only: rewrite authorize_upload to CosmaBot's API
+    # proxy when Core capture is opted in and the proxy origin is configured.
+    # All other profiles keep Core/Scribe upload URLs byte-for-byte (main).
     if body.operation.kind == "authorize_upload":
         from cosmas_os.application import capture_upload_proxy as upload_proxy
         from cosmas_os.ports.capture_protocol import UploadReceipt
         if not isinstance(receipt, UploadReceipt):
             raise ws.WorkspaceError("capture_request_unconfirmed", 503)
-        receipt = upload_proxy.mint_proxy_upload(
+        receipt = upload_proxy.maybe_rewrite_authorize_upload(
             session,
             receipt=receipt,
             box_id=identity.box_id,
@@ -994,6 +995,7 @@ async def perform_workspace_capture(request: Request, workspace_id: UUID,
             session_id=str(body.session_id),
             principal_id=identity.principal_id,
             proxy_origin=settings.workspace_capture_proxy_origin,
+            capture_backend=settings.workspace_capture_backend,
         )
     return JSONResponse(content={"session_id": str(body.session_id), "workspace_id": str(workspace_id),
         "operation": body.operation.kind, "receipt": receipt.model_dump(mode="json")},

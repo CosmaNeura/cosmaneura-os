@@ -98,6 +98,66 @@ def test_mint_rewrites_blob_url_to_cosmabot_api_proxy(db):
     assert str(row.authorization_receipt_id) == str(receipt.authorization_receipt_id)
 
 
+@pytest.mark.parametrize(
+    "capture_backend,proxy_origin",
+    [
+        ("disabled", ""),
+        ("disabled", "https://api.staging.cosmas.ai"),
+        # Capture-on Core profile with a Scribe blob upload URL and no CosmaBot
+        # proxy origin: keep Core upload URLs exactly (never 503).
+        ("core", ""),
+        ("core", "   "),
+    ],
+)
+def test_authorize_upload_without_independent_proxy_opt_in_keeps_core_url(
+    db, capture_backend, proxy_origin
+):
+    box, owner, workspace, _ = _seed(db)
+    scribe = (
+        "https://cosmaneurastaginguploads.blob.core.windows.net/synth"
+        "?sv=2025-01-05&sig=invented-signature"
+    )
+    receipt = _receipt(upload_url=scribe)
+    out = proxy.maybe_rewrite_authorize_upload(
+        db,
+        receipt=receipt,
+        box_id=box.id,
+        workspace_id=workspace.id,
+        session_id=str(uuid4()),
+        principal_id=owner.id,
+        proxy_origin=proxy_origin,
+        capture_backend=capture_backend,
+    )
+    assert out is receipt
+    assert out.upload_url == scribe
+    assert out.model_dump(mode="json") == receipt.model_dump(mode="json")
+
+
+def test_authorize_upload_with_proxy_configured_rewrites_to_cosmabot_api(db):
+    box, owner, workspace, _ = _seed(db)
+    scribe = (
+        "https://cosmaneurastaginguploads.blob.core.windows.net/synth"
+        "?sv=2025-01-05&sig=invented-signature"
+    )
+    receipt = _receipt(upload_url=scribe)
+    out = proxy.maybe_rewrite_authorize_upload(
+        db,
+        receipt=receipt,
+        box_id=box.id,
+        workspace_id=workspace.id,
+        session_id=str(uuid4()),
+        principal_id=owner.id,
+        proxy_origin="https://api.staging.cosmas.ai",
+        capture_backend="core",
+    )
+    assert out.upload_url != scribe
+    assert out.upload_url.startswith(
+        f"https://api.staging.cosmas.ai/workspaces/{workspace.id}/capture/ciphertexts/"
+    )
+    assert "sig=" not in out.upload_url
+    assert "blob.core.windows.net" not in out.upload_url
+
+
 def test_stream_requires_authz_match_and_size_limit(db):
     box, owner, workspace, _ = _seed(db)
     session_id = str(uuid4())

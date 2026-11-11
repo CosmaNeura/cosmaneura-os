@@ -4,10 +4,16 @@ Core authorize_upload still issues the Scribe/blob SAS URL. CosmaBot never
 returns that URL to the browser (browser→blob would need Cosmas CORS). The
 browser PUTs only to CosmaBot's own API origin; CosmaBot streams to the stored
 target with httpx (no browser CORS). Synthetic audio/ciphertext only.
+
+The proxy rewrite applies only when independent-beta Core capture is opted in
+(workspace_capture_backend=core) AND workspace_capture_proxy_origin is
+configured. Every other profile returns Core/Scribe upload URLs unchanged.
 """
 
 from __future__ import annotations
 
+import logging
+import re
 from datetime import UTC, datetime
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
@@ -26,6 +32,43 @@ from cosmas_os.ports.capture_protocol import UploadReceipt
 
 # Matches capture_protocol.Registration.ciphertext_size_bytes upper bound.
 MAX_CIPHERTEXT_BYTES = 327_680
+
+# httpx logs request URLs (including SAS query strings) on this logger.
+_HTTPX_LOGGER_NAME = "httpx"
+# Strip the entire query string from any http(s) URL span in a log line.
+_HTTP_URL_QUERY = re.compile(r"(https?://[^\s?]+)\?[^\s]*", re.IGNORECASE)
+
+
+def redact_core_upload_query(text: str) -> str:
+    """Redact the whole query string from Core upload URLs in one log line.
+
+    Used for every log line from the Core upload httpx client — not only sig=.
+    """
+    if not isinstance(text, str) or "?" not in text:
+        return text
+    return _HTTP_URL_QUERY.sub(r"\1", text)
+
+
+class _CoreUploadHttpxFilter(logging.Filter):
+    """Route httpx log msg/args through redact_core_upload_query."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = redact_core_upload_query(record.msg)
+        args = record.args
+        if isinstance(args, tuple):
+            record.args = tuple(
+                redact_core_upload_query(arg) if isinstance(arg, str) else arg
+                for arg in args
+            )
+        elif isinstance(args, dict):
+            record.args = {
+                key: redact_core_upload_query(value) if isinstance(value, str) else value
+                for key, value in args.items()
+            }
+        elif isinstance(args, str):
+            record.args = redact_core_upload_query(args)
+        return True
 
 
 def _loopback_host(hostname: str | None) -> bool:
@@ -52,6 +95,18 @@ def _exact_proxy_origin(value: str) -> bool:
     return parsed.scheme == "http" and _loopback_host(parsed.hostname)
 
 
+def upload_proxy_rewrite_active(*, capture_backend: str, proxy_origin: str) -> bool:
+    """True only for independent-beta Core capture opt-in with a configured proxy.
+
+    Opt-in maps to workspace_capture_backend=core (VITE_WORKSPACE_CAPTURE_ENABLED /
+    hosting core_capture). Proxy origin must be an exact CosmaBot API origin.
+    Empty proxy keeps main upload URLs byte-for-byte (no 503 at authorize time).
+    """
+    if capture_backend != "core":
+        return False
+    return _exact_proxy_origin(proxy_origin)
+
+
 def _allowed_target_upload_url(value: str) -> bool:
     parsed = urlparse(value)
     if parsed.username or parsed.password or not parsed.hostname:
@@ -64,6 +119,33 @@ def _allowed_target_upload_url(value: str) -> bool:
     if parsed.scheme == "https":
         return True
     return parsed.scheme == "http" and _loopback_host(host)
+
+
+def maybe_rewrite_authorize_upload(
+    session: Session,
+    *,
+    receipt: UploadReceipt,
+    box_id: str,
+    workspace_id: str,
+    session_id: str,
+    principal_id: str,
+    proxy_origin: str,
+    capture_backend: str,
+) -> UploadReceipt:
+    """Rewrite authorize_upload only when independent-beta proxy opt-in is active."""
+    if not upload_proxy_rewrite_active(
+        capture_backend=capture_backend, proxy_origin=proxy_origin
+    ):
+        return receipt
+    return mint_proxy_upload(
+        session,
+        receipt=receipt,
+        box_id=box_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        principal_id=principal_id,
+        proxy_origin=proxy_origin,
+    )
 
 
 def mint_proxy_upload(
@@ -157,6 +239,12 @@ def stream_ciphertext_to_core(
     host = (urlparse(target).hostname or "").lower()
     if host.endswith(".blob.core.windows.net"):
         headers["x-ms-blob-type"] = "BlockBlob"
+    httpx_logger = logging.getLogger(_HTTPX_LOGGER_NAME)
+    previous_level = httpx_logger.level
+    query_filter = _CoreUploadHttpxFilter()
+    httpx_logger.addFilter(query_filter)
+    # INFO lines include the full request URL; keep this client at WARNING.
+    httpx_logger.setLevel(logging.WARNING)
     try:
         with httpx.Client(
             transport=transport,
@@ -167,6 +255,9 @@ def stream_ciphertext_to_core(
             response = client.put(target, content=body, headers=headers)
     except httpx.HTTPError as exc:
         raise ws.WorkspaceError("capture_request_unconfirmed", 503) from exc
+    finally:
+        httpx_logger.removeFilter(query_filter)
+        httpx_logger.setLevel(previous_level)
     if response.status_code != 201:
         raise ws.WorkspaceError("capture_request_unconfirmed", 503)
     row.consumed_at = now
