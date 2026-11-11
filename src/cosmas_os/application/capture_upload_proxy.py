@@ -36,18 +36,28 @@ from cosmas_os.ports.capture_protocol import UploadReceipt
 MAX_CIPHERTEXT_BYTES = 327_680
 
 _HTTPX_LOGGER_NAME = "httpx"
-# Strip the entire query string from any http(s) URL span in a log line.
-_HTTP_URL_QUERY = re.compile(r"(https?://[^\s?]+)\?[^\s]*", re.IGNORECASE)
+# Only Core/Azure blob upload URLs: strip the entire query (SAS sig= / sv=).
+# Do not touch unrelated httpx logs (e.g. request_id on fixture API URLs).
+_CORE_UPLOAD_HOST_SUFFIX = ".blob.core.windows.net"
+_HTTP_URL_QUERY = re.compile(
+    rf"(https?://[^\s?]*{re.escape(_CORE_UPLOAD_HOST_SUFFIX)}[^\s?]*)\?[^\s]*",
+    re.IGNORECASE,
+)
+
+
+def _is_core_upload_host(host: str | None) -> bool:
+    return (host or "").lower().endswith(_CORE_UPLOAD_HOST_SUFFIX)
 
 
 def redact_core_upload_query(value: object) -> object:
     """Redact the whole query string from a Core upload URL value for logging.
 
     Handles httpx.URL (what httpx puts in LogRecord.args) and URL-shaped strings.
-    Used for every log line from the Core upload httpx client — not only sig=.
+    Scoped to Azure blob Core-upload hosts so other httpx request_id query
+    keys remain available to the plugin log scrubber.
     """
     if isinstance(value, httpx.URL):
-        if not value.query:
+        if not value.query or not _is_core_upload_host(value.host):
             return value
         return value.copy_with(query=None)
     if not isinstance(value, str) or "?" not in value:
