@@ -71,6 +71,19 @@
       IOSPCMBridgeCore.confirmProcessCaptureIdle()
     }
 
+    #if DEBUG
+    /// Synthetic Simulator XCUITest only. Confirms `load()` built the Capacitor
+    /// transport, then exercises the same mic-permission gate as `start`
+    /// (`AVAudioApplication.requestRecordPermission`). Not registered in
+    /// `pluginMethods`; the entire method is omitted from Release/TestFlight.
+    @MainActor @nonobjc public func uiTestStartRecordingThroughLoadedPlugin() async {
+      guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic",
+            ProcessInfo.processInfo.arguments.contains("-COSMAS_UI_TEST_START_CAPTURE"),
+            transport != nil else { return }
+      _ = await AVAudioApplication.requestRecordPermission()
+    }
+    #endif
+
     @objc public func getAppState(_ call: CAPPluginCall) {
       perform(call) { transport in
         ["state": await transport.getAppState()]

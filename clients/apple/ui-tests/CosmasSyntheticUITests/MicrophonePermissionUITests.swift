@@ -68,6 +68,9 @@ final class MicrophonePermissionUITests: XCTestCase {
             "Capture-start path must use the real native plugin bridge, not the demo surface"
         )
         let alert = micPermissionAlert()
+        // Capture evidence before the assertion so a missing prompt still leaves
+        // a screenshot in the xcresult / runner artifacts.
+        screenshot("02-start-recording-before-mic-assert")
         XCTAssertTrue(
             alert.waitForExistence(timeout: 12),
             "Starting recording must present the microphone permission prompt"

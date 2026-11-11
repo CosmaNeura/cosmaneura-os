@@ -36,5 +36,18 @@ final class MicrophoneLaunchPreflightTests: XCTestCase {
             bridgeSource.contains("IOSPCMCapacitorPlugin"),
             "Bridge still owns IOSPCM; Debug synthetic must not construct it"
         )
+        // Mic prompt must go through the loaded plugin, not a ViewController-local call.
+        XCTAssertFalse(
+            bridgeSource.contains("AVAudioApplication.requestRecordPermission"),
+            "Bridge must not call AVAudioApplication.requestRecordPermission directly"
+        )
+        XCTAssertTrue(
+            bridgeSource.contains("uiTestStartRecordingThroughLoadedPlugin"),
+            "START_CAPTURE must invoke IOSPCMCapacitorPlugin.uiTestStartRecordingThroughLoadedPlugin"
+        )
+        XCTAssertTrue(
+            source.contains("CosmasSyntheticDemoSurface.skipLaunchArgument"),
+            "Synthetic UI-test boot must skip practice-host failure before openWorkspace"
+        )
     }
 }

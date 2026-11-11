@@ -2,7 +2,6 @@ import UIKit
 import WebKit
 import Capacitor
 import CosmaneuraIOSPCMCapacitor
-import AVFAudio
 #if canImport(CosmasWorkspaceAuthPlugin)
 import CosmasWorkspaceAuthPlugin
 #endif
@@ -174,6 +173,16 @@ import CosmasNativeAuth
             return
         }
         capturePlugin = plugin
+        #if DEBUG
+        // Synthetic Simulator XCUITest only: trigger start-recording through the
+        // loaded IOSPCM plugin as soon as it is retained — before auth prepare
+        // can quarantine() and return. Never compiled into Release/TestFlight.
+        let uiTestStartCapture = Bundle.main.bundleIdentifier == "com.cosmasos.synthetic"
+            && ProcessInfo.processInfo.arguments.contains("-COSMAS_UI_TEST_START_CAPTURE")
+        if uiTestStartCapture {
+            Task { await plugin.uiTestStartRecordingThroughLoadedPlugin() }
+        }
+        #endif
         #if canImport(CosmasWorkspaceAuthPlugin)
         do {
             guard let auth = bridge?.plugin(withName: "CosmasWorkspaceAuth") as? CosmasWorkspaceAuthPlugin else {
@@ -183,6 +192,16 @@ import CosmasNativeAuth
             speechPlugin = bridge?.plugin(withName: "CosmasPrivateSpeech") as? CosmasPrivateSpeechPlugin
             try auth.prepareCosmaneuraNavigation(on: webView)
         } catch {
+            #if DEBUG
+            if Bundle.main.bundleIdentifier == "com.cosmasos.synthetic",
+               ProcessInfo.processInfo.arguments.contains("-COSMAS_UI_TEST_START_CAPTURE") {
+                // Keep the loaded IOSPCM plugin; synthetic auth is expected to
+                // fail without real Clerk keys. Do not quarantine the mic probe.
+                startedNavigation = true
+                super.viewDidLoad()
+                return
+            }
+            #endif
             quarantine()
             onFailure?()
             return
@@ -192,19 +211,19 @@ import CosmasNativeAuth
         navigationProxy = proxy
         webView.navigationDelegate = proxy
         do { try installLifecycle(on: webView) }
-        catch { quarantine(); onFailure?(); return }
+        catch {
+            #if DEBUG
+            if Bundle.main.bundleIdentifier == "com.cosmasos.synthetic",
+               ProcessInfo.processInfo.arguments.contains("-COSMAS_UI_TEST_START_CAPTURE") {
+                startedNavigation = true
+                super.viewDidLoad()
+                return
+            }
+            #endif
+            quarantine(); onFailure?(); return
+        }
         startedNavigation = true
         super.viewDidLoad()
-        #if DEBUG
-        // Synthetic Simulator XCUITest only: after the real IOSPCM plugin path is
-        // loaded, optionally request mic permission the same way plugin start does.
-        // Never compiled into Release/TestFlight.
-        if Bundle.main.bundleIdentifier == "com.cosmasos.synthetic",
-           ProcessInfo.processInfo.arguments.contains("-COSMAS_UI_TEST_START_CAPTURE"),
-           capturePlugin != nil {
-            Task { _ = await AVAudioApplication.requestRecordPermission() }
-        }
-        #endif
     }
 
     fileprivate func receive(_ message: WKScriptMessage) {
