@@ -51,6 +51,7 @@ _RUNTIME_RESTRICTED_AFTER_GRANT = (
     "GRANT SELECT ON TABLE public.alembic_version TO {runtime}",
     "REVOKE ALL ON TABLE public.patient_deletion_admin_bindings FROM {runtime}",
     "REVOKE ALL ON TABLE public.patient_deletion_in_progress FROM {runtime}",
+    "REVOKE ALL ON TABLE public.patient_deletion_pending_files FROM {runtime}",
 )
 
 

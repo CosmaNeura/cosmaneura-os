@@ -1,11 +1,12 @@
 -- John's idempotent operator step for patient-record deletion.
 -- Agents and CI must never run this against a real database.
 --
--- Run as the database owner / superuser (CREATEROLE alone is not enough for
--- the REVOKE/GRANT on existing tables and SECURITY DEFINER functions).
+-- Run as the database owner / superuser with CREATEROLE (CREATEROLE alone is
+-- not enough for the REVOKE/GRANT on existing tables and SECURITY DEFINER
+-- functions owned by the migrator). Exact NOLOGIN role: cosmas_patient_deletion.
 --
--- Create the NOLOGIN role if missing, revoke table rights, and grant EXECUTE
--- on the public delete + admin helper functions. Next admin LOGIN grant:
+-- Create that role if missing, revoke table rights, and grant EXECUTE on the
+-- public delete + admin helper functions. Next admin LOGIN grant:
 --   psql ... -v admin_login=cosmas_patient_deletion_admin -f scripts/ensure-patient-deletion-admin-login.sql
 -- Binding rows are inserted separately (see docs/RETENTION.md).
 
@@ -50,6 +51,7 @@ BEGIN
       TO cosmas_patient_deletion;
   END IF;
   IF to_regprocedure('public.delete_patient_keyed_records_plan(uuid)') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION public.delete_patient_keyed_records_plan(uuid) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid)
       TO cosmas_patient_deletion;
   END IF;
@@ -58,10 +60,12 @@ BEGIN
       TO cosmas_patient_deletion;
   END IF;
   IF to_regprocedure('public.patient_deletion_patient_box(uuid)') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION public.patient_deletion_patient_box(uuid) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.patient_deletion_patient_box(uuid)
       TO cosmas_patient_deletion;
   END IF;
   IF to_regprocedure('public.patient_deletion_collect_file_keys(jsonb)') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION public.patient_deletion_collect_file_keys(jsonb) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION public.patient_deletion_collect_file_keys(jsonb)
       TO cosmas_patient_deletion;
   END IF;

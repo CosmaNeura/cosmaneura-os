@@ -1747,6 +1747,23 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
         assert all(
             "_cosmas_patient_deletion_active" in body for body in _guard_bodies(target).values()
         )
+        with target.connect() as connection:
+            for signature in (
+                "public.delete_patient_keyed_records(uuid)",
+                "public.delete_patient_keyed_records_plan(uuid)",
+                "public.patient_deletion_collect_file_keys(jsonb)",
+                "public.patient_deletion_patient_box(uuid)",
+            ):
+                assert connection.scalar(
+                    text("SELECT NOT has_function_privilege('public', :signature, 'EXECUTE')"),
+                    {"signature": signature},
+                )
+            assert connection.scalar(
+                text(
+                    "SELECT NOT has_table_privilege('public', "
+                    "'public.patient_deletion_pending_files', 'INSERT')"
+                )
+            )
         blob = LocalBlobAdapter(tmp_path / "blobs")
         with Session(target) as session:
             arranged = _arrange(session, blob)
@@ -2912,3 +2929,323 @@ def test_exclusive_message_snapshot_retained_when_second_patient_reviews(
         )
         == 1
     )
+
+
+def test_runtime_cannot_plant_cross_practice_pending_file(practice) -> None:
+    """H1 pending_files: runtime DML refused; forged practice-1 row naming a
+    practice-2 path must not delete the practice-2 file when admin1 confirms."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_a = str(casey["patient_id"])
+    box_1 = str(practice["box_id"])
+
+    other = svc.Container(session, blob=blob)
+    foreign = svc.provision_box(other, "Invented Pending Cross Practice")
+    foreign_owner = str(foreign["owner_id"])
+    foreign_patient = svc.attest_patient_link(
+        other,
+        foreign["box_id"],
+        foreign_owner,
+        source_pair_key="csv:pending-cross-patient",
+        label="Invented Pending Cross Patient",
+    )
+    session.commit()
+    patient_c = str(foreign_patient.id)
+    box_2 = str(foreign["box_id"])
+    foreign_file = blob.root / "cross-practice" / "front.png"
+    foreign_file.parent.mkdir(parents=True, exist_ok=True)
+    foreign_file.write_bytes(PNG)
+    relative = "cross-practice/front.png"
+    assert foreign_file.is_file()
+
+    admin_engine = session.get_bind()
+    runtime_role = "patient_pending_rt_" + uuid4().hex[:10]
+    runtime_password = "invented-pending-runtime-password-123456"
+    runtime_url = make_url(str(admin_engine.url)).set(
+        username=runtime_role, password=runtime_password
+    )
+    quoted_role = admin_engine.dialect.identifier_preparer.quote_identifier(runtime_role)
+    runtime_engine = create_engine(runtime_url, echo=False, hide_parameters=True)
+    try:
+        with admin_engine.begin() as connection:
+            _ensure_unprivileged_role(connection, runtime_url)
+            _apply_runtime_privileges(connection, runtime_url)
+            _apply_runtime_privileges(connection, runtime_url)
+        with runtime_engine.connect() as connection:
+            locked = connection.execute(
+                text(
+                    "SELECT coalesce(bool_and("
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'SELECT') AND "
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'INSERT') AND "
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'UPDATE') AND "
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'DELETE')"
+                    "), false) FROM unnest(ARRAY["
+                    "'patient_deletion_admin_bindings',"
+                    "'patient_deletion_in_progress',"
+                    "'patient_deletion_pending_files'"
+                    "]::text[]) AS t"
+                )
+            ).scalar_one()
+            assert locked is True
+        with pytest.raises(ProgrammingError), runtime_engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO public.patient_deletion_pending_files "
+                    "(patient_link_id, box_id, kind, relative_path) VALUES "
+                    "(CAST(:patient AS uuid), CAST(:box AS uuid), 'uploads', :path)"
+                ),
+                {"patient": patient_c, "box": box_1, "path": relative},
+            )
+
+        # Exact attack row as table owner (what runtime used to plant). Confirm of
+        # patient A must refuse to finish it; practice-2 file stays.
+        session.execute(
+            text(
+                "INSERT INTO public.patient_deletion_pending_files "
+                "(patient_link_id, box_id, kind, relative_path) VALUES "
+                "(CAST(:patient AS uuid), CAST(:box AS uuid), 'uploads', :path)"
+            ),
+            {"patient": patient_c, "box": box_1, "path": relative},
+        )
+        session.commit()
+        with pytest.raises(Exception, match="admin authority required"):
+            session.execute(
+                text(
+                    "SELECT public.patient_deletion_pending_record("
+                    "CAST(:patient AS uuid), CAST(:box AS uuid), "
+                    "CAST(:files AS jsonb))"
+                ),
+                {
+                    "patient": patient_c,
+                    "box": box_1,
+                    "files": json.dumps([{"kind": "uploads", "path": relative}]),
+                },
+            )
+        session.rollback()
+
+        report = _calls(session, owner, patient_a, blob, confirm=True)
+        assert report["deleted"] is True
+        assert foreign_file.is_file()
+        assert session.get(PatientLink, patient_c) is not None
+        leftover = int(
+            session.scalar(
+                text(
+                    "SELECT count(*) FROM public.patient_deletion_pending_files "
+                    "WHERE relative_path = :path"
+                ),
+                {"path": relative},
+            )
+            or 0
+        )
+        # Forged row may remain (not finished); it must not have deleted the file.
+        assert leftover >= 0
+        del box_2
+    finally:
+        runtime_engine.dispose()
+        with admin_engine.begin() as connection:
+            if connection.scalar(
+                text("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=:role)"),
+                {"role": runtime_role},
+            ):
+                connection.execute(text(f"DROP OWNED BY {quoted_role}"))
+                connection.execute(text(f"DROP ROLE {quoted_role}"))
+
+
+def test_admin_and_staff_cannot_clear_or_delete_other_practice_pending(practice) -> None:
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    staff_id = str(practice["staff_id"])
+    box_1 = str(practice["box_id"])
+    assert isinstance(blob, LocalBlobAdapter)
+
+    other = svc.Container(session, blob=blob)
+    foreign = svc.provision_box(other, "Invented Pending Guard Practice")
+    foreign_owner = str(foreign["owner_id"])
+    foreign_patient = svc.attest_patient_link(
+        other,
+        foreign["box_id"],
+        foreign_owner,
+        source_pair_key="csv:pending-guard-patient",
+        label="Invented Pending Guard Patient",
+    )
+    session.commit()
+    patient_c = str(foreign_patient.id)
+    box_2 = str(foreign["box_id"])
+    pending_id = session.scalar(
+        text(
+            "INSERT INTO public.patient_deletion_pending_files "
+            "(patient_link_id, box_id, kind, relative_path) "
+            "VALUES (CAST(:patient AS uuid), CAST(:box AS uuid), 'uploads', "
+            "'guarded/front.png') RETURNING id::text"
+        ),
+        {"patient": patient_c, "box": box_2},
+    )
+    session.commit()
+    assert pending_id
+
+    # admin1 is bound to practice 1 via the practice fixture.
+    with pytest.raises(Exception, match="admin authority required"):
+        session.execute(
+            text(
+                "SELECT public.patient_deletion_pending_clear("
+                "CAST(:patient AS uuid), CAST(:paths AS text[]))"
+            ),
+            {"patient": patient_c, "paths": ["guarded/front.png"]},
+        )
+    session.rollback()
+    with pytest.raises(Exception, match="admin authority required"):
+        session.execute(
+            text("SELECT public.patient_deletion_pending_delete(CAST(:id AS uuid))"),
+            {"id": pending_id},
+        )
+    session.rollback()
+
+    runtime_url = os.environ.get("DATABASE_URL", settings.database_url)
+    parsed = make_url(runtime_url)
+    password = parsed.password
+    assert isinstance(password, str) and password
+    staff_role = "patient_staff_pd_" + uuid4().hex[:10]
+    quoted = session.scalar(text("SELECT quote_literal(:password)"), {"password": password})
+    assert isinstance(quoted, str)
+    database = str(session.scalar(text("SELECT current_database()")))
+    _autocommit(
+        session,
+        f"CREATE ROLE {staff_role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT "
+        f"PASSWORD {quoted}",
+    )
+    staff_engine = None
+    try:
+        _autocommit(session, f"GRANT CONNECT ON DATABASE {_quote(database)} TO {staff_role}")
+        _autocommit(session, f"GRANT USAGE ON SCHEMA public TO {staff_role}")
+        _ensure_patient_deletion_role(session)
+        _ensure_patient_deletion_admin_login(session, staff_role)
+        session.execute(
+            text(
+                """
+                INSERT INTO public.patient_deletion_admin_bindings (db_role, principal_id, box_id)
+                VALUES (:role, CAST(:principal AS uuid), CAST(:box AS uuid))
+                ON CONFLICT (db_role) DO UPDATE
+                  SET principal_id = EXCLUDED.principal_id,
+                      box_id = EXCLUDED.box_id
+                """
+            ),
+            {"role": staff_role, "principal": staff_id, "box": box_1},
+        )
+        session.commit()
+        staff_url = parsed.set(username=staff_role).render_as_string(hide_password=False)
+        staff_engine = create_engine(staff_url, echo=False, hide_parameters=True)
+        with staff_engine.begin() as connection:
+            with pytest.raises(Exception, match="admin authority required"):
+                connection.execute(
+                    text(
+                        "SELECT public.patient_deletion_pending_clear("
+                        "CAST(:patient AS uuid), CAST(:paths AS text[]))"
+                    ),
+                    {"patient": patient_c, "paths": ["guarded/front.png"]},
+                )
+        with staff_engine.begin() as connection:
+            with pytest.raises(Exception, match="admin authority required"):
+                connection.execute(
+                    text("SELECT public.patient_deletion_pending_delete(CAST(:id AS uuid))"),
+                    {"id": pending_id},
+                )
+        still = session.scalar(
+            text(
+                "SELECT count(*) FROM public.patient_deletion_pending_files "
+                "WHERE id = CAST(:id AS uuid)"
+            ),
+            {"id": pending_id},
+        )
+        assert int(still or 0) == 1
+        del owner
+    finally:
+        if staff_engine is not None:
+            staff_engine.dispose()
+        for statement in _documented_admin_login_grants(staff_role):
+            _autocommit(
+                session, statement.replace("GRANT ", "REVOKE ", 1).replace(" TO ", " FROM ", 1)
+            )
+        _autocommit(session, f"REVOKE ALL ON SCHEMA public FROM {staff_role}")
+        _autocommit(session, f"REVOKE ALL ON DATABASE {_quote(database)} FROM {staff_role}")
+        session.execute(
+            text("DELETE FROM public.patient_deletion_admin_bindings WHERE db_role = :role"),
+            {"role": staff_role},
+        )
+        session.commit()
+        _autocommit(session, f"DROP ROLE IF EXISTS {staff_role}")
+
+
+def test_temp_pg_constraint_cannot_redirect_patient_deletion(practice) -> None:
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    morgan = practice["morgan"]
+    assert (
+        isinstance(casey, dict) and isinstance(morgan, dict) and isinstance(blob, LocalBlobAdapter)
+    )
+    patient_a = str(casey["patient_id"])
+    patient_b = str(morgan["patient_id"])
+    configs = list(
+        session.execute(
+            text(
+                """
+                SELECT p.proname, p.prosecdef, p.proconfig
+                  FROM pg_catalog.pg_proc p
+                  JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'public'
+                   AND p.prosecdef
+                   AND (
+                     p.proname LIKE '%patient_deletion%'
+                     OR p.proname IN (
+                       'delete_patient_keyed_records',
+                       'delete_patient_keyed_records_plan',
+                       '_cosmas_patient_deletion_build_plan',
+                       '_cosmas_apply_patient_deletion_mutate',
+                       '_cosmas_patient_deletion_active'
+                     )
+                   )
+                """
+            )
+        )
+    )
+    assert configs
+    for _name, prosecdef, proconfig in configs:
+        assert prosecdef is True
+        assert proconfig is not None
+        assert "search_path=pg_catalog, public, pg_temp" in list(proconfig)
+
+    before_raw = session.scalar(
+        text("SELECT public.delete_patient_keyed_records_plan(CAST(:patient AS uuid))"),
+        {"patient": patient_a},
+    )
+    before = before_raw if isinstance(before_raw, dict) else json.loads(before_raw)
+    before_tickets = int(before.get("tables", {}).get("tickets", 0))
+    # pg_temp first would otherwise win when pg_temp is absent from search_path.
+    session.execute(
+        text("CREATE TEMP TABLE pg_constraint (LIKE pg_catalog.pg_constraint INCLUDING ALL)")
+    )
+    session.execute(
+        text(
+            "INSERT INTO pg_constraint "
+            "SELECT * FROM pg_catalog.pg_constraint WHERE contype = 'f' LIMIT 5"
+        )
+    )
+    after_raw = session.scalar(
+        text("SELECT public.delete_patient_keyed_records_plan(CAST(:patient AS uuid))"),
+        {"patient": patient_a},
+    )
+    after = after_raw if isinstance(after_raw, dict) else json.loads(after_raw)
+    assert after == before
+    after_tickets = int(after.get("tables", {}).get("tickets", 0))
+    assert after_tickets == before_tickets
+
+    _calls(session, owner, patient_a, blob, confirm=True)
+    assert session.get(PatientLink, patient_a) is None
+    assert session.get(PatientLink, patient_b) is not None
+    assert _patient_link_counts(session, patient_b)["tickets"] == 1

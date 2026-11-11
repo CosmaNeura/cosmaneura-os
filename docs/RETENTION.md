@@ -45,29 +45,38 @@ Which account runs each step:
 
 | Step | Runs as |
 |------|---------|
-| 1 Create LOGIN | Database owner / superuser (CREATEROLE alone is not enough for later REVOKE/GRANT on existing tables and SECURITY DEFINER functions) |
-| 2 Role grants (`ensure-patient-deletion-role.sql`) | Database owner / superuser |
-| 3 Admin LOGIN grants (`ensure-patient-deletion-admin-login.sql`) | Database owner / superuser |
+| 1 Create LOGIN | Database owner / superuser with `CREATEROLE` (creates the chosen admin LOGIN, e.g. `cosmas_patient_deletion_admin`) |
+| 2 Role grants (`ensure-patient-deletion-role.sql`) | Database owner / superuser with `CREATEROLE` (creates/updates NOLOGIN role `cosmas_patient_deletion` and REVOKE/GRANTs) |
+| 3 Admin LOGIN grants (`ensure-patient-deletion-admin-login.sql`) | Database owner / superuser with `CREATEROLE` (membership + EXECUTE for `-v admin_login=...`) |
 | 4 Binding INSERT | Database owner / superuser |
 | 5–6 CLI dry-run / confirm | The admin LOGIN from step 1 (`COSMAS_ADMIN_DATABASE_URL`) |
 
-1. As the database owner / superuser, create the admin LOGIN (password never in
-   git):
+Steps 1–3 require `CREATEROLE` on the account that runs them (database owner /
+superuser). `CREATEROLE` alone without ownership of the SECURITY DEFINER
+functions and tables is not enough for the REVOKE/GRANT statements in the
+ensure scripts. Exact roles involved: NOLOGIN `cosmas_patient_deletion`, and
+the LOGIN named by `-v admin_login=...` (example only:
+`cosmas_patient_deletion_admin`).
+
+1. As the database owner / superuser with `CREATEROLE`, create the admin LOGIN
+   (password never in git):
 
 ```bash
 psql "$POSTGRES_ADMIN_URL" -v ON_ERROR_STOP=1 \
   -c "CREATE ROLE cosmas_patient_deletion_admin LOGIN PASSWORD '...';"
 ```
 
-2. As the database owner / superuser, apply the deletion role grants:
+2. As the database owner / superuser with `CREATEROLE`, apply the deletion role
+   grants for `cosmas_patient_deletion`:
 
 ```bash
 psql "$POSTGRES_ADMIN_URL" -v ON_ERROR_STOP=1 \
   -f scripts/ensure-patient-deletion-role.sql
 ```
 
-3. As the database owner / superuser, grant that LOGIN membership and EXECUTE
-   only (psql variable; do not hard-code a single product role name):
+3. As the database owner / superuser with `CREATEROLE`, grant that LOGIN
+   membership and EXECUTE only (psql variable; do not hard-code a single
+   product role name):
 
 ```bash
 psql "$POSTGRES_ADMIN_URL" \

@@ -50,6 +50,7 @@ _RUNTIME_EXECUTE_EXTRA = (
 _RUNTIME_NO_TABLE_RIGHTS = (
     "patient_deletion_admin_bindings",
     "patient_deletion_in_progress",
+    "patient_deletion_pending_files",
 )
 
 
@@ -316,6 +317,7 @@ def _apply_runtime_privileges(connection: Connection, runtime: URL) -> None:
         # prep must leave these with zero rights after the blanket table grant.
         f"REVOKE ALL ON TABLE public.patient_deletion_admin_bindings FROM {quoted_role}",
         f"REVOKE ALL ON TABLE public.patient_deletion_in_progress FROM {quoted_role}",
+        f"REVOKE ALL ON TABLE public.patient_deletion_pending_files FROM {quoted_role}",
         f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_admin} IN SCHEMA public "
         "REVOKE ALL PRIVILEGES ON TABLES FROM PUBLIC",
         f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_admin} IN SCHEMA public "
@@ -410,7 +412,8 @@ def _verify_runtime_role(runtime_url: str, runtime: URL) -> dict[str, Any]:
                     "FROM pg_tables WHERE schemaname = 'public' "
                     "AND tablename NOT IN ("
                     "'alembic_version', 'audit_events', 'practice_owner_reservations', "
-                    "'patient_deletion_admin_bindings', 'patient_deletion_in_progress')"
+                    "'patient_deletion_admin_bindings', 'patient_deletion_in_progress', "
+                    "'patient_deletion_pending_files')"
                 )
             ).scalar_one()
             runtime_dml = (

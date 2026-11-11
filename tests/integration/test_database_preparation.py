@@ -82,7 +82,8 @@ def test_database_preparation_is_idempotent_and_proves_denials() -> None:
                         "NOT has_table_privilege(current_user, format('public.%I', t), 'TRIGGER')"
                         "), false) FROM unnest(ARRAY["
                         "'patient_deletion_admin_bindings',"
-                        "'patient_deletion_in_progress'"
+                        "'patient_deletion_in_progress',"
+                        "'patient_deletion_pending_files'"
                         "]::text[]) AS t"
                     )
                 ).scalar_one()
@@ -115,6 +116,11 @@ def test_database_preparation_is_idempotent_and_proves_denials() -> None:
                 "INSERT INTO public.patient_deletion_in_progress "
                 "(txid, patient_link_id) VALUES "
                 "(txid_current(), '00000000-0000-4000-8000-000000000001'::uuid)",
+                "INSERT INTO public.patient_deletion_pending_files "
+                "(patient_link_id, box_id, kind, relative_path) VALUES "
+                "('00000000-0000-4000-8000-000000000001'::uuid, "
+                "'00000000-0000-4000-8000-000000000002'::uuid, "
+                "'uploads', 'forged/front.png')",
             ):
                 with pytest.raises(DBAPIError), runtime_engine.begin() as connection:
                     connection.execute(text(statement))

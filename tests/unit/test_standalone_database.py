@@ -181,6 +181,9 @@ def test_runtime_grant_sql_reapplies_fine_grained_revokes_after_blanket_grant():
     assert after_grant(
         "REVOKE ALL ON TABLE public.patient_deletion_in_progress"
     )
+    assert after_grant(
+        "REVOKE ALL ON TABLE public.patient_deletion_pending_files"
+    )
 
     # Document the old broken order: blanket GRANT with no later audit/version revoke.
     old_broken = (

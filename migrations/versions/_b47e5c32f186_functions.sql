@@ -19,7 +19,7 @@ CREATE OR REPLACE FUNCTION public._cosmas_patient_deletion_classes()
 RETURNS TABLE(kind text, table_name text)
 LANGUAGE sql
 STABLE
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
   SELECT * FROM (VALUES
             ('owned', 'action_revisions'),
@@ -190,7 +190,7 @@ CREATE OR REPLACE FUNCTION public._cosmas_patient_deletion_exclusive_refs()
 RETURNS TABLE(content_table text, review_table text, snapshot_col text, patient_col text)
 LANGUAGE sql
 STABLE
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
   SELECT * FROM (VALUES
             ('google_message_snapshots', 'google_message_source_reviews', 'snapshot_id', 'patient_link_id'),
@@ -207,7 +207,7 @@ RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.patient_deletion_in_progress WHERE txid = txid_current()
@@ -219,7 +219,7 @@ RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $p$
 DECLARE
   v_owned text[] := ARRAY(SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'owned' ORDER BY 1);
@@ -286,11 +286,11 @@ BEGIN
     v_dirty := v_dirty[2:];
     FOR v_child IN
       SELECT child.relname
-        FROM pg_constraint con
-        JOIN pg_class child ON child.oid = con.conrelid
-        JOIN pg_class parent ON parent.oid = con.confrelid
-        JOIN pg_namespace ns ON ns.oid = child.relnamespace
-        JOIN pg_namespace pns ON pns.oid = parent.relnamespace
+        FROM pg_catalog.pg_constraint con
+        JOIN pg_catalog.pg_class child ON child.oid = con.conrelid
+        JOIN pg_catalog.pg_class parent ON parent.oid = con.confrelid
+        JOIN pg_catalog.pg_namespace ns ON ns.oid = child.relnamespace
+        JOIN pg_catalog.pg_namespace pns ON pns.oid = parent.relnamespace
        WHERE con.contype = 'f'
          AND ns.nspname = 'public' AND pns.nspname = 'public'
          AND parent.relname = v_table
@@ -325,23 +325,23 @@ BEGIN
              con.conname::text AS conname,
              (SELECT array_agg(a.attname ORDER BY k.ord)
                 FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS child_cols,
+                JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS child_cols,
              (SELECT array_agg(a.attname ORDER BY k.ord)
                 FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS parent_cols,
+                JOIN pg_catalog.pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS parent_cols,
              (SELECT array_agg(a.attname ORDER BY k.ord)
                 FROM unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum) AS child_pk_cols,
+                JOIN pg_catalog.pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum) AS child_pk_cols,
              (SELECT array_agg(a.attname ORDER BY k.ord)
                 FROM unnest(ppk.conkey) WITH ORDINALITY AS k(attnum, ord)
-                JOIN pg_attribute a ON a.attrelid = ppk.conrelid AND a.attnum = k.attnum) AS parent_pk_cols
-        FROM pg_constraint con
-        JOIN pg_class child ON child.oid = con.conrelid
-        JOIN pg_class parent ON parent.oid = con.confrelid
-        JOIN pg_namespace ns ON ns.oid = child.relnamespace
-        JOIN pg_namespace pns ON pns.oid = parent.relnamespace
-        JOIN pg_constraint pk ON pk.conrelid = child.oid AND pk.contype = 'p'
-        JOIN pg_constraint ppk ON ppk.conrelid = parent.oid AND ppk.contype = 'p'
+                JOIN pg_catalog.pg_attribute a ON a.attrelid = ppk.conrelid AND a.attnum = k.attnum) AS parent_pk_cols
+        FROM pg_catalog.pg_constraint con
+        JOIN pg_catalog.pg_class child ON child.oid = con.conrelid
+        JOIN pg_catalog.pg_class parent ON parent.oid = con.confrelid
+        JOIN pg_catalog.pg_namespace ns ON ns.oid = child.relnamespace
+        JOIN pg_catalog.pg_namespace pns ON pns.oid = parent.relnamespace
+        JOIN pg_catalog.pg_constraint pk ON pk.conrelid = child.oid AND pk.contype = 'p'
+        JOIN pg_catalog.pg_constraint ppk ON ppk.conrelid = parent.oid AND ppk.contype = 'p'
        WHERE con.contype = 'f'
          AND ns.nspname = 'public' AND pns.nspname = 'public'
          AND child.relname = ANY (v_owned)
@@ -465,9 +465,9 @@ BEGIN
   -- Also collect PATIENT_OWNED rows keyed directly by patient_link_id.
   FOR v_table IN
     SELECT c.relname
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'patient_link_id' AND NOT a.attisdropped
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attname = 'patient_link_id' AND NOT a.attisdropped
      WHERE n.nspname = 'public'
        AND c.relkind IN ('r', 'p')
        AND c.relname = ANY (v_owned)
@@ -475,11 +475,11 @@ BEGIN
   LOOP
     SELECT array_agg(a.attname ORDER BY k.ord)
       INTO v_child_pk_cols
-      FROM pg_constraint pk
-      JOIN pg_class c ON c.oid = pk.conrelid
-      JOIN pg_namespace n ON n.oid = c.relnamespace
+      FROM pg_catalog.pg_constraint pk
+      JOIN pg_catalog.pg_class c ON c.oid = pk.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       JOIN unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
-      JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
      WHERE pk.contype = 'p' AND n.nspname = 'public' AND c.relname = v_table;
     IF v_child_pk_cols IS NULL THEN
       CONTINUE;
@@ -643,7 +643,7 @@ RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $plan$
 DECLARE
   v_built jsonb;
@@ -662,7 +662,7 @@ CREATE OR REPLACE FUNCTION public._cosmas_apply_patient_deletion_mutate(p_patien
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $m$
 DECLARE
   v_box uuid;
@@ -755,17 +755,17 @@ BEGIN
     SELECT child.relname AS table_name,
            (SELECT array_agg(a.attname ORDER BY k.ord)
               FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-              JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS child_cols,
+              JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS child_cols,
            (SELECT array_agg(a.attname ORDER BY k.ord)
               FROM unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord)
-              JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum) AS pk_cols,
+              JOIN pg_catalog.pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum) AS pk_cols,
            (SELECT bool_and(NOT a.attnotnull)
               FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-              JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS nullable
-      FROM pg_constraint con
-      JOIN pg_class child ON child.oid = con.conrelid
-      JOIN pg_namespace ns ON ns.oid = child.relnamespace
-      JOIN pg_constraint pk ON pk.conrelid = child.oid AND pk.contype = 'p'
+              JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS nullable
+      FROM pg_catalog.pg_constraint con
+      JOIN pg_catalog.pg_class child ON child.oid = con.conrelid
+      JOIN pg_catalog.pg_namespace ns ON ns.oid = child.relnamespace
+      JOIN pg_catalog.pg_constraint pk ON pk.conrelid = child.oid AND pk.contype = 'p'
      WHERE con.contype = 'f'
        AND ns.nspname = 'public'
        AND con.conrelid = con.confrelid
@@ -793,23 +793,23 @@ BEGIN
            parent.relname AS parent_table,
            (SELECT array_agg(a.attname ORDER BY k.ord)
               FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-              JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS child_cols,
+              JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS child_cols,
            (SELECT array_agg(a.attname ORDER BY k.ord)
               FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
-              JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS parent_cols,
+              JOIN pg_catalog.pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS parent_cols,
            (SELECT array_agg(a.attname ORDER BY k.ord)
               FROM unnest(ppk.conkey) WITH ORDINALITY AS k(attnum, ord)
-              JOIN pg_attribute a ON a.attrelid = ppk.conrelid AND a.attnum = k.attnum) AS parent_pk_cols,
+              JOIN pg_catalog.pg_attribute a ON a.attrelid = ppk.conrelid AND a.attnum = k.attnum) AS parent_pk_cols,
            (SELECT bool_and(NOT a.attnotnull)
               FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-              JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS nullable,
+              JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS nullable,
            con.confdeltype AS deltype
-      FROM pg_constraint con
-      JOIN pg_class child ON child.oid = con.conrelid
-      JOIN pg_class parent ON parent.oid = con.confrelid
-      JOIN pg_namespace ns ON ns.oid = child.relnamespace
-      JOIN pg_namespace pns ON pns.oid = parent.relnamespace
-      JOIN pg_constraint ppk ON ppk.conrelid = parent.oid AND ppk.contype = 'p'
+      FROM pg_catalog.pg_constraint con
+      JOIN pg_catalog.pg_class child ON child.oid = con.conrelid
+      JOIN pg_catalog.pg_class parent ON parent.oid = con.confrelid
+      JOIN pg_catalog.pg_namespace ns ON ns.oid = child.relnamespace
+      JOIN pg_catalog.pg_namespace pns ON pns.oid = parent.relnamespace
+      JOIN pg_catalog.pg_constraint ppk ON ppk.conrelid = parent.oid AND ppk.contype = 'p'
      WHERE con.contype = 'f'
        AND ns.nspname = 'public' AND pns.nspname = 'public'
        AND parent.relname IN (SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'owned')
@@ -845,11 +845,11 @@ BEGIN
   END LOOP;
   FOR v_edge IN
     SELECT child.relname AS c, parent.relname AS p, con.conname AS n
-      FROM pg_constraint con
-      JOIN pg_class child ON child.oid = con.conrelid
-      JOIN pg_class parent ON parent.oid = con.confrelid
-      JOIN pg_namespace ns ON ns.oid = child.relnamespace
-      JOIN pg_namespace pns ON pns.oid = parent.relnamespace
+      FROM pg_catalog.pg_constraint con
+      JOIN pg_catalog.pg_class child ON child.oid = con.conrelid
+      JOIN pg_catalog.pg_class parent ON parent.oid = con.confrelid
+      JOIN pg_catalog.pg_namespace ns ON ns.oid = child.relnamespace
+      JOIN pg_catalog.pg_namespace pns ON pns.oid = parent.relnamespace
      WHERE con.contype = 'f'
        AND ns.nspname = 'public' AND pns.nspname = 'public'
        AND child.relname = ANY (v_remaining)
@@ -888,11 +888,11 @@ BEGIN
     v_remaining := array_remove(v_remaining, v_table);
     FOR v_edge IN
       SELECT child.relname AS c, parent.relname AS p, con.conname AS n
-        FROM pg_constraint con
-        JOIN pg_class child ON child.oid = con.conrelid
-        JOIN pg_class parent ON parent.oid = con.confrelid
-        JOIN pg_namespace ns ON ns.oid = child.relnamespace
-        JOIN pg_namespace pns ON pns.oid = parent.relnamespace
+        FROM pg_catalog.pg_constraint con
+        JOIN pg_catalog.pg_class child ON child.oid = con.conrelid
+        JOIN pg_catalog.pg_class parent ON parent.oid = con.confrelid
+        JOIN pg_catalog.pg_namespace ns ON ns.oid = child.relnamespace
+        JOIN pg_catalog.pg_namespace pns ON pns.oid = parent.relnamespace
        WHERE con.contype = 'f'
          AND ns.nspname = 'public' AND pns.nspname = 'public'
          AND child.relname = v_table
@@ -925,11 +925,11 @@ BEGIN
     END IF;
     SELECT array_agg(a.attname ORDER BY k.ord)
       INTO v_pk_cols
-      FROM pg_constraint pk
-      JOIN pg_class c ON c.oid = pk.conrelid
-      JOIN pg_namespace n ON n.oid = c.relnamespace
+      FROM pg_catalog.pg_constraint pk
+      JOIN pg_catalog.pg_class c ON c.oid = pk.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       JOIN unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
-      JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
      WHERE pk.contype = 'p' AND n.nspname = 'public' AND c.relname = v_table;
     v_pk_expr := public._cosmas_pk_text_expr('t', v_pk_cols);
     v_sql := format('DELETE FROM public.%I t WHERE %s = ANY ($1)', v_table, v_pk_expr);
@@ -966,7 +966,7 @@ CREATE OR REPLACE FUNCTION public.delete_patient_keyed_records(p_patient uuid)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $d$
 BEGIN
   RETURN public._cosmas_apply_patient_deletion_mutate(p_patient);
@@ -980,7 +980,7 @@ RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $r$
 DECLARE
   v_principal uuid;
@@ -1014,7 +1014,7 @@ RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $c$
 DECLARE
   v_out jsonb := '[]'::jsonb;
@@ -1031,9 +1031,23 @@ DECLARE
   v_workspace text;
   v_owner text;
   v_artifact text;
+  v_caller_box uuid;
+  v_has_box boolean;
+  v_has_patient boolean;
 BEGIN
   IF p_pks IS NULL OR jsonb_typeof(p_pks) <> 'object' THEN
     RETURN '[]'::jsonb;
+  END IF;
+  -- Deletion-role callers are limited to their bound practice; runtime dry-run
+  -- (non-member) keeps the PK set from the plan and is practice-checked in app code.
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'cosmas_patient_deletion')
+     AND pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
+    SELECT b.box_id INTO v_caller_box
+      FROM public.patient_deletion_admin_bindings b
+     WHERE b.db_role = session_user;
+    IF v_caller_box IS NULL THEN
+      RAISE EXCEPTION 'admin authority required';
+    END IF;
   END IF;
   FOR v_table IN SELECT jsonb_object_keys(p_pks) ORDER BY 1 LOOP
     SELECT ARRAY(SELECT jsonb_array_elements_text(COALESCE(p_pks -> v_table, '[]'::jsonb)))
@@ -1043,21 +1057,67 @@ BEGIN
     END IF;
     SELECT array_agg(a.attname ORDER BY k.ord)
       INTO v_pk_cols
-      FROM pg_constraint pk
-      JOIN pg_class c ON c.oid = pk.conrelid
-      JOIN pg_namespace n ON n.oid = c.relnamespace
+      FROM pg_catalog.pg_constraint pk
+      JOIN pg_catalog.pg_class c ON c.oid = pk.conrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
       JOIN unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
-      JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
      WHERE pk.contype = 'p' AND n.nspname = 'public' AND c.relname = v_table;
     IF v_pk_cols IS NULL THEN
       CONTINUE;
     END IF;
     v_pk_expr := public._cosmas_pk_text_expr('t', v_pk_cols);
+    IF v_caller_box IS NOT NULL THEN
+      SELECT EXISTS (
+               SELECT 1 FROM pg_catalog.pg_attribute a
+                 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relname = v_table
+                  AND NOT a.attisdropped AND a.attnum > 0 AND a.attname = 'box_id'
+             ),
+             EXISTS (
+               SELECT 1 FROM pg_catalog.pg_attribute a
+                 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'public' AND c.relname = v_table
+                  AND NOT a.attisdropped AND a.attnum > 0 AND a.attname = 'patient_link_id'
+             )
+        INTO v_has_box, v_has_patient;
+      IF v_has_box THEN
+        v_sql := format(
+          'SELECT ARRAY(SELECT %s FROM public.%I t WHERE %s = ANY ($1) AND t.box_id = $2)',
+          v_pk_expr, v_table, v_pk_expr
+        );
+        EXECUTE v_sql INTO v_values USING v_values, v_caller_box;
+      ELSIF v_has_patient THEN
+        v_sql := format(
+          'SELECT ARRAY(
+             SELECT %s FROM public.%I t
+              JOIN public.patient_links pl ON pl.id = t.patient_link_id
+              WHERE %s = ANY ($1) AND pl.box_id = $2
+           )',
+          v_pk_expr, v_table, v_pk_expr
+        );
+        EXECUTE v_sql INTO v_values USING v_values, v_caller_box;
+      ELSIF v_table = 'patient_links' THEN
+        v_sql := format(
+          'SELECT ARRAY(SELECT %s FROM public.%I t WHERE %s = ANY ($1) AND t.box_id = $2)',
+          v_pk_expr, v_table, v_pk_expr
+        );
+        EXECUTE v_sql INTO v_values USING v_values, v_caller_box;
+      END IF;
+      -- Tables without a practice key cannot contribute cross-practice file
+      -- paths here; file-column / vendor_artifacts loops below still run only
+      -- on the (possibly filtered) PK set from the patient plan.
+      IF coalesce(array_length(v_values, 1), 0) = 0 THEN
+        CONTINUE;
+      END IF;
+    END IF;
     SELECT array_agg(a.attname ORDER BY a.attname)
       INTO v_file_cols
-      FROM pg_attribute a
-      JOIN pg_class c ON c.oid = a.attrelid
-      JOIN pg_namespace n ON n.oid = c.relnamespace
+      FROM pg_catalog.pg_attribute a
+      JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = 'public' AND c.relname = v_table
        AND NOT a.attisdropped AND a.attnum > 0
        AND a.attname = ANY (ARRAY[
@@ -1080,6 +1140,11 @@ BEGIN
              OR position('..' in v_path) > 0 THEN
             CONTINUE;
           END IF;
+          IF v_caller_box IS NOT NULL
+             AND v_path ~ '^[0-9a-fA-F-]{36}/vendor-documents/'
+             AND split_part(v_path, '/', 1) IS DISTINCT FROM v_caller_box::text THEN
+            CONTINUE;
+          END IF;
           v_out := v_out || jsonb_build_array(
             jsonb_build_object('kind', v_kind, 'path', v_path)
           );
@@ -1093,10 +1158,11 @@ BEGIN
         v_pk_expr
       );
       FOR v_box, v_workspace, v_owner, v_artifact IN EXECUTE v_sql USING v_values LOOP
-        v_path := format(
-          '%s/vendor-documents/%s/%s/%s.pdf',
-          v_box, v_workspace, v_owner, v_artifact
-        );
+        IF v_caller_box IS NOT NULL AND v_box IS DISTINCT FROM v_caller_box::text THEN
+          CONTINUE;
+        END IF;
+        v_path := v_box || '/vendor-documents/' || v_workspace || '/' || v_owner
+                  || '/' || v_artifact || '.pdf';
         v_out := v_out || jsonb_build_array(
           jsonb_build_object('kind', 'exports', 'path', v_path)
         );
@@ -1111,7 +1177,7 @@ CREATE OR REPLACE FUNCTION public.patient_deletion_pending_list(p_box uuid)
 RETURNS TABLE(id uuid, kind text, relative_path text)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $l$
 BEGIN
   IF p_box IS NULL OR NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
@@ -1123,10 +1189,21 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;
+  -- Patient may already be gone on rerun. Keep rows whose living patient (if
+  -- any) still belongs to this box; drop forged rows that name another practice.
   RETURN QUERY
     SELECT f.id, f.kind::text, f.relative_path::text
       FROM public.patient_deletion_pending_files f
      WHERE f.box_id = p_box
+       AND NOT EXISTS (
+         SELECT 1 FROM public.patient_links pl
+          WHERE pl.id = f.patient_link_id
+            AND pl.box_id IS DISTINCT FROM p_box
+       )
+       AND (
+         f.relative_path !~ '^[0-9a-fA-F-]{36}/vendor-documents/'
+         OR split_part(f.relative_path, '/', 1) = p_box::text
+       )
      ORDER BY f.created_at, f.id
      FOR UPDATE OF f;
 END
@@ -1138,11 +1215,16 @@ CREATE OR REPLACE FUNCTION public.patient_deletion_pending_record(
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $rec$
 DECLARE
   item jsonb;
+  v_path text;
+  v_kind text;
 BEGIN
+  IF p_patient IS NULL OR p_box IS NULL THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
   IF NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;
@@ -1152,17 +1234,32 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.patient_links pl
+     WHERE pl.id = p_patient AND pl.box_id = p_box
+  ) THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
   IF p_files IS NULL OR jsonb_typeof(p_files) <> 'array' THEN
     RETURN;
   END IF;
   FOR item IN SELECT * FROM jsonb_array_elements(p_files) LOOP
-    IF coalesce(item ->> 'path', '') = '' OR coalesce(item ->> 'kind', '') = '' THEN
+    v_path := coalesce(item ->> 'path', '');
+    v_kind := coalesce(item ->> 'kind', '');
+    IF v_path = '' OR v_kind = '' THEN
       CONTINUE;
+    END IF;
+    IF position('/' in v_path) = 1 OR position('..' in v_path) > 0 THEN
+      RAISE EXCEPTION 'admin authority required';
+    END IF;
+    IF v_path ~ '^[0-9a-fA-F-]{36}/vendor-documents/'
+       AND split_part(v_path, '/', 1) IS DISTINCT FROM p_box::text THEN
+      RAISE EXCEPTION 'admin authority required';
     END IF;
     INSERT INTO public.patient_deletion_pending_files (
       patient_link_id, box_id, kind, relative_path
     ) VALUES (
-      p_patient, p_box, item ->> 'kind', item ->> 'path'
+      p_patient, p_box, v_kind, v_path
     );
   END LOOP;
 END
@@ -1174,19 +1271,58 @@ CREATE OR REPLACE FUNCTION public.patient_deletion_pending_clear(
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $clr$
+DECLARE
+  v_box uuid;
 BEGIN
+  IF p_patient IS NULL THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
   IF NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;
+  SELECT b.box_id INTO v_box
+    FROM public.patient_deletion_admin_bindings b
+   WHERE b.db_role = session_user;
+  IF v_box IS NULL THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  -- Refuse clearing another practice's patient or pending rows. Patient rows
+  -- may already be gone after mutate; then only same-box pending rows clear.
+  IF EXISTS (
+    SELECT 1 FROM public.patient_links pl
+     WHERE pl.id = p_patient AND pl.box_id IS DISTINCT FROM v_box
+  ) THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.patient_deletion_pending_files f
+     WHERE f.patient_link_id = p_patient
+       AND f.box_id IS DISTINCT FROM v_box
+  ) THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
   IF coalesce(array_length(p_paths, 1), 0) = 0 THEN
-    DELETE FROM public.patient_deletion_pending_files
-     WHERE patient_link_id = p_patient;
+    DELETE FROM public.patient_deletion_pending_files f
+     WHERE f.patient_link_id = p_patient
+       AND f.box_id = v_box
+       AND (
+         f.relative_path !~ '^[0-9a-fA-F-]{36}/vendor-documents/'
+         OR split_part(f.relative_path, '/', 1) = v_box::text
+       );
   ELSE
-    DELETE FROM public.patient_deletion_pending_files
-     WHERE patient_link_id = p_patient
-       AND relative_path = ANY (p_paths);
+    IF EXISTS (
+      SELECT 1 FROM unnest(p_paths) AS p(path)
+       WHERE p.path ~ '^[0-9a-fA-F-]{36}/vendor-documents/'
+         AND split_part(p.path, '/', 1) IS DISTINCT FROM v_box::text
+    ) THEN
+      RAISE EXCEPTION 'admin authority required';
+    END IF;
+    DELETE FROM public.patient_deletion_pending_files f
+     WHERE f.patient_link_id = p_patient
+       AND f.box_id = v_box
+       AND f.relative_path = ANY (p_paths);
   END IF;
 END
 $clr$;
@@ -1195,10 +1331,43 @@ CREATE OR REPLACE FUNCTION public.patient_deletion_pending_delete(p_id uuid)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $del$
+DECLARE
+  v_box uuid;
+  v_patient uuid;
+  v_path text;
 BEGIN
+  IF p_id IS NULL THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
   IF NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  SELECT f.box_id, f.patient_link_id, f.relative_path
+    INTO v_box, v_patient, v_path
+    FROM public.patient_deletion_pending_files f
+   WHERE f.id = p_id
+   FOR UPDATE OF f;
+  IF v_box IS NULL THEN
+    RETURN;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.patient_deletion_admin_bindings b
+     WHERE b.db_role = session_user AND b.box_id = v_box
+  ) THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  -- Patient may already be gone on rerun; if the link remains it must match box.
+  IF EXISTS (SELECT 1 FROM public.patient_links pl WHERE pl.id = v_patient)
+     AND NOT EXISTS (
+       SELECT 1 FROM public.patient_links pl
+        WHERE pl.id = v_patient AND pl.box_id = v_box
+     ) THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  IF v_path ~ '^[0-9a-fA-F-]{36}/vendor-documents/'
+     AND split_part(v_path, '/', 1) IS DISTINCT FROM v_box::text THEN
     RAISE EXCEPTION 'admin authority required';
   END IF;
   DELETE FROM public.patient_deletion_pending_files WHERE id = p_id;
@@ -1210,7 +1379,7 @@ RETURNS text
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $b$
 DECLARE
   v_box text;
@@ -1221,6 +1390,17 @@ BEGIN
   SELECT pl.box_id::text INTO v_box FROM public.patient_links pl WHERE pl.id = p_patient;
   IF v_box IS NULL THEN
     RAISE EXCEPTION 'patient not found';
+  END IF;
+  -- Deletion-role callers may only resolve patients in their bound practice.
+  -- Runtime dry-run (non-member) is practice-checked in application code.
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'cosmas_patient_deletion')
+     AND pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.patient_deletion_admin_bindings b
+       WHERE b.db_role = session_user AND b.box_id = v_box::uuid
+    ) THEN
+      RAISE EXCEPTION 'admin authority required';
+    END IF;
   END IF;
   RETURN v_box;
 END

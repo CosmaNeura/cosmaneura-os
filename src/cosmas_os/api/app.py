@@ -2462,6 +2462,7 @@ class _PatientDeletionNoStoreMiddleware:
             return
 
         async def send_wrapper(message):
+            # All statuses, including unhandled 500s from outer exception handlers.
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 headers["Cache-Control"] = "no-store"
