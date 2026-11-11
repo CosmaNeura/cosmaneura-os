@@ -27,7 +27,8 @@ For the synthetic CosmaBot staging/beta owned VM only, set:
   "core_capture_origin": "https://staging-app.cosmaneura.com",
   "core_web_origin": "https://staging-app.cosmaneura.com",
   "core_capture_scope": "api://invented-core-audience/.default",
-  "core_capture_managed_identity_client_id": "00000000-0000-4000-8000-0000000000aa"
+  "core_capture_managed_identity_client_id": "00000000-0000-4000-8000-0000000000aa",
+  "core_capture_upload_host": "inventedcaptureacct.blob.core.windows.net"
 }
 ```
 
@@ -39,20 +40,27 @@ and Chief agent tools together:
 - `WORKSPACE_CAPTURE_BACKEND=core`
 - `WORKSPACE_CAPTURE_PROXY_ENABLED=true`
 - `WORKSPACE_CAPTURE_PROXY_ORIGIN=<CosmaBot api_origin>`
-- Core origin/scope/managed-identity client id from the public inputs above
+- Core origin/scope/managed-identity client id and upload blob host from the
+  public inputs above (`core_capture_upload_host` is an exact lowercase
+  `<account>.blob.core.windows.net` hostname; invented account in fixtures)
 - Web, desktop, and iOS `VITE_WORKSPACE_CAPTURE_ENABLED=true` with real
   microphone modes (`browser_microphone` on web/desktop, `ios_native` on Apple)
 - Capture routes are available to all signed-in Box users on that host
 - The tool loop applies to all new non-analysis admissions
   (`model_work.py:790-800`); connector/delivery families
-  (`agent_tools.py:217-225`) can reach real Google/Microsoft account content
-  when those overlays are on
+  (`agent_tools.py:217-225`) can reach real Google account content (Google is
+  always on for an opt-in host) and Microsoft when that overlay is on
 - Network requirements allow exact Core capture HTTPS egress to
-  `staging-app.cosmaneura.com` and the IMDS token path
+  `staging-app.cosmaneura.com`, the IMDS token path
   `http://169.254.169.254/metadata/identity/oauth2/token`
-  (from `core_capture_connection.py:168-174`)
-- `platform_connections` records the Core staging capture connection; capture
-  content is live microphone audio on a synthetic-only host
+  (from `core_capture_connection.py:168-174`), and HTTPS PUT egress to the
+  declared Core capture upload blob host (from
+  `capture_upload_proxy.py:261-274`). Runtime does not pin that blob host, so
+  the host egress rule is the control.
+- `platform_connections` records the Core staging capture connection and upload
+  blob host; capture content is live microphone audio on a synthetic-only host.
+  Client manifests keep `platformAccess:'disabled'`; Core capture uses that
+  connection entry, not Cosmaneura platformAccess.
 
 Rules:
 

@@ -17,12 +17,15 @@ const object=(value,keys,code)=>{
 // Absent/false keeps render byte-identical to main (capture/tools dark).
 const CAPTURE_TOOLS_OPT_IN='syntheticBetaCaptureAndTools';
 const CAPTURE_TOOLS_CORE_KEYS=['core_capture_origin','core_web_origin','core_capture_scope',
-  'core_capture_managed_identity_client_id'];
+  'core_capture_managed_identity_client_id','core_capture_upload_host'];
 // Azure IMDS token endpoint used by ManagedIdentityCredential.get_token via
 // core_capture_connection.py:168-174 and BoundedIdentityTransport
 // (core_record_connection.py:195-214); path from azure.identity IMDS_TOKEN_PATH.
 const IMDS_TOKEN_HOST='169.254.169.254';
 const IMDS_TOKEN_PATH='/metadata/identity/oauth2/token';
+// Exact Core-issued blob host for CosmaBot API→blob PUT
+// (capture_upload_proxy.py:261-274). Runtime does not pin this host.
+const CORE_CAPTURE_UPLOAD_HOST=/^[a-z0-9]{3,24}\.blob\.core\.windows\.net$/;
 const publicUuid=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 // Synthetic web addresses, and the matching api.<host> names. Every other
 // cosmas.ai or cosmaneura.com hostname stays refused.
@@ -49,6 +52,7 @@ function requireCaptureToolsInputs(value,features,ownedVm){
   if(!value.core_capture_scope.startsWith('api://')||!value.core_capture_scope.endsWith('/.default')||
     /\s/.test(value.core_capture_scope))refuse('exact_core_capture_scope_required');
   if(!publicUuid(value.core_capture_managed_identity_client_id))refuse('exact_core_capture_managed_identity_required');
+  if(!CORE_CAPTURE_UPLOAD_HOST.test(value.core_capture_upload_host))refuse('exact_core_capture_upload_host_required');
 }
 
 function identityPreparationOptions(value,features,captureEnabled){
@@ -166,7 +170,8 @@ function service({name,user,config,release,intended,writePaths,environment=false
 export function render(input){
   const value=validateInput(input),id=value.instance_id,short=id.replaceAll('-','').slice(0,12);
   const features=betaFeatures(value),ownedVm=value.resource_scope==='owned-cosmabot-vm-instance';
-  const captureEnabled=captureToolsOptIn(value);
+  // Opt-in already validated in validateInput; read once here for the rest of render.
+  const captureEnabled=!!value[CAPTURE_TOOLS_OPT_IN];
   const parent=`/var/lib/cosmabot/standalone/${id}`;
   const root=ownedVm?parent+'/app':`/var/lib/cosmabot-standalone/${id}`,postgres=ownedVm?parent+'/postgres':`/var/lib/cosmabot-postgres/${id}`;
   const config=ownedVm?parent+'/config':`/etc/cosmabot-standalone/${id}`,release=ownedVm?parent+'/release':`/opt/cosmabot-standalone/${id}`,proxyRoot=ownedVm?parent+'/proxy':`/var/lib/cosmabot-https/${id}`;
@@ -277,11 +282,17 @@ export function render(input){
   }
   if(captureEnabled){
     // Live Core staging capture connection; content is live microphone audio on a synthetic-only host.
+    // Client manifests keep platformAccess:'disabled'; this entry is Core capture S2S only.
+    contract.client_manifest_platform_access=
+      "Client manifests keep platformAccess:'disabled'; Core capture uses this platform_connections entry, not Cosmaneura platformAccess";
     contract.platform_connections=[{kind:'core_staging_capture',origin:value.core_capture_origin,
       web_origin:value.core_web_origin,scope:value.core_capture_scope,
       managed_identity_client_id:value.core_capture_managed_identity_client_id,
       upload_proxy_origin:value.api_origin,
+      upload_host:value.core_capture_upload_host,
+      upload_host_control:'Runtime does not pin this host (any https except AssemblyAI/Recall); host egress rule is the control',
       adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174',
+      upload_adapter:'src/cosmas_os/application/capture_upload_proxy.py:261-274',
       content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
       real_patient_recording_process_switch:false}];
   }
@@ -318,15 +329,21 @@ export function render(input){
       firewall.api_egress.push({protocol:'https',hostname,tcp_port:443,redirects_allowed:false});
     (firewall.browser_oauth_origins??=[]).push('https://login.microsoftonline.com');
   }
+  let coreHost='';
   if(captureEnabled){
     // Core HTTPS origin from settings.core_capture_origin (core_capture_connection.py:174).
     // IMDS token path from ManagedIdentityCredential.get_token (same lines) via
     // BoundedIdentityTransport (core_record_connection.py:195-214).
-    const coreHost=new URL(value.core_capture_origin).hostname;
+    // Blob PUT host from Core-issued upload URL (capture_upload_proxy.py:261-274);
+    // runtime does not pin that host — host egress is the control.
+    coreHost=new URL(value.core_capture_origin).hostname;
+    const uploadHost=value.core_capture_upload_host;
     firewall.api_egress.push({protocol:'https',hostname:coreHost,tcp_port:443,redirects_allowed:false,
       adapter:'src/cosmas_os/adapters/core_capture_connection.py:174'});
     firewall.api_egress.push({protocol:'http',hostname:IMDS_TOKEN_HOST,tcp_port:80,path:IMDS_TOKEN_PATH,
       redirects_allowed:false,adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174'});
+    firewall.api_egress.push({protocol:'https',hostname:uploadHost,tcp_port:443,method:'PUT',
+      redirects_allowed:false,adapter:'src/cosmas_os/application/capture_upload_proxy.py:261-274'});
     firewall.deny=firewall.deny.map(item=>{
       if(item==='169.254.0.0/16 metadata and link-local')
         return `169.254.0.0/16 metadata and link-local except ${IMDS_TOKEN_HOST}${IMDS_TOKEN_PATH}`;
@@ -337,11 +354,11 @@ export function render(input){
   }
   if(value.beta_features!==undefined){
     firewall.dns=captureEnabled
-      ?'Only the exact configured Clerk/model, selected Google/Microsoft API hostnames, staging-app.cosmaneura.com Core capture, and IMDS token host; qualify resolver enforcement separately.'
+      ?`Only the exact configured Clerk/model, selected Google/Microsoft API hostnames, ${coreHost} Core capture, IMDS token host, and ${value.core_capture_upload_host} Core capture upload blob; qualify resolver enforcement separately.`
       :'Only the exact configured Clerk/model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
     contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
       (captureEnabled
-        ?'Host firewall and DNS qualification: only declared Clerk, optional own model, selected Google/Microsoft, Core capture staging-app.cosmaneura.com, and IMDS token endpoint; no other providers'
+        ?`Host firewall and DNS qualification: only declared Clerk, optional own model, selected Google/Microsoft, Core capture ${coreHost}, IMDS token endpoint, and Core capture upload blob ${value.core_capture_upload_host}; runtime does not pin the upload host so host egress is the control; no other providers`
         :'Host firewall and DNS qualification: only declared Clerk, optional own model and selected Google/Microsoft API egress; no metadata or other providers'):item);
   }
   if(ownedVm){

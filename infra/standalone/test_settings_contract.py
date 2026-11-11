@@ -52,6 +52,7 @@ if(process.argv[2]==='capture_tools'){
   input.core_web_origin='https://staging-app.cosmaneura.com';
   input.core_capture_scope='api://invented-core-audience/.default';
   input.core_capture_managed_identity_client_id='00000000-0000-4000-8000-0000000000aa';
+  input.core_capture_upload_host='inventedcaptureacct.blob.core.windows.net';
 }
 const files=render(input);console.log(JSON.stringify({environment:files['api-public.json'],contract:files['host-preparation.json']}));
 """
