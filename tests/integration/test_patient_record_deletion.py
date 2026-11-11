@@ -29,7 +29,7 @@ from cosmas_os.application.patient_deletion import delete_patient_records, stora
 from cosmas_os.cli import app as cli_app
 from cosmas_os.config import settings
 from cosmas_os.domain.enums import DecisionKind, PrincipalState, PrincipalType
-from cosmas_os.domain.rules import DomainError
+from cosmas_os.domain.rules import AuthorizationError, DomainError
 from cosmas_os.models import (
     ActionRevision,
     AppointmentObservation,
@@ -98,7 +98,10 @@ def _patient_link_counts(session: Session, patient_id: str) -> dict[str, int]:
         text(
             "SELECT table_name FROM information_schema.columns "
             "WHERE table_schema = 'public' AND column_name = 'patient_link_id' "
-            "AND table_name <> 'patient_deletion_pending_files'"
+            "AND table_name NOT IN ("
+            "  'patient_deletion_pending_files',"
+            "  'patient_deletion_in_progress'"
+            ")"
         )
     )
     counts: dict[str, int] = {}
@@ -367,7 +370,7 @@ def _count(session: Session, model, column: str, value: str) -> int:
     )
 
 
-def _calls(session: Session, actor: str, patient_id: str, blob: LocalBlobAdapter, *, confirm: bool):
+def _calls(session: Session, actor: str | None, patient_id: str, blob: LocalBlobAdapter, *, confirm: bool):
     return delete_patient_records(
         session,
         actor_principal_id=actor,
@@ -399,6 +402,7 @@ def practice(engine, tmp_path, monkeypatch):
     # Throwaway synth only: create John's deletion role here, never via CI workflows.
     _ensure_patient_deletion_role(session)
     arranged = _arrange(session, blob)
+    _bind_session_admin(session, str(arranged["owner_id"]), str(arranged["box_id"]))
     arranged["blob"] = blob
     arranged["session"] = session
     try:
@@ -427,7 +431,7 @@ def test_staff_and_agent_are_refused_by_the_api_and_the_cli(practice) -> None:
     path = f"/admin/patients/{patient_id}/records"
     admin_role, admin_url = _separate_admin_identity(session)
     try:
-        for actor, headers in (
+        for _actor, headers in (
             (staff, {"X-Box-Id": owner_box, "X-Actor-Principal-Id": staff}),
             (agent, {"X-Box-Id": owner_box, "X-Actor-Principal-Id": agent}),
         ):
@@ -437,7 +441,7 @@ def test_staff_and_agent_are_refused_by_the_api_and_the_cli(practice) -> None:
             assert str(names["note"]) not in refused.text
             cli = CliRunner().invoke(
                 cli_app,
-                ["delete-patient-records", patient_id, "--actor", actor, "--confirm"],
+                ["delete-patient-records", patient_id, "--confirm"],
                 env={"COSMAS_ADMIN_DATABASE_URL": admin_url},
             )
             assert cli.exit_code == 1
@@ -680,9 +684,23 @@ def test_repeat_delete_is_a_safe_no_op(practice) -> None:
     session.rollback()
     admin_role, admin_url = _separate_admin_identity(session)
     try:
+        _autocommit(session, f"GRANT cosmas_patient_deletion TO {admin_role}")
+        session.execute(
+            text(
+                """
+                INSERT INTO public.patient_deletion_admin_bindings (db_role, principal_id, box_id)
+                VALUES (:role, CAST(:principal AS uuid), CAST(:box AS uuid))
+                ON CONFLICT (db_role) DO UPDATE
+                  SET principal_id = EXCLUDED.principal_id,
+                      box_id = EXCLUDED.box_id
+                """
+            ),
+            {"role": admin_role, "principal": owner, "box": practice["box_id"]},
+        )
+        session.commit()
         cli = CliRunner().invoke(
             cli_app,
-            ["delete-patient-records", patient_id, "--actor", owner, "--confirm"],
+            ["delete-patient-records", patient_id, "--confirm"],
             env={"COSMAS_ADMIN_DATABASE_URL": admin_url},
         )
     finally:
@@ -752,7 +770,10 @@ def _patient_link_tables(session: Session) -> list[str]:
             text(
                 "SELECT table_name FROM information_schema.columns "
                 "WHERE table_schema = 'public' AND column_name = 'patient_link_id' "
-                "AND table_name <> 'patient_deletion_pending_files' "
+                "AND table_name NOT IN ("
+                "  'patient_deletion_pending_files',"
+                "  'patient_deletion_in_progress'"
+                ") "
                 "ORDER BY table_name"
             )
         )
@@ -1150,11 +1171,29 @@ def _ensure_patient_deletion_role(session: Session) -> None:
     bind = session.get_bind()
     with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
         _run_ensure_patient_deletion_role_sql(connection)
+        connection.execute(text("GRANT cosmas_patient_deletion TO CURRENT_USER"))
 
 
 def _ensure_patient_deletion_role_on(engine) -> None:
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
         _run_ensure_patient_deletion_role_sql(connection)
+        connection.execute(text("GRANT cosmas_patient_deletion TO CURRENT_USER"))
+
+
+def _bind_session_admin(session: Session, principal_id: str, box_id: str) -> None:
+    session.execute(
+        text(
+            """
+            INSERT INTO public.patient_deletion_admin_bindings (db_role, principal_id, box_id)
+            VALUES (session_user, CAST(:principal AS uuid), CAST(:box AS uuid))
+            ON CONFLICT (db_role) DO UPDATE
+              SET principal_id = EXCLUDED.principal_id,
+                  box_id = EXCLUDED.box_id
+            """
+        ),
+        {"principal": principal_id, "box": box_id},
+    )
+    session.commit()
 
 
 def _drop_patient_deletion_role(admin_engine, databases: tuple[str, ...]) -> None:
@@ -1172,12 +1211,12 @@ def _drop_patient_deletion_role(admin_engine, databases: tuple[str, ...]) -> Non
                 )
                 if connection.scalar(
                     text(
-                        "SELECT to_regprocedure('public.delete_patient_keyed_records(uuid, uuid)')"
+                        "SELECT to_regprocedure('public.delete_patient_keyed_records(uuid)')"
                     )
                 ):
                     connection.execute(
                         text(
-                            "ALTER FUNCTION public.delete_patient_keyed_records(uuid, uuid) "
+                            "ALTER FUNCTION public.delete_patient_keyed_records(uuid) "
                             "OWNER TO CURRENT_USER"
                         )
                     )
@@ -1189,17 +1228,17 @@ def _drop_patient_deletion_role(admin_engine, databases: tuple[str, ...]) -> Non
                     connection.execute(
                         text(
                             "DO $$ BEGIN "
-                            "IF to_regprocedure('public.delete_patient_keyed_records(uuid, uuid)') "
+                            "IF to_regprocedure('public.delete_patient_keyed_records(uuid)') "
                             "IS NOT NULL THEN "
                             "REVOKE ALL ON FUNCTION "
-                            "public.delete_patient_keyed_records(uuid, uuid) "
+                            "public.delete_patient_keyed_records(uuid) "
                             "FROM cosmas_patient_deletion; "
                             "END IF; "
                             "IF to_regprocedure("
-                            "'public._cosmas_apply_patient_deletion_mutate(uuid, uuid)') "
+                            "'public._cosmas_apply_patient_deletion_mutate(uuid)') "
                             "IS NOT NULL THEN "
                             "REVOKE ALL ON FUNCTION "
-                            "public._cosmas_apply_patient_deletion_mutate(uuid, uuid) "
+                            "public._cosmas_apply_patient_deletion_mutate(uuid) "
                             "FROM cosmas_patient_deletion; "
                             "END IF; "
                             "END $$"
@@ -1397,18 +1436,17 @@ def test_runtime_role_cannot_set_role_to_the_deletion_role(practice) -> None:
 def test_admin_cli_refuses_a_missing_or_runtime_database_url(practice, monkeypatch) -> None:
     session = practice["session"]
     patient_id = str(practice["casey"]["patient_id"])
-    owner = str(practice["owner_id"])
     runtime_url = os.environ.get("DATABASE_URL", settings.database_url)
     monkeypatch.delenv("COSMAS_ADMIN_DATABASE_URL", raising=False)
     missing = CliRunner().invoke(
-        cli_app, ["delete-patient-records", patient_id, "--actor", owner, "--confirm"]
+        cli_app, ["delete-patient-records", patient_id, "--confirm"]
     )
     assert missing.exit_code == 1
     assert "admin database identity is not configured" in (missing.stderr or "")
     assert "admin authority required" not in (missing.stderr or "")
     monkeypatch.setenv("COSMAS_ADMIN_DATABASE_URL", runtime_url)
     same = CliRunner().invoke(
-        cli_app, ["delete-patient-records", patient_id, "--actor", owner, "--confirm"]
+        cli_app, ["delete-patient-records", patient_id, "--confirm"]
     )
     assert same.exit_code == 1
     assert "admin database identity is not configured" in (same.stderr or "")
@@ -1420,7 +1458,7 @@ def test_admin_cli_refuses_a_missing_or_runtime_database_url(practice, monkeypat
     assert renamed != runtime_url
     monkeypatch.setenv("COSMAS_ADMIN_DATABASE_URL", renamed)
     same_role = CliRunner().invoke(
-        cli_app, ["delete-patient-records", patient_id, "--actor", owner, "--confirm"]
+        cli_app, ["delete-patient-records", patient_id, "--confirm"]
     )
     assert same_role.exit_code == 1
     assert "admin database identity is not configured" in (same_role.stderr or "")
@@ -1452,18 +1490,17 @@ def test_runtime_role_cannot_execute_the_deletion_function(practice) -> None:
                 connection.execute(
                     text(
                         "SELECT public.delete_patient_keyed_records("
-                        "CAST(:patient AS uuid), CAST(:actor AS uuid))"
+                        "CAST(:patient AS uuid))"
                     ),
                     {
                         "patient": practice["casey"]["patient_id"],
-                        "actor": practice["owner_id"],
                     },
                 )
         assert (
             session.scalar(
                 text(
                     "SELECT has_function_privilege(:role, "
-                    "'public.delete_patient_keyed_records(uuid, uuid)', 'EXECUTE')"
+                    "'public.delete_patient_keyed_records(uuid)', 'EXECUTE')"
                 ),
                 {"role": role},
             )
@@ -1566,7 +1603,7 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
         _ensure_patient_deletion_role_on(admin)
         _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
         assert _revision(target) == EXPECTED_SCHEMA_REVISION
-        assert all("cosmas_patient_deletion" in body for body in _guard_bodies(target).values())
+        assert all("_cosmas_patient_deletion_active" in body for body in _guard_bodies(target).values())
         blob = LocalBlobAdapter(tmp_path / "blobs")
         with Session(target) as session:
             arranged = _arrange(session, blob)
@@ -1586,7 +1623,7 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
 
         _migrate(target, PARENT_REVISION, downgrade=True)
         assert _revision(target) == PARENT_REVISION
-        assert all("cosmas_patient_deletion" not in body for body in _guard_bodies(target).values())
+        assert all("_cosmas_patient_deletion_active" not in body for body in _guard_bodies(target).values())
         with Session(target) as session:
             with pytest.raises(ProgrammingError, match="workspace history is immutable"):
                 session.execute(
@@ -1598,7 +1635,7 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
 
         _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
         assert _revision(target) == EXPECTED_SCHEMA_REVISION
-        assert all("cosmas_patient_deletion" in body for body in _guard_bodies(target).values())
+        assert all("_cosmas_patient_deletion_active" in body for body in _guard_bodies(target).values())
         with Session(target) as session:
             with pytest.raises(ProgrammingError, match="workspace history is immutable"):
                 session.execute(
@@ -1607,17 +1644,17 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
                 )
                 session.commit()
             session.rollback()
-            session.execute(
-                text(
-                    "SELECT public.delete_patient_keyed_records("
-                    "CAST(:patient AS uuid), CAST(:actor AS uuid))"
-                ),
-                {
-                    "patient": arranged["casey"]["patient_id"],
-                    "actor": arranged["owner_id"],
-                },
+            _ensure_patient_deletion_role(session)
+            _bind_session_admin(
+                session, str(arranged["owner_id"]), str(arranged["box_id"])
             )
-            session.commit()
+            _calls(
+                session,
+                str(arranged["owner_id"]),
+                str(arranged["casey"]["patient_id"]),
+                blob,
+                confirm=True,
+            )
             assert session.get(PrivateRecordingFinish, finish_id) is None
             assert session.get(PatientLink, arranged["casey"]["patient_id"]) is None
     finally:
@@ -1647,7 +1684,7 @@ def test_migration_applies_when_deletion_role_is_missing(caplog) -> None:
                 text(
                     "SELECT r.rolname FROM pg_proc p "
                     "JOIN pg_roles r ON r.oid = p.proowner "
-                    "WHERE p.oid = 'public.delete_patient_keyed_records(uuid, uuid)'::regprocedure"
+                    "WHERE p.oid = 'public.delete_patient_keyed_records(uuid)'::regprocedure"
                 )
             )
             assert owner is not None
@@ -1751,7 +1788,7 @@ def test_migration_applies_as_restricted_migrator_with_and_without_deletion_role
                     "SELECT r.rolname FROM pg_proc p "
                     "JOIN pg_roles r ON r.oid = p.proowner "
                     "WHERE p.oid = to_regprocedure("
-                    "'public.delete_patient_keyed_records(uuid, uuid)')"
+                    "'public.delete_patient_keyed_records(uuid)')"
                 )
             )
             assert owner == without_role
@@ -1770,7 +1807,6 @@ def test_migration_applies_as_restricted_migrator_with_and_without_deletion_role
         with caplog.at_level(logging.INFO, logger="alembic.runtime.migration"):
             _migrate(with_engine, EXPECTED_SCHEMA_REVISION, downgrade=False)
         assert _revision(with_engine) == EXPECTED_SCHEMA_REVISION
-        assert "cosmas_patient_deletion grant skipped" in caplog.text
         with with_engine.connect() as connection:
             assert connection.scalar(text("SELECT current_user")) == with_role
             assert not connection.scalar(
@@ -1782,10 +1818,17 @@ def test_migration_applies_as_restricted_migrator_with_and_without_deletion_role
                     "SELECT r.rolname FROM pg_proc p "
                     "JOIN pg_roles r ON r.oid = p.proowner "
                     "WHERE p.oid = to_regprocedure("
-                    "'public.delete_patient_keyed_records(uuid, uuid)')"
+                    "'public.delete_patient_keyed_records(uuid)')"
                 )
             )
             assert owner == with_role
+            assert connection.scalar(
+                text(
+                    "SELECT has_function_privilege(:role, "
+                    "'public.delete_patient_keyed_records(uuid)', 'EXECUTE')"
+                ),
+                {"role": DELETION_ROLE},
+            )
     finally:
         without_engine.dispose()
         with_engine.dispose()
@@ -1801,7 +1844,6 @@ def test_migration_applies_as_restricted_migrator_with_and_without_deletion_role
 def test_admin_cli_prints_each_fixed_refusal_reason(practice) -> None:
     session = practice["session"]
     owner = str(practice["owner_id"])
-    staff = str(practice["staff_id"])
     casey = practice["casey"]
     names = practice["names"]
     assert isinstance(casey, dict) and isinstance(names, dict)
@@ -1811,7 +1853,7 @@ def test_admin_cli_prints_each_fixed_refusal_reason(practice) -> None:
     try:
         missing_flags = CliRunner().invoke(
             cli_app,
-            ["delete-patient-records", patient_id, "--actor", owner],
+            ["delete-patient-records", patient_id],
             env=env,
         )
         assert missing_flags.exit_code == 1
@@ -1820,20 +1862,33 @@ def test_admin_cli_prints_each_fixed_refusal_reason(practice) -> None:
 
         bad_patient = CliRunner().invoke(
             cli_app,
-            ["delete-patient-records", "not-a-patient-id", "--actor", owner, "--dry-run"],
+            ["delete-patient-records", "not-a-patient-id", "--dry-run"],
             env=env,
         )
         assert bad_patient.exit_code == 1
         assert (bad_patient.stderr or "").strip() == "invalid patient id"
         assert "Traceback" not in (bad_patient.stderr or "")
 
+        # Bind the admin LOGIN so dry-run can resolve the actor, then probe missing patient.
+        _autocommit(session, f"GRANT cosmas_patient_deletion TO {admin_role}")
+        session.execute(
+            text(
+                """
+                INSERT INTO public.patient_deletion_admin_bindings (db_role, principal_id, box_id)
+                VALUES (:role, CAST(:principal AS uuid), CAST(:box AS uuid))
+                ON CONFLICT (db_role) DO UPDATE
+                  SET principal_id = EXCLUDED.principal_id,
+                      box_id = EXCLUDED.box_id
+                """
+            ),
+            {"role": admin_role, "principal": owner, "box": practice["box_id"]},
+        )
+        session.commit()
         missing_patient = CliRunner().invoke(
             cli_app,
             [
                 "delete-patient-records",
                 "00000000-0000-4000-8000-000000000099",
-                "--actor",
-                owner,
                 "--dry-run",
             ],
             env=env,
@@ -1842,9 +1897,14 @@ def test_admin_cli_prints_each_fixed_refusal_reason(practice) -> None:
         assert (missing_patient.stderr or "").strip() == "patient not found"
         assert "Traceback" not in (missing_patient.stderr or "")
 
+        session.execute(
+            text("DELETE FROM public.patient_deletion_admin_bindings WHERE db_role = :role"),
+            {"role": admin_role},
+        )
+        session.commit()
         not_admin = CliRunner().invoke(
             cli_app,
-            ["delete-patient-records", patient_id, "--actor", staff, "--confirm"],
+            ["delete-patient-records", patient_id, "--confirm"],
             env=env,
         )
         assert not_admin.exit_code == 1
@@ -1865,7 +1925,7 @@ def test_admin_cli_prints_each_fixed_refusal_reason(practice) -> None:
         try:
             no_role = CliRunner().invoke(
                 cli_app,
-                ["delete-patient-records", patient_id, "--actor", owner, "--confirm"],
+                ["delete-patient-records", patient_id, "--confirm"],
                 env={"COSMAS_ADMIN_DATABASE_URL": admin_url},
             )
             assert no_role.exit_code == 1
@@ -1982,7 +2042,7 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
         _autocommit(session, f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}")
         _autocommit(
             session,
-            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid, uuid) TO {role}",
+            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) TO {role}",
         )
         _ensure_patient_deletion_role(session)
         can_insert_audit = session.scalar(
@@ -1991,16 +2051,37 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
                 "'public.audit_events', 'INSERT')"
             )
         )
-        assert can_insert_audit is True
+        assert can_insert_audit is False
+        can_update_audit = session.scalar(
+            text(
+                "SELECT has_table_privilege('cosmas_patient_deletion', "
+                "'public.audit_events', 'UPDATE')"
+            )
+        )
+        assert can_update_audit is False
         is_super = session.scalar(
             text("SELECT rolsuper FROM pg_roles WHERE rolname = :role"), {"role": role}
         )
         assert is_super is False
+        _autocommit(session, f"GRANT cosmas_patient_deletion TO {role}")
+        session.execute(
+            text(
+                """
+                INSERT INTO public.patient_deletion_admin_bindings (db_role, principal_id, box_id)
+                VALUES (:role, CAST(:principal AS uuid), CAST(:box AS uuid))
+                ON CONFLICT (db_role) DO UPDATE
+                  SET principal_id = EXCLUDED.principal_id,
+                      box_id = EXCLUDED.box_id
+                """
+            ),
+            {"role": role, "principal": owner, "box": practice["box_id"]},
+        )
+        session.commit()
         admin_url = parsed.set(username=role).render_as_string(hide_password=False)
         assert make_url(admin_url).username == role
         cli = CliRunner().invoke(
             cli_app,
-            ["delete-patient-records", patient_id, "--actor", owner, "--confirm"],
+            ["delete-patient-records", patient_id, "--confirm"],
             env={"COSMAS_ADMIN_DATABASE_URL": admin_url},
         )
         assert cli.exit_code == 0, cli.stderr
@@ -2023,7 +2104,7 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
         _autocommit(session, f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {role}")
         _autocommit(
             session,
-            f"REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid, uuid) FROM {role}",
+            f"REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid) FROM {role}",
         )
         _autocommit(session, f"REVOKE ALL ON SCHEMA public FROM {role}")
         _autocommit(session, f"REVOKE ALL ON DATABASE {_quote(database)} FROM {role}")
@@ -2154,7 +2235,7 @@ def test_pending_file_delete_failure_is_finished_on_rerun(practice, monkeypatch)
         real_unlink(path)
 
     monkeypatch.setattr(deletion_mod, "_unlink", _fail_once)
-    with pytest.raises(DomainError, match="stored files could not be deleted"):
+    with pytest.raises(DomainError, match="database delete completed; stored files pending"):
         _calls(session, owner, patient_id, blob, confirm=True)
     session.rollback()
     assert session.get(PatientLink, patient_id) is None
@@ -2199,22 +2280,162 @@ def test_deletion_function_refuses_other_practice_patient(practice) -> None:
     other = svc.Container(session, blob=blob)
     foreign = svc.provision_box(other, "Invented Other Practice")
     foreign_owner = str(foreign["owner_id"])
-    before = _patient_link_counts(session, patient_id)
-    with pytest.raises(ProgrammingError, match="admin authority required"):
-        session.execute(
-            text(
-                "SELECT public.delete_patient_keyed_records("
-                "CAST(:patient AS uuid), CAST(:actor AS uuid))"
-            ),
-            {"patient": patient_id, "actor": foreign_owner},
-        )
-        session.commit()
+    foreign_patient = svc.attest_patient_link(
+        other,
+        foreign["box_id"],
+        foreign_owner,
+        source_pair_key="csv:foreign-patient",
+        label="Invented Foreign Patient",
+    )
+    session.commit()
+    foreign_id = str(foreign_patient.id)
+    before_foreign = _patient_link_counts(session, foreign_id)
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        _calls(session, owner, foreign_id, blob, confirm=True)
     session.rollback()
-    assert _patient_link_counts(session, patient_id) == before
-    assert session.get(PatientLink, patient_id) is not None
+    assert _patient_link_counts(session, foreign_id) == before_foreign
+    assert session.get(PatientLink, foreign_id) is not None
+    before = _patient_link_counts(session, patient_id)
+    assert before
     # Same-practice owner still works through the application path.
     _calls(session, owner, patient_id, blob, confirm=True)
     assert session.get(PatientLink, patient_id) is None
+
+
+def test_guc_bypass_cannot_edit_notes_or_audit(practice) -> None:
+    """T13: SET cosmas.patient_deletion cannot bypass immutability."""
+
+    session = practice["session"]
+    casey = practice["casey"]
+    assert isinstance(casey, dict)
+    note_id = session.scalar(
+        select(WorkspaceNote.id).where(WorkspaceNote.workspace_id == casey["workspace_id"])
+    )
+    assert note_id is not None
+    audit_id = session.scalar(select(AuditEvent.id).limit(1))
+    assert audit_id is not None
+    role = "patient_runtime_guc_" + uuid4().hex[:10]
+    runtime = _runtime_engine(session, role)
+    try:
+        # Notes: grant DML so the immutability trigger is what refuses.
+        # Audit: no DML grant — privilege check refuses even with the GUC set.
+        _autocommit(
+            session,
+            f"GRANT SELECT, UPDATE, DELETE ON public.workspace_notes TO {role}",
+        )
+        _autocommit(session, f"GRANT SELECT ON public.audit_events TO {role}")
+        for statement in (
+            "SET cosmas.patient_deletion = '1'",
+            "SET LOCAL cosmas.patient_deletion = '1'",
+        ):
+            with runtime.begin() as connection:
+                connection.execute(text(statement))
+                with pytest.raises(ProgrammingError, match="workspace history is immutable"):
+                    connection.execute(
+                        text(
+                            "UPDATE public.workspace_notes SET content = 'x' "
+                            "WHERE id = CAST(:id AS uuid)"
+                        ),
+                        {"id": note_id},
+                    )
+            with runtime.begin() as connection:
+                connection.execute(text(statement))
+                with pytest.raises(ProgrammingError, match="workspace history is immutable"):
+                    connection.execute(
+                        text("DELETE FROM public.workspace_notes WHERE id = CAST(:id AS uuid)"),
+                        {"id": note_id},
+                    )
+            with runtime.begin() as connection:
+                connection.execute(text(statement))
+                with pytest.raises(ProgrammingError, match="permission denied"):
+                    connection.execute(
+                        text(
+                            "UPDATE public.audit_events SET detail = '{}'::jsonb "
+                            "WHERE id = CAST(:id AS uuid)"
+                        ),
+                        {"id": audit_id},
+                    )
+            with runtime.begin() as connection:
+                connection.execute(text(statement))
+                with pytest.raises(ProgrammingError, match="permission denied"):
+                    connection.execute(
+                        text("DELETE FROM public.audit_events WHERE id = CAST(:id AS uuid)"),
+                        {"id": audit_id},
+                    )
+        bind = session.get_bind()
+        with bind.connect() as connection:
+            transaction = connection.begin()
+            try:
+                connection.execute(text("SET LOCAL ROLE cosmas_patient_deletion"))
+                connection.execute(text("SET LOCAL cosmas.patient_deletion = '1'"))
+                with pytest.raises(ProgrammingError, match="permission denied"):
+                    connection.execute(
+                        text(
+                            "UPDATE public.workspace_notes SET content = 'x' "
+                            "WHERE id = CAST(:id AS uuid)"
+                        ),
+                        {"id": note_id},
+                    )
+            finally:
+                transaction.rollback()
+        with bind.connect() as connection:
+            transaction = connection.begin()
+            try:
+                connection.execute(text("SET LOCAL ROLE cosmas_patient_deletion"))
+                connection.execute(text("SET LOCAL cosmas.patient_deletion = '1'"))
+                with pytest.raises(ProgrammingError, match="permission denied"):
+                    connection.execute(
+                        text(
+                            "UPDATE public.audit_events SET detail = '{}'::jsonb "
+                            "WHERE id = CAST(:id AS uuid)"
+                        ),
+                        {"id": audit_id},
+                    )
+            finally:
+                transaction.rollback()
+    finally:
+        runtime.dispose()
+        _drop_runtime_role(session, role)
+
+
+def test_unclassified_reachable_table_refuses_delete(practice) -> None:
+    """T14: a new table referencing tickets must refuse deletion."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_id = str(casey["patient_id"])
+    ticket_id = str(casey["ticket_id"])
+    session.execute(
+        text(
+            """
+            CREATE TABLE public.patient_deletion_probe_ticket_child (
+              id uuid PRIMARY KEY,
+              ticket_id uuid NOT NULL REFERENCES public.tickets(id)
+            )
+            """
+        )
+    )
+    session.execute(
+        text(
+            """
+            INSERT INTO public.patient_deletion_probe_ticket_child (id, ticket_id)
+            VALUES (gen_random_uuid(), CAST(:ticket AS uuid))
+            """
+        ),
+        {"ticket": ticket_id},
+    )
+    session.commit()
+    try:
+        with pytest.raises(Exception, match="schema not classified for patient deletion"):
+            _calls(session, owner, patient_id, blob, confirm=True)
+        session.rollback()
+        assert session.get(PatientLink, patient_id) is not None
+    finally:
+        session.execute(text("DROP TABLE IF EXISTS public.patient_deletion_probe_ticket_child"))
+        session.commit()
 
 
 def test_deletion_function_has_no_plan_argument_overload(practice) -> None:
@@ -2236,10 +2457,10 @@ def test_deletion_function_has_no_plan_argument_overload(practice) -> None:
         )
     ).all()
     signatures = {(str(name), str(args)) for name, args in rows}
-    assert ("delete_patient_keyed_records", "p_patient uuid, p_actor uuid") in signatures
-    assert ("_cosmas_apply_patient_deletion_mutate", "p_patient uuid, p_actor uuid") in signatures
+    assert ("delete_patient_keyed_records", "p_patient uuid") in signatures
+    assert ("_cosmas_apply_patient_deletion_mutate", "p_patient uuid") in signatures
     assert all("jsonb" not in args for _name, args in signatures)
     assert all(name != "_cosmas_apply_patient_deletion_plan" for name, _args in signatures)
     # Only the two-uuid entry exists for the public function.
     public = [args for name, args in signatures if name == "delete_patient_keyed_records"]
-    assert public == ["p_patient uuid, p_actor uuid"]
+    assert public == ["p_patient uuid"]

@@ -21,15 +21,65 @@ the same way. The new deletion event records who deleted it, when,
 and that internal id only. It does not record the patient's name or note text.
 Confirmed deletes refuse and change nothing when the deletion role is missing.
 
-John runs `scripts/ensure-patient-deletion-role.sql` himself. That idempotent
-script creates the `cosmas_patient_deletion` NOLOGIN role if needed and applies
-the grants (`SELECT`, `INSERT`, `UPDATE`, `DELETE` on public tables, including
-`INSERT` on `audit_events`, plus ownership of
-`delete_patient_keyed_records(uuid, uuid)`). Agents and CI never run it on a
-real database. The migration skips the grant with one log line when the role is
-absent. Confirmed deletes commit the database first, then remove stored files;
+Confirmed deletes commit the database first, then remove stored files;
 pending file paths are recorded in the same transaction so a later run can
-finish leftovers.
+finish leftovers for that practice. If file removal fails after the database
+commit, the command reports that the database delete completed and stored
+files are pending; a rerun finishes them.
 
 Backups are not edited. Deleted data ages out of backups under the backup
 retention policy. T-RETENTION adds that policy.
+
+## John's operator setup (admin LOGIN)
+
+Agents and CI never run these steps against a real database. Suggested example
+login name only — choose any LOGIN distinct from the runtime `DATABASE_URL`
+user.
+
+1. As a Postgres role that can create logins, create the admin LOGIN (password
+   never in git):
+
+```bash
+psql "$POSTGRES_ADMIN_URL" -v ON_ERROR_STOP=1 \
+  -c "CREATE ROLE cosmas_patient_deletion_admin LOGIN PASSWORD '...';"
+```
+
+2. Apply the deletion role grants:
+
+```bash
+psql "$POSTGRES_ADMIN_URL" -v ON_ERROR_STOP=1 \
+  -f scripts/ensure-patient-deletion-role.sql
+```
+
+3. Grant that LOGIN membership (and EXECUTE) using the psql variable:
+
+```bash
+psql "$POSTGRES_ADMIN_URL" \
+  -v admin_login=cosmas_patient_deletion_admin \
+  -v ON_ERROR_STOP=1 \
+  -f scripts/ensure-patient-deletion-admin-login.sql
+```
+
+4. Bind `session_user` to the practice owner principal (IDs only):
+
+```sql
+INSERT INTO public.patient_deletion_admin_bindings (db_role, principal_id, box_id)
+VALUES (
+  'cosmas_patient_deletion_admin',
+  '<owner principal uuid>',
+  '<box uuid>'
+);
+```
+
+5. Point `COSMAS_ADMIN_DATABASE_URL` at that LOGIN. The CLI refuses when its
+   user equals the runtime `DATABASE_URL` user.
+
+6. Dry-run, then confirm:
+
+```bash
+cosmas-os delete-patient-records <patient_link_id> --dry-run
+cosmas-os delete-patient-records <patient_link_id> --confirm
+```
+
+The actor is taken from the binding for `session_user`, not from a CLI flag.
+The SQL function also requires `pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER')`.

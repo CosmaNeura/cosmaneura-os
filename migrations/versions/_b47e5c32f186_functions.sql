@@ -1,0 +1,877 @@
+-- Generated companion for b47e5c32f186. Applied by the Python migration.
+
+CREATE OR REPLACE FUNCTION public._cosmas_pk_text_expr(p_alias text, p_cols text[])
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SET search_path = pg_catalog
+AS $$
+  SELECT CASE
+    WHEN array_length(p_cols, 1) = 1 THEN format('%I.%I::text', p_alias, p_cols[1])
+    ELSE (
+      SELECT string_agg(format('%I.%I::text', p_alias, col), ' || '','' || ' ORDER BY ord)
+        FROM unnest(p_cols) WITH ORDINALITY AS u(col, ord)
+    )
+  END;
+$$;
+
+CREATE OR REPLACE FUNCTION public._cosmas_patient_deletion_classes()
+RETURNS TABLE(kind text, table_name text)
+LANGUAGE sql
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+  SELECT * FROM (VALUES
+            ('owned', 'action_revisions'),
+            ('owned', 'appointment_executions'),
+            ('owned', 'appointment_observations'),
+            ('owned', 'appointment_receipts'),
+            ('owned', 'appointment_work'),
+            ('owned', 'artifacts'),
+            ('owned', 'calendar_import_requests'),
+            ('owned', 'calendar_import_revocations'),
+            ('owned', 'calendar_import_snapshots'),
+            ('owned', 'calendar_import_source_reviews'),
+            ('owned', 'conversation_read_markers'),
+            ('owned', 'decisions'),
+            ('owned', 'efax_inbound_acquisitions'),
+            ('owned', 'efax_inbound_image_revisions'),
+            ('owned', 'efax_inbound_invocations'),
+            ('owned', 'efax_inbound_outcomes'),
+            ('owned', 'efax_inbound_source_reviews'),
+            ('owned', 'ehr_athena_core_patient_grants'),
+            ('owned', 'ehr_athena_medication_patient_grants'),
+            ('owned', 'ehr_fhir_patient_grants'),
+            ('owned', 'ehr_read_requests'),
+            ('owned', 'ehr_read_snapshots'),
+            ('owned', 'ehr_read_source_reviews'),
+            ('owned', 'encounter_workspaces'),
+            ('owned', 'fax_inbound_attempts'),
+            ('owned', 'fax_inbound_dispatches'),
+            ('owned', 'fax_inbound_images'),
+            ('owned', 'fax_inbound_outcomes'),
+            ('owned', 'fax_inbound_source_reviews'),
+            ('owned', 'finance_command_receipts'),
+            ('owned', 'finance_customer_versions'),
+            ('owned', 'finance_provider_observations'),
+            ('owned', 'finance_read_claims'),
+            ('owned', 'finance_reopen_facts'),
+            ('owned', 'finance_setup_receipts'),
+            ('owned', 'finance_setup_revisions'),
+            ('owned', 'finance_setups'),
+            ('owned', 'finance_submit_claims'),
+            ('owned', 'finance_work_revisions'),
+            ('owned', 'follow_up_receipts'),
+            ('owned', 'follow_up_sources'),
+            ('owned', 'google_calendar_private_source_reviews'),
+            ('owned', 'google_calendar_source_reviews'),
+            ('owned', 'google_message_source_reviews'),
+            ('owned', 'inbox_events'),
+            ('owned', 'inbox_handoff_receipts'),
+            ('owned', 'inbox_items'),
+            ('owned', 'inbox_sources'),
+            ('owned', 'membership_command_retirements'),
+            ('owned', 'membership_receipts'),
+            ('owned', 'membership_work'),
+            ('owned', 'microsoft_calendar_source_reviews'),
+            ('owned', 'microsoft_message_source_reviews'),
+            ('owned', 'model_usage_observations'),
+            ('owned', 'model_work_admissions'),
+            ('owned', 'operations'),
+            ('owned', 'patient_links'),
+            ('owned', 'portal_setup_receipts'),
+            ('owned', 'portal_setup_revisions'),
+            ('owned', 'portal_work'),
+            ('owned', 'portal_work_claims'),
+            ('owned', 'portal_work_observations'),
+            ('owned', 'portal_work_receipts'),
+            ('owned', 'portal_work_reopens'),
+            ('owned', 'private_recording_finishes'),
+            ('owned', 'private_recording_links'),
+            ('owned', 'private_recording_transfer_attempts'),
+            ('owned', 'private_recording_transfer_rejections'),
+            ('owned', 'private_recording_transfer_sessions'),
+            ('owned', 'private_recording_transfers'),
+            ('owned', 'private_recording_visit_bindings'),
+            ('owned', 'private_recordings'),
+            ('owned', 'research_runs'),
+            ('owned', 'research_saves'),
+            ('owned', 'scheduling_patient_accounts'),
+            ('owned', 'scheduling_patient_mapping_reviews'),
+            ('owned', 'scheduling_patient_setup_requests'),
+            ('owned', 'scheduling_patient_setup_snapshots'),
+            ('owned', 'tickets'),
+            ('owned', 'vendor_artifact_attempts'),
+            ('owned', 'vendor_artifacts'),
+            ('owned', 'vendor_command_receipts'),
+            ('owned', 'vendor_command_retirements'),
+            ('owned', 'vendor_correspondence_versions'),
+            ('owned', 'vendor_preparation_retirements'),
+            ('owned', 'vendor_provider_observations'),
+            ('owned', 'vendor_read_claims'),
+            ('owned', 'vendor_setup_receipts'),
+            ('owned', 'vendor_setup_revisions'),
+            ('owned', 'vendor_setups'),
+            ('owned', 'vendor_submit_claims'),
+            ('owned', 'vendor_work'),
+            ('owned', 'vendor_work_revisions'),
+            ('owned', 'work_handoffs'),
+            ('owned', 'workspace_appointment_links'),
+            ('owned', 'workspace_core_note_sources'),
+            ('owned', 'workspace_entries'),
+            ('owned', 'workspace_handoff_attempts'),
+            ('owned', 'workspace_handoff_reviews'),
+            ('owned', 'workspace_handoff_revisions'),
+            ('owned', 'workspace_handoffs'),
+            ('owned', 'workspace_note_reviews'),
+            ('owned', 'workspace_notes'),
+            ('owned', 'workspace_replies'),
+            ('owned', 'workspace_title_revisions'),
+            ('preserve', 'alembic_version'),
+            ('preserve', 'audit_events'),
+            ('preserve', 'patient_deletion_admin_bindings'),
+            ('preserve', 'patient_deletion_in_progress'),
+            ('preserve', 'patient_deletion_pending_files'),
+            ('shared', 'box_contexts'),
+            ('shared', 'capability_configs'),
+            ('shared', 'capture_upload_proxies'),
+            ('shared', 'core_capture_accounts'),
+            ('shared', 'efax_inbound_grants'),
+            ('shared', 'efax_inbound_observation_requests'),
+            ('shared', 'efax_inbound_observations'),
+            ('shared', 'efax_inbound_receipts'),
+            ('shared', 'ehr_practice_resource_scopes'),
+            ('shared', 'ehr_read_bindings'),
+            ('shared', 'elation_sandbox_installation_receipts'),
+            ('shared', 'elation_sandbox_quota_minutes'),
+            ('shared', 'elation_sandbox_quotas'),
+            ('shared', 'external_identities'),
+            ('shared', 'fax_inbound_commands'),
+            ('shared', 'fax_inbound_grants'),
+            ('shared', 'fax_inbound_observations'),
+            ('shared', 'finance_connection_versions'),
+            ('shared', 'finance_event_candidates'),
+            ('shared', 'google_calendar_observation_requests'),
+            ('shared', 'google_calendar_snapshots'),
+            ('shared', 'google_connection_attempts'),
+            ('shared', 'google_connection_credentials'),
+            ('shared', 'google_message_read_requests'),
+            ('shared', 'google_message_snapshots'),
+            ('shared', 'microsoft_calendar_observation_requests'),
+            ('shared', 'microsoft_calendar_snapshots'),
+            ('shared', 'microsoft_connection_attempts'),
+            ('shared', 'microsoft_connection_credentials'),
+            ('shared', 'microsoft_message_read_requests'),
+            ('shared', 'microsoft_message_snapshots'),
+            ('shared', 'portal_setups'),
+            ('shared', 'practice_access_requests'),
+            ('shared', 'practice_invitations'),
+            ('shared', 'practice_invite_revocations'),
+            ('shared', 'practice_invite_uses'),
+            ('shared', 'practice_owner_reservations'),
+            ('shared', 'practice_setup_profiles'),
+            ('shared', 'principals'),
+            ('shared', 'provider_bots'),
+            ('shared', 'provider_team_revisions'),
+            ('shared', 'routine_revisions'),
+            ('shared', 'routine_runs'),
+            ('shared', 'scheduling_accounts'),
+            ('shared', 'scheduling_enrollments'),
+            ('shared', 'scheduling_login_attempts'),
+            ('shared', 'scheduling_login_credentials'),
+            ('shared', 'vendor_connection_versions'),
+            ('shared', 'vendor_event_candidates')
+  ) AS t(kind, table_name);
+$$;
+
+
+CREATE OR REPLACE FUNCTION public._cosmas_patient_deletion_active()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.patient_deletion_in_progress WHERE txid = txid_current()
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public._cosmas_patient_deletion_build_plan(p_patient uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $p$
+DECLARE
+  v_owned text[] := ARRAY(SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'owned' ORDER BY 1);
+  v_preserve text[] := ARRAY(SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'preserve' ORDER BY 1);
+  v_shared text[] := ARRAY(SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'shared' ORDER BY 1);
+  v_declared text[] := ARRAY[
+    'ehr_read_snapshots_observation_id_box_id_owner_id_fkey',
+    'fk_ehr_read_request_parent',
+    'fk_inbox_current_source',
+    'inbox_sources_item_id_box_id_owner_id_fkey',
+    'fk_vendor_supersedes_scope',
+    'vendor_work_revisions_ticket_id_workspace_id_box_id_owner__fkey'
+  ];
+  v_reachable text[] := ARRAY['patient_links'];
+  v_dirty text[] := ARRAY['patient_links'];
+  v_table text;
+  v_child text;
+  v_parent text;
+  v_unclassified text;
+  rec record;
+  edge record;
+  v_plan jsonb := '{}'::jsonb;
+  v_pks text[];
+  v_new text[];
+  v_parent_pks text[];
+  v_sql text;
+  v_steps int := 0;
+  v_counts jsonb := '{}'::jsonb;
+  v_child_pk text;
+  v_parent_pk text;
+  v_join text;
+  v_edges jsonb := '[]'::jsonb;
+  v_seen text[];
+  v_queue text[];
+  v_node text;
+  v_found boolean;
+  v_child_cols text[];
+  v_parent_cols text[];
+  v_child_pk_cols text[];
+  v_parent_pk_cols text[];
+BEGIN
+  IF p_patient IS NULL THEN
+    RAISE EXCEPTION 'patient records could not be deleted';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.patient_links WHERE id = p_patient) THEN
+    RAISE EXCEPTION 'patient not found';
+  END IF;
+
+  LOOP
+    v_steps := v_steps + 1;
+    IF v_steps > 10000 THEN
+      RAISE EXCEPTION 'patient records could not be deleted';
+    END IF;
+    EXIT WHEN coalesce(array_length(v_dirty, 1), 0) = 0;
+    v_table := v_dirty[1];
+    v_dirty := v_dirty[2:];
+    FOR v_child IN
+      SELECT child.relname
+        FROM pg_constraint con
+        JOIN pg_class child ON child.oid = con.conrelid
+        JOIN pg_class parent ON parent.oid = con.confrelid
+        JOIN pg_namespace ns ON ns.oid = child.relnamespace
+        JOIN pg_namespace pns ON pns.oid = parent.relnamespace
+       WHERE con.contype = 'f'
+         AND ns.nspname = 'public' AND pns.nspname = 'public'
+         AND parent.relname = v_table
+         AND child.relkind IN ('r', 'p')
+    LOOP
+      IF NOT (v_child = ANY (v_reachable)) THEN
+        v_reachable := array_append(v_reachable, v_child);
+        v_dirty := array_append(v_dirty, v_child);
+      END IF;
+    END LOOP;
+  END LOOP;
+
+  SELECT x INTO v_unclassified
+    FROM unnest(v_reachable) AS x
+   WHERE NOT (x = ANY (v_owned) OR x = ANY (v_preserve) OR x = ANY (v_shared))
+   ORDER BY 1 LIMIT 1;
+  IF v_unclassified IS NOT NULL THEN
+    RAISE EXCEPTION 'schema not classified for patient deletion';
+  END IF;
+
+  SELECT coalesce(jsonb_agg(row_to_json(e)::jsonb ORDER BY e.oid), '[]'::jsonb)
+    INTO v_edges
+    FROM (
+      SELECT con.oid,
+             child.relname AS child_table,
+             parent.relname AS parent_table,
+             con.conname::text AS conname,
+             (SELECT array_agg(a.attname ORDER BY k.ord)
+                FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+                JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS child_cols,
+             (SELECT array_agg(a.attname ORDER BY k.ord)
+                FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
+                JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS parent_cols,
+             (SELECT array_agg(a.attname ORDER BY k.ord)
+                FROM unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord)
+                JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum) AS child_pk_cols,
+             (SELECT array_agg(a.attname ORDER BY k.ord)
+                FROM unnest(ppk.conkey) WITH ORDINALITY AS k(attnum, ord)
+                JOIN pg_attribute a ON a.attrelid = ppk.conrelid AND a.attnum = k.attnum) AS parent_pk_cols
+        FROM pg_constraint con
+        JOIN pg_class child ON child.oid = con.conrelid
+        JOIN pg_class parent ON parent.oid = con.confrelid
+        JOIN pg_namespace ns ON ns.oid = child.relnamespace
+        JOIN pg_namespace pns ON pns.oid = parent.relnamespace
+        JOIN pg_constraint pk ON pk.conrelid = child.oid AND pk.contype = 'p'
+        JOIN pg_constraint ppk ON ppk.conrelid = parent.oid AND ppk.contype = 'p'
+       WHERE con.contype = 'f'
+         AND ns.nspname = 'public' AND pns.nspname = 'public'
+         AND child.relname = ANY (v_owned)
+         AND parent.relname = ANY (v_owned)
+         AND child.relkind IN ('r', 'p')
+         AND child.relname = ANY (v_reachable)
+         AND parent.relname = ANY (v_reachable)
+    ) e;
+
+  FOR edge IN
+    SELECT * FROM jsonb_to_recordset(v_edges) AS x(
+      child_table text,
+      parent_table text,
+      conname text,
+      child_cols text[],
+      parent_cols text[],
+      child_pk_cols text[],
+      parent_pk_cols text[]
+    )
+  LOOP
+    IF edge.child_table = edge.parent_table THEN
+      CONTINUE;
+    END IF;
+    IF edge.conname = ANY (v_declared) THEN
+      CONTINUE;
+    END IF;
+    v_seen := ARRAY[edge.parent_table];
+    v_queue := ARRAY[edge.parent_table];
+    v_found := FALSE;
+    v_steps := 0;
+    WHILE coalesce(array_length(v_queue, 1), 0) > 0 LOOP
+      v_steps := v_steps + 1;
+      IF v_steps > 10000 THEN
+        RAISE EXCEPTION 'patient records could not be deleted';
+      END IF;
+      v_node := v_queue[1];
+      v_queue := v_queue[2:];
+      IF v_node = edge.child_table THEN
+        v_found := TRUE;
+        EXIT;
+      END IF;
+      FOR rec IN
+        SELECT (e ->> 'parent_table') AS parent
+          FROM jsonb_array_elements(v_edges) AS e
+         WHERE (e ->> 'child_table') = v_node
+           AND (e ->> 'child_table') IS DISTINCT FROM (e ->> 'parent_table')
+      LOOP
+        IF NOT (rec.parent = ANY (v_seen)) THEN
+          v_seen := array_append(v_seen, rec.parent);
+          v_queue := array_append(v_queue, rec.parent);
+        END IF;
+      END LOOP;
+    END LOOP;
+    IF v_found THEN
+      RAISE EXCEPTION 'schema not classified for patient deletion';
+    END IF;
+  END LOOP;
+
+  v_plan := jsonb_build_object('patient_links', to_jsonb(ARRAY[p_patient::text]));
+  v_dirty := ARRAY['patient_links'];
+  v_steps := 0;
+  WHILE coalesce(array_length(v_dirty, 1), 0) > 0 LOOP
+    v_steps := v_steps + 1;
+    IF v_steps > 10000 THEN
+      RAISE EXCEPTION 'patient records could not be deleted';
+    END IF;
+    v_parent := v_dirty[1];
+    v_dirty := v_dirty[2:];
+    v_parent_pks := ARRAY(
+      SELECT jsonb_array_elements_text(COALESCE(v_plan -> v_parent, '[]'::jsonb))
+    );
+    IF coalesce(array_length(v_parent_pks, 1), 0) = 0 THEN
+      CONTINUE;
+    END IF;
+    FOR edge IN
+      SELECT * FROM jsonb_to_recordset(v_edges) AS x(
+        child_table text,
+        parent_table text,
+        conname text,
+        child_cols text[],
+        parent_cols text[],
+        child_pk_cols text[],
+        parent_pk_cols text[]
+      )
+     WHERE parent_table = v_parent
+    LOOP
+      v_child_cols := edge.child_cols;
+      v_parent_cols := edge.parent_cols;
+      v_child_pk_cols := edge.child_pk_cols;
+      v_parent_pk_cols := edge.parent_pk_cols;
+      v_child_pk := public._cosmas_pk_text_expr('c', v_child_pk_cols);
+      v_parent_pk := public._cosmas_pk_text_expr('p', v_parent_pk_cols);
+      v_join := (
+        SELECT string_agg(
+          format('c.%I IS NOT DISTINCT FROM p.%I', v_child_cols[ord], v_parent_cols[ord]),
+          ' AND ' ORDER BY ord
+        )
+        FROM generate_subscripts(v_child_cols, 1) AS ord
+      );
+      v_sql := format(
+        'SELECT ARRAY(SELECT DISTINCT %s FROM public.%I c JOIN public.%I p ON %s WHERE %s = ANY ($1))',
+        v_child_pk, edge.child_table, edge.parent_table, v_join, v_parent_pk
+      );
+      EXECUTE v_sql INTO v_new USING v_parent_pks;
+      v_new := COALESCE(v_new, ARRAY[]::text[]);
+      v_pks := ARRAY(
+        SELECT DISTINCT jsonb_array_elements_text(COALESCE(v_plan -> edge.child_table, '[]'::jsonb))
+        ORDER BY 1
+      );
+      SELECT ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(v_pks, ARRAY[]::text[]) || v_new) AS x ORDER BY 1)
+        INTO v_new;
+      IF v_new IS DISTINCT FROM COALESCE(v_pks, ARRAY[]::text[]) THEN
+        v_plan := v_plan || jsonb_build_object(edge.child_table, to_jsonb(v_new));
+        IF NOT (edge.child_table = ANY (v_dirty)) THEN
+          v_dirty := array_append(v_dirty, edge.child_table);
+        END IF;
+      END IF;
+    END LOOP;
+  END LOOP;
+
+  -- Also collect PATIENT_OWNED rows keyed directly by patient_link_id.
+  FOR v_table IN
+    SELECT c.relname
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'patient_link_id' AND NOT a.attisdropped
+     WHERE n.nspname = 'public'
+       AND c.relkind IN ('r', 'p')
+       AND c.relname = ANY (v_owned)
+     ORDER BY 1
+  LOOP
+    SELECT array_agg(a.attname ORDER BY k.ord)
+      INTO v_child_pk_cols
+      FROM pg_constraint pk
+      JOIN pg_class c ON c.oid = pk.conrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
+      JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
+     WHERE pk.contype = 'p' AND n.nspname = 'public' AND c.relname = v_table;
+    IF v_child_pk_cols IS NULL THEN
+      CONTINUE;
+    END IF;
+    v_child_pk := public._cosmas_pk_text_expr('t', v_child_pk_cols);
+    v_sql := format(
+      'SELECT ARRAY(SELECT DISTINCT %s FROM public.%I t WHERE t.patient_link_id = $1 ORDER BY 1)',
+      v_child_pk, v_table
+    );
+    EXECUTE v_sql INTO v_new USING p_patient;
+    v_new := COALESCE(v_new, ARRAY[]::text[]);
+    v_pks := ARRAY(
+      SELECT DISTINCT jsonb_array_elements_text(COALESCE(v_plan -> v_table, '[]'::jsonb))
+      ORDER BY 1
+    );
+    SELECT ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(v_pks, ARRAY[]::text[]) || v_new) AS x ORDER BY 1)
+      INTO v_new;
+    IF coalesce(array_length(v_new, 1), 0) > 0 THEN
+      v_plan := v_plan || jsonb_build_object(v_table, to_jsonb(v_new));
+    END IF;
+  END LOOP;
+
+  -- Re-expand FK children after direct patient_link_id collection.
+  v_dirty := ARRAY(SELECT DISTINCT jsonb_object_keys(v_plan) ORDER BY 1);
+  v_steps := 0;
+  WHILE coalesce(array_length(v_dirty, 1), 0) > 0 LOOP
+    v_steps := v_steps + 1;
+    IF v_steps > 10000 THEN
+      RAISE EXCEPTION 'patient records could not be deleted';
+    END IF;
+    v_parent := v_dirty[1];
+    v_dirty := v_dirty[2:];
+    v_parent_pks := ARRAY(
+      SELECT DISTINCT jsonb_array_elements_text(COALESCE(v_plan -> v_parent, '[]'::jsonb))
+      ORDER BY 1
+    );
+    IF coalesce(array_length(v_parent_pks, 1), 0) = 0 THEN
+      CONTINUE;
+    END IF;
+    FOR edge IN
+      SELECT * FROM jsonb_to_recordset(v_edges) AS x(
+        child_table text,
+        parent_table text,
+        conname text,
+        child_cols text[],
+        parent_cols text[],
+        child_pk_cols text[],
+        parent_pk_cols text[]
+      )
+     WHERE parent_table = v_parent
+    LOOP
+      v_child_cols := edge.child_cols;
+      v_parent_cols := edge.parent_cols;
+      v_child_pk_cols := edge.child_pk_cols;
+      v_parent_pk_cols := edge.parent_pk_cols;
+      v_child_pk := public._cosmas_pk_text_expr('c', v_child_pk_cols);
+      v_parent_pk := public._cosmas_pk_text_expr('p', v_parent_pk_cols);
+      v_join := (
+        SELECT string_agg(
+          format('c.%I IS NOT DISTINCT FROM p.%I', v_child_cols[ord], v_parent_cols[ord]),
+          ' AND ' ORDER BY ord
+        )
+        FROM generate_subscripts(v_child_cols, 1) AS ord
+      );
+      v_sql := format(
+        'SELECT ARRAY(SELECT DISTINCT %s FROM public.%I c JOIN public.%I p ON %s WHERE %s = ANY ($1))',
+        v_child_pk, edge.child_table, edge.parent_table, v_join, v_parent_pk
+      );
+      EXECUTE v_sql INTO v_new USING v_parent_pks;
+      v_new := COALESCE(v_new, ARRAY[]::text[]);
+      v_pks := ARRAY(
+        SELECT DISTINCT jsonb_array_elements_text(COALESCE(v_plan -> edge.child_table, '[]'::jsonb))
+        ORDER BY 1
+      );
+      SELECT ARRAY(SELECT DISTINCT x FROM unnest(COALESCE(v_pks, ARRAY[]::text[]) || v_new) AS x ORDER BY 1)
+        INTO v_new;
+      IF v_new IS DISTINCT FROM COALESCE(v_pks, ARRAY[]::text[]) THEN
+        v_plan := v_plan || jsonb_build_object(edge.child_table, to_jsonb(v_new));
+        IF NOT (edge.child_table = ANY (v_dirty)) THEN
+          v_dirty := array_append(v_dirty, edge.child_table);
+        END IF;
+      END IF;
+    END LOOP;
+  END LOOP;
+
+  FOR v_table IN SELECT * FROM unnest(v_owned) ORDER BY 1 LOOP
+    v_pks := ARRAY(SELECT jsonb_array_elements_text(COALESCE(v_plan -> v_table, '[]'::jsonb)));
+    IF coalesce(array_length(v_pks, 1), 0) > 0 THEN
+      v_counts := v_counts || jsonb_build_object(v_table, array_length(v_pks, 1));
+    END IF;
+  END LOOP;
+
+  RETURN jsonb_build_object('tables', v_counts, 'pks', v_plan);
+END
+$p$;
+
+CREATE OR REPLACE FUNCTION public.delete_patient_keyed_records_plan(p_patient uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $plan$
+DECLARE
+  v_built jsonb;
+BEGIN
+  v_built := public._cosmas_patient_deletion_build_plan(p_patient);
+  RETURN jsonb_build_object(
+    'tables', COALESCE(v_built -> 'tables', '{}'::jsonb),
+    'pks', COALESCE(v_built -> 'pks', '{}'::jsonb),
+    'patient_link_id', p_patient::text
+  );
+END
+$plan$;
+
+CREATE OR REPLACE FUNCTION public._cosmas_apply_patient_deletion_mutate(p_patient uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $m$
+DECLARE
+  v_box uuid;
+  v_actor uuid;
+  v_owner boolean;
+  v_built jsonb;
+  v_plan jsonb;
+  v_counts jsonb;
+  v_table text;
+  v_pks text[];
+  v_pk_cols text[];
+  v_sql text;
+  v_pk_expr text;
+  v_deleted int;
+  v_actual jsonb := '{}'::jsonb;
+  v_agg text[];
+  rec record;
+  v_order text[];
+  v_remaining text[];
+  v_ready text[];
+  v_child text;
+  v_parent text;
+  v_indeg jsonb := '{}'::jsonb;
+  v_edge record;
+  v_steps int := 0;
+  v_txid bigint := txid_current();
+  v_self record;
+  v_parent_pk text;
+BEGIN
+  IF p_patient IS NULL THEN
+    RAISE EXCEPTION 'patient records could not be deleted';
+  END IF;
+
+  SELECT pl.box_id INTO v_box FROM public.patient_links pl WHERE pl.id = p_patient;
+  IF v_box IS NULL THEN
+    RAISE EXCEPTION 'patient not found';
+  END IF;
+
+  SELECT b.principal_id INTO v_actor
+    FROM public.patient_deletion_admin_bindings b
+   WHERE b.db_role = session_user
+     AND b.box_id = v_box;
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  IF NOT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER') THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+  SELECT (p.principal_type = 'human' AND p.state = 'active' AND p.is_owner AND p.box_id = v_box)
+    INTO v_owner
+    FROM public.principals p WHERE p.id = v_actor;
+  IF v_owner IS DISTINCT FROM TRUE THEN
+    RAISE EXCEPTION 'admin authority required';
+  END IF;
+
+  v_built := public._cosmas_patient_deletion_build_plan(p_patient);
+  v_plan := COALESCE(v_built -> 'pks', '{}'::jsonb);
+  v_counts := COALESCE(v_built -> 'tables', '{}'::jsonb);
+
+  INSERT INTO public.patient_deletion_in_progress (txid, patient_link_id)
+  VALUES (v_txid, p_patient);
+
+  EXECUTE format(
+    'SET CONSTRAINTS %I, %I, %I, %I, %I, %I DEFERRED',
+    'ehr_read_snapshots_observation_id_box_id_owner_id_fkey',
+    'fk_ehr_read_request_parent',
+    'fk_inbox_current_source',
+    'inbox_sources_item_id_box_id_owner_id_fkey',
+    'fk_vendor_supersedes_scope',
+    'vendor_work_revisions_ticket_id_workspace_id_box_id_owner__fkey'
+  );
+
+  -- Aggregate ids for audit scrub: all collected PKs.
+  SELECT ARRAY(
+    SELECT DISTINCT jsonb_array_elements_text(value)
+      FROM jsonb_each(v_plan)
+  ) INTO v_agg;
+  v_agg := COALESCE(v_agg, ARRAY[]::text[]) || ARRAY[p_patient::text];
+
+  UPDATE public.audit_events ae
+     SET aggregate_id = 'redacted', detail = '{}'::jsonb
+   WHERE ae.event_type IS DISTINCT FROM 'patient.records_deleted'
+     AND ae.aggregate_id = ANY (v_agg);
+
+  -- Null self-referential FKs among owned rows first.
+  FOR v_self IN
+    SELECT child.relname AS table_name,
+           (SELECT array_agg(a.attname ORDER BY k.ord)
+              FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+              JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS child_cols,
+           (SELECT array_agg(a.attname ORDER BY k.ord)
+              FROM unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord)
+              JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum) AS pk_cols,
+           (SELECT bool_and(NOT a.attnotnull)
+              FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+              JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS nullable
+      FROM pg_constraint con
+      JOIN pg_class child ON child.oid = con.conrelid
+      JOIN pg_namespace ns ON ns.oid = child.relnamespace
+      JOIN pg_constraint pk ON pk.conrelid = child.oid AND pk.contype = 'p'
+     WHERE con.contype = 'f'
+       AND ns.nspname = 'public'
+       AND con.conrelid = con.confrelid
+  LOOP
+    IF NOT v_self.nullable THEN
+      CONTINUE;
+    END IF;
+    v_pks := ARRAY(SELECT jsonb_array_elements_text(COALESCE(v_plan -> v_self.table_name, '[]'::jsonb)));
+    IF coalesce(array_length(v_pks, 1), 0) = 0 THEN
+      CONTINUE;
+    END IF;
+    v_pk_expr := public._cosmas_pk_text_expr('t', v_self.pk_cols);
+    v_sql := format(
+      'UPDATE public.%I t SET %s WHERE %s = ANY ($1)',
+      v_self.table_name,
+      (SELECT string_agg(format('%I = NULL', col), ', ') FROM unnest(v_self.child_cols) AS col),
+      v_pk_expr
+    );
+    EXECUTE v_sql USING v_pks;
+  END LOOP;
+
+  -- Null SHARED/PRESERVE child FKs that point at PATIENT_OWNED rows about to go.
+  FOR rec IN
+    SELECT child.relname AS child_table,
+           parent.relname AS parent_table,
+           (SELECT array_agg(a.attname ORDER BY k.ord)
+              FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+              JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS child_cols,
+           (SELECT array_agg(a.attname ORDER BY k.ord)
+              FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
+              JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum) AS parent_cols,
+           (SELECT array_agg(a.attname ORDER BY k.ord)
+              FROM unnest(ppk.conkey) WITH ORDINALITY AS k(attnum, ord)
+              JOIN pg_attribute a ON a.attrelid = ppk.conrelid AND a.attnum = k.attnum) AS parent_pk_cols,
+           (SELECT bool_and(NOT a.attnotnull)
+              FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+              JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum) AS nullable,
+           con.confdeltype AS deltype
+      FROM pg_constraint con
+      JOIN pg_class child ON child.oid = con.conrelid
+      JOIN pg_class parent ON parent.oid = con.confrelid
+      JOIN pg_namespace ns ON ns.oid = child.relnamespace
+      JOIN pg_namespace pns ON pns.oid = parent.relnamespace
+      JOIN pg_constraint ppk ON ppk.conrelid = parent.oid AND ppk.contype = 'p'
+     WHERE con.contype = 'f'
+       AND ns.nspname = 'public' AND pns.nspname = 'public'
+       AND parent.relname IN (SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind = 'owned')
+       AND child.relname IN (SELECT table_name FROM public._cosmas_patient_deletion_classes() WHERE kind IN ('shared', 'preserve'))
+  LOOP
+    v_pks := ARRAY(SELECT jsonb_array_elements_text(COALESCE(v_plan -> rec.parent_table, '[]'::jsonb)));
+    IF coalesce(array_length(v_pks, 1), 0) = 0 THEN
+      CONTINUE;
+    END IF;
+    IF rec.deltype = 'n' OR rec.nullable THEN
+      v_parent_pk := public._cosmas_pk_text_expr('p', rec.parent_pk_cols);
+      v_sql := format(
+        'UPDATE public.%I c SET %s FROM public.%I p
+          WHERE %s AND %s = ANY ($1)',
+        rec.child_table,
+        (SELECT string_agg(format('%I = NULL', col), ', ') FROM unnest(rec.child_cols) AS col),
+        rec.parent_table,
+        (SELECT string_agg(
+            format('c.%I IS NOT DISTINCT FROM p.%I', rec.child_cols[ord], rec.parent_cols[ord]),
+            ' AND ' ORDER BY ord)
+           FROM generate_subscripts(rec.child_cols, 1) AS ord),
+        public._cosmas_pk_text_expr('p', rec.parent_pk_cols)
+      );
+      EXECUTE v_sql USING v_pks;
+    END IF;
+  END LOOP;
+
+  -- Topological delete order among owned tables that have rows (ignore declared cycle edges).
+  SELECT ARRAY(SELECT DISTINCT jsonb_object_keys(v_plan)) INTO v_remaining;
+  v_remaining := COALESCE(v_remaining, ARRAY[]::text[]);
+  FOR v_table IN SELECT * FROM unnest(v_remaining) LOOP
+    v_indeg := v_indeg || jsonb_build_object(v_table, 0);
+  END LOOP;
+  FOR v_edge IN
+    SELECT child.relname AS c, parent.relname AS p, con.conname AS n
+      FROM pg_constraint con
+      JOIN pg_class child ON child.oid = con.conrelid
+      JOIN pg_class parent ON parent.oid = con.confrelid
+      JOIN pg_namespace ns ON ns.oid = child.relnamespace
+      JOIN pg_namespace pns ON pns.oid = parent.relnamespace
+     WHERE con.contype = 'f'
+       AND ns.nspname = 'public' AND pns.nspname = 'public'
+       AND child.relname = ANY (v_remaining)
+       AND parent.relname = ANY (v_remaining)
+       AND child.relname <> parent.relname
+       AND con.conname <> ALL (ARRAY[
+         'ehr_read_snapshots_observation_id_box_id_owner_id_fkey',
+         'fk_ehr_read_request_parent',
+         'fk_inbox_current_source',
+         'inbox_sources_item_id_box_id_owner_id_fkey',
+         'fk_vendor_supersedes_scope',
+         'vendor_work_revisions_ticket_id_workspace_id_box_id_owner__fkey'
+       ])
+  LOOP
+    -- edge child depends on parent: indegree of parent increases (delete child first)
+    v_indeg := v_indeg || jsonb_build_object(
+      v_edge.p,
+      COALESCE((v_indeg ->> v_edge.p)::int, 0) + 1
+    );
+  END LOOP;
+
+  v_order := ARRAY[]::text[];
+  LOOP
+    v_steps := v_steps + 1;
+    IF v_steps > 10000 THEN
+      RAISE EXCEPTION 'patient records could not be deleted';
+    END IF;
+    SELECT ARRAY(
+      SELECT t FROM unnest(v_remaining) AS t
+       WHERE COALESCE((v_indeg ->> t)::int, 0) = 0
+       ORDER BY t
+    ) INTO v_ready;
+    EXIT WHEN coalesce(array_length(v_ready, 1), 0) = 0;
+    v_table := v_ready[1];
+    v_order := array_append(v_order, v_table);
+    v_remaining := array_remove(v_remaining, v_table);
+    FOR v_edge IN
+      SELECT child.relname AS c, parent.relname AS p, con.conname AS n
+        FROM pg_constraint con
+        JOIN pg_class child ON child.oid = con.conrelid
+        JOIN pg_class parent ON parent.oid = con.confrelid
+        JOIN pg_namespace ns ON ns.oid = child.relnamespace
+        JOIN pg_namespace pns ON pns.oid = parent.relnamespace
+       WHERE con.contype = 'f'
+         AND ns.nspname = 'public' AND pns.nspname = 'public'
+         AND child.relname = v_table
+         AND parent.relname = ANY (v_remaining)
+         AND child.relname <> parent.relname
+         AND con.conname <> ALL (ARRAY[
+           'ehr_read_snapshots_observation_id_box_id_owner_id_fkey',
+           'fk_ehr_read_request_parent',
+           'fk_inbox_current_source',
+           'inbox_sources_item_id_box_id_owner_id_fkey',
+           'fk_vendor_supersedes_scope',
+           'vendor_work_revisions_ticket_id_workspace_id_box_id_owner__fkey'
+         ])
+    LOOP
+      v_indeg := v_indeg || jsonb_build_object(
+        v_edge.p,
+        GREATEST(COALESCE((v_indeg ->> v_edge.p)::int, 0) - 1, 0)
+      );
+    END LOOP;
+  END LOOP;
+  -- leftover cycle members (declared): append sorted
+  IF coalesce(array_length(v_remaining, 1), 0) > 0 THEN
+    v_order := v_order || ARRAY(SELECT * FROM unnest(v_remaining) ORDER BY 1);
+  END IF;
+
+  FOREACH v_table IN ARRAY v_order LOOP
+    v_pks := ARRAY(SELECT jsonb_array_elements_text(COALESCE(v_plan -> v_table, '[]'::jsonb)));
+    IF coalesce(array_length(v_pks, 1), 0) = 0 THEN
+      CONTINUE;
+    END IF;
+    SELECT array_agg(a.attname ORDER BY k.ord)
+      INTO v_pk_cols
+      FROM pg_constraint pk
+      JOIN pg_class c ON c.oid = pk.conrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      JOIN unnest(pk.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
+      JOIN pg_attribute a ON a.attrelid = pk.conrelid AND a.attnum = k.attnum
+     WHERE pk.contype = 'p' AND n.nspname = 'public' AND c.relname = v_table;
+    v_pk_expr := public._cosmas_pk_text_expr('t', v_pk_cols);
+    v_sql := format('DELETE FROM public.%I t WHERE %s = ANY ($1)', v_table, v_pk_expr);
+    EXECUTE v_sql USING v_pks;
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    IF v_deleted > 0 THEN
+      v_actual := v_actual || jsonb_build_object(v_table, v_deleted);
+    END IF;
+  END LOOP;
+
+  INSERT INTO public.audit_events (
+    id, box_id, aggregate_type, aggregate_id, event_type,
+    actor_principal_id, outcome, detail, created_at
+  ) VALUES (
+    gen_random_uuid(), v_box, 'patient_link', p_patient::text,
+    'patient.records_deleted', v_actor, 'deleted', '{}'::jsonb, now()
+  );
+
+  DELETE FROM public.patient_deletion_in_progress WHERE txid = v_txid;
+
+  RETURN jsonb_build_object(
+    'tables', v_actual,
+    'patient_link_id', p_patient::text,
+    'actor_principal_id', v_actor::text
+  );
+EXCEPTION WHEN OTHERS THEN
+  DELETE FROM public.patient_deletion_in_progress WHERE txid = v_txid;
+  RAISE;
+END
+$m$;
+
+CREATE OR REPLACE FUNCTION public.delete_patient_keyed_records(p_patient uuid)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $d$
+BEGIN
+  RETURN public._cosmas_apply_patient_deletion_mutate(p_patient);
+END
+$d$;

@@ -743,7 +743,6 @@ def verify_beta_offboarding_acceptance_cmd(
 @app.command("delete-patient-records")
 def delete_patient_records_cmd(
     patient_link_id: str = typer.Argument(..., help="Internal patient id"),
-    actor_principal_id: str = typer.Option(..., "--actor"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     confirm: bool = typer.Option(False, "--confirm"),
 ) -> None:
@@ -760,6 +759,8 @@ def delete_patient_records_cmd(
             "patient not found",
             "invalid patient id",
             "confirm required",
+            "database delete completed; stored files pending; rerun finishes them",
+            "schema not classified for patient deletion",
         }
     )
     if dry_run == confirm:
@@ -774,9 +775,9 @@ def delete_patient_records_cmd(
         engine = make_engine(admin_url)
         session = make_session_factory(engine)()
         container = Container(session)
+        # Actor comes from patient_deletion_admin_bindings for session_user.
         report = delete_patient_records(
             session,
-            actor_principal_id=actor_principal_id,
             patient_link_id=patient_link_id,
             confirm=confirm,
             blob=container.blob,

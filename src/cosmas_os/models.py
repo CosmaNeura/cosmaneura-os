@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -1141,12 +1142,49 @@ class PatientDeletionPendingFile(Base):
             "ix_patient_deletion_pending_files_patient",
             "patient_link_id",
         ),
+        Index(
+            "ix_patient_deletion_pending_files_box",
+            "box_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     patient_link_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
     relative_path: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PatientDeletionAdminBinding(Base):
+    """Maps an admin DB LOGIN (session_user) to one practice owner principal."""
+
+    __tablename__ = "patient_deletion_admin_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["principal_id", "box_id"],
+            ["principals.id", "principals.box_id"],
+            name="patient_deletion_admin_bindings_principal_fk",
+        ),
+    )
+
+    db_role: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PatientDeletionInProgress(Base):
+    """Transaction-scoped gate for immutability triggers during a definer delete."""
+
+    __tablename__ = "patient_deletion_in_progress"
+
+    txid: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    patient_link_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

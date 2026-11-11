@@ -1,13 +1,15 @@
 """Delete one patient's live records and stored files.
 
 The practice owner is the admin. Dry-run counts rows and files and writes
-nothing. A confirmed delete runs only through the admin database command: it
-calls the security-definer function owned by ``cosmas_patient_deletion``. The
-HTTP route must not confirm. A repeat call is safe.
+nothing, through ``delete_patient_keyed_records_plan``. A confirmed delete runs
+only through the admin database command: it SET ROLEs to
+``cosmas_patient_deletion`` and calls ``delete_patient_keyed_records``. The HTTP
+route must not confirm. A repeat call is safe.
 
 Confirmed deletes commit the database first, then remove stored files. Pending
 file rows (internal ids and relative paths only) are recorded in the same
-transaction so a later run can finish leftovers and report them by count.
+transaction so a later run can finish leftovers for that practice and report
+them by count.
 
 Backups are not opened or rewritten here. The append-only audit event stores
 the actor, the time, and the patient's internal id only.
@@ -17,7 +19,6 @@ from __future__ import annotations
 
 import os
 import re
-from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,28 +44,13 @@ _FILE_COLUMNS = {
     "export_path": "exports",
 }
 _AUDIO_SUFFIXES = {".wav", ".m4a", ".mp3", ".flac", ".ogg", ".aac"}
-_PRESERVE = frozenset({"audit_events", "alembic_version", "patient_deletion_pending_files"})
-_MAX_STEPS = 10000
+_PENDING_FILES_MSG = (
+    "database delete completed; stored files pending; rerun finishes them"
+)
 
 
 class BlobDeleter(Protocol):
     def delete(self, key: str) -> None: ...
-
-
-@dataclass(frozen=True)
-class _Key:
-    table: str
-    columns: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class _Edge:
-    child: str
-    parent: str
-    child_cols: tuple[str, ...]
-    parent_cols: tuple[str, ...]
-    deferrable: bool
-    nullable: tuple[bool, ...]
 
 
 @dataclass(frozen=True)
@@ -89,7 +75,7 @@ def storage_roots(blob: object) -> list[Path]:
 def delete_patient_records(
     session: Session,
     *,
-    actor_principal_id: str,
+    actor_principal_id: str | None = None,
     patient_link_id: str,
     confirm: bool,
     blob: BlobDeleter | None = None,
@@ -98,17 +84,22 @@ def delete_patient_records(
 ) -> dict[str, object]:
     """Count or delete every row and stored file keyed to one patient."""
 
-    del now  # Audit timestamp is written inside the database function.
-    # Validate the patient id before the role check so a malformed id refuses
-    # with the fixed reason even when the deletion role is missing.
+    del now
     patient_id = _patient_id(patient_link_id)
-    actor = _require_admin(session, actor_principal_id, lock=confirm)
     if confirm:
         _require_deletion_role(session)
+        actor = _resolve_bound_admin(session)
+    elif actor_principal_id is None:
+        # Admin CLI dry-run: actor comes from the session binding.
+        actor = _resolve_bound_admin(session)
+    else:
+        actor = _require_admin(session, actor_principal_id, lock=False)
 
     pending_finished = 0
     if confirm:
-        pending_finished = _finish_pending_files(session, blob, file_roots)
+        pending_finished = _finish_pending_files(
+            session, blob, file_roots, box_id=str(actor.box_id)
+        )
 
     statement = select(PatientLink).where(PatientLink.id == patient_id)
     if confirm:
@@ -130,66 +121,108 @@ def delete_patient_records(
     if patient.box_id != actor.box_id:
         raise AuthorizationError("admin authority required")
 
-    rows = _collect_rows(session, patient_id)
-    files = _collect_files(session, rows, file_roots)
-    counts = {table: len(keys) for table, keys in sorted(rows.items()) if keys}
-    file_counts = _file_counts(files)
     if not confirm:
+        plan = _plan(session, patient_id)
+        files = _collect_files_for_plan(session, plan, file_roots)
         return _report(
             patient_id,
             confirm=False,
             deleted=False,
-            tables=counts,
-            files=file_counts,
+            tables=_table_counts(plan.get("tables")),
+            files=_file_counts(files),
             pending_files_finished=0,
         )
 
+    plan = _plan(session, patient_id)
+    files = _collect_files_for_plan(session, plan, file_roots)
+    file_counts = _file_counts(files)
     try:
-        _record_pending_files(session, patient_id, files, file_roots)
-        _apply_secure_deletion(session, patient_id, actor.id)
+        _record_pending_files(session, patient_id, str(patient.box_id), files, file_roots)
+        result = _apply_secure_deletion(session, patient_id)
         session.commit()
     except Exception:
         session.rollback()
         raise
 
+    tables = _table_counts(result.get("tables"))
     try:
-        _delete_files(blob, files, file_roots, _deleted_ids(rows))
+        _delete_files(blob, files, file_roots, _deleted_ids_from_plan(plan))
         _clear_pending_files(session, patient_id, files, file_roots)
         session.commit()
+    except DomainError as exc:
+        session.rollback()
+        if str(exc) == "stored files could not be deleted":
+            raise DomainError(_PENDING_FILES_MSG) from None
+        raise
     except Exception:
         session.rollback()
-        raise
+        raise DomainError(_PENDING_FILES_MSG) from None
     return _report(
         patient_id,
         confirm=True,
         deleted=True,
-        tables=counts,
+        tables=tables,
         files=file_counts,
         pending_files_finished=pending_finished,
     )
 
 
 def _require_deletion_role(session: Session) -> None:
-    """Refuse confirmed deletes unless John's deletion role owns the function."""
+    """Refuse confirmed deletes unless John's deletion role can execute the function."""
 
     ready = session.scalar(
         text(
             """
             SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cosmas_patient_deletion')
+               AND COALESCE(
+                    has_function_privilege(
+                      'cosmas_patient_deletion',
+                      'public.delete_patient_keyed_records(uuid)',
+                      'EXECUTE'
+                    ),
+                    false
+               )
                AND EXISTS (
                     SELECT 1
                       FROM pg_proc p
-                      JOIN pg_roles owner ON owner.oid = p.proowner
                      WHERE p.oid = to_regprocedure(
-                             'public.delete_patient_keyed_records(uuid, uuid)'
+                             'public.delete_patient_keyed_records(uuid)'
                            )
-                       AND owner.rolname = 'cosmas_patient_deletion'
+                       AND p.prosecdef
                )
             """
         )
     )
     if not ready:
         raise DomainError("deletion role not configured")
+
+
+def _resolve_bound_admin(session: Session) -> Principal:
+    row = session.execute(
+        text(
+            """
+            SELECT b.principal_id::text, b.box_id::text
+              FROM public.patient_deletion_admin_bindings b
+             WHERE b.db_role = session_user
+            """
+        )
+    ).first()
+    if row is None:
+        raise AuthorizationError("admin authority required")
+    if not session.scalar(
+        text("SELECT pg_has_role(session_user, 'cosmas_patient_deletion', 'MEMBER')")
+    ):
+        raise AuthorizationError("admin authority required")
+    principal = session.scalar(select(Principal).where(Principal.id == str(row[0])))
+    if (
+        principal is None
+        or principal.principal_type != PrincipalType.HUMAN.value
+        or principal.state != PrincipalState.ACTIVE.value
+        or not principal.is_owner
+        or str(principal.box_id) != str(row[1])
+    ):
+        raise AuthorizationError("admin authority required")
+    return principal
 
 
 def _require_admin(session: Session, actor_principal_id: str, *, lock: bool) -> Principal:
@@ -247,222 +280,45 @@ def _quote(name: str) -> str:
     return '"' + name + '"'
 
 
-def _load_catalog(session: Session) -> tuple[dict[str, _Key], list[_Edge], dict[str, set[str]]]:
-    keys: dict[str, _Key] = {}
-    for table, columns in session.execute(
-        text(
-            """
-            SELECT child.relname,
-                   (SELECT array_agg(a.attname ORDER BY k.ord)
-                    FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                    JOIN pg_attribute a
-                      ON a.attrelid = con.conrelid AND a.attnum = k.attnum)
-            FROM pg_constraint con
-            JOIN pg_class child ON child.oid = con.conrelid
-            JOIN pg_namespace ns ON ns.oid = child.relnamespace
-            WHERE con.contype = 'p' AND ns.nspname = 'public'
-              AND child.relkind IN ('r', 'p')
-            """
-        )
-    ):
-        if columns:
-            keys[str(table)] = _Key(str(table), tuple(str(column) for column in columns))
-    edges: list[_Edge] = []
-    for child, parent, deferrable, child_cols, parent_cols, nullable in session.execute(
-        text(
-            """
-            SELECT child.relname, parent.relname, con.condeferrable,
-                   (SELECT array_agg(a.attname ORDER BY k.ord)
-                    FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                    JOIN pg_attribute a
-                      ON a.attrelid = con.conrelid AND a.attnum = k.attnum),
-                   (SELECT array_agg(a.attname ORDER BY k.ord)
-                    FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
-                    JOIN pg_attribute a
-                      ON a.attrelid = con.confrelid AND a.attnum = k.attnum),
-                   (SELECT array_agg(NOT a.attnotnull ORDER BY k.ord)
-                    FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
-                    JOIN pg_attribute a
-                      ON a.attrelid = con.conrelid AND a.attnum = k.attnum)
-            FROM pg_constraint con
-            JOIN pg_class child ON child.oid = con.conrelid
-            JOIN pg_class parent ON parent.oid = con.confrelid
-            JOIN pg_namespace ns ON ns.oid = child.relnamespace
-            JOIN pg_namespace pns ON pns.oid = parent.relnamespace
-            WHERE con.contype = 'f' AND ns.nspname = 'public' AND pns.nspname = 'public'
-              AND child.relkind IN ('r', 'p') AND parent.relkind IN ('r', 'p')
-            """
-        )
-    ):
-        if not child_cols or not parent_cols or not nullable:
-            continue
-        edges.append(
-            _Edge(
-                str(child),
-                str(parent),
-                tuple(str(column) for column in child_cols),
-                tuple(str(column) for column in parent_cols),
-                bool(deferrable),
-                tuple(bool(flag) for flag in nullable),
-            )
-        )
-    columns: dict[str, set[str]] = defaultdict(set)
-    for table, column in session.execute(
-        text(
-            """
-            SELECT table_name, column_name
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-            """
-        )
-    ):
-        columns[str(table)].add(str(column))
-    return keys, edges, columns
+def _table_counts(value: object) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): int(v) for k, v in value.items()}
 
 
-def _collect_rows(session: Session, patient_id: str) -> dict[str, set[tuple[str, ...]]]:
-    keys, edges, columns = _load_catalog(session)
-    patient_key = keys.get("patient_links")
-    if patient_key is None:
+def _plan(session: Session, patient_id: str) -> dict[str, object]:
+    raw = session.scalar(
+        text("SELECT public.delete_patient_keyed_records_plan(CAST(:patient AS uuid))"),
+        {"patient": patient_id},
+    )
+    if not isinstance(raw, dict):
         raise DomainError("patient records could not be deleted")
-    rows: dict[str, set[tuple[str, ...]]] = defaultdict(set)
-    rows["patient_links"].add((patient_id,))
-    incoming: dict[str, list[_Edge]] = defaultdict(list)
-    for edge in edges:
-        incoming[edge.parent].append(edge)
-    dirty = {"patient_links"}
-    steps = 0
-    while dirty:
-        steps += 1
-        if steps > _MAX_STEPS:
-            raise DomainError("patient records could not be deleted")
-        parent = dirty.pop()
-        parent_key = keys.get(parent)
-        parent_rows = rows.get(parent) or set()
-        if parent_key is None or not parent_rows:
-            continue
-        for edge in incoming.get(parent, ()):
-            if edge.child in _PRESERVE:
-                raise DomainError("patient records could not be deleted")
-            child_key = keys.get(edge.child)
-            if child_key is None:
-                raise DomainError("patient records could not be deleted")
-            found = _child_rows(
-                session, edge, parent_key, child_key, parent_rows, columns, patient_id
-            )
-            fresh = found - rows[edge.child]
-            if fresh:
-                rows[edge.child].update(fresh)
-                dirty.add(edge.child)
-    for table, table_columns in columns.items():
-        if table in _PRESERVE or "patient_link_id" not in table_columns:
-            continue
-        key = keys.get(table)
-        if key is None:
-            raise DomainError("patient records could not be deleted")
-        selected = ", ".join(f"t.{_quote(column)}::text" for column in key.columns)
-        for record in session.execute(
-            text(
-                f"SELECT {selected} FROM public.{_quote(table)} AS t "
-                "WHERE t.patient_link_id = CAST(:patient AS uuid)"
-            ),
-            {"patient": patient_id},
-        ):
-            identity = tuple(str(value) for value in record)
-            if identity not in rows[table]:
-                rows[table].add(identity)
-                dirty.add(table)
-    while dirty:
-        steps += 1
-        if steps > _MAX_STEPS:
-            raise DomainError("patient records could not be deleted")
-        parent = dirty.pop()
-        parent_key = keys.get(parent)
-        parent_rows = rows.get(parent) or set()
-        if parent_key is None or not parent_rows:
-            continue
-        for edge in incoming.get(parent, ()):
-            if edge.child in _PRESERVE:
-                raise DomainError("patient records could not be deleted")
-            child_key = keys.get(edge.child)
-            if child_key is None:
-                raise DomainError("patient records could not be deleted")
-            found = _child_rows(
-                session, edge, parent_key, child_key, parent_rows, columns, patient_id
-            )
-            fresh = found - rows[edge.child]
-            if fresh:
-                rows[edge.child].update(fresh)
-                dirty.add(edge.child)
-    return {table: found for table, found in rows.items() if found}
+    return raw
 
 
-def _child_rows(
-    session: Session,
-    edge: _Edge,
-    parent_key: _Key,
-    child_key: _Key,
-    parent_rows: set[tuple[str, ...]],
-    columns: Mapping[str, set[str]],
-    patient_id: str,
-) -> set[tuple[str, ...]]:
-    has_patient = "patient_link_id" in columns.get(edge.child, set())
-    selected = ", ".join(f"c.{_quote(column)}::text" for column in child_key.columns)
-    if has_patient:
-        selected += ", c.patient_link_id::text"
-    match = " AND ".join(
-        f"c.{_quote(child_col)}::text = p.{_quote(parent_col)}::text"
-        for child_col, parent_col in zip(edge.child_cols, edge.parent_cols, strict=True)
+def _apply_secure_deletion(session: Session, patient_id: str) -> dict[str, object]:
+    # SET LOCAL ROLE reverts automatically at transaction end.
+    session.execute(text("SET LOCAL ROLE cosmas_patient_deletion"))
+    raw = session.scalar(
+        text("SELECT public.delete_patient_keyed_records(CAST(:patient AS uuid))"),
+        {"patient": patient_id},
     )
-    found: set[tuple[str, ...]] = set()
-    for chunk in _chunks(tuple(parent_rows), 200):
-        where, params = _key_clause("p", parent_key.columns, chunk, "pk")
-        statement = (
-            f"SELECT {selected} FROM public.{_quote(edge.child)} AS c "
-            f"WHERE EXISTS (SELECT 1 FROM public.{_quote(edge.parent)} AS p "
-            f"WHERE ({where}) AND {match})"
-        )
-        for record in session.execute(text(statement), params):
-            raw = tuple(record)
-            linked = raw[-1] if has_patient else None
-            identity = tuple(str(value) for value in (raw[:-1] if has_patient else raw))
-            if has_patient and linked is not None and str(linked) != patient_id:
-                raise DomainError("patient records are shared")
-            found.add(identity)
+    if not isinstance(raw, dict):
+        raise DomainError("patient records could not be deleted")
+    return raw
+
+
+def _deleted_ids_from_plan(plan: Mapping[str, object]) -> set[str]:
+    found: set[str] = set()
+    pks = plan.get("pks")
+    if isinstance(pks, dict):
+        for values in pks.values():
+            if isinstance(values, list):
+                found.update(str(value) for value in values)
+    tables = plan.get("tables")
+    if isinstance(tables, dict):
+        found.update(str(key) for key in tables)
     return found
-
-
-def _chunks(rows: tuple[tuple[str, ...], ...], size: int) -> list[tuple[tuple[str, ...], ...]]:
-    return [rows[index : index + size] for index in range(0, len(rows), size)]
-
-
-def _key_clause(
-    alias: str, columns: Sequence[str], rows: Sequence[tuple[str, ...]], prefix: str
-) -> tuple[str, dict[str, str]]:
-    groups: list[str] = []
-    params: dict[str, str] = {}
-    for index, row in enumerate(rows):
-        parts: list[str] = []
-        for column_index, column in enumerate(columns):
-            name = f"{prefix}_{index}_{column_index}"
-            params[name] = row[column_index]
-            parts.append(f"{alias}.{_quote(column)}::text = :{name}")
-        groups.append("(" + " AND ".join(parts) + ")")
-    return " OR ".join(groups), params
-
-
-def _apply_secure_deletion(session: Session, patient_id: str, actor_id: str) -> None:
-    session.execute(
-        text(
-            "SELECT public.delete_patient_keyed_records("
-            "CAST(:patient AS uuid), CAST(:actor AS uuid))"
-        ),
-        {"patient": patient_id, "actor": actor_id},
-    )
-
-
-def _deleted_ids(rows: Mapping[str, set[tuple[str, ...]]]) -> set[str]:
-    return {value for found in rows.values() for key in found for value in key}
 
 
 def _relative_for(path: Path, roots: Sequence[Path]) -> str | None:
@@ -481,6 +337,7 @@ def _relative_for(path: Path, roots: Sequence[Path]) -> str | None:
 def _record_pending_files(
     session: Session,
     patient_id: str,
+    box_id: str,
     files: Sequence[_StoredFile],
     roots: Sequence[Path],
 ) -> None:
@@ -498,13 +355,13 @@ def _record_pending_files(
             text(
                 """
                 INSERT INTO public.patient_deletion_pending_files (
-                  patient_link_id, kind, relative_path
+                  patient_link_id, box_id, kind, relative_path
                 ) VALUES (
-                  CAST(:patient AS uuid), :kind, :path
+                  CAST(:patient AS uuid), CAST(:box AS uuid), :kind, :path
                 )
                 """
             ),
-            {"patient": patient_id, "kind": item.kind, "path": relative},
+            {"patient": patient_id, "box": box_id, "kind": item.kind, "path": relative},
         )
 
 
@@ -544,17 +401,25 @@ def _clear_pending_files(
     )
 
 
-def _finish_pending_files(session: Session, blob: BlobDeleter | None, roots: Sequence[Path]) -> int:
+def _finish_pending_files(
+    session: Session,
+    blob: BlobDeleter | None,
+    roots: Sequence[Path],
+    *,
+    box_id: str,
+) -> int:
     rows = list(
         session.execute(
             text(
                 """
                 SELECT id::text, kind, relative_path
                   FROM public.patient_deletion_pending_files
+                 WHERE box_id = CAST(:box AS uuid)
                  ORDER BY created_at, id
                 FOR UPDATE
                 """
-            )
+            ),
+            {"box": box_id},
         )
     )
     if not rows:
@@ -588,57 +453,98 @@ def _finish_pending_files(session: Session, blob: BlobDeleter | None, roots: Seq
     return finished
 
 
-def _collect_files(
+def _collect_files_for_plan(
     session: Session,
-    rows: Mapping[str, set[tuple[str, ...]]],
+    plan: Mapping[str, object],
     file_roots: Sequence[Path],
 ) -> list[_StoredFile]:
-    keys, _edges, columns = _load_catalog(session)
+    pks = plan.get("pks")
+    if not isinstance(pks, dict):
+        pks = {}
+    columns: dict[str, set[str]] = {}
+    for table, column in session.execute(
+        text(
+            """
+            SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            """
+        )
+    ):
+        columns.setdefault(str(table), set()).add(str(column))
+    keys: dict[str, tuple[str, ...]] = {}
+    for table, pk_cols in session.execute(
+        text(
+            """
+            SELECT c.relname,
+                   (SELECT array_agg(a.attname ORDER BY k.ord)
+                      FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+                      JOIN pg_attribute a
+                        ON a.attrelid = con.conrelid AND a.attnum = k.attnum)
+              FROM pg_constraint con
+              JOIN pg_class c ON c.oid = con.conrelid
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE con.contype = 'p' AND n.nspname = 'public'
+            """
+        )
+    ):
+        if pk_cols:
+            keys[str(table)] = tuple(str(col) for col in pk_cols)
     stored: dict[str, _StoredFile] = {}
-    for table, found in rows.items():
-        key = keys.get(table)
-        if key is None or not found:
+    for table, values in pks.items():
+        if not isinstance(values, list) or not values:
             continue
-        named = tuple(column for column in _FILE_COLUMNS if column in columns.get(table, set()))
+        key = keys.get(str(table))
+        if key is None:
+            continue
+        named = tuple(column for column in _FILE_COLUMNS if column in columns.get(str(table), set()))
         if named:
             selected = ", ".join(f"t.{_quote(column)}::text" for column in named)
-            for chunk in _chunks(tuple(found), 200):
-                where, params = _key_clause("t", key.columns, chunk, "pk")
-                for record in session.execute(
-                    text(f"SELECT {selected} FROM public.{_quote(table)} AS t WHERE {where}"),
-                    params,
-                ):
-                    for column, value in zip(named, record, strict=True):
-                        if isinstance(value, str) and value and _safe_relative(value):
-                            _add_file(
-                                stored,
-                                _StoredFile(_FILE_COLUMNS[column], value, None, value),
-                                file_roots,
-                            )
-        if table == "vendor_artifacts" and {
+            pk_expr = (
+                f"t.{_quote(key[0])}::text"
+                if len(key) == 1
+                else " || ',' || ".join(f"t.{_quote(col)}::text" for col in key)
+            )
+            for record in session.execute(
+                text(
+                    f"SELECT {selected} FROM public.{_quote(str(table))} AS t "
+                    f"WHERE ({pk_expr}) = ANY(CAST(:pks AS text[]))"
+                ),
+                {"pks": [str(v) for v in values]},
+            ):
+                for column, value in zip(named, record, strict=True):
+                    if isinstance(value, str) and value and _safe_relative(value):
+                        _add_file(
+                            stored,
+                            _StoredFile(_FILE_COLUMNS[column], value, None, value),
+                            file_roots,
+                        )
+        if str(table) == "vendor_artifacts" and {
             "box_id",
             "workspace_id",
             "owner_id",
             "artifact_id",
-        } <= columns.get(table, set()):
-            for chunk in _chunks(tuple(found), 200):
-                where, params = _key_clause("t", key.columns, chunk, "pk")
-                for box_id, workspace_id, owner_id, artifact_id in session.execute(
-                    text(
-                        "SELECT t.box_id::text, t.workspace_id::text, t.owner_id::text, "
-                        "t.artifact_id::text FROM public.vendor_artifacts AS t WHERE " + where
-                    ),
-                    params,
-                ):
-                    relative = (
-                        f"{box_id}/vendor-documents/{workspace_id}/{owner_id}/{artifact_id}.pdf"
-                    )
-                    _add_file(
-                        stored,
-                        _StoredFile("exports", relative, None, relative),
-                        file_roots,
-                    )
-    deleted_ids = _deleted_ids(rows)
+        } <= columns.get(str(table), set()):
+            pk_expr = (
+                f"t.{_quote(key[0])}::text"
+                if len(key) == 1
+                else " || ',' || ".join(f"t.{_quote(col)}::text" for col in key)
+            )
+            for box_id, workspace_id, owner_id, artifact_id in session.execute(
+                text(
+                    "SELECT t.box_id::text, t.workspace_id::text, t.owner_id::text, "
+                    "t.artifact_id::text FROM public.vendor_artifacts AS t "
+                    f"WHERE ({pk_expr}) = ANY(CAST(:pks AS text[]))"
+                ),
+                {"pks": [str(v) for v in values]},
+            ):
+                relative = f"{box_id}/vendor-documents/{workspace_id}/{owner_id}/{artifact_id}.pdf"
+                _add_file(
+                    stored,
+                    _StoredFile("exports", relative, None, relative),
+                    file_roots,
+                )
+    deleted_ids = _deleted_ids_from_plan(plan)
     for root in file_roots:
         for path in _scan(root, deleted_ids):
             relative = _relative_for(path, file_roots)
