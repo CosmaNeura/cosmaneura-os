@@ -402,7 +402,12 @@ def _file_scan_ids_from_plan(plan: Mapping[str, object]) -> _FileScanIds:
 
 
 def _path_matches_patient_files(parts: tuple[str, ...], *, box_id: str, ids: _FileScanIds) -> bool:
-    """Match a relative path only in the expected segment for each artifact kind."""
+    """Match a relative path only in the expected segment for each artifact kind.
+
+    Ticket and unrelated plan PKs must never match here: a bait ticket whose id
+    equals another practice's box or recording id used to delete that practice's
+    files when any path segment was compared to the full plan PK set.
+    """
 
     if not parts:
         return False
