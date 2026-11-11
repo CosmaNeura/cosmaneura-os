@@ -296,20 +296,61 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     assert privacy[0]["owner"] == "clients/apple"
     assert privacy[0]["authoritative_counterpart"] == "clients/apple/startup-recovery/PrivacyInfo.xcprivacy"
     assert plistlib.loads((output / "apps/capture/ios/App/App/PrivacyInfo.xcprivacy").read_bytes()) == {
+        "NSPrivacyTracking": False,
+        "NSPrivacyCollectedDataTypes": [
+            {
+                "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeAudioData",
+                "NSPrivacyCollectedDataTypeLinked": True,
+                "NSPrivacyCollectedDataTypeTracking": False,
+                "NSPrivacyCollectedDataTypePurposes": [
+                    "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+                ],
+            },
+            {
+                "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeUserID",
+                "NSPrivacyCollectedDataTypeLinked": True,
+                "NSPrivacyCollectedDataTypeTracking": False,
+                "NSPrivacyCollectedDataTypePurposes": [
+                    "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+                ],
+            },
+            {
+                "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeEmailAddress",
+                "NSPrivacyCollectedDataTypeLinked": True,
+                "NSPrivacyCollectedDataTypeTracking": False,
+                "NSPrivacyCollectedDataTypePurposes": [
+                    "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+                ],
+            },
+        ],
         "NSPrivacyAccessedAPITypes": [{
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
             "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
         }],
     }
-    assert (output / "apps/capture/ios/App/App/Info.plist").read_bytes() == (
-        ROOT / "apps/capture/ios/App/App/Info.plist"
-    ).read_bytes()
     default_info = plistlib.loads((output / "apps/capture/ios/App/App/Info.plist").read_bytes())
     assert default_info["CosmasNativeAuth"]["enabled"] is False
     assert default_info["CosmasConfiguredCapture"]["enabled"] is False
+    assert default_info["NSMicrophoneUsageDescription"] == (
+        "CosmaBot uses the microphone to record visits you choose to capture so it can draft your notes."
+    )
+    assert default_info["NSSpeechRecognitionUsageDescription"] == (
+        "CosmaBot uses on-device speech recognition to transcribe recordings you choose to "
+        "transcribe so it can draft your notes."
+    )
+    assert "ITSAppUsesNonExemptEncryption" not in default_info
     derived = [item for item in manifest["files"] if item["role"] == "derived-app-resource-wiring"]
     assert len(derived) == 1
     assert derived[0]["path"] == "ios/App/App.xcodeproj/project.pbxproj"
+    usage = [item for item in manifest["files"] if item["role"] == "derived-usage-description"]
+    assert len(usage) == 1
+    assert usage[0]["path"] == "ios/App/App/Info.plist"
+    assert usage[0]["scaffold_input_sha256"] == _sha256(ROOT / "apps/capture/ios/App/App/Info.plist")
+    assert usage[0]["derivation_source"] == "scripts/compose-portable-iphone.py"
+    assert usage[0]["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)
+    assert (output / "apps/capture/ios/App/App/Info.plist").read_bytes() != (
+        ROOT / "apps/capture/ios/App/App/Info.plist"
+    ).read_bytes()
 
     owners = set()
     for item in manifest["files"]:
@@ -341,6 +382,19 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
             privacy_lines = [line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" in line]
             assert len(privacy_lines) == 4
             assert "".join(line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" not in line) == original.read_text(encoding="utf-8")
+        elif item["role"] == "derived-usage-description":
+            assert item["owner"] == "apps/capture"
+            assert item["path"] == "ios/App/App/Info.plist"
+            original = ROOT / "apps/capture" / item["path"]
+            assert item["scaffold_input_sha256"] == _sha256(original)
+            assert item["derivation_source"] == "scripts/compose-portable-iphone.py"
+            assert item["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)
+            info = plistlib.loads(placed.read_bytes())
+            scaffold = plistlib.loads(original.read_bytes())
+            assert info["NSMicrophoneUsageDescription"] != scaffold["NSMicrophoneUsageDescription"]
+            assert info["NSSpeechRecognitionUsageDescription"] != scaffold["NSSpeechRecognitionUsageDescription"]
+            assert "ITSAppUsesNonExemptEncryption" not in info
+            assert "ITSAppUsesNonExemptEncryption" not in scaffold
         elif item["role"] == "derived-capacitor-localization":
             assert item["derivation_source"] == "scripts/compose-portable-iphone.py"
             assert item["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)

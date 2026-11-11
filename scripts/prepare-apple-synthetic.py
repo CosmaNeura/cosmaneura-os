@@ -574,11 +574,18 @@ def prepare(
             scene.pop("UISceneStoryboardFile", None)
     info["CFBundleDisplayName"] = display_name
     info["NSMicrophoneUsageDescription"] = (
-        "Cosmas records visit audio after you confirm consent and choose Start recording."
+        "CosmaBot uses the microphone to record visits you choose to capture so it can draft your notes."
         if operational and not simulator_staging_auth
-        else "Record an invented encounter only after you explicitly start a synthetic capture test."
+        else "CosmaBot uses the microphone only after you start a synthetic capture test with invented encounter audio."
     )
-    info["NSSpeechRecognitionUsageDescription"] = "Transcribe your saved recording on this iPhone only when you choose Transcribe. Your audio is not sent to a speech server."
+    info["NSSpeechRecognitionUsageDescription"] = (
+        "CosmaBot uses on-device speech recognition to transcribe recordings you choose to "
+        "transcribe so it can draft your notes."
+    )  # keep wording aligned with scripts/compose-portable-iphone.py REVIEWED_SPEECH_USAGE
+    if info.get("ITSAppUsesNonExemptEncryption") is False:
+        raise ValueError(
+            "Refusing ITSAppUsesNonExemptEncryption=NO; native recording uses non-exempt crypto."
+        )
     info["NSAppTransportSecurity"] = {} if hosted_workspace else {"NSAllowsLocalNetworking": True}
     info_path.write_bytes(plistlib.dumps(info, sort_keys=False))
     (app / "capacitor.config.json").write_text(
