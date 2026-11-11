@@ -48,11 +48,13 @@ def _guard(name: str, message: str, *, scheduling: bool = False) -> str:
            WHERE pd_proc.oid = to_regprocedure(
                    'public._cosmas_apply_patient_deletion_mutate(uuid)'
                  );
-          IF v_owner IS NOT NULL
-             AND current_user = v_owner
-             AND public._cosmas_patient_deletion_active() THEN
-            IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
-            RETURN NEW;
+          -- Call active() only after the owner check so restricted runtime roles
+          -- never need EXECUTE on the helper (runtime prep revokes PUBLIC execute).
+          IF v_owner IS NOT NULL AND current_user = v_owner THEN
+            IF public._cosmas_patient_deletion_active() THEN
+              IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+              RETURN NEW;
+            END IF;
           END IF;
 """
     if scheduling:
@@ -98,11 +100,11 @@ def _patch_owned_table_guards(connection) -> None:
            WHERE pd_proc.oid = to_regprocedure(
                    'public._cosmas_apply_patient_deletion_mutate(uuid)'
                  );
-          IF v_pd_owner IS NOT NULL
-             AND current_user = v_pd_owner
-             AND public._cosmas_patient_deletion_active() THEN
-            IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
-            RETURN NEW;
+          IF v_pd_owner IS NOT NULL AND current_user = v_pd_owner THEN
+            IF public._cosmas_patient_deletion_active() THEN
+              IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+              RETURN NEW;
+            END IF;
           END IF;
 """
     rows = connection.execute(

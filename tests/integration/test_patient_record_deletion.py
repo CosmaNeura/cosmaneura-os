@@ -685,6 +685,14 @@ def test_repeat_delete_is_a_safe_no_op(practice) -> None:
     admin_role, admin_url = _separate_admin_identity(session)
     try:
         _autocommit(session, f"GRANT cosmas_patient_deletion TO {admin_role}")
+        _autocommit(
+            session,
+            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid) TO {admin_role}",
+        )
+        _autocommit(
+            session,
+            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) TO {admin_role}",
+        )
         session.execute(
             text(
                 """
@@ -1386,6 +1394,14 @@ def _separate_admin_identity(session: Session) -> tuple[str, str]:
 
 
 def _drop_admin_identity(session: Session, role: str) -> None:
+    _autocommit(
+        session,
+        f"REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid) FROM {role}",
+    )
+    _autocommit(
+        session,
+        f"REVOKE ALL ON FUNCTION public.delete_patient_keyed_records_plan(uuid) FROM {role}",
+    )
     _autocommit(session, f"DROP ROLE IF EXISTS {role}")
 
 
@@ -1871,6 +1887,14 @@ def test_admin_cli_prints_each_fixed_refusal_reason(practice) -> None:
 
         # Bind the admin LOGIN so dry-run can resolve the actor, then probe missing patient.
         _autocommit(session, f"GRANT cosmas_patient_deletion TO {admin_role}")
+        _autocommit(
+            session,
+            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid) TO {admin_role}",
+        )
+        _autocommit(
+            session,
+            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) TO {admin_role}",
+        )
         session.execute(
             text(
                 """
@@ -2044,6 +2068,10 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
             session,
             f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) TO {role}",
         )
+        _autocommit(
+            session,
+            f"GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid) TO {role}",
+        )
         _ensure_patient_deletion_role(session)
         can_insert_audit = session.scalar(
             text(
@@ -2105,6 +2133,10 @@ def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
         _autocommit(
             session,
             f"REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid) FROM {role}",
+        )
+        _autocommit(
+            session,
+            f"REVOKE ALL ON FUNCTION public.delete_patient_keyed_records_plan(uuid) FROM {role}",
         )
         _autocommit(session, f"REVOKE ALL ON SCHEMA public FROM {role}")
         _autocommit(session, f"REVOKE ALL ON DATABASE {_quote(database)} FROM {role}")

@@ -6,6 +6,7 @@
 \if :{?admin_login}
 GRANT cosmas_patient_deletion TO :"admin_login";
 GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid) TO :"admin_login";
+GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records_plan(uuid) TO :"admin_login";
 \else
 \echo 'Set -v admin_login=... (example: cosmas_patient_deletion_admin)'
 \quit 1

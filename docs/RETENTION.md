@@ -51,7 +51,7 @@ psql "$POSTGRES_ADMIN_URL" -v ON_ERROR_STOP=1 \
   -f scripts/ensure-patient-deletion-role.sql
 ```
 
-3. Grant that LOGIN membership (and EXECUTE) using the psql variable:
+3. Grant that LOGIN membership and EXECUTE on the delete + plan functions using the psql variable:
 
 ```bash
 psql "$POSTGRES_ADMIN_URL" \
