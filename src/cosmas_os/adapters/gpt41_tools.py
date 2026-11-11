@@ -21,6 +21,7 @@ from cosmas_os.adapters.gpt41 import (
 from cosmas_os.application.workspace import WorkspaceError
 from cosmas_os.ports.agent_tools import REQUEST_ADAPTER, TOOL_NAMES, ToolSelection, tool_definitions
 from cosmas_os.ports.bot_capabilities import BotContext, BotReply, ModelCallFailure
+from cosmas_os.workspace_llm import REQUEST_DEPLOYMENTS, RESPONSE_MODELS
 
 CURRENT_PREPARED_CONTRACT = "cosmas-gpt41-prepared.v5"
 MAX_TOOL_CALLS = 4
@@ -104,8 +105,11 @@ class GPT41ToolsConnector:
     tool_names = TOOL_NAMES
 
     def __init__(self, credential: Callable[[], str], *, transport: httpx.BaseTransport | None = None,
-        monotonic: Callable[[], float] = time.monotonic):
+        monotonic: Callable[[], float] = time.monotonic, deployment: str = MODEL):
+        if deployment not in REQUEST_DEPLOYMENTS:
+            raise ValueError("Exact reviewed Azure OpenAI deployment required")
         self.credential, self.transport, self.monotonic = credential, transport, monotonic
+        self.deployment = deployment
 
     def _validate(self, envelope):
         return validate_prepared(envelope)
@@ -123,7 +127,7 @@ class GPT41ToolsConnector:
         return decode_response(envelope["baseline"], data, **usage)
 
     def prepare(self, context: BotContext, tool_selection: dict) -> dict:
-        baseline = GPT41Connector(lambda: "").prepare(context)
+        baseline = GPT41Connector(lambda: "", deployment=self.deployment).prepare(context)
         selection = ToolSelection.model_validate(tool_selection).model_dump()
         value = {"contract": CURRENT_PREPARED_CONTRACT, "decoder": "cosmas-gpt41-decoder.v5",
             "baseline": baseline, "body": _body(baseline, selection),
@@ -168,7 +172,7 @@ class GPT41ToolsConnector:
                         hashes.append(hashlib.sha256(raw).hexdigest())
                         response_hash = _digest({"contract": "cosmas-agent-model-response-chain.v1", "responses": hashes})
                         data = _json_unique(raw)
-                        usage = data.get("usage") if isinstance(data, dict) and data.get("model") in {MODEL, "gpt-4.1-2025-04-14"} else None
+                        usage = data.get("usage") if isinstance(data, dict) and data.get("model") in RESPONSE_MODELS else None
                         values = [usage.get("prompt_tokens"), usage.get("completion_tokens")] if isinstance(usage, dict) else []
                         if len(values) == 2 and type(values[0]) is int and type(values[1]) is int and (
                             0 <= values[0] < 1_000_000 and 0 <= values[1] < 1_000_000
@@ -180,7 +184,7 @@ class GPT41ToolsConnector:
                         else:
                             usage_verified = False
                         response.raise_for_status()
-                    if self.monotonic() > deadline or not isinstance(data, dict) or data.get("model") not in {MODEL, "gpt-4.1-2025-04-14"}:
+                    if self.monotonic() > deadline or not isinstance(data, dict) or data.get("model") not in RESPONSE_MODELS:
                         raise ValueError("unexpected or late operational response")
                     choices = data.get("choices")
                     if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict):

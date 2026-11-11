@@ -7,8 +7,10 @@ from typing import Literal
 from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
-from pydantic import SecretStr
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from cosmas_os.workspace_llm import DEFAULT_DEPLOYMENT, USDZ_DEPLOYMENT
 
 STANDALONE_ENVS = frozenset({"standalone_synthetic", "standalone_clerk_synthetic"})
 
@@ -226,11 +228,38 @@ class Settings(BaseSettings):
     core_session_prep_managed_identity_client_id: str = ""
     workspace_llm_backend: Literal["disabled", "azure_gpt41"] = "disabled"
     workspace_llm_endpoint: str = "https://cosmascode.services.ai.azure.com/openai/v1"
-    workspace_llm_deployment: str = "gpt-4.1"
+    workspace_llm_deployment: str = DEFAULT_DEPLOYMENT
     workspace_llm_api_key: SecretStr | None = None
+    # T-USDZ: when true, CosmaBot chat uses Data Zone Standard US deployment
+    # gpt-4.1-dzus. Default off — existing live users keep gpt-4.1.
+    workspace_llm_usdz_enabled: bool = False
     # New admissions opt into the closed product reader loop; saved v1–v4
     # requests retain their original single-response contract.
     workspace_agent_tools_enabled: bool = False
+
+    @model_validator(mode="after")
+    def _sync_usdz_chat_deployment(self):
+        # Flag swaps only the unset default. An explicit WORKSPACE_LLM_DEPLOYMENT
+        # (including gpt-4.1) must not be rewritten.
+        if (
+            self.workspace_llm_usdz_enabled
+            and "workspace_llm_deployment" not in self.model_fields_set
+        ):
+            object.__setattr__(self, "workspace_llm_deployment", USDZ_DEPLOYMENT)
+        return self
+
+    @property
+    def workspace_llm_reviewed_deployments(self) -> frozenset[str]:
+        # Flag off: main's reviewed set is only gpt-4.1. Flag on also reviews dzus.
+        allowed = {DEFAULT_DEPLOYMENT}
+        if self.workspace_llm_usdz_enabled:
+            allowed.add(USDZ_DEPLOYMENT)
+        return frozenset(allowed)
+
+    @property
+    def workspace_llm_chat_deployment(self) -> str:
+        # Effective deployment after default-only USDZ sync; explicit values win.
+        return self.workspace_llm_deployment
 
     @property
     def workspace_calendar_import_available(self) -> bool:
@@ -410,7 +439,7 @@ class Settings(BaseSettings):
                         and not self._standalone_model_errors())
         return bool(self.workspace_available and self.workspace_llm_backend == "azure_gpt41"
                     and self.workspace_llm_endpoint == "https://cosmascode.services.ai.azure.com/openai/v1"
-                    and self.workspace_llm_deployment == "gpt-4.1"
+                    and self.workspace_llm_deployment in self.workspace_llm_reviewed_deployments
                     and self.workspace_llm_api_key and self.workspace_llm_api_key.get_secret_value())
 
     @property
@@ -862,7 +891,8 @@ class Settings(BaseSettings):
         endpoint = self.workspace_llm_endpoint
         parsed = urlparse(endpoint)
         origin = "https://" + (parsed.hostname or "")
-        if (self.workspace_llm_backend != "azure_gpt41" or self.workspace_llm_deployment != "gpt-4.1"
+        if (self.workspace_llm_backend != "azure_gpt41"
+                or self.workspace_llm_deployment not in self.workspace_llm_reviewed_deployments
                 or not re.fullmatch(r"https://[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)/openai/v1", endpoint)
                 or self._csv(self.standalone_model_origin_allowlist) != (origin,)
                 or not self.workspace_llm_api_key or not self.workspace_llm_api_key.get_secret_value()):

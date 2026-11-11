@@ -22,9 +22,16 @@ from cosmas_os.ports.bot_capabilities import (
     SourcePassage,
 )
 from cosmas_os.ports.task_brief import TaskRequirements
+from cosmas_os.workspace_llm import (
+    DEFAULT_DEPLOYMENT,
+    REQUEST_DEPLOYMENTS,
+    RESPONSE_MODELS,
+)
 
 ENDPOINT = "https://cosmascode.services.ai.azure.com/openai/v1/chat/completions"
-MODEL = "gpt-4.1"
+# Azure OpenAI v1 request "model" field is the deployment name. Default stays
+# the historical GlobalStandard name; USDZ is selected per connector when flagged.
+MODEL = DEFAULT_DEPLOYMENT
 
 CURRENT_PREPARED_CONTRACT = "cosmas-gpt41-prepared.v4"
 SUPPORTED_PREPARED_CONTRACTS = frozenset({
@@ -158,13 +165,16 @@ If a specifically requested teammate is absent from handoff_targets or allowed_h
 class GPT41Connector:
     def __init__(
         self, credential: Callable[[], str], *, transport: httpx.BaseTransport | None = None,
-        endpoint: str = ENDPOINT,
+        endpoint: str = ENDPOINT, deployment: str = MODEL,
     ):
         if not re.fullmatch(r"https://[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)/openai/v1/chat/completions", endpoint):
             raise ValueError("Exact Azure OpenAI v1 endpoint required")
+        if deployment not in REQUEST_DEPLOYMENTS:
+            raise ValueError("Exact reviewed Azure OpenAI deployment required")
         self.credential = credential
         self.transport = transport
         self.endpoint = endpoint
+        self.deployment = deployment
 
     def prepare(self, context: BotContext) -> dict:
         value = self._prepare_value(context)
@@ -172,7 +182,8 @@ class GPT41Connector:
         return value
 
     def _prepare_value(
-        self, context: BotContext, *, source_records=None, contract=CURRENT_PREPARED_CONTRACT
+        self, context: BotContext, *, source_records=None, contract=CURRENT_PREPARED_CONTRACT,
+        deployment: str | None = None,
     ) -> dict:
         if contract not in SUPPORTED_PREPARED_CONTRACTS:
             raise ValueError("unsupported prepared model contract")
@@ -273,8 +284,11 @@ class GPT41Connector:
                 },
                 "required": ["excerpts", "needs_from_clinician"],
             }
+        request_deployment = self.deployment if deployment is None else deployment
+        if request_deployment not in REQUEST_DEPLOYMENTS:
+            raise ValueError("Exact reviewed Azure OpenAI deployment required")
         body = {
-            "model": MODEL,
+            "model": request_deployment,
             "store": False,
             "temperature": 0.2,
             "max_completion_tokens": 1600,
@@ -399,7 +413,7 @@ class GPT41Connector:
                     response_sha256 = hashlib.sha256(raw).hexdigest()
                     response.raise_for_status()
                     data = json.loads(raw)
-            if isinstance(data, dict) and data.get("model") in {"gpt-4.1", "gpt-4.1-2025-04-14"}:
+            if isinstance(data, dict) and data.get("model") in RESPONSE_MODELS:
                 usage = data.get("usage")
                 if isinstance(usage, dict):
                     values = [usage.get("prompt_tokens"), usage.get("completion_tokens")]
@@ -431,7 +445,7 @@ def decode_response(envelope, data, *, input_tokens=None, output_tokens=None, re
     )
     if not isinstance(data, dict):
         raise ValueError("invalid response")
-    if data.get("model") not in {"gpt-4.1", "gpt-4.1-2025-04-14"}:
+    if data.get("model") not in RESPONSE_MODELS:
         raise ValueError("unexpected model")
     choice = data["choices"][0]
     if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
@@ -584,7 +598,7 @@ def _checked_envelope(value):
         not isinstance(body, dict)
         or set(body)
         != {"model", "store", "temperature", "max_completion_tokens", "messages", "response_format"}
-        or body["model"] != MODEL
+        or body["model"] not in REQUEST_DEPLOYMENTS
         or body["store"] is not False
         or body["temperature"] != 0.2
         or body["max_completion_tokens"] != 1600
@@ -628,8 +642,9 @@ def _checked_envelope(value):
         seen.add(source["source_id"])
     if seen != set(supplied) or total > 30000:
         raise ValueError("invalid prepared source coverage")
-    expected = GPT41Connector(lambda: "")._prepare_value(
-        context, source_records=value["sources"], contract=value["contract"]
+    expected = GPT41Connector(lambda: "", deployment=body["model"])._prepare_value(
+        context, source_records=value["sources"], contract=value["contract"],
+        deployment=body["model"],
     )
     expected["body"]["messages"][1]["content"] = _preserved_record_order(
         expected["body"]["messages"][1]["content"], body["messages"][1]["content"]
