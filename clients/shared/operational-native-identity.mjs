@@ -2,8 +2,20 @@ import {exactHostedOrigin} from './hosted-workspace-config.mjs';
 
 export const OPERATIONAL_NATIVE_PROFILE = 'operational-beta-v1';
 export const STAGING_NATIVE_PROFILE = 'operational-staging-v1';
-/** Exact Clerk hosts staging may use with its own live publishable key. */
-const STAGING_DEDICATED_CLERK_HOSTS = new Set(['clerk.staging.cosmas.ai']);
+/** Production-review builds on clerk.beta.cosmas.ai; live Infos stay operational-beta-v1. */
+export const PRODUCTION_NATIVE_PROFILE = 'operational-production-v1';
+/**
+ * Exact Clerk hosts pinned per dedicated profile. No wildcards.
+ * Staging may also use `.clerk.accounts.dev` with pk_test_ (handled separately).
+ * operational-beta-v1 keeps its prior rule (any non-accounts.dev host).
+ */
+const DEDICATED_CLERK_HOSTS_BY_PROFILE = Object.freeze({
+  [STAGING_NATIVE_PROFILE]: Object.freeze(new Set(['clerk.staging.cosmas.ai'])),
+  [PRODUCTION_NATIVE_PROFILE]: Object.freeze(new Set(['clerk.beta.cosmas.ai'])),
+});
+const ALLOWED_PROFILES = Object.freeze([
+  OPERATIONAL_NATIVE_PROFILE, STAGING_NATIVE_PROFILE, PRODUCTION_NATIVE_PROFILE,
+]);
 const fields = ['version', 'profile', 'client', 'apiOrigin', 'publishableKey', 'frontendOrigin', 'organizationId', 'audience'];
 const unavailable = () => { throw new Error('Operational native identity configuration is incomplete or inconsistent'); };
 
@@ -17,18 +29,24 @@ export function validateOperationalNativeDataMode(value, identity) {
 /** Public build input only. Never selects an account or fetches a credential. */
 export function validateOperationalNativeIdentity(value, client, apiOrigin) {
   const staging = value?.profile === STAGING_NATIVE_PROFILE;
+  const production = value?.profile === PRODUCTION_NATIVE_PROFILE;
   const frontendOrigin = typeof value?.frontendOrigin === 'string' && exactHostedOrigin(value.frontendOrigin)
     ? value.frontendOrigin : '';
   const hostname = frontendOrigin ? new URL(frontendOrigin).hostname : '';
-  const dedicatedStagingFrontend = STAGING_DEDICATED_CLERK_HOSTS.has(hostname);
-  const developmentFrontend = !dedicatedStagingFrontend && hostname.endsWith('.clerk.accounts.dev');
+  const dedicatedHosts = DEDICATED_CLERK_HOSTS_BY_PROFILE[value?.profile];
+  const dedicatedFrontend = dedicatedHosts instanceof Set && dedicatedHosts.has(hostname);
+  const developmentFrontend = !dedicatedFrontend && hostname.endsWith('.clerk.accounts.dev');
   const prefix = staging && developmentFrontend ? 'pk_test_' : 'pk_live_';
+  const hostAllowed = staging
+    ? (developmentFrontend || dedicatedFrontend)
+    : production
+      ? dedicatedFrontend
+      : !hostname.endsWith('.clerk.accounts.dev');
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).length !== fields.length || fields.some(key => !Object.hasOwn(value, key)) ||
-      value.version !== 1 || ![OPERATIONAL_NATIVE_PROFILE, STAGING_NATIVE_PROFILE].includes(value.profile) ||
+      value.version !== 1 || !ALLOWED_PROFILES.includes(value.profile) ||
       !['apple', 'desktop'].includes(client) || value.client !== client || value.apiOrigin !== apiOrigin ||
-      !exactHostedOrigin(apiOrigin) || !frontendOrigin ||
-      (staging ? !(developmentFrontend || dedicatedStagingFrontend) : hostname.endsWith('.clerk.accounts.dev')) ||
+      !exactHostedOrigin(apiOrigin) || !frontendOrigin || !hostAllowed ||
       !/^[a-z]/.test(hostname.split('.').at(-1)) ||
       typeof value.publishableKey !== 'string' || value.publishableKey.length > 1024 ||
       !value.publishableKey.startsWith(prefix) ||
