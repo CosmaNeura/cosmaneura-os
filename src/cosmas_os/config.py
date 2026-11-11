@@ -7,8 +7,10 @@ from typing import Literal
 from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
-from pydantic import SecretStr
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from cosmas_os.workspace_llm import DEFAULT_DEPLOYMENT, USDZ_DEPLOYMENT
 
 STANDALONE_ENVS = frozenset({"standalone_synthetic", "standalone_clerk_synthetic"})
 
@@ -51,6 +53,9 @@ class Settings(BaseSettings):
     baa_evidence_ref: str | None = None
     human_deploy_evidence_ref: str | None = None
     phi_authorization_ref: str | None = None
+    # Process env must stay false. Real-patient recording is a Box DB switch only
+    # and takes effect solely when clinic/BAA/PHI refs are present (T-REL-6).
+    real_patient_recording_enabled: bool = False
 
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)
@@ -208,17 +213,53 @@ class Settings(BaseSettings):
     core_capture_origin: str = ""
     core_capture_scope: str = ""
     core_capture_managed_identity_client_id: str = ""
+    # Independent-beta CosmaBot ciphertext upload proxy (default OFF). Maps to
+    # VITE_WORKSPACE_CAPTURE_ENABLED / hosting core_capture. Never inferred from
+    # workspace_capture_backend alone — Core backend with a proxy origin and this
+    # flag off keeps main authorize_upload URLs byte-for-byte.
+    workspace_capture_proxy_enabled: bool = False
+    # CosmaBot public API origin for ciphertext proxy URLs (independent-beta only).
+    # Must equal the client VITE_CAPTURE_UPLOAD_ORIGINS / hosted API origin — never
+    # a Core or Scribe blob host (browser→blob would need Cosmas CORS).
+    workspace_capture_proxy_origin: str = ""
     # Separate activation and caller configuration for Core's prepared artifact.
     workspace_session_prep_enabled: bool = False
     core_session_prep_scope: str = ""
     core_session_prep_managed_identity_client_id: str = ""
     workspace_llm_backend: Literal["disabled", "azure_gpt41"] = "disabled"
     workspace_llm_endpoint: str = "https://cosmascode.services.ai.azure.com/openai/v1"
-    workspace_llm_deployment: str = "gpt-4.1"
+    workspace_llm_deployment: str = DEFAULT_DEPLOYMENT
     workspace_llm_api_key: SecretStr | None = None
+    # T-USDZ: when true, CosmaBot chat uses Data Zone Standard US deployment
+    # gpt-4.1-dzus. Default off — existing live users keep gpt-4.1.
+    workspace_llm_usdz_enabled: bool = False
     # New admissions opt into the closed product reader loop; saved v1–v4
     # requests retain their original single-response contract.
     workspace_agent_tools_enabled: bool = False
+
+    @model_validator(mode="after")
+    def _sync_usdz_chat_deployment(self):
+        # Flag swaps only the unset default. An explicit WORKSPACE_LLM_DEPLOYMENT
+        # (including gpt-4.1) must not be rewritten.
+        if (
+            self.workspace_llm_usdz_enabled
+            and "workspace_llm_deployment" not in self.model_fields_set
+        ):
+            object.__setattr__(self, "workspace_llm_deployment", USDZ_DEPLOYMENT)
+        return self
+
+    @property
+    def workspace_llm_reviewed_deployments(self) -> frozenset[str]:
+        # Flag off: main's reviewed set is only gpt-4.1. Flag on also reviews dzus.
+        allowed = {DEFAULT_DEPLOYMENT}
+        if self.workspace_llm_usdz_enabled:
+            allowed.add(USDZ_DEPLOYMENT)
+        return frozenset(allowed)
+
+    @property
+    def workspace_llm_chat_deployment(self) -> str:
+        # Effective deployment after default-only USDZ sync; explicit values win.
+        return self.workspace_llm_deployment
 
     @property
     def workspace_calendar_import_available(self) -> bool:
@@ -398,7 +439,7 @@ class Settings(BaseSettings):
                         and not self._standalone_model_errors())
         return bool(self.workspace_available and self.workspace_llm_backend == "azure_gpt41"
                     and self.workspace_llm_endpoint == "https://cosmascode.services.ai.azure.com/openai/v1"
-                    and self.workspace_llm_deployment == "gpt-4.1"
+                    and self.workspace_llm_deployment in self.workspace_llm_reviewed_deployments
                     and self.workspace_llm_api_key and self.workspace_llm_api_key.get_secret_value())
 
     @property
@@ -551,9 +592,14 @@ class Settings(BaseSettings):
     def runtime_configuration_errors(self) -> list[str]:
         """Return configuration faults without exposing configured values."""
 
-        if self.cosmas_env in STANDALONE_ENVS:
-            return self._standalone_configuration_errors()
         errors: list[str] = []
+        if self.real_patient_recording_enabled:
+            errors.append(
+                "REAL_PATIENT_RECORDING_ENABLED must remain false in process "
+                "configuration; enable only via Box after clinic, BAA and PHI refs"
+            )
+        if self.cosmas_env in STANDALONE_ENVS:
+            return errors + self._standalone_configuration_errors()
         errors.extend(self.workspace_enrollment_configuration_errors())
         if (self.standalone_instance_id or self.standalone_root or self.standalone_jwks_path
                 or self.standalone_clerk_issuer_allowlist or self.standalone_model_origin_allowlist):
@@ -754,7 +800,10 @@ class Settings(BaseSettings):
         if real_clerk:
             enabled_allowlist.update({"workspace_google_connection_enabled", "workspace_google_message_enabled",
                                       "workspace_google_calendar_enabled", "workspace_microsoft_connection_enabled",
-                                      "workspace_microsoft_message_enabled", "workspace_microsoft_calendar_enabled"})
+                                      "workspace_microsoft_message_enabled", "workspace_microsoft_calendar_enabled",
+                                      # Independent-beta launch: Chief tools + Core note capture only.
+                                      "workspace_agent_tools_enabled", "workspace_capture_notes_enabled",
+                                      "workspace_capture_proxy_enabled"})
         enabled_allowlist.update({"workspace_hosted_enabled", "workspace_apple_hosted_transport_enabled",
             "workspace_desktop_hosted_transport_enabled"} if real_clerk else {
             "workspace_apple_local_transport_enabled", "workspace_desktop_local_transport_enabled"})
@@ -764,8 +813,20 @@ class Settings(BaseSettings):
                 break
         empty_prefixes = ("core_", "azure_",
             "scheduling_", "managed_services_config_")
+        # Independent-beta Core capture: reviewed origin + MI identity only.
+        # Never Athena, prep, or other Core callers from this allowlist.
+        core_capture_fields = {
+            "core_capture_origin", "core_capture_scope",
+            "core_capture_managed_identity_client_id", "core_web_origin",
+            "workspace_capture_proxy_enabled", "workspace_capture_proxy_origin",
+        }
         for name in type(self).model_fields:
             value = getattr(self, name)
+            if name in core_capture_fields:
+                if value and self.workspace_capture_backend != "core":
+                    errors.append("Standalone Core capture fields require WORKSPACE_CAPTURE_BACKEND=core")
+                    break
+                continue
             reviewed_optional = real_clerk and name in {"workspace_llm_api_key", "google_connection_encryption_key",
                                                         "microsoft_connection_encryption_key"}
             if ((name.startswith(empty_prefixes) or (not real_clerk and name.startswith("microsoft_connection_"))
@@ -773,7 +834,9 @@ class Settings(BaseSettings):
                  or name.endswith("_encryption_key")) and value and not reviewed_optional):
                 errors.append("Standalone cannot contain external service addresses or credentials")
                 break
-        if (self.workspace_capture_backend != "disabled" or self.compact_web_root
+        if self.workspace_capture_backend == "core":
+            errors.extend(self._standalone_core_capture_errors())
+        elif (self.workspace_capture_backend != "disabled" or self.compact_web_root
                 or self.workspace_native_synthetic_enabled):
             errors.append("Standalone capture and alternate execution paths must be disabled")
         if real_clerk:
@@ -786,6 +849,41 @@ class Settings(BaseSettings):
             errors.append("Offline standalone models and Google credentials must remain disabled")
         return errors
 
+    def _standalone_core_capture_errors(self) -> list[str]:
+        """Independent-beta Core capture: reviewed origin + exact scope/MI only.
+
+        Do not call workspace_capture_available here: that property reads
+        workspace_available, which re-enters standalone configuration errors.
+        """
+        # Observed Core web/API origin: docs/beta/WEB_RELEASE.md:171-176.
+        reviewed = "https://staging-app.cosmaneura.com"
+        try:
+            UUID(self.core_capture_managed_identity_client_id)
+            origin = urlparse(self.core_capture_origin)
+            valid_identity = origin.port in (None, 443) and not any(c.isspace() for c in self.core_capture_origin)
+        except ValueError:
+            valid_identity = False
+        if (not valid_identity or not self._is_exact_https_origin(self.core_capture_origin)
+                or not self.core_capture_scope.startswith("api://")
+                or not self.core_capture_scope.endswith("/.default")
+                or any(c.isspace() for c in self.core_capture_scope)):
+            return ["Standalone Core capture requires exact CORE_CAPTURE_ORIGIN, SCOPE and managed identity"]
+        if self.core_capture_origin != reviewed or self.core_web_origin != reviewed:
+            return ["Standalone Core capture requires the reviewed staging-app.cosmaneura.com origin"]
+        if not self.workspace_capture_notes_enabled or not self.workspace_agent_tools_enabled:
+            return ["Standalone Core capture requires capture notes and agent tools together"]
+        # Explicit proxy opt-in + CosmaBot API origin — never Core web or Scribe blob.
+        if not self.workspace_capture_proxy_enabled:
+            return ["Standalone Core capture requires the CosmaBot upload proxy opt-in"]
+        proxy = self.workspace_capture_proxy_origin
+        proxy_host = (urlparse(proxy).hostname or "").lower()
+        if (not self._is_exact_https_origin(proxy)
+                or proxy.rstrip("/") == reviewed
+                or proxy_host.endswith(".blob.core.windows.net")
+                or proxy_host.endswith(".cosmaneura.com")):
+            return ["Standalone Core capture requires CosmaBot API proxy origin for uploads"]
+        return []
+
     def _standalone_model_errors(self) -> list[str]:
         if self.workspace_llm_backend == "disabled":
             return (["Disabled standalone model must have no endpoint, origin selection or key"]
@@ -793,7 +891,8 @@ class Settings(BaseSettings):
         endpoint = self.workspace_llm_endpoint
         parsed = urlparse(endpoint)
         origin = "https://" + (parsed.hostname or "")
-        if (self.workspace_llm_backend != "azure_gpt41" or self.workspace_llm_deployment != "gpt-4.1"
+        if (self.workspace_llm_backend != "azure_gpt41"
+                or self.workspace_llm_deployment not in self.workspace_llm_reviewed_deployments
                 or not re.fullmatch(r"https://[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)/openai/v1", endpoint)
                 or self._csv(self.standalone_model_origin_allowlist) != (origin,)
                 or not self.workspace_llm_api_key or not self.workspace_llm_api_key.get_secret_value()):

@@ -52,7 +52,9 @@ def main():
         parser.error("Operational and synthetic helper identities cannot be combined.")
     if practice is not None and (not identity or args.verification_variant):
         parser.error("Native practice connection requires an operational desktop helper identity.")
-    capture_disabled = args.native_feature_profile in ("first-owner-staging-v1", "standalone-practice-v1", "independent-beta-v1")
+    # Independent-beta Core capture stays dark until VITE_WORKSPACE_CAPTURE_ENABLED is opted in.
+    capture_disabled = args.native_feature_profile in (
+        "first-owner-staging-v1", "standalone-practice-v1", "independent-beta-v1")
     if capture_disabled and not identity:
         parser.error("A capture-disabled profile requires an operational native identity.")
     if args.output.is_symlink() or output.exists() or output.suffix != ".app" or not identity and not re.fullmatch(r"w[1-9][0-9]*[a-z]?", args.verification_variant):

@@ -11,6 +11,13 @@ from pathlib import Path
 
 from .hosting import GOOGLE_SECRET_NAMES, canonical
 
+# Observed Core web/API origin: docs/beta/WEB_RELEASE.md:171-176.
+# Keep aligned with clients/shared/beta-feature-profile.mjs REVIEWED_CORE_CAPTURE_ORIGIN.
+REVIEWED_CORE_CAPTURE_ORIGIN = "https://staging-app.cosmaneura.com"
+# Single enrollment/profile opt-in for independent-beta Core capture (default OFF).
+# Keep aligned with clients/shared/beta-feature-profile.mjs INDEPENDENT_CORE_CAPTURE_OPT_IN.
+INDEPENDENT_CORE_CAPTURE_OPT_IN = "VITE_WORKSPACE_CAPTURE_ENABLED"
+
 
 def build_allocated_web(backend, state: dict) -> str:
     config, d = backend.config, state["deployment"]
@@ -82,12 +89,23 @@ def build_allocated_web(backend, state: dict) -> str:
         profile_raw = canonical(profile)
         proof = hashlib.sha256(profile_raw).hexdigest()
         (context / "allocated-web-profile.json").write_bytes(profile_raw)
+        # Independent-beta Core capture stays OFF unless the hosting config opts in.
+        # Opt-in is HostingConfiguration.core_capture (maps to VITE_WORKSPACE_CAPTURE_ENABLED).
+        core_capture = bool(getattr(config, "core_capture", False)) and google is not None
+        if core_capture:
+            capture_mode, core_web_origin, capture_upload_origins = (
+                "browser_microphone", REVIEWED_CORE_CAPTURE_ORIGIN, plan["api_origin"])
+        else:
+            capture_mode, core_web_origin, capture_upload_origins = "disabled", "", ""
         public = {"VITE_BUILD_SHA": source, "VITE_CLERK_PUBLISHABLE_KEY": account["publishable_key"],
                   "VITE_WORKSPACE_HOSTED_API_ORIGIN": plan["api_origin"], "VITE_WORKSPACE_WEB_ORIGIN": d["practice"]["web_origin"],
                   "VITE_WORKSPACE_ORGANIZATION_ID": plan["organization_id"], "VITE_WORKSPACE_DATA_MODE": config.environment.runtime_data_mode,
-                  "VITE_WORKSPACE_FEATURE_PROFILE": feature_profile, "VITE_WORKSPACE_CAPTURE_MODE": "disabled",
-                  "VITE_CAPTURE_UPLOAD_ORIGINS": "", "VITE_COSMANEURA_WEB_ORIGIN": "", "VITE_ENROLLMENT_API_BASE": account["api_origin"],
+                  "VITE_WORKSPACE_FEATURE_PROFILE": feature_profile, "VITE_WORKSPACE_CAPTURE_MODE": capture_mode,
+                  "VITE_CAPTURE_UPLOAD_ORIGINS": capture_upload_origins, "VITE_COSMANEURA_WEB_ORIGIN": core_web_origin,
+                  "VITE_ENROLLMENT_API_BASE": account["api_origin"],
                   "VITE_MESSAGES_ENABLED": "true", "APP_IMAGE": config.release["api_image"]}
+        if google is not None:
+            public[INDEPENDENT_CORE_CAPTURE_OPT_IN] = "true" if core_capture else "false"
         arguments = ["-t", image, "-f", "infra/enrollment/allocated-workspace/Dockerfile.web"]
         for name, value in sorted(public.items()):
             arguments += ["--build-arg", name + "=" + value]
@@ -101,9 +119,14 @@ def build_allocated_web(backend, state: dict) -> str:
                 "assert f['organizationId']==" + repr(plan["organization_id"]) + ";"
                 "assert f['profile']==" + repr(feature_profile) + ";"
                 "assert f['dataMode']==" + repr(config.environment.runtime_data_mode) + ";"
-                "assert f['platformAccess']=='disabled' and f['captureMode']=='disabled';"
-                + ("assert all(n in f['enabledFlags'] for n in ['VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED']);" if google is not None else "") +
-                "print('COSMAS_ALLOCATED_WEB_VALIDATED:" + proof + "')")
+                "assert f['platformAccess']=='disabled' and f['captureMode']==" + repr(capture_mode) + ";"
+                "assert f['coreWebOrigin']==" + repr(core_web_origin) + ";"
+                "assert f['captureUploadOrigins']==" + repr([capture_upload_origins] if capture_upload_origins else []) + ";"
+                + ("assert all(n in f['enabledFlags'] for n in ['VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED']);" if google is not None else "")
+                + (("assert all(n in f['enabledFlags'] for n in ['VITE_WORKSPACE_CAPTURE_ENABLED','VITE_WORKSPACE_CAPTURE_NOTES_ENABLED']);"
+                    if core_capture else
+                    "assert 'VITE_WORKSPACE_CAPTURE_ENABLED' not in f['enabledFlags'];") if google is not None else "")
+                + "print('COSMAS_ALLOCATED_WEB_VALIDATED:" + proof + "')")
         recipe = {"version": "v1.1.0", "stepTimeout": 1800, "steps": [
             {"id": "build", "build": shlex.join(arguments), "env": ["DOCKER_BUILDKIT=1"]},
             {"id": "validate", "cmd": image + " -B -c " + shlex.quote(code), "entryPoint": "python", "when": ["build"], "timeout": 120},

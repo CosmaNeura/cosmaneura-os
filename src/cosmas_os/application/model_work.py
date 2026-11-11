@@ -11,8 +11,8 @@ from uuid import uuid4
 from sqlalchemy import and_, exists, func, or_, select
 
 from cosmas_os.adapters.enrollment_admission import RuntimeAdmissionError
+from cosmas_os.adapters.gpt41 import MODEL, GPT41Connector, _context
 from cosmas_os.adapters.gpt41 import SUPPORTED_PREPARED_CONTRACTS as TEXT_PREPARED_CONTRACTS
-from cosmas_os.adapters.gpt41 import GPT41Connector, _context
 from cosmas_os.adapters.gpt41_tools import CURRENT_PREPARED_CONTRACT as TOOL_PREPARED_CONTRACT
 from cosmas_os.adapters.gpt41_tools import GPT41ToolsConnector
 from cosmas_os.adapters.gpt41_tools import validate_prepared as validate_tools
@@ -454,6 +454,22 @@ def resolve_conversation(
     )
 
 
+def _usage_model_name(row) -> str:
+    """Record the deployment actually prepared on the admission envelope."""
+    envelope = getattr(row, "prepared_envelope", None)
+    if isinstance(envelope, dict):
+        bodies = [envelope.get("body")]
+        baseline = envelope.get("baseline")
+        if isinstance(baseline, dict):
+            bodies.append(baseline.get("body"))
+        for candidate in bodies:
+            if isinstance(candidate, dict):
+                model = candidate.get("model")
+                if isinstance(model, str) and model:
+                    return model
+    return getattr(team.runtime_settings, "workspace_llm_chat_deployment", MODEL)
+
+
 def _usage_record(
     s,
     row,
@@ -479,7 +495,7 @@ def _usage_record(
         "usage": "verified" if verified else "unknown",
         "input_tokens": input_tokens if verified else None,
         "output_tokens": output_tokens if verified else None,
-        "model": "gpt-4.1",
+        "model": _usage_model_name(row),
         "envelope_sha256": row.envelope_sha256,
         "response_sha256": response_sha256,
     }
@@ -767,6 +783,9 @@ def _new_admission(
         except (ValueError, TypeError, KeyError):
             raise ws.WorkspaceError("handoff_source_context_too_large", 422) from None
     ws._entry_key_available(s, workspace.id, command["idempotency_key"])
+    deployment = getattr(
+        team.runtime_settings, "workspace_llm_chat_deployment", MODEL
+    )
     try:
         if not any(
             key in command for key in ("research_analysis", "inbox_analysis", "membership_analysis", "session_prep_analysis")
@@ -791,16 +810,16 @@ def _new_admission(
                     "contract": "cosmas-agent-tool-selection.v3"}
                 value.pop("sha256")
                 selection = ToolSelectionV3.model_validate({**value, "sha256": digest(value)}).model_dump()
-                envelope = GPT41DeliveryToolsConnector(lambda: "").prepare(context, selection)
+                envelope = GPT41DeliveryToolsConnector(lambda: "", deployment=deployment).prepare(context, selection)
             elif connector_selection["connector_capabilities"] or connector_selection["connector_intents"]:
                 value = {**selection, **connector_selection, "contract": "cosmas-agent-tool-selection.v2"}
                 value.pop("sha256")
                 selection = ToolSelectionV2.model_validate({**value, "sha256": digest(value)}).model_dump()
-                envelope = GPT41ConnectorToolsConnector(lambda: "").prepare(context, selection)
+                envelope = GPT41ConnectorToolsConnector(lambda: "", deployment=deployment).prepare(context, selection)
             else:
-                envelope = GPT41CompactToolsConnector(lambda: "").prepare(context, selection)
+                envelope = GPT41CompactToolsConnector(lambda: "", deployment=deployment).prepare(context, selection)
         else:
-            envelope = GPT41Connector(lambda: "").prepare(context)
+            envelope = GPT41Connector(lambda: "", deployment=deployment).prepare(context)
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
         raise ws.WorkspaceError("model_unavailable", 503) from None
     if full_source_task and envelope["contract"] not in handoff_briefs.FULL_SOURCE_CONTRACTS:
@@ -1211,6 +1230,8 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_ex
                 raise ModelCallFailure(dispatch="not_dispatched", outcome="authority_withheld") from None
     current_managed_admission()
     key = team.runtime_settings.workspace_llm_api_key
+    # Review uses the immutable saved envelope model field; do not re-select
+    # deployment here (tests and workers both rely on that exact body).
     if getattr(team.runtime_settings, "cosmas_env", None) == "standalone_clerk_synthetic":
         runtime = team.runtime_settings
         if (not runtime.workspace_llm_available

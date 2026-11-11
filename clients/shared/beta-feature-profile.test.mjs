@@ -95,6 +95,12 @@ test('requires usable exact origins and explicit source mode, without a syntheti
     {VITE_WORKSPACE_CAPTURE_MODE:'synthetic',VITE_WORKSPACE_DATA_MODE:'authorized_beta',VITE_CLERK_PUBLISHABLE_KEY:'pk_live_fixture'},
     {VITE_CLERK_PUBLISHABLE_KEY:''}])assert.throws(()=>resolveBetaFeatureProfile({...base,...change}));
 });
+test('refuses AssemblyAI and Recall.ai capture upload origins',()=>{
+  for(const origin of ['https://api.assemblyai.com','https://streaming.assemblyai.com',
+    'https://api.recall.ai','https://us-east-1.recall.ai']){
+    assert.throws(()=>resolveBetaFeatureProfile({...base,VITE_CAPTURE_UPLOAD_ORIGINS:origin}),/AssemblyAI|Recall/);
+  }
+});
 test('both native composers validate all profile features and matching origins and source support',()=>{
   for(const client of ['desktop','apple']){
     const manifest=resolveBetaFeatureProfile(native(client)).manifest;const options=expected(client);

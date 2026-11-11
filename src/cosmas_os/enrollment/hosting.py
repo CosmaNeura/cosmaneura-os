@@ -68,11 +68,18 @@ class HostingConfiguration:
         expected = {"contract_version", "enabled", "synthetic_only", "foundation", "account", "release",
                     "worker_client_id", "worker_object_id", "source_repository", "state_root", "cloudflare_zone_id",
                     "cloudflare_token_file", "native_origins"}
-        if (not expected <= set(value) or set(value) - expected - {"google", "model"} or value["contract_version"] != HOSTING_CONTRACT
+        if (not expected <= set(value) or set(value) - expected - {"google", "model", "core_capture"}
+                or value["contract_version"] != HOSTING_CONTRACT
                 or type(value["enabled"]) is not bool or type(value["synthetic_only"]) is not bool):
             raise ValueError("explicit dedicated hosting configuration required")
         self.value = json.loads(json.dumps(value))
         self.foundation, self.account, self.release = (self.value[name] for name in ("foundation", "account", "release"))
+        # Single independent-beta Core capture opt-in (default OFF). Requires Google.
+        if "core_capture" in self.value and type(self.value["core_capture"]) is not bool:
+            raise ValueError("core_capture must be an explicit boolean")
+        self.core_capture = bool(self.value.get("core_capture", False))
+        if self.core_capture and "google" not in self.value:
+            raise ValueError("independent Core capture requires the Google independent-beta profile")
         f, a, release = self.foundation, self.account, self.release
         for name in ("subscription_id", "tenant_id"):
             if str(UUID(f[name])) != f[name]:

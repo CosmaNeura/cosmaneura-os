@@ -210,7 +210,7 @@ def read(s: Session, box: str, owner: str, *, version: ProviderTeamRevision | No
         "members": [member(bot) for bot in config["bots"]],
         "templates": [template for role, template in templates.items() if role not in {"chief", "custom"}],
         "custom_skills": skills,
-        "llm": {"enabled": llm_enabled, "model": "gpt-4.1"},
+        "llm": {"enabled": llm_enabled, "model": runtime_settings.workspace_llm_chat_deployment},
         "scheduling": {"enabled": runtime_settings.workspace_scheduling_available},
         "capture": {"enabled": capture_enabled,
                     "prep_enabled": capture_enabled and runtime_settings.workspace_prep_enabled,
