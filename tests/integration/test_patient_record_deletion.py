@@ -1764,6 +1764,35 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
                     "'public.patient_deletion_pending_files', 'INSERT')"
                 )
             )
+            # Follow-up 4/5: DEFINER helpers pin pg_temp last and qualify catalog reads.
+            definer_paths = connection.execute(
+                text(
+                    """
+                    SELECT p.proname, p.proconfig, pg_get_functiondef(p.oid)
+                      FROM pg_catalog.pg_proc p
+                      JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                     WHERE n.nspname = 'public'
+                       AND p.prosecdef
+                       AND p.proname IN (
+                         'delete_patient_keyed_records',
+                         'delete_patient_keyed_records_plan',
+                         '_cosmas_patient_deletion_build_plan',
+                         '_cosmas_apply_patient_deletion_mutate',
+                         'patient_deletion_pending_record',
+                         'patient_deletion_pending_clear',
+                         'patient_deletion_pending_delete',
+                         'patient_deletion_pending_list',
+                         'patient_deletion_patient_box',
+                         'patient_deletion_collect_file_keys'
+                       )
+                    """
+                )
+            ).all()
+            assert len(definer_paths) >= 10
+            for _name, proconfig, definition in definer_paths:
+                assert proconfig is not None
+                assert "search_path=pg_catalog, public, pg_temp" in list(proconfig)
+                assert "pg_catalog.pg_constraint" in definition or "pg_constraint" not in definition
         blob = LocalBlobAdapter(tmp_path / "blobs")
         with Session(target) as session:
             arranged = _arrange(session, blob)
