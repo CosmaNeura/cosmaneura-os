@@ -8,16 +8,26 @@ import {REVIEWED_CORE_CAPTURE_ORIGIN} from '../../clients/shared/beta-feature-pr
 const sample=JSON.parse(await readFile(new URL('./invented-host-input.json',import.meta.url),'utf8'));
 const CORE_SCOPE='api://invented-core-audience/.default';
 const CORE_MI='00000000-0000-4000-8000-0000000000aa';
+const IMDS_HOST='169.254.169.254';
+const IMDS_PATH='/metadata/identity/oauth2/token';
 
-function ownedBeta({host='staging.cosmas.ai'}={}){
+function ownedBeta({host='staging.cosmas.ai',microsoft=false,staging=false}={}){
   const value=structuredClone(sample);
   value.resource_scope='owned-cosmabot-vm-instance';
   value.web_origin=`https://${host}`;value.api_origin=`https://api.${host}`;
   value.identity.apiOrigin=value.api_origin;value.tls.hostnames=[host,`api.${host}`];
+  if(staging){
+    value.identity_policy='shared_staging';value.identity.profile='operational-staging-v1';
+    value.identity.audience='';value.identity.frontendOrigin='https://invented-own-practice.clerk.accounts.dev';
+    value.identity.publishableKey='pk_test_'+Buffer.from('invented-own-practice.clerk.accounts.dev$').toString('base64');
+  }
   value.beta_features={model:{origin:'https://invented-owned-chief.openai.azure.com',
     endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'},
     google:{client_id:'invented-client.apps.googleusercontent.com',
       callback_uri:value.api_origin+'/connections/google/callback',return_origin:value.web_origin}};
+  if(microsoft)value.beta_features.microsoft={tenant_id:'10000000-0000-4000-8000-000000000001',
+    client_id:'10000000-0000-4000-8000-000000000002',
+    callback_uri:value.api_origin+'/connections/microsoft/callback',return_origin:value.web_origin};
   return value;
 }
 
@@ -28,7 +38,6 @@ function withCaptureTools(value){
 }
 
 function fingerprint(files){
-  // Stable byte identity over every rendered artifact.
   return createHash('sha256').update(JSON.stringify(files)).digest('hex');
 }
 
@@ -36,9 +45,39 @@ function withoutHostInput(files){
   return Object.fromEntries(Object.entries(files).filter(([name])=>name!=='host-input.json'));
 }
 
-// Golden SHA-256 of JSON.stringify(render(...)) from origin/main@c7bdd17b.
-const MAIN_DEDICATED_FINGERPRINT='2cba849698b0d4d28a040dda92cfddd87510e884df914741b86cf0de3578d361';
-const MAIN_OWNED_STAGING_FINGERPRINT='f60e83ec57f05c97373a37f4cde2dac2c1b368eae3750c0df575c0416bc41e4c';
+function assertRefused(fn,code){
+  assert.throws(fn,error=>{
+    assert.equal(error instanceof Refused,true);
+    assert.equal(error.message,code);
+    return true;
+  });
+}
+
+function assertNoRealPatientOn(files){
+  assert.equal(Object.hasOwn(files['api-public.json'],'REAL_PATIENT_RECORDING_ENABLED'),false);
+  for(const line of files['api-public.env'].split('\n')){
+    if(!line)continue;
+    const eq=line.indexOf('=');
+    const key=eq===-1?line:line.slice(0,eq);
+    const value=eq===-1?'':line.slice(eq+1);
+    assert.notEqual(key,'REAL_PATIENT_RECORDING_ENABLED');
+    assert.equal(/REAL_PATIENT_RECORDING_ENABLED/i.test(key),false);
+    assert.equal(key==='REAL_PATIENT_RECORDING_ENABLED'&&JSON.parse(value)===true,false);
+  }
+  for(const [name,value] of Object.entries(files)){
+    if(typeof value!=='object'||value===null)continue;
+    const raw=JSON.stringify(value);
+    assert.equal(raw.includes('"REAL_PATIENT_RECORDING_ENABLED":"true"'),false,name);
+    assert.equal(raw.includes('"real_patient_recording_enabled":true'),false,name);
+  }
+  assert.equal(files['host-preparation.json'].optional_runtime_features.real_patient_recording_process_switch,false);
+}
+
+// Golden SHA-256 of JSON.stringify(render(...)) from origin/main render.mjs on
+// the current invented-host-input (schema_revision a46f2c09d853). Off-path must
+// stay byte-identical to that main renderer for the same inputs.
+const MAIN_DEDICATED_FINGERPRINT='149934eed7b64b97fa41e0f2327465ff943e57a959157e2bf9f593f64843996c';
+const MAIN_OWNED_STAGING_FINGERPRINT='1619b2ea8d3ba56913ed6d73f9e77d5a901068c2e0172edbc29e4c213ab59f3d';
 
 test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const baseline=render(structuredClone(sample));
@@ -58,7 +97,9 @@ test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   assert.equal(Object.hasOwn(env,'REAL_PATIENT_RECORDING_ENABLED'),false);
   assert.equal(baseline['clients/web-build-env.json'].VITE_WORKSPACE_CAPTURE_ENABLED,'false');
   assert.equal(baseline['clients/standalone-profile.json'].clients.web.captureMode,'disabled');
-  // Owned independent-beta without the opt-in stays capture/tools dark too.
+  assert.deepEqual(baseline['host-preparation.json'].platform_connections,[]);
+  assert.ok(baseline['network-requirements.json'].deny.includes('*.cosmaneura.com'));
+  assert.ok(baseline['network-requirements.json'].deny.includes('169.254.0.0/16 metadata and link-local'));
   const owned=render(ownedBeta());
   assert.equal(fingerprint(owned),MAIN_OWNED_STAGING_FINGERPRINT);
   const ownedEnv=owned['api-public.json'];
@@ -67,6 +108,7 @@ test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   assert.equal(Object.hasOwn(ownedEnv,'WORKSPACE_CAPTURE_PROXY_ENABLED'),false);
   assert.equal(owned['clients/web-build-env.json'].VITE_WORKSPACE_CAPTURE_ENABLED,'false');
   assert.equal(Object.hasOwn(owned['host-preparation.json'].optional_runtime_features,'capture_and_agent_tools'),false);
+  assert.deepEqual(owned['host-preparation.json'].platform_connections,[]);
 });
 
 test('opt-in false matches absent output except echoed host-input',()=>{
@@ -77,6 +119,7 @@ test('opt-in false matches absent output except echoed host-input',()=>{
   assert.equal(off['api-public.env'],absent['api-public.env']);
   assert.equal(fingerprint(withoutHostInput(off)),fingerprint(withoutHostInput(absent)));
   assert.equal(off['host-input.json'].syntheticBetaCaptureAndTools,false);
+  assert.notDeepEqual(off['host-input.json'],absent['host-input.json']);
 });
 
 test('opt-in on renders exact capture and agent-tools keys for synthetic staging beta',()=>{
@@ -103,37 +146,72 @@ test('opt-in on renders exact capture and agent-tools keys for synthetic staging
     assert.equal(build.VITE_WORKSPACE_CAPTURE_NOTES_ENABLED,'true');
     assert.equal(build.VITE_COSMANEURA_WEB_ORIGIN,REVIEWED_CORE_CAPTURE_ORIGIN);
     assert.equal(build.VITE_CAPTURE_UPLOAD_ORIGINS,'https://api.staging.cosmas.ai');
+    assert.equal(build.VITE_WORKSPACE_CAPTURE_MODE,client==='apple'?'ios_native':'browser_microphone');
   }
   assert.equal(files['clients/web-build-arguments.json'].VITE_WORKSPACE_CAPTURE_ENABLED,'true');
   assert.equal(files['host-preparation.json'].optional_runtime_features.capture_and_agent_tools,true);
+  assert.equal(files['host-preparation.json'].optional_runtime_features.capture_content,
+    'live microphone audio on a synthetic-only host; never relabelled as invented');
   assert.equal(files['host-preparation.json'].synthetic_only,true);
   assert.equal(files['host-preparation.json'].deployment_authorized,false);
 });
 
-test('opt-in never enables real-patient recording',()=>{
-  const files=render(withCaptureTools(ownedBeta({host:'beta.cosmas.ai'})));
-  const env=files['api-public.json'];
-  assert.equal(Object.hasOwn(env,'REAL_PATIENT_RECORDING_ENABLED'),false);
-  assert.doesNotMatch(files['api-public.env'],/REAL_PATIENT_RECORDING_ENABLED\s*=\s*"?true"?/i);
-  assert.equal(files['host-preparation.json'].optional_runtime_features.real_patient_recording,false);
-  assert.equal(env.DATA_MODE,'synthetic');
-  // Server process guard stays untouched; renderer must not ship the on switch.
-  assert.equal(JSON.stringify(files).includes('REAL_PATIENT_RECORDING_ENABLED=true'),false);
-  assert.equal(JSON.stringify(files).includes('"REAL_PATIENT_RECORDING_ENABLED":"true"'),false);
+test('opt-in on declares Core capture egress, IMDS token path, platform connection and evidence',()=>{
+  const files=render(withCaptureTools(ownedBeta()));
+  const network=files['network-requirements.json'];
+  const coreEgress=network.api_egress.find(item=>item.hostname==='staging-app.cosmaneura.com');
+  const imdsEgress=network.api_egress.find(item=>item.hostname===IMDS_HOST);
+  assert.deepEqual(coreEgress,{protocol:'https',hostname:'staging-app.cosmaneura.com',tcp_port:443,
+    redirects_allowed:false,adapter:'src/cosmas_os/adapters/core_capture_connection.py:174'});
+  assert.deepEqual(imdsEgress,{protocol:'http',hostname:IMDS_HOST,tcp_port:80,path:IMDS_PATH,
+    redirects_allowed:false,adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174'});
+  assert.equal(network.deny.includes('*.cosmaneura.com'),false);
+  assert.ok(network.deny.includes('*.cosmaneura.com except staging-app.cosmaneura.com Core capture origin'));
+  assert.equal(network.deny.includes('169.254.0.0/16 metadata and link-local'),false);
+  assert.ok(network.deny.includes(`169.254.0.0/16 metadata and link-local except ${IMDS_HOST}${IMDS_PATH}`));
+  assert.match(network.dns,/staging-app\.cosmaneura\.com Core capture/);
+  assert.match(network.dns,/IMDS token host/);
+  const evidence=files['host-preparation.json'].required_evidence.find(item=>item.startsWith('Host firewall and DNS'));
+  assert.match(evidence,/Core capture staging-app\.cosmaneura\.com/);
+  assert.match(evidence,/IMDS token endpoint/);
+  assert.deepEqual(files['host-preparation.json'].platform_connections,[{
+    kind:'core_staging_capture',origin:REVIEWED_CORE_CAPTURE_ORIGIN,web_origin:REVIEWED_CORE_CAPTURE_ORIGIN,
+    scope:CORE_SCOPE,managed_identity_client_id:CORE_MI,upload_proxy_origin:'https://api.staging.cosmas.ai',
+    adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174',
+    content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
+    real_patient_recording_process_switch:false}]);
 });
 
-test('opt-in is refused for non-staging/production CosmaBot profiles',()=>{
-  // Dedicated practice host (standalone-practice) cannot opt in.
+test('opt-in never enables real-patient recording process switch',()=>{
+  const files=render(withCaptureTools(ownedBeta({host:'beta.cosmas.ai'})));
+  assertNoRealPatientOn(files);
+  assert.equal(files['api-public.json'].DATA_MODE,'synthetic');
+});
+
+test('opt-in accepts shared_staging and Microsoft overlays on owned synthetic hosts',()=>{
+  const staging=render(withCaptureTools(ownedBeta({staging:true})));
+  assert.equal(staging['api-public.json'].CLERK_SESSION_POLICY,'shared_staging');
+  assert.equal(staging['api-public.json'].WORKSPACE_CAPTURE_BACKEND,'core');
+  assert.equal(staging['api-public.json'].WORKSPACE_AGENT_TOOLS_ENABLED,'true');
+  assert.equal(staging['host-preparation.json'].platform_connections[0].kind,'core_staging_capture');
+  const withMs=render(withCaptureTools(ownedBeta({microsoft:true})));
+  assert.equal(withMs['api-public.json'].WORKSPACE_MICROSOFT_CONNECTION_ENABLED,'true');
+  assert.equal(withMs['api-public.json'].WORKSPACE_CAPTURE_BACKEND,'core');
+  assert.equal(withMs['api-public.json'].WORKSPACE_AGENT_TOOLS_ENABLED,'true');
+  assert.ok(withMs['network-requirements.json'].api_egress.some(item=>item.hostname==='login.microsoftonline.com'));
+  assert.ok(withMs['network-requirements.json'].api_egress.some(item=>item.hostname==='staging-app.cosmaneura.com'));
+  assert.ok(withMs['network-requirements.json'].api_egress.some(item=>item.hostname===IMDS_HOST));
+});
+
+test('opt-in is refused for non-staging/production CosmaBot profiles with exact codes',()=>{
   const practice=structuredClone(sample);
   practice.syntheticBetaCaptureAndTools=true;
   practice.core_capture_origin=REVIEWED_CORE_CAPTURE_ORIGIN;
   practice.core_web_origin=REVIEWED_CORE_CAPTURE_ORIGIN;
   practice.core_capture_scope=CORE_SCOPE;
   practice.core_capture_managed_identity_client_id=CORE_MI;
-  assert.throws(()=>validateInput(practice),Refused);
-  assert.throws(()=>render(practice),Refused);
-  // Missing independent-beta google/model overlay on an owned host is already refused;
-  // opt-in on a non-owned profile stays refused even when Core public fields look valid.
+  assertRefused(()=>validateInput(practice),'synthetic_beta_capture_tools_refused_for_profile');
+  assertRefused(()=>render(practice),'synthetic_beta_capture_tools_refused_for_profile');
   const incomplete=ownedBeta();
   incomplete.resource_scope='dedicated-new-cosmabot-host';
   incomplete.web_origin='https://workspace.standalone.example.invalid';
@@ -142,17 +220,41 @@ test('opt-in is refused for non-staging/production CosmaBot profiles',()=>{
   incomplete.tls.hostnames=['api.standalone.example.invalid','workspace.standalone.example.invalid'];
   incomplete.beta_features.google.callback_uri=incomplete.api_origin+'/connections/google/callback';
   incomplete.beta_features.google.return_origin=incomplete.web_origin;
-  assert.throws(()=>render(withCaptureTools(incomplete)),Refused);
+  assertRefused(()=>render(withCaptureTools(incomplete)),'synthetic_beta_capture_tools_refused_for_profile');
+  for(const host of ['app.cosmas.ai','cosmas.ai']){
+    assertRefused(()=>render(withCaptureTools(ownedBeta({host}))),'exact_owned_cosmabot_routes_required');
+  }
+  // Owned VM with a cosmaneura.com pair fails the exact owned-route check first.
+  const ownedPlatform=ownedBeta();
+  ownedPlatform.web_origin='https://workspace.cosmaneura.com';
+  ownedPlatform.api_origin='https://api.cosmaneura.com';
+  ownedPlatform.identity.apiOrigin=ownedPlatform.api_origin;
+  ownedPlatform.tls.hostnames=['workspace.cosmaneura.com','api.cosmaneura.com'];
+  ownedPlatform.beta_features.google.callback_uri=ownedPlatform.api_origin+'/connections/google/callback';
+  ownedPlatform.beta_features.google.return_origin=ownedPlatform.web_origin;
+  assertRefused(()=>render(withCaptureTools(ownedPlatform)),'exact_owned_cosmabot_routes_required');
+  // Dedicated host with a *.cosmaneura.com web origin is refused at origin().
+  const dedicatedPlatform=structuredClone(sample);
+  dedicatedPlatform.web_origin='https://workspace.cosmaneura.com';
+  dedicatedPlatform.api_origin='https://api.standalone.example.invalid';
+  dedicatedPlatform.identity.apiOrigin=dedicatedPlatform.api_origin;
+  dedicatedPlatform.tls.hostnames=['workspace.cosmaneura.com','api.standalone.example.invalid'];
+  assertRefused(()=>render(withCaptureTools(dedicatedPlatform)),'dedicated_https_origin_required');
 });
 
-test('opt-in requires exact reviewed Core public inputs and rejects secrets',()=>{
+test('opt-in requires exact reviewed Core public inputs and rejects secrets with exact codes',()=>{
   const base=ownedBeta();
-  assert.throws(()=>render({...base,syntheticBetaCaptureAndTools:true}),Refused);
-  assert.throws(()=>render({...withCaptureTools(base),core_capture_origin:'https://app.cosmaneura.com'}),Refused);
-  assert.throws(()=>render({...withCaptureTools(base),core_web_origin:'https://core.example.invalid'}),Refused);
-  assert.throws(()=>render({...withCaptureTools(base),core_capture_scope:'https://not-api'}),Refused);
-  assert.throws(()=>render({...withCaptureTools(base),core_capture_managed_identity_client_id:'not-a-uuid'}),Refused);
-  assert.throws(()=>render({...withCaptureTools(base),syntheticBetaCaptureAndTools:'true'}),Refused);
-  assert.throws(()=>render({...withCaptureTools(base),core_capture_client_secret:'PRIVATE'}),Refused);
-  assert.throws(()=>render({...withCaptureTools(base),secret:'DO_NOT_LOG'}),Refused);
+  assertRefused(()=>render({...base,syntheticBetaCaptureAndTools:true}),'input_shape');
+  assertRefused(()=>render({...withCaptureTools(base),core_capture_origin:'https://app.cosmaneura.com'}),
+    'reviewed_core_capture_origin_required');
+  assertRefused(()=>render({...withCaptureTools(base),core_web_origin:'https://core.example.invalid'}),
+    'reviewed_core_capture_origin_required');
+  assertRefused(()=>render({...withCaptureTools(base),core_capture_scope:'https://not-api'}),
+    'exact_core_capture_scope_required');
+  assertRefused(()=>render({...withCaptureTools(base),core_capture_managed_identity_client_id:'not-a-uuid'}),
+    'exact_core_capture_managed_identity_required');
+  assertRefused(()=>render({...withCaptureTools(base),syntheticBetaCaptureAndTools:'true'}),
+    'synthetic_beta_capture_tools_boolean_required');
+  assertRefused(()=>render({...withCaptureTools(base),core_capture_client_secret:'PRIVATE'}),'input_shape');
+  assertRefused(()=>render({...withCaptureTools(base),secret:'DO_NOT_LOG'}),'input_shape');
 });

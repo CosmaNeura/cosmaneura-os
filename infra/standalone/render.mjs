@@ -18,6 +18,11 @@ const object=(value,keys,code)=>{
 const CAPTURE_TOOLS_OPT_IN='syntheticBetaCaptureAndTools';
 const CAPTURE_TOOLS_CORE_KEYS=['core_capture_origin','core_web_origin','core_capture_scope',
   'core_capture_managed_identity_client_id'];
+// Azure IMDS token endpoint used by ManagedIdentityCredential.get_token via
+// core_capture_connection.py:168-174 and BoundedIdentityTransport
+// (core_record_connection.py:195-214); path from azure.identity IMDS_TOKEN_PATH.
+const IMDS_TOKEN_HOST='169.254.169.254';
+const IMDS_TOKEN_PATH='/metadata/identity/oauth2/token';
 const publicUuid=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 // Synthetic web addresses, and the matching api.<host> names. Every other
 // cosmas.ai or cosmaneura.com hostname stays refused.
@@ -44,6 +49,14 @@ function requireCaptureToolsInputs(value,features,ownedVm){
   if(!value.core_capture_scope.startsWith('api://')||!value.core_capture_scope.endsWith('/.default')||
     /\s/.test(value.core_capture_scope))refuse('exact_core_capture_scope_required');
   if(!publicUuid(value.core_capture_managed_identity_client_id))refuse('exact_core_capture_managed_identity_required');
+}
+
+function identityPreparationOptions(value,features,captureEnabled){
+  return {webOrigin:value.web_origin,
+    coreWebOrigin:captureEnabled?value.core_web_origin:'',
+    captureUploadOrigins:captureEnabled?[value.api_origin]:[],
+    dataMode:'synthetic',featureProfile:features.profile,
+    microsoftConnectionEnabled:!!features.microsoft,coreCaptureEnabled:captureEnabled};
 }
 function origin(value,ownedStaging=false){
   let url;try{url=new URL(value);}catch{refuse('exact_https_origin_required');}
@@ -76,8 +89,7 @@ function betaFeatures(value){
   }
   if(features.microsoft!==null){
     object(features.microsoft,['tenant_id','client_id','callback_uri','return_origin'],'public_microsoft_shape');
-    const identifier=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
-    if(!features.google||(features.microsoft.tenant_id!=='organizations'&&!identifier(features.microsoft.tenant_id))||!identifier(features.microsoft.client_id)||
+    if(!features.google||(features.microsoft.tenant_id!=='organizations'&&!publicUuid(features.microsoft.tenant_id))||!publicUuid(features.microsoft.client_id)||
       features.microsoft.callback_uri!==value.api_origin+'/connections/microsoft/callback'||
       features.microsoft.return_origin!==value.web_origin)refuse('matching_microsoft_public_contract_required');
   }
@@ -114,10 +126,7 @@ export function validateInput(value){
   // Audience identifies the reviewed receiving application. The exact issuer,
   // organization and Box bind the practice; storage remains instance-specific.
   // This existing generator owns public identity validation and every client flag.
-  workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,
-    coreWebOrigin:captureEnabled?value.core_web_origin:'',
-    captureUploadOrigins:captureEnabled?[value.api_origin]:[],
-    dataMode:'synthetic',featureProfile:features.profile,coreCaptureEnabled:captureEnabled});
+  workspaceIdentityInputs(value.identity,identityPreparationOptions(value,features,captureEnabled));
   object(value.ports,['api','postgres'],'ports_shape');
   if(Object.values(value.ports).some(port=>!Number.isInteger(port)||port<1024||port>65535)||
     value.ports.api===value.ports.postgres)refuse('distinct_unprivileged_loopback_ports_required');
@@ -163,11 +172,7 @@ export function render(input){
   const config=ownedVm?parent+'/config':`/etc/cosmabot-standalone/${id}`,release=ownedVm?parent+'/release':`/opt/cosmabot-standalone/${id}`,proxyRoot=ownedVm?parent+'/proxy':`/var/lib/cosmabot-https/${id}`;
   const apiUser=`cosmabot-api-${short}`,pgUser=`cosmabot-pg-${short}`,proxyUser=`cosmabot-web-${short}`;
   const dbName=`cosmabot_standalone_${id.replaceAll('-','')}`,dbRole=`cosmabot_runtime_${short}`,migrationRole=`cbpg_${short}`;
-  const files=workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,
-    coreWebOrigin:captureEnabled?value.core_web_origin:'',
-    captureUploadOrigins:captureEnabled?[value.api_origin]:[],
-    dataMode:'synthetic',featureProfile:features.profile,microsoftConnectionEnabled:!!features.microsoft,
-    coreCaptureEnabled:captureEnabled});
+  const files=workspaceIdentityInputs(value.identity,identityPreparationOptions(value,features,captureEnabled));
   const parties=[value.web_origin,'app://cosmas','capacitor://localhost'].join(',');
   const environment={...Object.fromEntries(disabledFlags.map(name=>[name,'false'])),
     COSMAS_ENV:'standalone_clerk_synthetic',DATA_MODE:'synthetic',AUTH_MODE:'clerk_jwt',BETA_BOX_ID:value.box_id,
@@ -256,7 +261,10 @@ export function render(input){
     contract.optional_runtime_features={model:!!features.model,google:!!features.google,microsoft:!!features.microsoft,live_provider_acceptance:false,
       secrets_in_package:false,practice_records:'invented synthetic records',google_content:'actual consenting account content; never relabelled as invented',
       microsoft_content:'actual consenting account content; never relabelled as invented'};
-    if(captureEnabled)Object.assign(contract.optional_runtime_features,{capture_and_agent_tools:true,real_patient_recording:false});
+    if(captureEnabled)Object.assign(contract.optional_runtime_features,{capture_and_agent_tools:true,
+      capture_content:'live microphone audio on a synthetic-only host; never relabelled as invented',
+      real_patient_recording_process_switch:false,
+      in_flight_v2_handoff_rollback:'Turning the opt-in off on a later render leaves in-flight v2 tool/capture handoffs to drain or fail closed; no automatic replay'});
     if(features.model)contract.private_environment.exact_names.push('WORKSPACE_LLM_API_KEY');
     if(features.google)contract.private_environment.exact_names.push('GOOGLE_CONNECTION_CLIENT_SECRET','GOOGLE_CONNECTION_ENCRYPTION_KEY');
     if(features.microsoft)contract.private_environment.exact_names.push('MICROSOFT_CONNECTION_CLIENT_SECRET','MICROSOFT_CONNECTION_ENCRYPTION_KEY');
@@ -266,6 +274,16 @@ export function render(input){
           'any_work_or_school_tenant':'configured_work_or_school_tenant',provider_registration_performed:false};
       if(features.microsoft.tenant_id==='organizations')contract.microsoft_registration.required_sign_in_audience='AzureADMultipleOrgs';
     }
+  }
+  if(captureEnabled){
+    // Live Core staging capture connection; content is live microphone audio on a synthetic-only host.
+    contract.platform_connections=[{kind:'core_staging_capture',origin:value.core_capture_origin,
+      web_origin:value.core_web_origin,scope:value.core_capture_scope,
+      managed_identity_client_id:value.core_capture_managed_identity_client_id,
+      upload_proxy_origin:value.api_origin,
+      adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174',
+      content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
+      real_patient_recording_process_switch:false}];
   }
   if(ownedVm){
     contract.resource_identity.host_name='vm-cosmabot-staging-eus2-lab01';
@@ -300,10 +318,31 @@ export function render(input){
       firewall.api_egress.push({protocol:'https',hostname,tcp_port:443,redirects_allowed:false});
     (firewall.browser_oauth_origins??=[]).push('https://login.microsoftonline.com');
   }
+  if(captureEnabled){
+    // Core HTTPS origin from settings.core_capture_origin (core_capture_connection.py:174).
+    // IMDS token path from ManagedIdentityCredential.get_token (same lines) via
+    // BoundedIdentityTransport (core_record_connection.py:195-214).
+    const coreHost=new URL(value.core_capture_origin).hostname;
+    firewall.api_egress.push({protocol:'https',hostname:coreHost,tcp_port:443,redirects_allowed:false,
+      adapter:'src/cosmas_os/adapters/core_capture_connection.py:174'});
+    firewall.api_egress.push({protocol:'http',hostname:IMDS_TOKEN_HOST,tcp_port:80,path:IMDS_TOKEN_PATH,
+      redirects_allowed:false,adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174'});
+    firewall.deny=firewall.deny.map(item=>{
+      if(item==='169.254.0.0/16 metadata and link-local')
+        return `169.254.0.0/16 metadata and link-local except ${IMDS_TOKEN_HOST}${IMDS_TOKEN_PATH}`;
+      if(item==='*.cosmaneura.com')
+        return `*.cosmaneura.com except ${coreHost} Core capture origin`;
+      return item;
+    });
+  }
   if(value.beta_features!==undefined){
-    firewall.dns='Only the exact configured Clerk/model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
+    firewall.dns=captureEnabled
+      ?'Only the exact configured Clerk/model, selected Google/Microsoft API hostnames, staging-app.cosmaneura.com Core capture, and IMDS token host; qualify resolver enforcement separately.'
+      :'Only the exact configured Clerk/model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
     contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
-      'Host firewall and DNS qualification: only declared Clerk, optional own model and selected Google/Microsoft API egress; no metadata or other providers':item);
+      (captureEnabled
+        ?'Host firewall and DNS qualification: only declared Clerk, optional own model, selected Google/Microsoft, Core capture staging-app.cosmaneura.com, and IMDS token endpoint; no other providers'
+        :'Host firewall and DNS qualification: only declared Clerk, optional own model and selected Google/Microsoft API egress; no metadata or other providers'):item);
   }
   if(ownedVm){
     firewall.dedicated_host_required=false;firewall.existing_owned_cosmabot_host_required=true;

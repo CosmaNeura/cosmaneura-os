@@ -13,6 +13,19 @@ from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# Public standalone render leaves these Settings booleans unrendered; they keep
+# their process defaults (False). Do not emit new keys just to satisfy this set.
+UNRENDERED_BOOLEAN_DEFAULTS_FALSE = frozenset({
+    "COSMAS_EHR_REAL_DATA_ENABLED",
+    "GOOGLE_CONNECTION_BROKER_ENABLED",
+    "REAL_PATIENT_RECORDING_ENABLED",
+    "WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED",
+    "WORKSPACE_CAPTURE_PROXY_ENABLED",
+    "WORKSPACE_EFAX_SANDBOX_ENABLED",
+    "WORKSPACE_ENROLLMENT_MANAGED",
+    "WORKSPACE_RX_SANDBOX_ENABLED",
+})
+
 
 class ExplicitSettings(Settings):
     @classmethod
@@ -74,7 +87,9 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
                 contract = rendered["contract"]
                 self.assertEqual(set(public) - {key.upper() for key in Settings.model_fields}, set())
                 booleans = {key.upper() for key, field in Settings.model_fields.items() if field.annotation is bool}
-                self.assertEqual(booleans - set(public), set())
+                self.assertEqual(booleans - set(public), UNRENDERED_BOOLEAN_DEFAULTS_FALSE)
+                for name in UNRENDERED_BOOLEAN_DEFAULTS_FALSE:
+                    self.assertIs(Settings.model_fields[name.lower()].default, False)
                 self.assertEqual(contract["database"]["schema_revision"], EXPECTED_SCHEMA_REVISION)
                 # Invented process-only values; no file, account or database is opened.
                 database = contract["database"]
@@ -150,6 +165,10 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
     def test_synthetic_beta_capture_tools_opt_in_matches_runtime_and_keeps_real_patient_off(self):
         import base64
 
+        from cosmas_os.ports.agent_connectors import CONNECTOR_TOOL_NAMES
+        from cosmas_os.ports.agent_delivery_tools import DELIVERY_TOOL_NAMES
+        from cosmas_os.ports.agent_tools import TOOL_NAMES
+
         output = self.rendered("audience", capture_tools=True, host="staging")
         public, contract = output["environment"], output["contract"]
         self.assertEqual(public["WORKSPACE_AGENT_TOOLS_ENABLED"], "true")
@@ -160,8 +179,28 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
         self.assertEqual(public["CORE_CAPTURE_ORIGIN"], "https://staging-app.cosmaneura.com")
         self.assertEqual(public["CORE_WEB_ORIGIN"], "https://staging-app.cosmaneura.com")
         self.assertNotIn("REAL_PATIENT_RECORDING_ENABLED", public)
-        self.assertFalse(contract["optional_runtime_features"]["real_patient_recording"])
+        self.assertFalse(contract["optional_runtime_features"]["real_patient_recording_process_switch"])
         self.assertTrue(contract["optional_runtime_features"]["capture_and_agent_tools"])
+        self.assertEqual(
+            contract["optional_runtime_features"]["capture_content"],
+            "live microphone audio on a synthetic-only host; never relabelled as invented",
+        )
+        self.assertEqual(contract["platform_connections"][0]["kind"], "core_staging_capture")
+        # Sibling platform paths stay dark with capture/tools opted in.
+        for flag in (
+            "WORKSPACE_CORE_CONNECTION_ENABLED",
+            "WORKSPACE_CORE_RECORD_ENABLED",
+            "WORKSPACE_SESSION_PREP_ENABLED",
+            "WORKSPACE_ATHENA_CONNECTION_ENABLED",
+            "WORKSPACE_PREP_ENABLED",
+            "WORKSPACE_PREP_WORK_ENABLED",
+            "WORKSPACE_ROUTINES_ENABLED",
+            "WORKSPACE_CAPTURE_CORRECTIONS_ENABLED",
+            "WORKSPACE_CAPTURE_RECOVERY_ENABLED",
+            "WORKSPACE_CAPTURE_SOURCE_ENABLED",
+            "WORKSPACE_CAPTURE_LONG_VISITS_ENABLED",
+        ):
+            self.assertEqual(public[flag], "false", flag)
         database = contract["database"]
         private = {
             "database_url": f"postgresql+psycopg://{database['role']}:invented-password@127.0.0.1:{database['port']}/{database['name']}",
@@ -175,6 +214,38 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
         self.assertTrue(settings.workspace_capture_available)
         self.assertTrue(settings.workspace_agent_tools_enabled)
         self.assertFalse(settings.real_patient_recording_enabled)
+        self.assertFalse(settings.workspace_core_connection_available)
+        self.assertFalse(settings.workspace_core_record_enabled)
+        self.assertFalse(settings.workspace_session_prep_enabled)
+        self.assertFalse(settings.workspace_athena_connection_enabled)
+        self.assertFalse(settings.workspace_prep_enabled)
+        self.assertFalse(settings.workspace_routines_enabled)
+        self.assertFalse(settings.workspace_capture_corrections_enabled)
+        self.assertFalse(settings.workspace_capture_recovery_enabled)
+        self.assertFalse(settings.workspace_capture_source_enabled)
+        self.assertFalse(settings.workspace_capture_long_visits_enabled)
+        # Tool families reachable when agent tools are on (agent_tools.py:217-225,
+        # model_work.py:790-800). Base tools are local; connector/delivery families
+        # can touch real Google/Microsoft account content when those overlays are on.
+        self.assertEqual(
+            TOOL_NAMES,
+            (
+                "list_selected_sources",
+                "read_selected_source",
+                "read_saved_teammate_draft",
+                "read_current_operation_status",
+            ),
+        )
+        self.assertEqual(
+            CONNECTOR_TOOL_NAMES,
+            ("propose_research_query", "execute_reviewed_research", "read_research_result"),
+        )
+        self.assertEqual(DELIVERY_TOOL_NAMES, ("execute_reviewed_delivery", "read_delivery_status"))
+        self.assertTrue(settings.workspace_google_message_available)
+        self.assertEqual(
+            contract["optional_runtime_features"]["google_content"],
+            "actual consenting account content; never relabelled as invented",
+        )
         # Process guard still refuses turning real-patient recording on via env.
         refused = ExplicitSettings(
             **{key.lower(): value for key, value in public.items()},
