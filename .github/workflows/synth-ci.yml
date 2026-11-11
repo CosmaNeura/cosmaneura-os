@@ -338,6 +338,8 @@ jobs:
         run: |
           node --test infra/enrollment/render.test.mjs infra/enrollment/verify-staging-hosts.test.mjs web/scripts/enrollment-hosting.test.mjs infra/enrollment/workspaces/render.test.mjs
           python3 -m unittest discover -s infra/enrollment/runtime/tests -p test_dns.py -v
+      - name: Standalone host render node tests
+        run: node --test infra/standalone/render.test.mjs infra/standalone/render-beta.test.mjs
       - name: Validate independent enrollment runtime
         working-directory: infra/enrollment/runtime
         run: tofu fmt -check && tofu init -backend=false -input=false -lockfile=readonly && tofu validate -no-color && tofu test -no-color
