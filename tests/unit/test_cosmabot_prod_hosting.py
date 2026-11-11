@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -87,10 +88,27 @@ def test_model_config_matches_staging_profile():
 def test_azure_openai_defaults_off():
     openai = (FOUNDATION / "openai.tf").read_text()
     assert "enable_azure_openai" in openai
-    assert "default" in openai and "false" in openai
+    assert re.search(r"default\s*=\s*false", openai)
     assert 'module "azure_openai"' in openai
     profile = json.loads((PROD / "profile/runtime-public.json").read_text())
     assert profile["azure_openai_module"]["enabled_by_default"] is False
+    bundle = dry_run.render_params()
+    dry_run.validate_rendered(bundle)
+    assert bundle["params"]["enable_azure_openai"] is False
+
+
+def test_azure_openai_opt_in_path_validates_dzus_shape():
+    module = (FOUNDATION / "modules/azure_openai/main.tf").read_text()
+    assert "gpt-4.1-dzus" in module
+    assert "DataZoneStandard" in module
+    assert "2025-04-14" in module
+    assert "privatelink.openai.azure.com" in module
+    assert "Cognitive Services OpenAI User" in module
+    assert "public_network_access_enabled = false" in module
+    assert not re.search(r"local_auth_enabled\s*=\s*false", module)
+    bundle = dry_run.render_params(enable_azure_openai=True)
+    dry_run.validate_rendered(bundle)
+    assert bundle["params"]["enable_azure_openai"] is True
 
 
 def test_clerk_secret_names_only_no_values():
@@ -104,13 +122,18 @@ def test_clerk_secret_names_only_no_values():
 def test_price_table_estimate_and_total():
     prices = json.loads((PROD / "prices/monthly-estimate.json").read_text())
     assert prices["label"] == "estimate"
-    assert prices["price_date"] == "2026-09-25"
+    assert prices["price_date"] == "2026-11-11"
+    components = {item["component"] for item in prices["line_items"]}
+    assert any("Azure OpenAI gpt-4.1 Data Zone" in name for name in components)
+    assert any("OpenAI private endpoint" in name for name in components)
+    assert any("privatelink.openai.azure.com" in name for name in components)
     total = dry_run.monthly_total(prices)
     assert 180 <= total <= 260
+    assert total == 188.07
     assert total <= float(prices["warning_threshold_usd"])
 
 
-def test_dry_run_offline_no_azure(monkeypatch):
+def test_dry_run_offline_no_azure_default_off(monkeypatch):
     # Ensure dry-run does not require or call Azure tooling.
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     for key in list(os.environ):
@@ -131,6 +154,24 @@ def test_dry_run_offline_no_azure(monkeypatch):
     assert payload["params"]["web_host"] == "beta.cosmas.ai"
     assert payload["params"]["real_patient_recording_enabled"] == "false"
     assert payload["params"]["enable_azure_openai"] is False
+
+
+def test_dry_run_offline_opt_in_openai(monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    for key in list(os.environ):
+        if key.startswith(("ARM_", "TF_")) or key == "AZURE_CONFIG_DIR":
+            monkeypatch.delenv(key, raising=False)
+    result = subprocess.run(
+        [sys.executable, str(PROD / "dry_run.py"), "--enable-azure-openai"],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["params"]["enable_azure_openai"] is True
+    assert payload["azure_calls"] is False
 
 
 def test_apply_refuses_without_confirm():

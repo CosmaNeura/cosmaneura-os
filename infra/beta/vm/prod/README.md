@@ -46,9 +46,15 @@ Example inputs shape (invented values only in tests):
   "admin_username": "cosmasoperator",
   "admin_ssh_public_key": "ssh-ed25519 AAAA... reviewer@example.invalid",
   "release_operator_object_id": "00000000-0000-4000-8000-000000000003",
-  "alert_contact_email": "owner@example.invalid"
+  "alert_contact_email": "owner@example.invalid",
+  "enable_azure_openai": true
 }
 ```
+
+`enable_azure_openai` is optional and defaults to `false` when omitted. Set
+`"enable_azure_openai": true` (JSON boolean) in the reviewed inputs file so the
+OpenAI account, `gpt-4.1-dzus` deployment, private endpoint, DNS zone, and
+runtime RBAC appear in the plan John reviews before any apply.
 
 ## Review (what-if / plan + cost)
 

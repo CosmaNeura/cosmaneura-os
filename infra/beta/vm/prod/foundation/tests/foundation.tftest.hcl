@@ -91,6 +91,17 @@ mock_provider "azurerm" {
       id = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft.Insights/dataCollectionRules/dcr-health"
     }
   }
+  mock_resource "azurerm_cognitive_account" {
+    defaults = {
+      id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft.CognitiveServices/accounts/oai-mock"
+      endpoint = "https://oai-mock.openai.azure.com/"
+    }
+  }
+  mock_resource "azurerm_cognitive_deployment" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft.CognitiveServices/accounts/oai-mock/deployments/gpt-4.1-dzus"
+    }
+  }
 }
 
 variables {
@@ -332,5 +343,21 @@ run "azure_openai_defaults_off" {
   assert {
     condition     = module.azure_openai.created == false && var.enable_azure_openai == false
     error_message = "Default production plan must not create Azure OpenAI."
+  }
+}
+
+run "azure_openai_opt_in_creates_dzus_and_private_path" {
+  command = plan
+  variables {
+    enable_azure_openai = true
+  }
+  assert {
+    condition = (
+      module.azure_openai.created == true &&
+      module.azure_openai.deployment_name == "gpt-4.1-dzus" &&
+      module.azure_openai.private_endpoint_id != null &&
+      module.azure_openai.private_dns_zone_id != null
+    )
+    error_message = "Opt-in plan must create gpt-4.1-dzus with private endpoint and DNS."
   }
 }

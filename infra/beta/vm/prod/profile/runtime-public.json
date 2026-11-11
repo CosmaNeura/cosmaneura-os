@@ -31,6 +31,8 @@
   },
   "azure_openai_module": {
     "enabled_by_default": false,
-    "requires_separate_john_yes": true
+    "requires_separate_john_yes": true,
+    "opt_in_inputs_key": "enable_azure_openai",
+    "deployment_when_enabled": "gpt-4.1-dzus"
   }
 }

@@ -27,6 +27,8 @@ REQUIRED = {
     "admin_username", "admin_ssh_public_key", "release_operator_object_id", "alert_contact_email",
 }
 OPTIONAL = {"location", "ubuntu_image_version"}
+# Optional JSON bool only. Absent means false (OpenTofu variable default).
+OPTIONAL_BOOLS = {"enable_azure_openai"}
 PROTECTED_FILES = {"inputs.json", "backend.hcl", "tofurc", "encryption.passphrase"}
 
 
@@ -145,12 +147,21 @@ def prepare(folder: Path, inputs_path: Path, expected_source: str, expected_lock
     if actual["source_sha256"] != expected_source or actual["lock_sha256"] != expected_lock:
         raise Refused("Foundation source/lock differs from the reviewed hashes")
     inputs = read_json(inputs_path)
-    if not isinstance(inputs, dict) or not REQUIRED <= set(inputs) or set(inputs) - REQUIRED - OPTIONAL or not all(isinstance(value, str) and value for value in inputs.values()):
+    if not isinstance(inputs, dict) or not REQUIRED <= set(inputs):
         raise Refused("Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret")
+    unknown = set(inputs) - REQUIRED - OPTIONAL - OPTIONAL_BOOLS
+    if unknown:
+        raise Refused("Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret")
+    string_keys = (REQUIRED | OPTIONAL) & set(inputs)
+    if not all(isinstance(inputs[key], str) and inputs[key] for key in string_keys):
+        raise Refused("Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret")
+    for key in OPTIONAL_BOOLS & set(inputs):
+        if not isinstance(inputs[key], bool):
+            raise Refused("enable_azure_openai must be a JSON boolean when present")
     if inputs.get("location", "eastus2") != "eastus2" or inputs.get("ubuntu_image_version", "22.04.202608060") != "22.04.202608060":
         raise Refused("Keep the reviewed East US 2 location and immutable image")
     try:
-        assert_production_inputs(inputs)
+        assert_production_inputs({key: value for key, value in inputs.items() if isinstance(value, str)})
     except NameGuardError as exc:
         raise Refused(str(exc)) from exc
     context = owner_context(env, inputs)

@@ -11,5 +11,7 @@ Operator entrypoints live one level up:
 - Offline dry-run: `infra/beta/vm/prod/dry_run.py`
 
 See `../README.md` for John's exact commands. Azure OpenAI is a separate module
-defaulting to off (`enable_azure_openai=false`). This helper prepares and plans
-only; it does not apply.
+defaulting to off (`enable_azure_openai=false`). Set
+`"enable_azure_openai": true` in the reviewed inputs JSON at plan time to include
+`gpt-4.1-dzus`, the OpenAI private endpoint, and `privatelink.openai.azure.com`.
+This helper prepares and plans only; it does not apply.

@@ -46,9 +46,11 @@ def load_json(path: Path):
     return json.loads(path.read_text(), object_pairs_hook=unique)
 
 
-def render_params() -> dict:
+def render_params(*, enable_azure_openai: bool = False) -> dict:
     profile = load_json(ROOT / "profile" / "runtime-public.json")
     prices = load_json(ROOT / "prices" / "monthly-estimate.json")
+    if not isinstance(enable_azure_openai, bool):
+        raise DryRunError("enable_azure_openai_must_be_bool")
     params = {
         "environment": "production",
         "resource_group": PRODUCTION["resource_group"],
@@ -61,7 +63,7 @@ def render_params() -> dict:
         "key_vault_prefix": PRODUCTION["key_vault_prefix"],
         "storage_prefixes": list(PRODUCTION["storage_prefixes"]),
         "state_namespace": PRODUCTION["state_namespace"],
-        "enable_azure_openai": False,
+        "enable_azure_openai": enable_azure_openai,
         "dns_proxy": False,
         "clerk_secret_names_only": profile["runtime"]["secret_names"],
         "real_patient_recording_enabled": profile["runtime"]["environment"][
@@ -108,10 +110,15 @@ def validate_rendered(bundle: dict) -> None:
         raise DryRunError("real_patient_recording_must_stay_false")
     if profile["runtime"]["environment"]["REAL_PATIENT_RECORDING_ENABLED"] != "false":
         raise DryRunError("profile_recording_must_stay_false")
-    if params["enable_azure_openai"] is not False:
-        raise DryRunError("azure_openai_must_default_off")
+    # Code/profile default stays false. Opt-in is only via John's inputs at plan time.
     if profile["azure_openai_module"]["enabled_by_default"] is not False:
         raise DryRunError("azure_openai_profile_must_default_off")
+    if params["enable_azure_openai"] is False:
+        pass
+    elif params["enable_azure_openai"] is True:
+        validate_openai_opt_in_source()
+    else:
+        raise DryRunError("azure_openai_flag_must_be_bool")
     if params["workspace_llm_backend"] != "azure_gpt41":
         raise DryRunError("model_backend_must_match_staging")
     if params["workspace_llm_deployment"] != "gpt-4.1":
@@ -129,6 +136,31 @@ def validate_rendered(bundle: dict) -> None:
         raise DryRunError("price_total_invalid")
     params["estimated_monthly_total_usd"] = total
     params["exceeds_300"] = total > float(prices["warning_threshold_usd"])
+
+
+def validate_openai_opt_in_source() -> None:
+    """When enable_azure_openai is true, require the reviewed opt-in resource shape."""
+    openai = (FOUNDATION / "openai.tf").read_text()
+    module = (FOUNDATION / "modules/azure_openai/main.tf").read_text()
+    if "enable_azure_openai" not in openai or not re.search(r"default\s*=\s*false", openai):
+        raise DryRunError("openai_module_must_default_false")
+    for needle in (
+        '"gpt-4.1-dzus"',
+        '"2025-04-14"',
+        '"DataZoneStandard"',
+        "capacity = 10",
+        '"privatelink.openai.azure.com"',
+        "public_network_access_enabled = false",
+        '"Cognitive Services OpenAI User"',
+        'subresource_names              = ["account"]',
+        "azurerm_cognitive_deployment",
+        "azurerm_private_endpoint",
+    ):
+        if needle not in module:
+            raise DryRunError(f"openai_opt_in_source_missing:{needle}")
+    # App still uses API key auth; module must not disable local key auth.
+    if re.search(r"local_auth_enabled\s*=\s*false", module):
+        raise DryRunError("openai_must_keep_local_key_auth")
 
 
 class _expect:
@@ -178,8 +210,10 @@ def validate_foundation_source() -> None:
         r"default\s*=\s*false", openai
     ):
         raise DryRunError("openai_module_must_default_false")
-    if "module \"azure_openai\"" not in openai:
+    if 'module "azure_openai"' not in openai:
         raise DryRunError("openai_must_be_separate_module")
+    # Opt-in resources exist behind count; default plan still creates none.
+    validate_openai_opt_in_source()
     staging_foundation = REPO / "infra/beta/vm/foundation"
     staging_text = "\n".join(
         path.read_text()
@@ -262,9 +296,19 @@ def tofu_offline_validate() -> dict:
         return {"tofu": tofu, "fmt": "ok", "validate": "ok", "skipped": False}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    enable_openai = False
+    if args == ["--enable-azure-openai"]:
+        enable_openai = True
+    elif args:
+        print(
+            "cosmabot_prod_dry_run_refused:usage_python3_dry_run.py_[--enable-azure-openai]",
+            file=sys.stderr,
+        )
+        return 1
     try:
-        bundle = render_params()
+        bundle = render_params(enable_azure_openai=enable_openai)
         validate_rendered(bundle)
         validate_foundation_source()
         tofu = tofu_offline_validate()

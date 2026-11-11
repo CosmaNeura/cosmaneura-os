@@ -83,7 +83,8 @@ if total > threshold:
 else:
     print(f"(under ${threshold:.0f}/month warning threshold)")
 print("")
-print("Azure OpenAI module: OFF by default (excluded from this estimate).")
+print("Azure OpenAI module: OFF by default (enable_azure_openai=false).")
+print("Estimate includes OpenAI PE/DNS standing when opted in; token usage is pay-as-you-go.")
 print("This is an estimate, not an Azure invoice.")
 print("")
 

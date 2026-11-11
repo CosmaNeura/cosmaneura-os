@@ -1,13 +1,13 @@
 {
   "label": "estimate",
-  "price_date": "2026-09-25",
+  "price_date": "2026-11-11",
   "currency": "USD",
   "hours_per_month": 730,
   "notes": [
     "Checked-in retail estimate for the CosmaBot production VM foundation shape.",
-    "Same SKU envelope as the September 25, 2026 staging VM option (D2s_v5, Premium ACR, four private endpoints).",
+    "VM/ACR/storage envelope originally priced 2026-09-25; Azure OpenAI Data Zone token rates refreshed from Azure Retail Prices API eastus2 on 2026-11-11.",
     "Not an Azure invoice, reservation quote, or spending cap. No credits, tax, or transfer assumed.",
-    "Azure OpenAI module is OFF by default and is excluded from this estimate."
+    "Azure OpenAI resources stay behind enable_azure_openai (default false). Standing OpenAI network costs below apply when John opts in at plan time; token usage is pay-as-you-go with no standing fee."
   ],
   "line_items": [
     {
@@ -54,6 +54,21 @@
       "component": "Illustrative usage (10 GB app objects + 100 GB backups + 0.1 GB/day logs + 10k Key Vault ops)",
       "quantity": "planning assumption",
       "monthly_usd": 10.45
+    },
+    {
+      "component": "Azure OpenAI gpt-4.1 Data Zone Standard US (no standing fee; usage only)",
+      "quantity": "input $0.0022/1K + cached input $0.00055/1K + output $0.0088/1K tokens (Retail Prices eastus2 2026-11-11)",
+      "monthly_usd": 0.0
+    },
+    {
+      "component": "Azure OpenAI private endpoint (when enable_azure_openai=true)",
+      "quantity": "1 × $0.01/hour × 730 hours",
+      "monthly_usd": 7.30
+    },
+    {
+      "component": "Azure OpenAI private DNS zone privatelink.openai.azure.com (when enable_azure_openai=true)",
+      "quantity": "1 × $0.50",
+      "monthly_usd": 0.50
     }
   ],
   "warning_threshold_usd": 300

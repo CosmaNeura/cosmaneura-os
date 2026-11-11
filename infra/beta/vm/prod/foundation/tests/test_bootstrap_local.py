@@ -91,6 +91,18 @@ class BootstrapSafety(unittest.TestCase):
                 self.prepare()
         self.assertFalse(self.folder.exists())
 
+    def test_enable_azure_openai_bool_accepted_string_refused(self):
+        self.input_file.write_text(json.dumps({**self.inputs, "enable_azure_openai": True}))
+        result, _ = self.prepare()
+        self.assertTrue(result["prepared"])
+        written = json.loads((self.folder / "inputs.json").read_text())
+        self.assertIs(written["enable_azure_openai"], True)
+        shutil.rmtree(self.folder)
+        self.input_file.write_text(json.dumps({**self.inputs, "enable_azure_openai": "true"}))
+        with self.assertRaises(bootstrap.Refused):
+            self.prepare()
+        self.assertFalse(self.folder.exists())
+
     def test_changed_inputs_snapshot_or_existing_data_are_refused_before_azure(self):
         self.prepare()
         original = (self.folder / "inputs.json").read_bytes()
