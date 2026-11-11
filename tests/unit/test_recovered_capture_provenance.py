@@ -60,6 +60,38 @@ EXPECTED_APP_PRIVACY = {
                 "NSPrivacyCollectedDataTypePurposeAppFunctionality",
             ],
         },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeName",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeHealth",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeOtherUserContent",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeDeviceID",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
     ],
     "NSPrivacyAccessedAPITypes": [
         {
@@ -68,6 +100,10 @@ EXPECTED_APP_PRIVACY = {
         }
     ],
 }
+SYNTHETIC_MICROPHONE_USAGE = (
+    "CosmaBot uses the microphone only after you start a synthetic capture test with "
+    "invented encounter audio."
+)
 EXTERNAL_CAPTURE_SNAPSHOT = "ea7f99d0278a05706531ffb1288cb1df7acf507b"
 FROZEN_CAPTURE_PROVENANCE_SHA256 = "f1d73c9e7fd9515d7dd16b676f78d1cacd420a63d9f7524fe9444525c9bdf2a3"
 
@@ -520,10 +556,68 @@ def test_composed_project_includes_privacy_manifest_and_usage_strings(tmp_path):
     assert "ITSAppUsesNonExemptEncryption" not in info
 
 
-def test_prepare_apple_synthetic_writes_reviewed_usage_strings():
-    source = APPLE_PREPARE.read_text(encoding="utf-8")
-    assert MICROPHONE_USAGE in source
-    assert "CosmaBot uses on-device speech recognition to transcribe recordings you choose to" in source
-    assert "transcribe so it can draft your notes." in source
-    assert "Cosmas records visit audio after you confirm consent" not in source
-    assert "ITSAppUsesNonExemptEncryption=NO" in source or "ITSAppUsesNonExemptEncryption) is False" in source
+def test_compose_refuses_non_true_export_compliance_key(tmp_path, monkeypatch):
+    module = _portable()
+    original_apply = module._apply_owned_usage_descriptions
+
+    def inject_false_then_apply(repository, output, placed):
+        destination = output / module.APP_SCAFFOLD / "ios/App/App/Info.plist"
+        info = plistlib.loads(destination.read_bytes())
+        info["ITSAppUsesNonExemptEncryption"] = False
+        destination.write_bytes(plistlib.dumps(info, sort_keys=False))
+        return original_apply(repository, output, placed)
+
+    monkeypatch.setattr(module, "_apply_owned_usage_descriptions", inject_false_then_apply)
+    output = tmp_path / "refused-export"
+    with pytest.raises(ValueError, match="Refusing"):
+        module.compose(ROOT, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("value", [False, 0, "NO", "false", "YES", 1])
+def test_refuse_non_true_export_compliance_rejects_non_true_values(value):
+    module = _portable()
+    with pytest.raises(ValueError, match="Refusing"):
+        module.refuse_non_true_export_compliance({"ITSAppUsesNonExemptEncryption": value})
+
+
+def test_refuse_non_true_export_compliance_allows_absent_or_true():
+    module = _portable()
+    module.refuse_non_true_export_compliance({})
+    module.refuse_non_true_export_compliance({"ITSAppUsesNonExemptEncryption": True})
+
+
+def test_apply_reviewed_apple_info_usage_covers_operational_and_synthetic_paths():
+    spec = importlib.util.spec_from_file_location("prepare_apple_synthetic", APPLE_PREPARE)
+    assert spec is not None and spec.loader is not None
+    prepare = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(prepare)
+
+    operational = prepare.apply_reviewed_apple_info_usage(
+        {}, operational=True, simulator_staging_auth=False
+    )
+    assert operational["NSMicrophoneUsageDescription"] == MICROPHONE_USAGE
+    assert operational["NSSpeechRecognitionUsageDescription"] == SPEECH_USAGE
+    assert "ITSAppUsesNonExemptEncryption" not in operational
+
+    synthetic = prepare.apply_reviewed_apple_info_usage(
+        {}, operational=False, simulator_staging_auth=False
+    )
+    assert synthetic["NSMicrophoneUsageDescription"] == SYNTHETIC_MICROPHONE_USAGE
+    assert synthetic["NSSpeechRecognitionUsageDescription"] == SPEECH_USAGE
+
+    simulator = prepare.apply_reviewed_apple_info_usage(
+        {}, operational=True, simulator_staging_auth=True
+    )
+    assert simulator["NSMicrophoneUsageDescription"] == SYNTHETIC_MICROPHONE_USAGE
+
+    with pytest.raises(ValueError, match="Refusing"):
+        prepare.apply_reviewed_apple_info_usage(
+            {"ITSAppUsesNonExemptEncryption": False},
+            operational=True,
+            simulator_staging_auth=False,
+        )
+    absent = prepare.apply_reviewed_apple_info_usage(
+        {}, operational=True, simulator_staging_auth=False
+    )
+    assert "ITSAppUsesNonExemptEncryption" not in absent
