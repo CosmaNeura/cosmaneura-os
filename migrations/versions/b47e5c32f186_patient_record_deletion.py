@@ -197,20 +197,48 @@ def upgrade() -> None:
     op.execute(
         "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) TO CURRENT_USER"
     )
-    # Apply grants only when John already created the role. Never create it here.
-    if op.get_bind().execute(
-        text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": _ROLE}
-    ).scalar() is None:
+    # Apply grants only when John already created the role and this migrator can
+    # hand off ownership (superuser or SET). Never create the role here. A
+    # cluster-wide role left by synthetic fixtures must not break a later
+    # non-superuser compact migrate.
+    bind = op.get_bind()
+    role_exists = (
+        bind.execute(
+            text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": _ROLE}
+        ).scalar()
+        is not None
+    )
+    if not role_exists:
         _LOG.info("cosmas_patient_deletion is missing; grant skipped")
     else:
+        can_handoff = bool(
+            bind.execute(
+                text(
+                    """
+                    SELECT EXISTS (
+                      SELECT 1 FROM pg_roles
+                       WHERE rolname = current_user AND rolsuper
+                    ) OR pg_has_role(current_user, :role, 'SET')
+                    """
+                ),
+                {"role": _ROLE},
+            ).scalar()
+        )
         op.execute(f"GRANT USAGE, CREATE ON SCHEMA public TO {_ROLE}")
         op.execute(
             f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {_ROLE}"
         )
-        op.execute(
-            f"ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb) OWNER TO {_ROLE}"
-        )
-        op.execute(f"REVOKE CREATE ON SCHEMA public FROM {_ROLE}")
+        if can_handoff:
+            op.execute(
+                f"ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb) "
+                f"OWNER TO {_ROLE}"
+            )
+            op.execute(f"REVOKE CREATE ON SCHEMA public FROM {_ROLE}")
+        else:
+            # Role exists (often from an earlier synth fixture on this cluster) but
+            # this migrator cannot SET ROLE to it. Skip ownership; keep grants.
+            _LOG.info("cosmas_patient_deletion grant skipped")
+            op.execute(f"REVOKE CREATE ON SCHEMA public FROM {_ROLE}")
 
 
 def downgrade() -> None:
