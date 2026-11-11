@@ -114,7 +114,7 @@ PORTAL_SETUP_ENABLED PORTAL_WORK_ENABLED PORTAL_IO_ENABLED FINANCE_WORK_ENABLED 
 MEMBERSHIP_WORK_ENABLED INBOX_WORK_ENABLED INBOX_HANDOFF_ENABLED FINANCE_IO_ENABLED FINANCE_EVENTS_ENABLED
 WORKSPACE_ROUTINES_ENABLED WORKSPACE_CAPTURE_CORRECTIONS_ENABLED WORKSPACE_CAPTURE_RECOVERY_ENABLED
 WORKSPACE_CAPTURE_SOURCE_ENABLED WORKSPACE_CAPTURE_LONG_VISITS_ENABLED WORKSPACE_SESSION_PREP_ENABLED
-WORKSPACE_AGENT_TOOLS_ENABLED`.split(/\s+/);
+WORKSPACE_AGENT_TOOLS_ENABLED WORKSPACE_LLM_USDZ_ENABLED`.split(/\s+/);
 
 function service({name,user,config,release,intended,writePaths,environment=false,https=false}){
   return `[Unit]\nDescription=${name} (review only; startup held)\n\n[Service]\nType=exec\nUser=${user}\nGroup=${user}\nWorkingDirectory=${release}\n${environment?`EnvironmentFile=${config}/api-public.env\nEnvironmentFile=${config}/api-private.env\n`:''}ExecStart=/bin/sh ${release}/STARTUP-HELD.sh\n# Intended command for a separately qualified release only:\n# ${intended}\nRestart=no\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=${writePaths.join(' ')}\nCapabilityBoundingSet=${https?'CAP_NET_BIND_SERVICE':''}\n${https?'AmbientCapabilities=CAP_NET_BIND_SERVICE\n':''}RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n\n# No Install section: this review unit cannot be enabled as a release.\n`;

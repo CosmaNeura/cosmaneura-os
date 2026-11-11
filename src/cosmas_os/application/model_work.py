@@ -454,6 +454,22 @@ def resolve_conversation(
     )
 
 
+def _usage_model_name(row) -> str:
+    """Record the deployment actually prepared on the admission envelope."""
+    envelope = getattr(row, "prepared_envelope", None)
+    if isinstance(envelope, dict):
+        bodies = [envelope.get("body")]
+        baseline = envelope.get("baseline")
+        if isinstance(baseline, dict):
+            bodies.append(baseline.get("body"))
+        for candidate in bodies:
+            if isinstance(candidate, dict):
+                model = candidate.get("model")
+                if isinstance(model, str) and model:
+                    return model
+    return getattr(team.runtime_settings, "workspace_llm_chat_deployment", MODEL)
+
+
 def _usage_record(
     s,
     row,
@@ -479,7 +495,7 @@ def _usage_record(
         "usage": "verified" if verified else "unknown",
         "input_tokens": input_tokens if verified else None,
         "output_tokens": output_tokens if verified else None,
-        "model": "gpt-4.1",
+        "model": _usage_model_name(row),
         "envelope_sha256": row.envelope_sha256,
         "response_sha256": response_sha256,
     }

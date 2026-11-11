@@ -339,7 +339,7 @@ def record_reply(s, w, entry, version, bot, settings, context, reply):
                 initiated_by_principal_id=owner,
                 outcome="unavailable" if reply.backend.endswith("unavailable") else "completed",
                 detail={
-                    "model": "gpt-4.1",
+                    "model": runtime_settings.workspace_llm_chat_deployment,
                     "input_tokens": reply.input_tokens,
                     "output_tokens": reply.output_tokens,
                 },
