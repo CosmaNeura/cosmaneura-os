@@ -6,13 +6,18 @@ flag is on and ``current_user`` is ``cosmas_patient_deletion``. That role owns
 the security-definer function, cannot log in, and is never granted to the
 application runtime role.
 
-This migration does not create or grant ``cosmas_patient_deletion``. John sets
-that role up before applying the migration (including table privileges the
-function needs, and a temporary SET grant so the migrator can hand off
-ownership). The local synth checker mirrors that precondition.
+This migration never creates ``cosmas_patient_deletion``. When that role already
+exists, the migration applies the grants and ownership handoff. When it is
+missing, the migration still succeeds and skips the grant. John runs
+``scripts/ensure-patient-deletion-role.sql`` himself.
 """
 
+from __future__ import annotations
+
+import logging
+
 from alembic import op
+from sqlalchemy import text
 
 revision = "b47e5c32f186"
 down_revision = "a46f2c09d853"
@@ -20,6 +25,7 @@ branch_labels = None
 depends_on = None
 
 _ROLE = "cosmas_patient_deletion"
+_LOG = logging.getLogger("alembic.runtime.migration")
 
 
 def upgrade() -> None:
@@ -185,31 +191,26 @@ def upgrade() -> None:
         END $$
         """
     )
-    # Ownership transfer and table grants need the role John creates. Local
-    # synth prepares that role before migrating. This migration never creates
-    # or grants membership in cosmas_patient_deletion.
-    op.execute(
-        f"""
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{_ROLE}') THEN
-            RAISE NOTICE
-              'cosmas_patient_deletion missing; John must create the role and reassign delete_patient_keyed_records';
-            RETURN;
-          END IF;
-          GRANT USAGE, CREATE ON SCHEMA public TO {_ROLE};
-          GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {_ROLE};
-          ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb) OWNER TO {_ROLE};
-          REVOKE CREATE ON SCHEMA public FROM {_ROLE};
-        END $$
-        """
-    )
     op.execute(
         "REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) FROM PUBLIC"
     )
     op.execute(
         "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) TO CURRENT_USER"
     )
+    # Apply grants only when John already created the role. Never create it here.
+    if op.get_bind().execute(
+        text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": _ROLE}
+    ).scalar() is None:
+        _LOG.info("cosmas_patient_deletion is missing; grant skipped")
+    else:
+        op.execute(f"GRANT USAGE, CREATE ON SCHEMA public TO {_ROLE}")
+        op.execute(
+            f"GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {_ROLE}"
+        )
+        op.execute(
+            f"ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb) OWNER TO {_ROLE}"
+        )
+        op.execute(f"REVOKE CREATE ON SCHEMA public FROM {_ROLE}")
 
 
 def downgrade() -> None:

@@ -79,12 +79,6 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Sync
         run: uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import
-      - name: Patient deletion role precondition (John sets this up outside migrations)
-        run: >
-          uv run python -c "import pathlib, psycopg;
-          c=psycopg.connect('postgresql://cosmas:cosmas@localhost:54329/cosmas_os', autocommit=True);
-          c.execute(pathlib.Path('scripts/ensure-patient-deletion-role.sql').read_text());
-          c.close()"
       - name: Migrations on empty database
         run: uv run alembic upgrade head
       - uses: actions/setup-node@v4
@@ -244,12 +238,6 @@ jobs:
           EOF
           echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
           echo "WEB_IMAGE_TAG=$WEB_IMAGE_TAG" >> "$GITHUB_ENV"
-      - name: Patient deletion role precondition (John sets this up outside migrations)
-        run: |
-          set -euo pipefail
-          docker run --rm --network host -e PGPASSWORD=cosmas -v "$PWD/scripts:/scripts:ro" postgres:16.9 \
-            psql -h 127.0.0.1 -p 54329 -U cosmas -d cosmas_os -v ON_ERROR_STOP=1 \
-            -f /scripts/ensure-patient-deletion-role.sql
       - name: Smoke migrate from image
         run: |
           set -euo pipefail
@@ -430,12 +418,6 @@ jobs:
       - run: uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import
       - name: Create separate synthetic registry and managed workspace databases
         run: uv run python -c "import psycopg; c=psycopg.connect('postgresql://enrollment_test:synthetic_test_only@127.0.0.1:54329/runtime_synthetic',autocommit=True); c.execute('CREATE DATABASE enrollment_synthetic'); c.execute('CREATE DATABASE enrollment_runtime_synthetic'); c.close()"
-      - name: Patient deletion role precondition (John sets this up outside migrations)
-        run: >
-          uv run python -c "import pathlib, psycopg;
-          c=psycopg.connect('postgresql://enrollment_test:synthetic_test_only@127.0.0.1:54329/runtime_synthetic', autocommit=True);
-          c.execute(pathlib.Path('scripts/ensure-patient-deletion-role.sql').read_text());
-          c.close()"
       - name: Migrate the separate runtime protocol fixture database
         run: uv run alembic upgrade head
       - name: Account, agreement, billing and trusted workspace checks

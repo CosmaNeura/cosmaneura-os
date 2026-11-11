@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from datetime import UTC, datetime
@@ -27,6 +28,7 @@ from cosmas_os.application.patient_deletion import delete_patient_records, stora
 from cosmas_os.cli import app as cli_app
 from cosmas_os.config import settings
 from cosmas_os.domain.enums import DecisionKind, PrincipalState, PrincipalType
+from cosmas_os.domain.rules import DomainError
 from cosmas_os.models import (
     ActionRevision,
     AppointmentObservation,
@@ -51,11 +53,33 @@ from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 PNG = b"\x89PNG\r\n\x1a\n" + b"synthetic-card"
 ROOT = Path(__file__).resolve().parents[2]
 PARENT_REVISION = "a46f2c09d853"
+DELETION_ROLE = "cosmas_patient_deletion"
 GUARD_FUNCTIONS = (
     "reject_workspace_history_change",
     "reject_provider_history_change",
     "immutable_patient_setup",
     "reject_scheduling_account_change",
+)
+_ENSURE_ROLE_STATEMENTS = (
+    """
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cosmas_patient_deletion') THEN
+        CREATE ROLE cosmas_patient_deletion NOLOGIN NOINHERIT;
+      END IF;
+    END $$
+    """,
+    "GRANT USAGE ON SCHEMA public TO cosmas_patient_deletion",
+    "GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO cosmas_patient_deletion",
+    """
+    DO $$
+    BEGIN
+      IF to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)') IS NOT NULL THEN
+        ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb)
+          OWNER TO cosmas_patient_deletion;
+      END IF;
+    END $$
+    """,
 )
 
 
@@ -352,6 +376,8 @@ def practice(engine, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "blob_root", str(tmp_path / "blobs"))
     blob = LocalBlobAdapter(tmp_path / "blobs")
     session = Session(engine)
+    # Throwaway synth only: create John's deletion role here, never via CI workflows.
+    _ensure_patient_deletion_role(session)
     arranged = _arrange(session, blob)
     arranged["blob"] = blob
     arranged["session"] = session
@@ -714,6 +740,59 @@ def _autocommit(session: Session, statement: str) -> None:
         connection.execute(text(statement))
 
 
+def _run_statements(connection, statements: tuple[str, ...]) -> None:
+    for statement in statements:
+        connection.execute(text(statement))
+
+
+def _ensure_patient_deletion_role(session: Session) -> None:
+    """John's role setup, limited to this throwaway synthetic database session."""
+
+    bind = session.get_bind()
+    with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        _run_statements(connection, _ENSURE_ROLE_STATEMENTS)
+
+
+def _ensure_patient_deletion_role_on(engine) -> None:
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        _run_statements(connection, _ENSURE_ROLE_STATEMENTS)
+
+
+def _drop_patient_deletion_role(admin_engine, databases: tuple[str, ...]) -> None:
+    """Return function ownership, then drop the cluster role for no-role migrate tests."""
+
+    url = make_url(os.environ.get("DATABASE_URL", settings.database_url))
+    # Include postgres: John's ensure script may have granted schema usage there.
+    for database in tuple(dict.fromkeys((*databases, "postgres"))):
+        engine = create_engine(url.set(database=database))
+        try:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+                role_present = connection.scalar(
+                    text("SELECT 1 FROM pg_roles WHERE rolname = :role"),
+                    {"role": DELETION_ROLE},
+                )
+                if connection.scalar(
+                    text(
+                        "SELECT to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)')"
+                    )
+                ):
+                    connection.execute(
+                        text(
+                            "ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb) "
+                            "OWNER TO CURRENT_USER"
+                        )
+                    )
+                if role_present:
+                    connection.execute(
+                        text(f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {DELETION_ROLE}")
+                    )
+                    connection.execute(text(f"REVOKE ALL ON SCHEMA public FROM {DELETION_ROLE}"))
+        finally:
+            engine.dispose()
+    with admin_engine.connect() as connection:
+        connection.execute(text(f"DROP ROLE IF EXISTS {DELETION_ROLE}"))
+
+
 def _runtime_engine(session: Session, role: str):
     url = make_url(os.environ.get("DATABASE_URL", settings.database_url))
     database = str(session.scalar(text("SELECT current_database()")))
@@ -1019,6 +1098,8 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
     with admin.connect() as connection:
         connection.execute(text(f'CREATE DATABASE "{name}"'))
     try:
+        # Role must exist before migrate so ownership handoff runs on this synth DB.
+        _ensure_patient_deletion_role_on(admin)
         _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
         assert _revision(target) == EXPECTED_SCHEMA_REVISION
         assert all("cosmas.patient_deletion" in body for body in _guard_bodies(target).values())
@@ -1085,4 +1166,74 @@ def test_patient_deletion_guard_migration_upgrades_and_downgrades(tmp_path) -> N
         target.dispose()
         with admin.connect() as connection:
             connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin.dispose()
+
+
+def test_migration_applies_when_deletion_role_is_missing(caplog) -> None:
+    url = make_url(os.environ.get("DATABASE_URL", settings.database_url))
+    assert url.host in {"127.0.0.1", "localhost"}
+    shared = str(url.database)
+    name = "patdel_norole_" + uuid4().hex[:12]
+    admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    target = create_engine(url.set(database=name))
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"'))
+    try:
+        _drop_patient_deletion_role(admin, (shared, name))
+        with caplog.at_level(logging.INFO, logger="alembic.runtime.migration"):
+            _migrate(target, EXPECTED_SCHEMA_REVISION, downgrade=False)
+        assert _revision(target) == EXPECTED_SCHEMA_REVISION
+        assert "cosmas_patient_deletion is missing; grant skipped" in caplog.text
+        with target.connect() as connection:
+            owner = connection.scalar(
+                text(
+                    "SELECT r.rolname FROM pg_proc p "
+                    "JOIN pg_roles r ON r.oid = p.proowner "
+                    "WHERE p.oid = 'public.delete_patient_keyed_records(uuid, jsonb)'::regprocedure"
+                )
+            )
+            assert owner is not None
+            assert owner != DELETION_ROLE
+            assert connection.scalar(
+                text("SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": DELETION_ROLE}
+            ) is None
+    finally:
+        target.dispose()
+        with admin.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        # Restore John's role for later tests on this synthetic cluster.
+        _ensure_patient_deletion_role_on(create_engine(url))
+        admin.dispose()
+
+
+def test_confirm_refuses_when_deletion_role_is_missing(engine, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "blob_root", str(tmp_path / "blobs"))
+    blob = LocalBlobAdapter(tmp_path / "blobs")
+    session = Session(engine)
+    admin = create_engine(
+        make_url(os.environ.get("DATABASE_URL", settings.database_url)).set(database="postgres"),
+        isolation_level="AUTOCOMMIT",
+    )
+    try:
+        arranged = _arrange(session, blob)
+        casey = arranged["casey"]
+        patient_id = str(casey["patient_id"])
+        files = list(_paths(blob, casey).values()) + _upload_paths(
+            session, blob, str(casey["ticket_id"])
+        )
+        assert all(path.is_file() for path in files)
+        before = _patient_link_counts(session, patient_id)
+        _drop_patient_deletion_role(admin, (str(session.scalar(text("SELECT current_database()"))),))
+        with pytest.raises(DomainError, match="patient record deletion role is not configured"):
+            _calls(session, str(arranged["owner_id"]), patient_id, blob, confirm=True)
+        session.rollback()
+        assert _patient_link_counts(session, patient_id) == before
+        assert all(path.is_file() for path in files)
+        dry = _calls(session, str(arranged["owner_id"]), patient_id, blob, confirm=False)
+        assert dry["dry_run"] is True
+        assert dry["deleted"] is False
+        assert dry["tables"]
+    finally:
+        _ensure_patient_deletion_role(session)
+        session.close()
         admin.dispose()

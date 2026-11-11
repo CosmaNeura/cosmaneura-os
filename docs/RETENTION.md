@@ -18,6 +18,12 @@ metadata, transcripts, notes, drafts, messages, uploads, exports, and the other
 clinical rows keyed to that patient are removed. Older audit events stay, with
 the patient id replaced. The new deletion event records who deleted it, when,
 and that internal id only. It does not record the patient's name or note text.
+Confirmed deletes refuse and change nothing when the deletion role is missing.
+
+John runs `scripts/ensure-patient-deletion-role.sql` himself. That idempotent
+script creates the `cosmas_patient_deletion` NOLOGIN role if needed and applies
+the grants. Agents and CI never run it on a real database. The migration skips
+the grant with one log line when the role is absent.
 
 Backups are not edited. Deleted data ages out of backups under the backup
 retention policy. T-RETENTION adds that policy.

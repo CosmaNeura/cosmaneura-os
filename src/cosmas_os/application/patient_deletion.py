@@ -96,6 +96,9 @@ def delete_patient_records(
     """Count or delete every row and stored file keyed to one patient."""
 
     actor = _require_admin(session, actor_principal_id, lock=confirm)
+    if confirm:
+        # Fail closed before patient mutations when John has not set up the role.
+        _require_deletion_role(session)
     patient_id = _patient_id(patient_link_id)
     statement = select(PatientLink).where(PatientLink.id == patient_id)
     if confirm:
@@ -142,6 +145,27 @@ def delete_patient_records(
         session.rollback()
         raise
     return _report(patient_id, confirm=True, deleted=True, tables=counts, files=file_counts)
+
+
+def _require_deletion_role(session: Session) -> None:
+    """Refuse confirmed deletes unless John's deletion role owns the function."""
+
+    ready = session.scalar(
+        text(
+            """
+            SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'cosmas_patient_deletion')
+               AND EXISTS (
+                    SELECT 1
+                      FROM pg_proc p
+                      JOIN pg_roles owner ON owner.oid = p.proowner
+                     WHERE p.oid = to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)')
+                       AND owner.rolname = 'cosmas_patient_deletion'
+               )
+            """
+        )
+    )
+    if not ready:
+        raise DomainError("patient record deletion role is not configured")
 
 
 def _require_admin(session: Session, actor_principal_id: str, *, lock: bool) -> Principal:
