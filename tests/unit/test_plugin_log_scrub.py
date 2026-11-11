@@ -161,13 +161,18 @@ def test_httpx_and_runner_logs_scrub_urls_and_exceptions() -> None:
     combined = httpx_stream.getvalue() + runner_stream.getvalue()
     for secret in (MRN, EMAIL, NOTE, "stuffed penguin"):
         assert secret not in combined
-    assert REQUEST in httpx_stream.getvalue()
+    httpx_text = httpx_stream.getvalue()
+    # CoreUploadHttpxFilter (import order in backend-2) may strip the whole
+    # query; plugin scrubbing may keep keys as mrn=[redacted]. Never require a
+    # raw mrn= query value or request_id from the URL query to survive here.
+    assert "https://fixture.invalid/connections/ehr/reads" in httpx_text
+    assert f"mrn={MRN}" not in httpx_text
+    # request_id on the runner exception line is a format field, not a URL query.
     assert "request_id=" + REQUEST in runner_stream.getvalue()
     assert "Traceback (most recent call last)" in runner_stream.getvalue()
     assert "note_text = " not in runner_stream.getvalue()
     assert "mrn = " not in runner_stream.getvalue()
-    assert "note_text" not in httpx_stream.getvalue()
-    assert f"request_id={REQUEST}" in httpx_stream.getvalue()
+    assert "note_text" not in httpx_text
 
 
 def test_preexisting_httpx_handler_is_armed() -> None:
@@ -188,7 +193,8 @@ def test_preexisting_httpx_handler_is_armed() -> None:
         assert MRN not in text
         assert EMAIL not in text
         assert "penguin" not in text
-        assert REQUEST in text
+        assert "https://fixture.invalid/connections/ehr/reads" in text
+        assert f"mrn={MRN}" not in text
     finally:
         _restore(logger, previous)
 
