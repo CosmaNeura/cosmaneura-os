@@ -1120,3 +1120,33 @@ class ModelUsageObservation(Base):
     envelope_sha256: Mapped[str] = mapped_column(String(64))
     response_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     receipt_hash: Mapped[str] = mapped_column(String(64))
+
+
+class PatientDeletionPendingFile(Base):
+    """Relative stored-file paths left after a committed patient-record delete."""
+
+    __tablename__ = "patient_deletion_pending_files"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('audio', 'uploads', 'exports')",
+            name="patient_deletion_pending_files_kind_check",
+        ),
+        CheckConstraint(
+            "char_length(relative_path) BETWEEN 1 AND 1024 "
+            "AND relative_path !~ '^[/\\\\]' "
+            "AND relative_path !~ '\\\\.\\\\.'",
+            name="patient_deletion_pending_files_path_check",
+        ),
+        Index(
+            "ix_patient_deletion_pending_files_patient",
+            "patient_link_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    patient_link_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    relative_path: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
