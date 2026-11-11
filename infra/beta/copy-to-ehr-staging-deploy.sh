@@ -1137,7 +1137,7 @@ dry-run: git -C ${workdir}/src checkout --detach ${sha}
 dry-run: test "\$(git -C ${workdir}/src rev-parse HEAD)" = ${sha}
 dry-run: test -z "\$(git -C ${workdir}/src status --porcelain)"
 dry-run: cp -p -- ${web_env} ${workdir}/src/web/.env.production
-dry-run: VITE_BUILD_SHA=${sha} corepack pnpm install --frozen-lockfile
+dry-run: ${workdir}/src/scripts/install-client-deps.sh
 dry-run: VITE_BUILD_SHA=${sha} corepack pnpm run build
 dry-run: node scripts/package-staging-web.mjs --dist web/dist --output ${workdir}/web-package
 dry-run: transfer the web archive in ${CHUNK_BYTES}-byte chunks with az vm run-command invoke to ${release}/cosmabot-web-${sha}.tar.gz
@@ -1302,7 +1302,7 @@ copy_to_ehr_execute() {
   chmod 600 "$workdir/src/web/.env.production"
   (
     cd "$workdir/src/web"
-    VITE_BUILD_SHA="$sha" corepack pnpm install --frozen-lockfile
+    "$workdir/src/scripts/install-client-deps.sh"
     VITE_BUILD_SHA="$sha" corepack pnpm run build
   )
   node "$workdir/src/scripts/package-staging-web.mjs" \

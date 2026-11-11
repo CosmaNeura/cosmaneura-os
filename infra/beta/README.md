@@ -1203,7 +1203,10 @@ EHR beta. It follows the October 31 pointer switch on
 The script is a dry-run until `--execute`. Without `--cutover` it leaves
 `release-r10` on ports 54110 and 54112 and trials the new build on 54120 and
 54122, with a throwaway database on 54130. The live database is not migrated
-until cutover. Cutover also requires `--expect-prior-sha`.
+until cutover. Cutover also requires `--expect-prior-sha`. On `--execute`, the
+local web build runs `scripts/install-client-deps.sh` before `pnpm run build`
+in `web/`. That is the same install CI uses. `tsc -b` also typechecks
+`clients/capture`, so a web-only install is not enough.
 
 The candidate SHA lives in one constant, `DEFAULT_SOURCE_SHA`, currently
 `e29bf5a2de0eddec1663b1185076472ef172b590`. Pass `--sha` when PR 341 moves.

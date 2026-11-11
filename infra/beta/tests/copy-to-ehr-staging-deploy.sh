@@ -615,6 +615,28 @@ else
   fail "run-command output keeps whole status tokens"
 fi
 
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  body=$(declare -f copy_to_ehr_execute)
+  install_line=$(printf '%s\n' "$body" | awk '/install-client-deps\.sh/{print NR; exit}')
+  build_line=$(printf '%s\n' "$body" | awk '/corepack pnpm run build/{print NR; exit}')
+  web_line=$(printf '%s\n' "$body" | awk '/cd "\$workdir\/src\/web"/{print NR; exit}')
+  [[ -n "$install_line" && -n "$build_line" && -n "$web_line" ]]
+  [[ "$install_line" -lt "$build_line" && "$web_line" -lt "$build_line" ]]
+  printf '%s\n' "$body" | grep -q '\$workdir/src/scripts/install-client-deps.sh'
+  if printf '%s\n' "$body" | grep -q 'pnpm install'; then exit 1; fi
+)
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "execute installs client deps before the web build"
+else
+  fail "execute installs client deps before the web build"
+fi
+
 if [[ "$failures" -eq 0 ]]; then
   printf 'copy-to-ehr staging deploy tests passed\n'
   exit 0
