@@ -122,7 +122,8 @@ def validate_prepared(envelope):
     # Original history/source bytes remain committed for current-input checks.
     # The old output decoder has its independently bounded history and sources.
     _bounded_context(replace(context, history=tuple((role, text[:3000]) for role, text in context.history)))
-    baseline = GPT41Connector(lambda: "").prepare(context)
+    saved_deployment = envelope["baseline"]["body"]["model"]
+    baseline = GPT41Connector(lambda: "", deployment=saved_deployment).prepare(context)
     _checked_envelope(envelope["baseline"])
     # JSONB reorders descriptor dictionaries but retains the saved provider
     # string. Use the original v4 reconstruction of those two known record
@@ -176,7 +177,7 @@ class GPT41CompactToolsConnector(GPT41ToolsConnector):
         return body
 
     def prepare(self, context, tool_selection):
-        baseline = GPT41Connector(lambda: "").prepare(context)
+        baseline = GPT41Connector(lambda: "", deployment=self.deployment).prepare(context)
         selection = ToolSelection.model_validate(tool_selection).model_dump()
         body, manifest = _compact_body(baseline, selection, context)
         envelope = {"contract": CURRENT_PREPARED_CONTRACT, "decoder": "cosmas-gpt41-decoder.v6",
