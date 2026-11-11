@@ -24,7 +24,8 @@ final class MicrophonePermissionUITests: XCTestCase {
     }
 
     /// iOS 27 may present TCC as a SpringBoard alert or sheet (sometimes both
-    /// hierarchies briefly expose nested "Don't Allow" buttons).
+    /// hierarchies briefly expose nested "Don't Allow" buttons). Prefer sheet,
+    /// then alert; callers must still assert the prompt appeared.
     private func micPermissionPrompt(timeout: TimeInterval) -> XCUIElement? {
         let predicate = NSPredicate(
             format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@",
