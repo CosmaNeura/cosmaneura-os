@@ -247,7 +247,7 @@ fi
   storage_prod="/subscriptions/ffffffff-ffff-ffff-ffff-ffffffffffff/resourceGroups/rg-prod/providers/Microsoft.Storage/storageAccounts/prodbackup"
   vm_dump="${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump"
   copy_to_ehr_validate_dump_target "$vm_dump"
-  copy_to_ehr_validate_dump_target "$storage_ok"
+  if copy_to_ehr_validate_dump_target "$storage_ok"; then exit 1; fi
   if copy_to_ehr_validate_dump_target "/Users/john/live.dump"; then exit 1; fi
   if copy_to_ehr_validate_dump_target "/home/john/live.dump"; then exit 1; fi
   if copy_to_ehr_validate_dump_target "/tmp/live.dump"; then exit 1; fi
@@ -256,9 +256,9 @@ fi
   if copy_to_ehr_trial_url_file_allowed /dev/null; then exit 1; fi
 )
 if [[ $? -eq 0 ]]; then
-  pass "dump target outside the resource group or on this Mac is refused"
+  pass "storage ids and dump targets outside the staging VM are refused"
 else
-  fail "dump target outside the resource group or on this Mac is refused"
+  fail "storage ids and dump targets outside the staging VM are refused"
 fi
 
 trial_url="$root_dir/trial.url"
@@ -281,31 +281,32 @@ fi
   # shellcheck disable=SC1090
   source "$target"
   side=$(copy_to_ehr_render_side_port "e29bf5a2de0eddec1663b1185076472ef172b590")
-  printf '%s\n' "$side" | grep -q 'SIDE_PORT_REFUSED_LIVE_DATABASE'
-  printf '%s\n' "$side" | grep -q 'cosmabot_copy_ehr_trial'
-  printf '%s\n' "$side" | grep -q '54130'
-  printf '%s\n' "$side" | grep -q 'COPY_TO_EHR_ENABLED'
-  if printf '%s\n' "$side" | grep -q 'copy_to_ehr_migrate_live'; then exit 1; fi
-  if printf '%s\n' "$side" | grep -q 'copy_to_ehr_stop_live_listeners'; then exit 1; fi
-  if printf '%s\n' "$side" | grep -E 'docker (stop|rm).*-r10-'; then exit 1; fi
-  if printf '%s\n' "$side" | grep -E 'blob download|scp '; then exit 1; fi
   printf '%s\n' "$side" >"$root_dir/side.sh"
+  grep -q 'SIDE_PORT_REFUSED_LIVE_DATABASE' "$root_dir/side.sh"
+  grep -q 'cosmabot_copy_ehr_trial' "$root_dir/side.sh"
+  grep -q '54130' "$root_dir/side.sh"
+  grep -q 'COPY_TO_EHR_ENABLED' "$root_dir/side.sh"
+  if grep -q 'copy_to_ehr_migrate_live' "$root_dir/side.sh"; then exit 1; fi
+  if grep -q 'copy_to_ehr_stop_live_listeners' "$root_dir/side.sh"; then exit 1; fi
+  if grep -E -q 'docker (stop|rm).*-r10-' "$root_dir/side.sh"; then exit 1; fi
+  if grep -E -q 'blob download|scp ' "$root_dir/side.sh"; then exit 1; fi
   awk 'seen && $0 == "COPY_TO_EHR_BASH_BODY" {exit} seen {print} $0 == "exec /bin/bash <<'\''COPY_TO_EHR_BASH_BODY'\''" {seen=1}' "$root_dir/side.sh" >"$root_dir/side-inner.sh"
   bash -n "$root_dir/side-inner.sh"
   body=$(declare -f copy_to_ehr_cutover_sequence)
-  restore=$(printf '%s\n' "$body" | awk '/copy_to_ehr_restore_gate/{print NR; exit}')
-  stop=$(printf '%s\n' "$body" | awk '/copy_to_ehr_stop_live_listeners/{print NR; exit}')
-  migrate=$(printf '%s\n' "$body" | awk '/copy_to_ehr_migrate_live/{print NR; exit}')
+  printf '%s\n' "$body" >"$root_dir/sequence-body.txt"
+  restore=$(awk '/copy_to_ehr_restore_gate/{print NR; exit}' "$root_dir/sequence-body.txt")
+  stop=$(awk '/copy_to_ehr_stop_live_listeners/{print NR; exit}' "$root_dir/sequence-body.txt")
+  migrate=$(awk '/copy_to_ehr_migrate_live/{print NR; exit}' "$root_dir/sequence-body.txt")
   [[ -n "$restore" && -n "$stop" && -n "$migrate" ]]
   [[ "$restore" -lt "$stop" && "$stop" -lt "$migrate" ]]
   cutover=$(copy_to_ehr_render_cutover "e29bf5a2de0eddec1663b1185076472ef172b590" "9dfd4cfd" "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump")
-  printf '%s\n' "$cutover" | grep -q 'release-r10'
-  printf '%s\n' "$cutover" | grep -q 'pg_dump -Fc'
-  printf '%s\n' "$cutover" | grep -q 'copy_to_ehr_confirm_prior_identity'
-  printf '%s\n' "$cutover" | grep -q 'copy_to_ehr_cutover_trap_rollback'
-  printf '%s\n' "$cutover" | grep -q 'copy_to_ehr_assert_target_schema'
-  if printf '%s\n' "$cutover" | grep -E 'blob download|scp '; then exit 1; fi
   printf '%s\n' "$cutover" >"$root_dir/cutover.sh"
+  grep -q 'release-r10' "$root_dir/cutover.sh"
+  grep -q 'pg_dump -Fc' "$root_dir/cutover.sh"
+  grep -q 'copy_to_ehr_confirm_prior_identity' "$root_dir/cutover.sh"
+  grep -q 'copy_to_ehr_cutover_trap_rollback' "$root_dir/cutover.sh"
+  grep -q 'copy_to_ehr_assert_target_schema' "$root_dir/cutover.sh"
+  if grep -E -q 'blob download|scp ' "$root_dir/cutover.sh"; then exit 1; fi
   awk 'seen && $0 == "COPY_TO_EHR_BASH_BODY" {exit} seen {print} $0 == "exec /bin/bash <<'\''COPY_TO_EHR_BASH_BODY'\''" {seen=1}' "$root_dir/cutover.sh" >"$root_dir/cutover-inner.sh"
   bash -n "$root_dir/cutover-inner.sh"
 )
@@ -461,6 +462,10 @@ fi
   awk 'seen && $0 == "COPY_TO_EHR_BASH_BODY" {exit} seen {print} $0 == "exec /bin/bash <<'\''COPY_TO_EHR_BASH_BODY'\''" {seen=1}' "$root_dir/chunk.sh" >"$root_dir/chunk-inner.sh"
   bash -n "$root_dir/chunk-inner.sh"
   grep -q 'CHUNK_OK' "$root_dir/chunk.sh"
+  grep -q 'web archive chunks: 1' "$root_dir/chunk.out"
+  chunk_line=$(awk '/web archive chunks:/{print NR; exit}' "$root_dir/chunk.out")
+  invoke_line=$(awk '/remote-script web-chunk-0 begin/{print NR; exit}' "$root_dir/chunk.out")
+  [[ -n "$chunk_line" && -n "$invoke_line" && "$chunk_line" -lt "$invoke_line" ]]
   if grep -q 'synthetic-web-archive' "$root_dir/chunk.out"; then exit 1; fi
 )
 if [[ $? -eq 0 ]]; then
@@ -512,8 +517,9 @@ served_commit=9dfd4cfd0123456789abcdef0123456789abcdef
     exit 1
   fi
   main_body=$(declare -f copy_to_ehr_cutover_main)
-  version_line=$(printf '%s\n' "$main_body" | awk '/copy_to_ehr_confirm_prior_identity/{print NR; exit}')
-  sequence_line=$(printf '%s\n' "$main_body" | awk '/copy_to_ehr_cutover_sequence/{print NR; exit}')
+  printf '%s\n' "$main_body" >"$root_dir/cutover-main-body.txt"
+  version_line=$(awk '/copy_to_ehr_confirm_prior_identity/{print NR; exit}' "$root_dir/cutover-main-body.txt")
+  sequence_line=$(awk '/copy_to_ehr_cutover_sequence/{print NR; exit}' "$root_dir/cutover-main-body.txt")
   [[ -n "$version_line" && -n "$sequence_line" && "$version_line" -lt "$sequence_line" ]]
   if [[ -s "$log" ]]; then exit 1; fi
 ) >"$root_dir/version.out" 2>"$root_dir/version.err"
@@ -603,7 +609,7 @@ set +e
 (
   # shellcheck disable=SC1090
   source "$target"
-  payload=$(python3 -c 'import json,sys; sys.stdout.write(json.dumps({"value":[{"message":"RESTORE_CHECK_OK\nLOOKING\nCOUNT alembic_version=4\nOKAY\nthis line is OK\nAPI_BUILD_FAILED\nWEB_ARCHIVE_MISSING\nLIVE_POINTER_CHANGED\nPG_DUMP_FAILED\nSHA_MISMATCH\nDIRTY_TREE\nACTIVE_RELEASE_NOT_R10\nNFT_TRIAL_RULE_FAILED\n"}]}))')
+  payload=$(python3 -c 'import json,sys; sys.stdout.write(json.dumps({"value":[{"message":"RESTORE_CHECK_OK\nLOOKING\nCOUNT alembic_version=4\nOKAY\nthis line is OK\nAPI_BUILD_FAILED\nWEB_ARCHIVE_MISSING\nLIVE_POINTER_CHANGED\nPG_DUMP_FAILED\nSHA_MISMATCH\nDIRTY_TREE\nACTIVE_RELEASE_NOT_R10\nNFT_TRIAL_RULE_FAILED\nLIVE_POSTGRES_CONTAINER_NOT_FOUND\n"}]}))')
   filtered=$(printf '%s' "$payload" | copy_to_ehr_filter_run_output)
   printf '%s\n' "$filtered" | grep -qx 'RESTORE_CHECK_OK'
   printf '%s\n' "$filtered" | grep -qx 'COUNT alembic_version=4'
@@ -616,6 +622,7 @@ set +e
   printf '%s\n' "$filtered" | grep -qx 'DIRTY_TREE'
   printf '%s\n' "$filtered" | grep -qx 'ACTIVE_RELEASE_NOT_R10'
   printf '%s\n' "$filtered" | grep -qx 'NFT_TRIAL_RULE_FAILED'
+  printf '%s\n' "$filtered" | grep -qx 'LIVE_POSTGRES_CONTAINER_NOT_FOUND'
   if printf '%s\n' "$filtered" | grep -qx 'LOOKING'; then exit 1; fi
   if printf '%s\n' "$filtered" | grep -qx 'OKAY'; then exit 1; fi
 )
@@ -633,9 +640,10 @@ set +e
   # shellcheck disable=SC1090
   source "$target"
   body=$(declare -f copy_to_ehr_execute)
-  install_line=$(printf '%s\n' "$body" | awk '/install-client-deps\.sh/{print NR; exit}')
-  build_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_run_web_build/{print NR; exit}')
-  web_line=$(printf '%s\n' "$body" | awk '/cd "\$workdir\/src\/web"/{print NR; exit}')
+  printf '%s\n' "$body" >"$root_dir/execute-body.txt"
+  install_line=$(awk '/install-client-deps\.sh/{print NR; exit}' "$root_dir/execute-body.txt")
+  build_line=$(awk '/copy_to_ehr_run_web_build/{print NR; exit}' "$root_dir/execute-body.txt")
+  web_line=$(awk '/cd "\$workdir\/src\/web"/{print NR; exit}' "$root_dir/execute-body.txt")
   [[ -n "$install_line" && -n "$build_line" && -n "$web_line" ]]
   [[ "$install_line" -lt "$build_line" && "$web_line" -lt "$build_line" ]]
   printf '%s\n' "$body" | grep -q '\$workdir/src/scripts/install-client-deps.sh'
@@ -719,10 +727,11 @@ EOF
   [[ ! -e "$copy_out" ]]
   [[ -f "$independent" ]]
   body=$(declare -f copy_to_ehr_execute)
-  read_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_read_web_env_keys/{print NR; exit}')
-  stage_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_stage_web_env/{print NR; exit}')
-  copy_line=$(printf '%s\n' "$body" | awk '/COPY_TO_EHR_WEB_ENV_COPY=/{print NR; exit}')
-  trap_line=$(printf '%s\n' "$body" | awk '/trap copy_to_ehr_local_exit/{print NR; exit}')
+  printf '%s\n' "$body" >"$root_dir/execute-env-body.txt"
+  read_line=$(awk '/copy_to_ehr_read_web_env_keys/{print NR; exit}' "$root_dir/execute-env-body.txt")
+  stage_line=$(awk '/copy_to_ehr_stage_web_env/{print NR; exit}' "$root_dir/execute-env-body.txt")
+  copy_line=$(awk '/COPY_TO_EHR_WEB_ENV_COPY=/{print NR; exit}' "$root_dir/execute-env-body.txt")
+  trap_line=$(awk '/trap copy_to_ehr_local_exit/{print NR; exit}' "$root_dir/execute-env-body.txt")
   [[ -n "$read_line" && -n "$stage_line" && -n "$copy_line" && -n "$trap_line" ]]
   [[ "$read_line" -lt "$stage_line" && "$stage_line" -lt "$copy_line" && "$copy_line" -lt "$trap_line" ]]
 )
@@ -872,6 +881,12 @@ set +e
   check_refused 'missing profile'
   write_profile_env "$bad" 'not-a-profile' 'VITE_PUBLIC_1=value'
   check_refused 'unknown profile'
+  printf 'VITE_PUBLIC_1=%s$HOME\n' "$secret" >"$bad"
+  chmod 600 "$bad"
+  check_refused dollar
+  printf 'VITE_PUBLIC_1=%s\\path\n' "$secret" >"$bad"
+  chmod 600 "$bad"
+  check_refused backslash
 ) >"$root_dir/env-shape.out" 2>"$root_dir/env-shape.err"
 status=$?
 set -e
@@ -945,7 +960,7 @@ set +e
   COPY_TO_EHR_WEB_ENV_COPY="$dest"
   trap copy_to_ehr_local_exit EXIT
   trap copy_to_ehr_local_signal INT TERM HUP
-  kill -TERM "$BASHPID"
+  sh -c 'kill -TERM "$PPID"'
 ) >"$root_dir/signal-trap.out" 2>"$root_dir/signal-trap.err"
 status=$?
 set -e
@@ -974,9 +989,10 @@ set +e
   unset COPY_TO_EHR_WEB_ENV_COPY
   copy_to_ehr_cleanup_web_env_copy
   grep -qx 'keep-me' "$dest"
+  example="$work/.env.example"
+  printf 'VITE_COSMANEURA_WEB_ORIGIN=https://example.synthetic.example\nVITE_CAPTURE_UPLOAD_ORIGINS=https://upload.synthetic.example\n' >"$example"
   shadow="$work/.env.local"
-  printf 'VITE_COSMANEURA_WEB_ORIGIN=https://shadow.synthetic.example\n' >"$shadow"
-  chmod 600 "$shadow"
+  printf '# VITE_COSMANEURA_WEB_ORIGIN=https://comment.synthetic.example\n' >"$shadow"
   independent="$root_dir/shadow-independent.env"
   cp "$root_dir/independent.env" "$independent" 2>/dev/null || true
   if [[ ! -f "$independent" ]]; then
@@ -996,6 +1012,14 @@ EOF
     chmod 600 "$independent"
   fi
   rm -f -- "$dest"
+  copy_to_ehr_stage_web_env "$independent" "$dest" >"$root_dir/shadow-ok.out" 2>"$root_dir/shadow-ok.err"
+  [[ -f "$dest" ]]
+  if grep -q 'example.synthetic.example' "$root_dir/shadow-ok.out" "$root_dir/shadow-ok.err"; then
+    exit 1
+  fi
+  rm -f -- "$dest"
+  printf 'VITE_COSMANEURA_WEB_ORIGIN=https://shadow.synthetic.example\n' >"$shadow"
+  chmod 600 "$shadow"
   if copy_to_ehr_stage_web_env "$independent" "$dest" >"$root_dir/shadow.out" 2>"$root_dir/shadow.err"; then
     exit 1
   fi
@@ -1054,6 +1078,15 @@ set +e
   printf 'alembic_version 4\naudit_events 4\npractice_owner_reservations 4\n' >"${dump}.counts"
   chmod 600 "$dump" "${dump}.counts"
   COPY_TO_EHR_PG_CONTAINER=pg-stub
+  COPY_TO_EHR_DB_TOUCHED=1
+  copy_to_ehr_psql() {
+    case "$2" in
+      *pg_get_userbyid*) printf 'postgres\n' ;;
+      *pg_encoding_to_char*) printf 'UTF8\n' ;;
+      *version_num*) printf 'changed000000\n' ;;
+      *) printf '9\n' ;;
+    esac
+  }
   docker() {
     printf '%s\n' "$*" >>"$root_dir/restore-docker.log"
     if [[ "$*" == *pg_restore* ]]; then
@@ -1066,6 +1099,13 @@ set +e
   fi
   grep -q -- '--single-transaction' "$root_dir/restore-docker.log"
   grep -q -- '--exit-on-error' "$root_dir/restore-docker.log"
+  grep -q -- '--owner postgres' "$root_dir/restore-docker.log"
+  grep -q -- '--encoding UTF8' "$root_dir/restore-docker.log"
+  grep -q -- '--template template0' "$root_dir/restore-docker.log"
+  grep -q -- '--dbname cosmabot_standalone_e0a414184674_copy_ehr_in' "$root_dir/restore-docker.log"
+  if grep -E -q 'dropdb --if-exists --no-password cosmabot_standalone_e0a414184674$' "$root_dir/restore-docker.log"; then
+    exit 1
+  fi
   if grep -q -- '--no-owner' "$root_dir/restore-docker.log"; then
     exit 1
   fi
@@ -1095,6 +1135,7 @@ set +e
   printf 'alembic_version 4\naudit_events 4\npractice_owner_reservations 4\n' >"${dump}.counts"
   chmod 600 "$dump" "${dump}.counts"
   COPY_TO_EHR_PG_CONTAINER=pg-stub
+  COPY_TO_EHR_DB_TOUCHED=1
   : >"$root_dir/count-start.log"
   docker() { return 0; }
   copy_to_ehr_psql() { printf 'wrong\n'; return 0; }
@@ -1189,6 +1230,7 @@ set +e
   chosen=$(copy_to_ehr_edge_conf_source "$edge")
   [[ "$chosen" == "$edge/release-r10/edge-nginx.conf" ]]
   copy_to_ehr_write_trial_edge "$chosen" "$edge/trial.conf"
+  python3 -c 'import os,sys; mode=os.stat(sys.argv[1]).st_mode & 0o777; raise SystemExit(0 if mode == 0o644 else 1)' "$edge/trial.conf"
   grep -q '127.0.0.1:54120' "$edge/trial.conf"
   grep -q '127.0.0.1:54122' "$edge/trial.conf"
   if grep -q '54110' "$edge/trial.conf"; then exit 1; fi
@@ -1198,14 +1240,17 @@ set +e
   [[ "$chosen" == "$edge/release-r6r1/edge-nginx.conf" ]]
   side=$(copy_to_ehr_render_side_port e29bf5a2de0eddec1663b1185076472ef172b590)
   cutover=$(copy_to_ehr_render_cutover e29bf5a2de0eddec1663b1185076472ef172b590 9dfd4cfd "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump")
-  printf '%s\n' "$side" | grep -q 'copy_to_ehr_edge_conf_source'
-  printf '%s\n' "$cutover" | grep -q 'copy_to_ehr_edge_conf_source'
-  printf '%s\n' "$side" | grep -q 'copy_to_ehr_run_migrate_py'
-  if printf '%s\n' "$side" | grep -q 'copy_to_ehr_migrate_live'; then exit 1; fi
+  printf '%s\n' "$side" >"$root_dir/edge-side.sh"
+  printf '%s\n' "$cutover" >"$root_dir/edge-cutover.sh"
+  grep -q 'copy_to_ehr_edge_conf_source' "$root_dir/edge-side.sh"
+  grep -q 'copy_to_ehr_edge_conf_source' "$root_dir/edge-cutover.sh"
+  grep -q 'copy_to_ehr_run_migrate_py' "$root_dir/edge-side.sh"
+  if grep -q 'copy_to_ehr_migrate_live' "$root_dir/edge-side.sh"; then exit 1; fi
   side_body=$(declare -f copy_to_ehr_side_port_main)
-  pg_line=$(printf '%s\n' "$side_body" | awk '/copy_to_ehr_wait_postgres/{print NR; exit}')
-  migrate_line=$(printf '%s\n' "$side_body" | awk '/copy_to_ehr_run_migrate_py/{print NR; exit}')
-  listener_line=$(printf '%s\n' "$side_body" | awk '/copy_to_ehr_wait_listener/{print NR; exit}')
+  printf '%s\n' "$side_body" >"$root_dir/side-body.txt"
+  pg_line=$(awk '/copy_to_ehr_wait_postgres/{print NR; exit}' "$root_dir/side-body.txt")
+  migrate_line=$(awk '/copy_to_ehr_run_migrate_py/{print NR; exit}' "$root_dir/side-body.txt")
+  listener_line=$(awk '/copy_to_ehr_wait_listener/{print NR; exit}' "$root_dir/side-body.txt")
   [[ -n "$pg_line" && -n "$migrate_line" && -n "$listener_line" ]]
   [[ "$pg_line" -lt "$migrate_line" && "$migrate_line" -lt "$listener_line" ]]
 ) >"$root_dir/edge.out" 2>"$root_dir/edge.err"
@@ -1281,27 +1326,425 @@ set +e
 (
   # shellcheck disable=SC1090
   source "$target"
-  dump="$root_dir/storage.dump"
-  printf 'PGDMP' >"$dump"
-  : >"$root_dir/upload.log"
-  az() {
-    printf '%s\n' "$*" >>"$root_dir/upload.log"
-    return 1
-  }
-  if copy_to_ehr_upload_dump_to_storage "$dump" stgcbotstaging; then
+  storage_id="/subscriptions/bab2a709-1fcb-4c87-a9fc-802f7477ec13/resourceGroups/rg-cosmas-os-vm-staging-eus2-lab01/providers/Microsoft.Storage/storageAccounts/stgcbotstaging"
+  if copy_to_ehr_validate_dump_target "$storage_id"; then
     exit 1
   fi
-  grep -q 'storage blob upload' "$root_dir/upload.log"
-  if grep -q 'blob download' "$root_dir/upload.log"; then
+  vm="$root_dir/dump-fail-vm"
+  dump="$vm/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  : >"$root_dir/dump-fail.log"
+  copy_to_ehr_pg_dump() { printf 'DUMP\n' >>"$root_dir/dump-fail.log"; return 1; }
+  copy_to_ehr_stop_live_listeners() { printf 'STOP\n' >>"$root_dir/dump-fail.log"; return 0; }
+  if copy_to_ehr_cutover_sequence "$vm" "$dump" cosmabot_standalone_e0a414184674; then
     exit 1
   fi
+  if grep -qx 'STOP' "$root_dir/dump-fail.log"; then
+    exit 1
+  fi
+  grep -qx 'DUMP' "$root_dir/dump-fail.log"
 ) >"$root_dir/upload.out" 2>"$root_dir/upload.err"
 status=$?
 set -e
-if [[ "$status" -eq 0 ]] && grep -q 'STORAGE_UPLOAD_FAILED' "$root_dir/upload.err"; then
-  pass "a storage dump target uploads from the VM and a failed upload is visible"
+if [[ "$status" -eq 0 ]] && grep -E -q 'DUMP_TARGET_REFUSED|CUTOVER_ABORT_RESTORE_CHECK' "$root_dir/upload.err"; then
+  pass "a storage id is refused and a dump failure stops before the listeners"
 else
-  fail "a storage dump target uploads from the VM and a failed upload is visible"
+  fail "a storage id is refused and a dump failure stops before the listeners"
+  cat "$root_dir/upload.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  src="$root_dir/migrate-tree"
+  mkdir -p "$src/infra/standalone/package"
+  chmod 700 "$src" "$src/infra" "$src/infra/standalone" "$src/infra/standalone/package"
+  cat >"$src/infra/standalone/package/migrate.py" <<PY
+import sys
+open("$root_dir/migrate-marker", "w").write("yes\\n" if "/app/src" in sys.path else "no\\n")
+PY
+  chmod 600 "$src/infra/standalone/package/migrate.py"
+  envf="$root_dir/migrate.env"
+  printf 'STANDALONE_INSTANCE_ID=e0a41418-4674-456e-8512-7d5de7a78670\n' >"$envf"
+  chmod 600 "$envf"
+  chown() { printf '%s\n' "$*" >"$root_dir/chown.txt"; return 0; }
+  docker() {
+    python3 - "$root_dir/docker-args" "$src" "$envf" -- "$@" <<'PY'
+import pathlib, subprocess, sys
+out, src, env = sys.argv[1:4]
+args = sys.argv[5:]
+pathlib.Path(out).write_bytes("\0".join(args).encode())
+if "--userns" not in args or args[args.index("--userns") + 1] != "host":
+    raise SystemExit(2)
+if "21000:21000" not in args:
+    raise SystemExit(3)
+script = args[args.index("-c") + 1]
+script = script.replace("/opt/copy-to-ehr-src", src).replace("/run/copy-to-ehr-migrate.env", env)
+raise SystemExit(subprocess.call([sys.executable, "-c", script]))
+PY
+  }
+  COPY_TO_EHR_SHA=e29bf5a2de0eddec1663b1185076472ef172b590
+  copy_to_ehr_run_migrate_py "$envf" "$src"
+  python3 -c 'import os,sys; mode=os.stat(sys.argv[1]).st_mode; raise SystemExit(0 if mode & 0o004 else 1)' "$src/infra/standalone/package/migrate.py"
+  python3 -c 'import os,sys; mode=os.stat(sys.argv[1]).st_mode; raise SystemExit(0 if (mode & 0o005) == 0o005 else 1)' "$src"
+  python3 -c 'import os,sys; mode=os.stat(sys.argv[1]).st_mode & 0o777; raise SystemExit(0 if mode == 0o600 else 1)' "$envf"
+  grep -q '21000:21000' "$root_dir/chown.txt"
+  grep -qx 'yes' "$root_dir/migrate-marker"
+) >"$root_dir/migrate-user.out" 2>"$root_dir/migrate-user.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "migrate tree is readable by uid 21000 and the launcher exits 0"
+else
+  fail "migrate tree is readable by uid 21000 and the launcher exits 0"
+  cat "$root_dir/migrate-user.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  packed="$root_dir/web-src"
+  archive="$root_dir/web-archive.tar.gz"
+  dest="$root_dir/web-out"
+  mkdir -p "$packed/nested"
+  printf '{"commit":"e29bf5a2de0eddec1663b1185076472ef172b590"}\n' >"$packed/version.json"
+  printf 'page\n' >"$packed/nested/app.js"
+  chmod 700 "$packed" "$packed/nested"
+  chmod 600 "$packed/version.json" "$packed/nested/app.js"
+  tar -czf "$archive" -C "$packed" .
+  copy_to_ehr_extract_web "$archive" "$dest" e29bf5a2de0eddec1663b1185076472ef172b590
+  python3 -c 'import os,sys
+root=sys.argv[1]
+for dirpath, dirnames, filenames in os.walk(root):
+    mode=os.stat(dirpath).st_mode
+    if (mode & 0o005) != 0o005:
+        raise SystemExit(1)
+    for name in filenames:
+        fmode=os.stat(os.path.join(dirpath, name)).st_mode
+        if (fmode & 0o004) != 0o004:
+            raise SystemExit(1)
+' "$dest"
+) >"$root_dir/web-mode.out" 2>"$root_dir/web-mode.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "extracted release web is world-readable"
+else
+  fail "extracted release web is world-readable"
+  cat "$root_dir/web-mode.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  log="$root_dir/quiet.log"
+  : >"$log"
+  phase=serving
+  vm="$root_dir/quiet-vm"
+  dump="$vm/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  copy_to_ehr_pg_dump() { printf 'DUMP %s\n' "$phase" >>"$log"; printf 'PGDMP' >"$1"; }
+  copy_to_ehr_createdb() { return 0; }
+  copy_to_ehr_pg_restore() { return 0; }
+  copy_to_ehr_dropdb() { return 0; }
+  copy_to_ehr_psql() {
+    if [[ "$2" == *version_num* ]]; then
+      printf 'bb57e3d10c964\n'
+      return 0
+    fi
+    if [[ "$phase" == quiet ]]; then
+      printf '9\n'
+    else
+      printf '2\n'
+    fi
+  }
+  copy_to_ehr_stop_live_listeners() { phase=quiet; printf 'STOP\n' >>"$log"; return 0; }
+  copy_to_ehr_migrate_live() { printf 'MIGRATE\n' >>"$log"; return 1; }
+  copy_to_ehr_fail_rollback() { copy_to_ehr_disarm_cutover_trap; printf 'ROLLBACK\n' >>"$log"; return 1; }
+  copy_to_ehr_cutover_sequence "$vm" "$dump" cosmabot_standalone_e0a414184674 || true
+  awk '
+    $1 == "DUMP" && $2 == "serving" {serving=NR}
+    $1 == "STOP" {stop=NR}
+    $1 == "DUMP" && $2 == "quiet" {quiet=NR}
+    $1 == "MIGRATE" {migrate=NR}
+    END {exit !(serving && stop && quiet && migrate && serving < stop && stop < quiet && quiet < migrate)}
+  ' "$log"
+  grep -qx 'alembic_version 9' "${dump}.counts"
+  if grep -qx 'alembic_version 2' "${dump}.counts"; then exit 1; fi
+) >"$root_dir/quiet.out" 2>"$root_dir/quiet.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "the authoritative dump and its counts are taken after listeners stop"
+else
+  fail "the authoritative dump and its counts are taken after listeners stop"
+  cat "$root_dir/quiet.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  log="$root_dir/clone-fail.log"
+  : >"$log"
+  STAGING_DATA_ROOT="$root_dir/clone-vm"
+  dump="$STAGING_DATA_ROOT/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  printf 'PGDMP\n' >"$dump"
+  printf 'verified\n' >"${dump}.verified"
+  printf 'alembic_version 1\naudit_events 1\npractice_owner_reservations 1\n' >"${dump}.counts"
+  chmod 600 "$dump" "${dump}.verified" "${dump}.counts"
+  COPY_TO_EHR_SHA=e29bf5a2de0eddec1663b1185076472ef172b590
+  copy_to_ehr_restore_gate() { printf 'GATE\n' >>"$log"; return 0; }
+  copy_to_ehr_stop_live_listeners() { printf 'STOP\n' >>"$log"; return 0; }
+  copy_to_ehr_write_migrate_env() { printf 'X=1\n' >"$2"; return 0; }
+  git() { return 1; }
+  copy_to_ehr_start_prior_listeners() { printf 'START_R10\n' >>"$log"; return 0; }
+  copy_to_ehr_write_prior_pointer() { printf 'POINTER\n' >>"$log"; return 0; }
+  copy_to_ehr_rollback_verify_prior() { printf 'SERVING\n' >>"$log"; return 0; }
+  docker() { printf 'DOCKER %s\n' "$*" >>"$log"; return 0; }
+  if copy_to_ehr_cutover_sequence "$STAGING_DATA_ROOT" "$dump" cosmabot_standalone_e0a414184674; then
+    exit 1
+  fi
+  grep -qx 'START_R10' "$log"
+  if grep -q 'dropdb' "$log"; then exit 1; fi
+) >"$root_dir/clone-fail.out" 2>"$root_dir/clone-fail.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -q 'RESTORE_SKIPPED_UNTOUCHED' "$root_dir/clone-fail.out"; then
+  pass "a clone failure restarts release-r10 without dropping the live database"
+else
+  fail "a clone failure restarts release-r10 without dropping the live database"
+  cat "$root_dir/clone-fail.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  log="$root_dir/stop-fail.log"
+  : >"$log"
+  rm -f -- "$COPY_TO_EHR_MARKER_FILE"
+  copy_to_ehr_restore_gate() { return 0; }
+  copy_to_ehr_stop_live_listeners() { return 1; }
+  copy_to_ehr_start_prior_listeners() { printf 'START\n' >>"$log"; return 0; }
+  copy_to_ehr_rollback_verify_prior() { printf 'SERVING\n' >>"$log"; return 0; }
+  if copy_to_ehr_cutover_sequence "$root_dir/stop-vm" "$root_dir/stop.dump" cosmabot_standalone_e0a414184674; then
+    exit 1
+  fi
+  [[ ! -e "$COPY_TO_EHR_MARKER_FILE" ]]
+  grep -qx 'START' "$log"
+  grep -qx 'SERVING' "$log"
+  copy_to_ehr_rollback_verify_prior() { return 1; }
+  if copy_to_ehr_cutover_sequence "$root_dir/stop-vm" "$root_dir/stop.dump" cosmabot_standalone_e0a414184674; then
+    exit 1
+  fi
+  [[ -f "$COPY_TO_EHR_MARKER_FILE" ]]
+) >"$root_dir/stop-fail.out" 2>"$root_dir/stop-fail.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -q 'CUTOVER_ABORT_STOP' "$root_dir/stop-fail.err" && grep -q 'CUTOVER_ROLLBACK_FAILED' "$root_dir/stop-fail.err"; then
+  pass "a failed listener stop clears the marker only after release-r10 is serving"
+else
+  fail "a failed listener stop clears the marker only after release-r10 is serving"
+  cat "$root_dir/stop-fail.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  printf 'in-progress\n' >"$COPY_TO_EHR_MARKER_FILE"
+  if copy_to_ehr_api_build_main; then
+    exit 1
+  fi
+  [[ -s "$COPY_TO_EHR_MARKER_FILE" ]]
+  trap - EXIT
+) >"$root_dir/build-marker.out" 2>"$root_dir/build-marker.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -q 'CUTOVER_IN_PROGRESS' "$root_dir/build-marker.err"; then
+  pass "the image build refuses a cutover marker without removing it"
+else
+  fail "the image build refuses a cutover marker without removing it"
+fi
+
+record_api_dirs() {
+  command mktemp "$@" | tee -a "$root_dir/api-dirs"
+}
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  set -euo pipefail
+  source "$target"
+  rm -f -- "$COPY_TO_EHR_MARKER_FILE"
+  COPY_TO_EHR_SHA=e29bf5a2de0eddec1663b1185076472ef172b590
+  : >"$root_dir/api-dirs"
+  df() {
+    printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+    printf 'tmpfs 100 1 99999999 1%% /var/tmp\n'
+  }
+  mktemp() { record_api_dirs "$@"; }
+  copy_to_ehr_clone_at_sha() { return 1; }
+  copy_to_ehr_api_build_main
+) >"$root_dir/api-fail.out" 2>"$root_dir/api-fail.err"
+status=$?
+set -e
+api_dir=$(head -n 1 "$root_dir/api-dirs")
+if [[ "$status" -ne 0 && -n "$api_dir" && ! -e "$api_dir" ]] && ! grep -q 'unbound variable' "$root_dir/api-fail.err"; then
+  pass "a failed image build removes its work directory"
+else
+  fail "a failed image build removes its work directory"
+  cat "$root_dir/api-fail.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  set -euo pipefail
+  source "$target"
+  rm -f -- "$COPY_TO_EHR_MARKER_FILE"
+  COPY_TO_EHR_SHA=e29bf5a2de0eddec1663b1185076472ef172b590
+  : >"$root_dir/api-dirs"
+  df() {
+    printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+    printf 'tmpfs 100 1 99999999 1%% /var/tmp\n'
+  }
+  mktemp() { record_api_dirs "$@"; }
+  copy_to_ehr_clone_at_sha() { mkdir -p "$1/infra/standalone/package"; return 0; }
+  python3() {
+    if [[ "$1" == *prepare_api_recipe.py ]]; then
+      mkdir -p "$5"
+      printf 'FROM scratch\n' >"$5/Dockerfile"
+      printf '\n' >"$5/Dockerfile.dockerignore"
+      return 0
+    fi
+    command python3 "$@"
+  }
+  docker() { return 0; }
+  copy_to_ehr_api_build_main
+) >"$root_dir/api-ok.out" 2>"$root_dir/api-ok.err"
+status=$?
+set -e
+api_dir=$(head -n 1 "$root_dir/api-dirs")
+if [[ "$status" -eq 0 && -n "$api_dir" && ! -e "$api_dir" ]] && grep -q 'API_IMAGE_OK' "$root_dir/api-ok.out"; then
+  pass "a successful image build removes its work directory"
+else
+  fail "a successful image build removes its work directory"
+  cat "$root_dir/api-ok.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  log="$root_dir/teardown.log"
+  : >"$log"
+  nft() {
+    printf '%s\n' "$*" >>"$log"
+    if [[ "$1" == "-a" ]]; then
+      printf '%s\n' 'tcp dport 54120 accept comment "copy-ehr-trial" # handle 4'
+    fi
+    return 0
+  }
+  docker() { printf '%s\n' "$*" >>"$log"; return 0; }
+  copy_to_ehr_teardown_main
+  grep -q 'delete rule' "$log"
+  grep -q 'handle 4' "$log"
+  grep -q 'copyehr-trial-pg-' "$log"
+  grep -q 'copyehr-trial-api-' "$log"
+  grep -q 'copyehr-trial-edge-' "$log"
+  copy_to_ehr_restore_gate() { return 0; }
+  copy_to_ehr_stop_live_listeners() { return 0; }
+  copy_to_ehr_migrate_live() { return 0; }
+  copy_to_ehr_psql() { printf 'a46f2c09d853\n'; }
+  copy_to_ehr_start_new_listeners() { return 0; }
+  copy_to_ehr_ready_for_pointer() { return 0; }
+  copy_to_ehr_write_new_pointer() { return 0; }
+  copy_to_ehr_post_switch_checks() { return 0; }
+  : >"$log"
+  copy_to_ehr_cutover_sequence "$root_dir/cut-vm" "$root_dir/cut.dump" cosmabot_standalone_e0a414184674
+  grep -q 'delete rule' "$log"
+  grep -q 'copyehr-trial-pg-' "$log"
+) >"$root_dir/teardown.out" 2>"$root_dir/teardown.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -qx 'TEARDOWN_OK' "$root_dir/teardown.out" && grep -qx 'CUTOVER_OK' "$root_dir/teardown.out"; then
+  pass "teardown and a successful cutover remove the trial containers and nft rule"
+else
+  fail "teardown and a successful cutover remove the trial containers and nft rule"
+  cat "$root_dir/teardown.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  log="$root_dir/curl.log"
+  : >"$log"
+  curl() { printf '%s\n' "$*" >>"$log"; return 1; }
+  copy_to_ehr_expect_ready 54110 || true
+  copy_to_ehr_expect_version 54112 e29bf5a2de0eddec1663b1185076472ef172b590 || true
+  feature_dir="$root_dir/feature-web"
+  mkdir -p "$feature_dir"
+  printf 'Copy to EHR\n' >"$feature_dir/index.html"
+  copy_to_ehr_expect_feature "$feature_dir" 54112 || true
+  copy_to_ehr_read_served_commit 54112 || true
+  COPY_TO_EHR_READY_TRIES=1
+  sleep() { return 0; }
+  copy_to_ehr_rollback_verify_prior || true
+  [[ "$(grep -c -- '--max-time' "$log")" -ge 5 ]]
+  prelude=$(copy_to_ehr_remote_prelude e29bf5a2de0eddec1663b1185076472ef172b590 9dfd4cfd "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump")
+  tries=$(bash -c "$prelude"$'\n''printf %s "$COPY_TO_EHR_READY_TRIES"')
+  [[ "$tries" -ge 90 ]]
+  pointer="$root_dir/pointer-dir/active-release"
+  COPY_TO_EHR_POINTER_FILE="$pointer"
+  copy_to_ehr_write_pointer "${STAGING_DATA_ROOT}/release-r10" POINTER_R10
+  copy_to_ehr_write_pointer "${STAGING_DATA_ROOT}/release-copy-ehr-e29bf5a2de0e" POINTER_NEW
+  python3 -c 'import os,sys; mode=os.stat(sys.argv[1]).st_mode & 0o777; raise SystemExit(0 if mode == 0o644 else 1)' "$pointer"
+  grep -qx "RELEASE_DIR=${STAGING_DATA_ROOT}/release-copy-ehr-e29bf5a2de0e" "$pointer"
+  [[ "$(find "$root_dir/pointer-dir" -name 'active-release.*' | wc -l | tr -d '[:space:]')" -eq 0 ]]
+  scratch="$root_dir/scratch.dump"
+  printf 'PGDMP' >"$scratch"
+  : >"$root_dir/scratch-restore.log"
+  COPY_TO_EHR_PG_CONTAINER=pg-stub
+  docker() { printf '%s\n' "$*" >>"$root_dir/scratch-restore.log"; return 0; }
+  copy_to_ehr_pg_restore cosmabot_copy_ehr_scratch "$scratch"
+  grep -q -- '--single-transaction' "$root_dir/scratch-restore.log"
+  grep -q -- '--exit-on-error' "$root_dir/scratch-restore.log"
+  if grep -q -- '--no-owner' "$root_dir/scratch-restore.log"; then exit 1; fi
+) >"$root_dir/curl-pointer.out" 2>"$root_dir/curl-pointer.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "curls are bounded, listeners wait at least 90s, and the pointer write is atomic"
+else
+  fail "curls are bounded, listeners wait at least 90s, and the pointer write is atomic"
+  cat "$root_dir/curl-pointer.err" >&2 || true
+fi
+
+sub_stubs="$root_dir/stubs-storage-id"
+make_stubs "$sub_stubs" "$staging_account" "$staging_vm"
+expect_fail "subscription dump target refused" run_script "$sub_stubs" --workdir "$workdir" \
+  --dump-target "/subscriptions/bab2a709-1fcb-4c87-a9fc-802f7477ec13/resourceGroups/rg-cosmas-os-vm-staging-eus2-lab01/providers/Microsoft.Storage/storageAccounts/stgcbotstaging"
+if [[ -s "$sub_stubs/az.log" ]]; then
+  fail "subscription dump target reached azure"
+else
+  pass "subscription dump target stopped before azure"
 fi
 
 if [[ "$failures" -eq 0 ]]; then
