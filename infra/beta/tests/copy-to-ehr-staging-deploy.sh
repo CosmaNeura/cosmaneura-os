@@ -6,6 +6,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 target="$(cd -- "$script_dir/.." && pwd -P)/copy-to-ehr-staging-deploy.sh"
 root_dir="$(mktemp -d "${TMPDIR:-/tmp}/copy-to-ehr-tests.XXXXXX")"
 chmod 700 "$root_dir"
+export COPY_TO_EHR_MARKER_FILE="$root_dir/cutover-marker"
 failures=0
 
 cleanup() {
@@ -27,7 +28,7 @@ expect_fail() {
   shift
   local status=0
   set +e
-  "$@" >/tmp/copy-to-ehr-test-out 2>/tmp/copy-to-ehr-test-err
+  "$@" >"$root_dir/expect-fail.out" 2>"$root_dir/expect-fail.err"
   status=$?
   set -e
   if [[ "$status" -eq 0 ]]; then
@@ -116,7 +117,9 @@ if run_script "$stubs" --workdir "$workdir" >"$dry_out" 2>"$dry_err"; then
     && grep -q 'e29bf5a2de0eddec1663b1185076472ef172b590' "$dry_out" \
     && grep -q 'stop before cutover: live release-r10 stays on 54110/54112' "$dry_out" \
     && grep -q 'SIDE_PORT_REFUSED_LIVE_DATABASE' "$dry_out" \
-    && grep -q '54130' "$dry_out"; then
+    && grep -q '54130' "$dry_out" \
+    && grep -q 'stops live staging' "$dry_out" \
+    && grep -q 'load the staging VM' "$dry_out"; then
     pass "dry-run prints the plan and runs no mutating command"
   else
     fail "dry-run prints the plan and runs no mutating command"
@@ -420,8 +423,9 @@ fi
 env_file="$root_dir/web.env"
 umask 077
 {
+  printf 'VITE_WORKSPACE_FEATURE_PROFILE=operational-beta-v1\n'
   i=1
-  while [[ "$i" -le 11 ]]; do
+  while [[ "$i" -le 10 ]]; do
     printf 'VITE_PUBLIC_%s=SUPERSECRETVALUE\n' "$i"
     i=$((i + 1))
   done
@@ -431,7 +435,7 @@ chmod 600 "$env_file"
   # shellcheck disable=SC1090
   source "$target"
   keys=$(copy_to_ehr_read_web_env_keys "$env_file")
-  printf '%s\n' "$keys" | grep -q 'VITE_PUBLIC_11'
+  printf '%s\n' "$keys" | grep -q 'VITE_PUBLIC_10'
   if printf '%s\n' "$keys" | grep -q 'SUPERSECRETVALUE'; then exit 1; fi
   chmod 644 "$env_file"
   if copy_to_ehr_read_web_env_keys "$env_file"; then exit 1; fi
@@ -599,11 +603,19 @@ set +e
 (
   # shellcheck disable=SC1090
   source "$target"
-  payload=$(python3 -c 'import json,sys; sys.stdout.write(json.dumps({"value":[{"message":"RESTORE_CHECK_OK\nLOOKING\nCOUNT alembic_version=4\nOKAY\nthis line is OK\n"}]}))')
+  payload=$(python3 -c 'import json,sys; sys.stdout.write(json.dumps({"value":[{"message":"RESTORE_CHECK_OK\nLOOKING\nCOUNT alembic_version=4\nOKAY\nthis line is OK\nAPI_BUILD_FAILED\nWEB_ARCHIVE_MISSING\nLIVE_POINTER_CHANGED\nPG_DUMP_FAILED\nSHA_MISMATCH\nDIRTY_TREE\nACTIVE_RELEASE_NOT_R10\nNFT_TRIAL_RULE_FAILED\n"}]}))')
   filtered=$(printf '%s' "$payload" | copy_to_ehr_filter_run_output)
   printf '%s\n' "$filtered" | grep -qx 'RESTORE_CHECK_OK'
   printf '%s\n' "$filtered" | grep -qx 'COUNT alembic_version=4'
   printf '%s\n' "$filtered" | grep -qx 'this line is OK'
+  printf '%s\n' "$filtered" | grep -qx 'API_BUILD_FAILED'
+  printf '%s\n' "$filtered" | grep -qx 'WEB_ARCHIVE_MISSING'
+  printf '%s\n' "$filtered" | grep -qx 'LIVE_POINTER_CHANGED'
+  printf '%s\n' "$filtered" | grep -qx 'PG_DUMP_FAILED'
+  printf '%s\n' "$filtered" | grep -qx 'SHA_MISMATCH'
+  printf '%s\n' "$filtered" | grep -qx 'DIRTY_TREE'
+  printf '%s\n' "$filtered" | grep -qx 'ACTIVE_RELEASE_NOT_R10'
+  printf '%s\n' "$filtered" | grep -qx 'NFT_TRIAL_RULE_FAILED'
   if printf '%s\n' "$filtered" | grep -qx 'LOOKING'; then exit 1; fi
   if printf '%s\n' "$filtered" | grep -qx 'OKAY'; then exit 1; fi
 )
@@ -622,12 +634,13 @@ set +e
   source "$target"
   body=$(declare -f copy_to_ehr_execute)
   install_line=$(printf '%s\n' "$body" | awk '/install-client-deps\.sh/{print NR; exit}')
-  build_line=$(printf '%s\n' "$body" | awk '/corepack pnpm run build/{print NR; exit}')
+  build_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_run_web_build/{print NR; exit}')
   web_line=$(printf '%s\n' "$body" | awk '/cd "\$workdir\/src\/web"/{print NR; exit}')
   [[ -n "$install_line" && -n "$build_line" && -n "$web_line" ]]
   [[ "$install_line" -lt "$build_line" && "$web_line" -lt "$build_line" ]]
   printf '%s\n' "$body" | grep -q '\$workdir/src/scripts/install-client-deps.sh'
   if printf '%s\n' "$body" | grep -q 'pnpm install'; then exit 1; fi
+  declare -f copy_to_ehr_run_web_build | grep -q 'corepack pnpm run build'
 )
 status=$?
 set -e
@@ -683,7 +696,8 @@ EOF
   stage_out="$root_dir/stage.out"
   copy_to_ehr_stage_web_env "$independent" "$copy_out" >"$stage_out"
   [[ ! -s "$stage_out" ]]
-  [[ "$(stat -c %a "$copy_out")" == "600" ]]
+  mode=$(python3 -c 'import os,sys; print(format(os.stat(sys.argv[1]).st_mode & 0o777, "o"))' "$copy_out")
+  [[ "$mode" == "600" ]]
   [[ "$(cksum "$independent")" == "$independent_before" ]]
   grep -q '^VITE_WORKSPACE_FEATURE_PROFILE=independent-beta-v1$' "$copy_out"
   grep -q '^VITE_WORKSPACE_ORGANIZATION_ID=org_synthetic_beta$' "$copy_out"
@@ -706,11 +720,11 @@ EOF
   [[ -f "$independent" ]]
   body=$(declare -f copy_to_ehr_execute)
   read_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_read_web_env_keys/{print NR; exit}')
-  trap_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_cleanup_web_env_copy/{print NR; exit}')
   stage_line=$(printf '%s\n' "$body" | awk '/copy_to_ehr_stage_web_env/{print NR; exit}')
-  [[ -n "$read_line" && -n "$trap_line" && -n "$stage_line" ]]
-  [[ "$read_line" -lt "$stage_line" && "$trap_line" -lt "$stage_line" ]]
-  if printf '%s\n' "$body" | grep -q 'cp -p --'; then exit 1; fi
+  copy_line=$(printf '%s\n' "$body" | awk '/COPY_TO_EHR_WEB_ENV_COPY=/{print NR; exit}')
+  trap_line=$(printf '%s\n' "$body" | awk '/trap copy_to_ehr_local_exit/{print NR; exit}')
+  [[ -n "$read_line" && -n "$stage_line" && -n "$copy_line" && -n "$trap_line" ]]
+  [[ "$read_line" -lt "$stage_line" && "$stage_line" -lt "$copy_line" && "$copy_line" -lt "$trap_line" ]]
 )
 status=$?
 set -e
@@ -718,6 +732,576 @@ if [[ "$status" -eq 0 ]]; then
   pass "independent profile build copy drops forced-empty origins"
 else
   fail "independent profile build copy drops forced-empty origins"
+fi
+
+write_profile_env() {
+  local path="$1" profile="$2" extra="$3"
+  umask 077
+  {
+    printf 'VITE_WORKSPACE_FEATURE_PROFILE=%s\n' "$profile"
+    printf '%s\n' "$extra"
+    printf 'VITE_WORKSPACE_HOSTED_ENABLED=true\n'
+    printf 'VITE_WORKSPACE_CAPTURE_MODE=synthetic\n'
+    printf 'VITE_COSMANEURA_WEB_ORIGIN=https://core.synthetic.example\n'
+    printf 'VITE_CAPTURE_UPLOAD_ORIGINS=https://upload.synthetic.example\n'
+    printf 'VITE_WORKSPACE_DATA_MODE=synthetic\n'
+    printf 'VITE_WORKSPACE_HOSTED_CLIENT=web\n'
+    printf 'VITE_WORKSPACE_HOSTED_API_ORIGIN=https://api.synthetic.example\n'
+    printf 'VITE_API_BASE=https://api.synthetic.example\n'
+    printf 'VITE_WORKSPACE_WEB_ORIGIN=https://app.synthetic.example\n'
+  } >"$path"
+  chmod 600 "$path"
+}
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  export COPY_TO_EHR_EXECUTE=1
+  reached="$root_dir/sentinel.reached"
+  : >"$reached"
+  az() {
+    printf '%s' '{"value":[{"message":"API_BUILD_FAILED\n"}]}'
+    return 0
+  }
+  copy_to_ehr_invoke_remote api-build 'echo remote'
+  printf 'REACHED_NEXT\n' >>"$reached"
+) >"$root_dir/sentinel.out" 2>"$root_dir/sentinel.err"
+status=$?
+set -e
+if [[ "$status" -ne 0 ]] \
+  && grep -qx 'API_BUILD_FAILED' "$root_dir/sentinel.out" \
+  && ! grep -q 'REACHED_NEXT' "$root_dir/sentinel.reached"; then
+  pass "az exit 0 with a failed remote step stops before the next step"
+else
+  fail "az exit 0 with a failed remote step stops before the next step"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  export COPY_TO_EHR_EXECUTE=1
+  az() {
+    printf '%s' '{"value":[{"message":"API_IMAGE_OK\n"}]}'
+    return 0
+  }
+  copy_to_ehr_invoke_remote api-build 'echo remote'
+  az() {
+    printf '%s' '{"value":[{"message":"CHUNK_OK 0\n"}]}'
+    return 0
+  }
+  copy_to_ehr_invoke_remote web-chunk-0 'echo remote'
+  COPY_TO_EHR_ARCHIVE_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  az() {
+    printf '%s' '{"value":[{"message":"ARCHIVE_SHA256 bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"}]}'
+    return 0
+  }
+  if copy_to_ehr_invoke_remote web-verify 'echo remote'; then
+    exit 1
+  fi
+) >"$root_dir/sentinel-ok.out" 2>"$root_dir/sentinel-ok.err"
+status=$?
+set -e
+if [[ "$status" -ne 0 ]] && grep -q 'did not report success' "$root_dir/sentinel-ok.err"; then
+  pass "a web archive hash mismatch exits non-zero"
+else
+  fail "a web archive hash mismatch exits non-zero"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  secret='SUPERSECRETVALUE'
+  bad="$root_dir/bad-env"
+  check_refused() {
+    local label="$1"
+    : >"$root_dir/env-names.out"
+    : >"$root_dir/env-names.err"
+    if copy_to_ehr_read_web_env_keys "$bad" >"$root_dir/env-names.out" 2>"$root_dir/env-names.err"; then
+      printf 'accepted %s\n' "$label" >&2
+      exit 1
+    fi
+    grep -qx 'WEB_ENV_REFUSED' "$root_dir/env-names.err"
+    if grep -q "$secret" "$root_dir/env-names.out" "$root_dir/env-names.err"; then
+      printf 'echoed %s\n' "$label" >&2
+      exit 1
+    fi
+  }
+  umask 077
+  printf 'VITE_PUBLIC_1="%s"\n' "$secret" >"$bad"
+  chmod 600 "$bad"
+  check_refused quoted
+  printf 'VITE_PUBLIC_1 = %s\n' "$secret" >"$bad"
+  chmod 600 "$bad"
+  check_refused spaced
+  printf 'VITE_PUBLIC_1=%s # note\n' "$secret" >"$bad"
+  chmod 600 "$bad"
+  check_refused comment
+  printf 'export VITE_PUBLIC_1=%s\n' "$secret" >"$bad"
+  chmod 600 "$bad"
+  check_refused export
+  printf 'VITE_PUBLIC_1=%s\r\n' "$secret" >"$bad"
+  chmod 600 "$bad"
+  check_refused crlf
+  {
+    printf 'VITE_WORKSPACE_FEATURE_PROFILE=operational-beta-v1\n'
+    printf 'VITE_PUBLIC_1=%s\n' "$secret"
+    printf 'VITE_PUBLIC_1=%s\n' "$secret"
+    i=2
+    while [[ "$i" -le 9 ]]; do
+      printf 'VITE_PUBLIC_%s=value\n' "$i"
+      i=$((i + 1))
+    done
+  } >"$bad"
+  chmod 600 "$bad"
+  check_refused duplicate
+  {
+    printf 'VITE_PUBLIC_1=%s\n' "$secret"
+    i=2
+    while [[ "$i" -le 11 ]]; do
+      printf 'VITE_PUBLIC_%s=value\n' "$i"
+      i=$((i + 1))
+    done
+  } >"$bad"
+  chmod 600 "$bad"
+  check_refused 'missing profile'
+  write_profile_env "$bad" 'not-a-profile' 'VITE_PUBLIC_1=value'
+  check_refused 'unknown profile'
+) >"$root_dir/env-shape.out" 2>"$root_dir/env-shape.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "quoted spaced commented duplicate and CRLF env lines are refused by name only"
+else
+  fail "quoted spaced commented duplicate and CRLF env lines are refused by name only"
+  cat "$root_dir/env-shape.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  export VITE_API_BASE='https://evil.synthetic.example'
+  export VITE_BUILD_SHA='inherited'
+  sha='e29bf5a2de0eddec1663b1185076472ef172b590'
+  corepack() {
+    if [[ -n "${VITE_API_BASE:-}" ]]; then
+      printf 'LEAK\n' >&2
+      return 1
+    fi
+    [[ "${VITE_BUILD_SHA:-}" == "$sha" ]]
+  }
+  copy_to_ehr_run_web_build "$sha"
+) >"$root_dir/build-env.out" 2>"$root_dir/build-env.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && ! grep -q 'LEAK' "$root_dir/build-env.err"; then
+  pass "the web build drops inherited VITE variables except VITE_BUILD_SHA"
+else
+  fail "the web build drops inherited VITE variables except VITE_BUILD_SHA"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  work="$root_dir/trap-env"
+  mkdir -p "$work"
+  good="$root_dir/trap-good.env"
+  write_profile_env "$good" operational-beta-v1 'VITE_PUBLIC_1=value'
+  dest="$work/.env.production"
+  copy_to_ehr_stage_web_env "$good" "$dest"
+  COPY_TO_EHR_WEB_ENV_COPY="$dest"
+  trap copy_to_ehr_local_exit EXIT
+  trap copy_to_ehr_local_signal INT TERM HUP
+  false
+) >"$root_dir/exit-trap.out" 2>"$root_dir/exit-trap.err"
+status=$?
+set -e
+if [[ "$status" -ne 0 && ! -e "$root_dir/trap-env/.env.production" ]]; then
+  pass "EXIT trap removes the env copy when the build fails"
+else
+  fail "EXIT trap removes the env copy when the build fails"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  work="$root_dir/signal-env"
+  mkdir -p "$work"
+  good="$root_dir/signal-good.env"
+  write_profile_env "$good" operational-beta-v1 'VITE_PUBLIC_1=value'
+  dest="$work/.env.production"
+  copy_to_ehr_stage_web_env "$good" "$dest"
+  COPY_TO_EHR_WEB_ENV_COPY="$dest"
+  trap copy_to_ehr_local_exit EXIT
+  trap copy_to_ehr_local_signal INT TERM HUP
+  kill -TERM "$BASHPID"
+) >"$root_dir/signal-trap.out" 2>"$root_dir/signal-trap.err"
+status=$?
+set -e
+if [[ "$status" -ne 0 && ! -e "$root_dir/signal-env/.env.production" ]]; then
+  pass "TERM trap removes the env copy"
+else
+  fail "TERM trap removes the env copy"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  work="$root_dir/preexisting-env"
+  mkdir -p "$work"
+  good="$root_dir/preexisting-good.env"
+  write_profile_env "$good" operational-beta-v1 'VITE_PUBLIC_1=value'
+  dest="$work/.env.production"
+  printf 'keep-me\n' >"$dest"
+  chmod 600 "$dest"
+  if copy_to_ehr_stage_web_env "$good" "$dest"; then
+    exit 1
+  fi
+  grep -qx 'keep-me' "$dest"
+  unset COPY_TO_EHR_WEB_ENV_COPY
+  copy_to_ehr_cleanup_web_env_copy
+  grep -qx 'keep-me' "$dest"
+  shadow="$work/.env.local"
+  printf 'VITE_COSMANEURA_WEB_ORIGIN=https://shadow.synthetic.example\n' >"$shadow"
+  chmod 600 "$shadow"
+  independent="$root_dir/shadow-independent.env"
+  cp "$root_dir/independent.env" "$independent" 2>/dev/null || true
+  if [[ ! -f "$independent" ]]; then
+    cat >"$independent" <<'EOF'
+VITE_WORKSPACE_FEATURE_PROFILE=independent-beta-v1
+VITE_WORKSPACE_ORGANIZATION_ID=org_synthetic_beta
+VITE_WORKSPACE_CAPTURE_MODE=disabled
+VITE_COSMANEURA_WEB_ORIGIN=https://core.synthetic.example
+VITE_CAPTURE_UPLOAD_ORIGINS=https://upload.synthetic.example
+VITE_WORKSPACE_DATA_MODE=synthetic
+VITE_WORKSPACE_HOSTED_CLIENT=web
+VITE_WORKSPACE_HOSTED_API_ORIGIN=https://api.synthetic.example
+VITE_API_BASE=https://api.synthetic.example
+VITE_WORKSPACE_WEB_ORIGIN=https://app.synthetic.example
+VITE_CLERK_PUBLISHABLE_KEY=pk_test_syntheticdummy
+EOF
+    chmod 600 "$independent"
+  fi
+  rm -f -- "$dest"
+  if copy_to_ehr_stage_web_env "$independent" "$dest" >"$root_dir/shadow.out" 2>"$root_dir/shadow.err"; then
+    exit 1
+  fi
+  [[ ! -e "$dest" ]]
+  grep -qx 'WEB_ENV_REFUSED' "$root_dir/shadow.err"
+  if grep -q 'shadow.synthetic.example' "$root_dir/shadow.out" "$root_dir/shadow.err"; then
+    exit 1
+  fi
+) >"$root_dir/preexisting.out" 2>"$root_dir/preexisting.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "cleanup does not delete a pre-existing env file and refuses a shadow key"
+else
+  fail "cleanup does not delete a pre-existing env file and refuses a shadow key"
+  cat "$root_dir/preexisting.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  export COPY_TO_EHR_READY_TRIES=2
+  sleep() { return 0; }
+  docker() { return 1; }
+  if copy_to_ehr_wait_postgres trial-pg 54130; then
+    exit 1
+  fi
+  curl() { return 1; }
+  if copy_to_ehr_wait_listener 54120 54122 e29bf5a2de0eddec1663b1185076472ef172b590; then
+    exit 1
+  fi
+) >"$root_dir/ready.out" 2>"$root_dir/ready.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] \
+  && grep -q 'POSTGRES_NOT_READY 54130' "$root_dir/ready.err" \
+  && grep -q 'LISTENER_NOT_READY 54120 54122' "$root_dir/ready.err" \
+  && ! grep -q 'SIDE_PORT_REFUSED_LIVE_DATABASE' "$root_dir/ready.err"; then
+  pass "readiness timeout uses its own token"
+else
+  fail "readiness timeout uses its own token"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  vm="$root_dir/restore-vm"
+  STAGING_DATA_ROOT="$vm"
+  dump="$vm/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  printf 'PGDMP' >"$dump"
+  printf 'alembic_version 4\naudit_events 4\npractice_owner_reservations 4\n' >"${dump}.counts"
+  chmod 600 "$dump" "${dump}.counts"
+  COPY_TO_EHR_PG_CONTAINER=pg-stub
+  docker() {
+    printf '%s\n' "$*" >>"$root_dir/restore-docker.log"
+    if [[ "$*" == *pg_restore* ]]; then
+      return 1
+    fi
+    return 0
+  }
+  if copy_to_ehr_rollback_to_r10 "$dump" cosmabot_standalone_e0a414184674; then
+    exit 1
+  fi
+  grep -q -- '--single-transaction' "$root_dir/restore-docker.log"
+  grep -q -- '--exit-on-error' "$root_dir/restore-docker.log"
+  if grep -q -- '--no-owner' "$root_dir/restore-docker.log"; then
+    exit 1
+  fi
+  if grep -q -- '--clean' "$root_dir/restore-docker.log"; then
+    exit 1
+  fi
+) >"$root_dir/pg-restore.out" 2>"$root_dir/pg-restore.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -q 'CUTOVER_ROLLBACK_FAILED' "$root_dir/pg-restore.err"; then
+  pass "a failing pg_restore rolls back non-zero without --clean --no-owner"
+else
+  fail "a failing pg_restore rolls back non-zero without --clean --no-owner"
+  cat "$root_dir/pg-restore.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  vm="$root_dir/restore-vm-count"
+  STAGING_DATA_ROOT="$vm"
+  dump="$vm/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  printf 'PGDMP' >"$dump"
+  printf 'alembic_version 4\naudit_events 4\npractice_owner_reservations 4\n' >"${dump}.counts"
+  chmod 600 "$dump" "${dump}.counts"
+  COPY_TO_EHR_PG_CONTAINER=pg-stub
+  : >"$root_dir/count-start.log"
+  docker() { return 0; }
+  copy_to_ehr_psql() { printf 'wrong\n'; return 0; }
+  copy_to_ehr_start_prior_listeners() { printf 'STARTED\n' >>"$root_dir/count-start.log"; return 0; }
+  if copy_to_ehr_rollback_to_r10 "$dump" cosmabot_standalone_e0a414184674; then
+    exit 1
+  fi
+  if grep -q 'STARTED' "$root_dir/count-start.log"; then
+    exit 1
+  fi
+) >"$root_dir/count-restore.out" 2>"$root_dir/count-restore.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -q 'PG_RESTORE_FAILED' "$root_dir/count-restore.err"; then
+  pass "row-count mismatch blocks release-r10 from starting"
+else
+  fail "row-count mismatch blocks release-r10 from starting"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  COPY_TO_EHR_SHA=e29bf5a2de0eddec1663b1185076472ef172b590
+  copy_to_ehr_write_migrate_env() { return 1; }
+  if copy_to_ehr_run_live_migrate; then
+    exit 1
+  fi
+  copy_to_ehr_write_migrate_env() { printf 'x\n' >"$2"; return 0; }
+  git() { return 1; }
+  if copy_to_ehr_run_live_migrate; then
+    exit 1
+  fi
+) >"$root_dir/migrate-check.out" 2>"$root_dir/migrate-check.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "migrate checks the env writer and the clone before it can succeed"
+else
+  fail "migrate checks the env writer and the clone before it can succeed"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  copy_to_ehr_rollback_to_r10() { return 0; }
+  copy_to_ehr_clear_cutover_marker() { return 0; }
+  COPY_TO_EHR_TRAP_DUMP="$root_dir/marker.dump"
+  COPY_TO_EHR_TRAP_DB=cosmabot_standalone_e0a414184674
+  true
+  copy_to_ehr_cutover_trap_rollback
+) >"$root_dir/int-zero.out" 2>"$root_dir/int-zero.err"
+status=$?
+set -e
+if [[ "$status" -ne 0 ]] && grep -q 'CUTOVER_ROLLBACK' "$root_dir/int-zero.err"; then
+  pass "a rollback handler exits non-zero even when the prior status was 0"
+else
+  fail "a rollback handler exits non-zero even when the prior status was 0"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  owned="$root_dir/owned-work"
+  mkdir -p "$owned/keep"
+  COPY_TO_EHR_OWNED_WORKDIR="$owned"
+  copy_to_ehr_local_exit
+  [[ ! -e "$owned" ]]
+) >"$root_dir/owned.out" 2>"$root_dir/owned.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "owned build directory cleanup removes the work tree"
+else
+  fail "owned build directory cleanup removes the work tree"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  edge="$root_dir/edge-src"
+  mkdir -p "$edge/release-r10" "$edge/release-r6r1"
+  printf 'listen 127.0.0.1:54110;\nlisten 172.30.241.1:54112;\n' >"$edge/release-r10/edge-nginx.conf"
+  printf 'listen 127.0.0.1:54110;\n' >"$edge/release-r6r1/edge-nginx.conf"
+  chosen=$(copy_to_ehr_edge_conf_source "$edge")
+  [[ "$chosen" == "$edge/release-r10/edge-nginx.conf" ]]
+  copy_to_ehr_write_trial_edge "$chosen" "$edge/trial.conf"
+  grep -q '127.0.0.1:54120' "$edge/trial.conf"
+  grep -q '127.0.0.1:54122' "$edge/trial.conf"
+  if grep -q '54110' "$edge/trial.conf"; then exit 1; fi
+  if grep -q '54112' "$edge/trial.conf"; then exit 1; fi
+  rm -f "$edge/release-r10/edge-nginx.conf"
+  chosen=$(copy_to_ehr_edge_conf_source "$edge")
+  [[ "$chosen" == "$edge/release-r6r1/edge-nginx.conf" ]]
+  side=$(copy_to_ehr_render_side_port e29bf5a2de0eddec1663b1185076472ef172b590)
+  cutover=$(copy_to_ehr_render_cutover e29bf5a2de0eddec1663b1185076472ef172b590 9dfd4cfd "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump")
+  printf '%s\n' "$side" | grep -q 'copy_to_ehr_edge_conf_source'
+  printf '%s\n' "$cutover" | grep -q 'copy_to_ehr_edge_conf_source'
+  printf '%s\n' "$side" | grep -q 'copy_to_ehr_run_migrate_py'
+  if printf '%s\n' "$side" | grep -q 'copy_to_ehr_migrate_live'; then exit 1; fi
+  side_body=$(declare -f copy_to_ehr_side_port_main)
+  pg_line=$(printf '%s\n' "$side_body" | awk '/copy_to_ehr_wait_postgres/{print NR; exit}')
+  migrate_line=$(printf '%s\n' "$side_body" | awk '/copy_to_ehr_run_migrate_py/{print NR; exit}')
+  listener_line=$(printf '%s\n' "$side_body" | awk '/copy_to_ehr_wait_listener/{print NR; exit}')
+  [[ -n "$pg_line" && -n "$migrate_line" && -n "$listener_line" ]]
+  [[ "$pg_line" -lt "$migrate_line" && "$migrate_line" -lt "$listener_line" ]]
+) >"$root_dir/edge.out" 2>"$root_dir/edge.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "trial and cutover share the edge source and the trial config drops live ports"
+else
+  fail "trial and cutover share the edge source and the trial config drops live ports"
+  cat "$root_dir/edge.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  if copy_to_ehr_validate_dump_target "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/bad name.dump"; then
+    exit 1
+  fi
+  if copy_to_ehr_validate_dump_target "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/bad;name.dump"; then
+    exit 1
+  fi
+  copy_to_ehr_validate_dump_target "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump"
+  log="$root_dir/nft.log"
+  : >"$log"
+  nft() {
+    printf '%s\n' "$*" >>"$log"
+    if [[ "$1" == "-a" ]]; then
+      printf '%s\n' 'tcp dport 54120 accept comment "copy-ehr-trial" # handle 9'
+    fi
+    return 0
+  }
+  docker() { return 0; }
+  copy_to_ehr_remove_trial
+  grep -q 'delete rule' "$log"
+  grep -q 'handle 9' "$log"
+) >"$root_dir/nft.out" 2>"$root_dir/nft.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "teardown deletes the trial nft rule and dump paths stay on the character whitelist"
+else
+  fail "teardown deletes the trial nft rule and dump paths stay on the character whitelist"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  printf 'in-progress\n' >"$COPY_TO_EHR_MARKER_FILE"
+  if copy_to_ehr_refuse_cutover_marker; then
+    exit 1
+  fi
+  copy_to_ehr_clear_cutover_marker
+  copy_to_ehr_refuse_cutover_marker
+  copy_to_ehr_arm_cutover_trap "$root_dir/marker.dump" cosmabot_standalone_e0a414184674
+  [[ -f "$COPY_TO_EHR_MARKER_FILE" ]]
+  trap - ERR EXIT INT TERM HUP
+  rm -f -- "$COPY_TO_EHR_MARKER_FILE"
+) >"$root_dir/marker.out" 2>"$root_dir/marker.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -q 'CUTOVER_IN_PROGRESS' "$root_dir/marker.err"; then
+  pass "an in-progress cutover marker blocks the next run"
+else
+  fail "an in-progress cutover marker blocks the next run"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  dump="$root_dir/storage.dump"
+  printf 'PGDMP' >"$dump"
+  : >"$root_dir/upload.log"
+  az() {
+    printf '%s\n' "$*" >>"$root_dir/upload.log"
+    return 1
+  }
+  if copy_to_ehr_upload_dump_to_storage "$dump" stgcbotstaging; then
+    exit 1
+  fi
+  grep -q 'storage blob upload' "$root_dir/upload.log"
+  if grep -q 'blob download' "$root_dir/upload.log"; then
+    exit 1
+  fi
+) >"$root_dir/upload.out" 2>"$root_dir/upload.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -q 'STORAGE_UPLOAD_FAILED' "$root_dir/upload.err"; then
+  pass "a storage dump target uploads from the VM and a failed upload is visible"
+else
+  fail "a storage dump target uploads from the VM and a failed upload is visible"
 fi
 
 if [[ "$failures" -eq 0 ]]; then

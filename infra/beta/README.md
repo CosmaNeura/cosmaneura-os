@@ -1203,10 +1203,34 @@ EHR beta. It follows the October 31 pointer switch on
 The script is a dry-run until `--execute`. Without `--cutover` it leaves
 `release-r10` on ports 54110 and 54112 and trials the new build on 54120 and
 54122, with a throwaway database on 54130. The live database is not migrated
-until cutover. Cutover also requires `--expect-prior-sha`. On `--execute`, the
-local web build runs `scripts/install-client-deps.sh` before `pnpm run build`
-in `web/`. That is the same install CI uses. `tsc -b` also typechecks
-`clients/capture`, so a web-only install is not enough.
+until cutover. Cutover also requires `--expect-prior-sha`. Cutover stops the
+live listeners, so staging is down until `release-r10` is serving again or the
+new release passes its checks. The image build, web transfer, and side-port
+trial load the staging VM. On `--execute`, the local web build runs
+`scripts/install-client-deps.sh` before `pnpm run build` in `web/`. That is
+the same install CI uses. `tsc -b` also typechecks `clients/capture`, so a
+web-only install is not enough.
+
+`az vm run-command invoke` can exit 0 when the remote script fails. A local
+exit code of 0 is not success. Each remote step has to print its own sentinel
+(`API_IMAGE_OK`, `CHUNK_OK <n>`, `SIDE_PORT_OK`, `CUTOVER_OK`, or
+`ARCHIVE_SHA256` plus the archive hash). If that line is missing, the local
+script exits non-zero and does not continue. A failed build, chunk, or
+side-port does not start cutover.
+
+The web env file has to be a regular mode 600 file with exactly 11 lines of
+`VITE_<NAME>=<value>`. The name is `VITE_` plus uppercase letters, digits, and
+underscores. The value cannot contain a space. Quotes, spaces around `=`,
+inline comments, an `export` prefix, a duplicate key, a missing profile, and
+an unknown profile are refused. The refusal prints `WEB_ENV_REFUSED` and does
+not echo the line. The build uses a private mode 600 copy. For
+`independent-beta-v1` and `standalone-practice-v1` that copy omits
+`VITE_COSMANEURA_WEB_ORIGIN` and `VITE_CAPTURE_UPLOAD_ORIGINS`. Another
+`web/.env*` file that still defines either of those keys is refused. The
+build unsets every inherited `VITE_*` variable except `VITE_BUILD_SHA`. The
+copy is deleted when the build finishes. The cleanup trap is armed only after
+that copy is created, and it also runs on EXIT, INT, TERM, and HUP. A file
+that was already there is not deleted.
 
 The candidate SHA lives in one constant, `DEFAULT_SOURCE_SHA`, currently
 `e29bf5a2de0eddec1663b1185076472ef172b590`. Pass `--sha` when PR 341 moves.
@@ -1229,10 +1253,17 @@ The pre-cutover `pg_dump` stays on the staging VM under
 `rg-cosmas-os-vm-staging-eus2-lab01`. The script does not download that dump.
 Before any live migration it restores the dump into a scratch database, checks
 the alembic version and row counts, drops the scratch database, and aborts if
-that check fails. A failed cutover restores the on-VM dump and points
-`/etc/cosmabot/active-release` back at `release-r10`.
+that check fails. A failed cutover drops and recreates the live database,
+restores the on-VM dump with `--single-transaction --exit-on-error` and the
+original owners, checks the alembic version and row counts, and only then
+starts `release-r10`. It points `/etc/cosmabot/active-release` back at
+`release-r10`. A restore failure prints `CUTOVER_ROLLBACK_FAILED` and exits
+non-zero. `--dump-target` may be that VM path or a storage account id in the
+staging resource group. A storage id is uploaded from the VM with
+`az storage blob upload` and is never downloaded. The trial nft rule is
+removed when the trial is torn down.
 
-Run the shell tests from the repository root:
+`beta-infra-static` in `.github/workflows/synth-ci.yml` runs the shell tests:
 
 ```sh
 bash infra/beta/tests/copy-to-ehr-staging-deploy.sh

@@ -40,6 +40,8 @@ MIN_FREE_KIB=4194304
 PUBLIC_GIT_URL=https://github.com/CosmaNeura/cosmaneura-os.git
 WEB_ENV_KEY_COUNT=11
 CHUNK_BYTES=24000
+COPY_TO_EHR_READY_TRIES="${COPY_TO_EHR_READY_TRIES:-30}"
+COPY_TO_EHR_STORAGE_ACCOUNT="${COPY_TO_EHR_STORAGE_ACCOUNT:-}"
 
 copy_to_ehr_die() {
   printf 'copy-to-ehr staging deploy refused: %s\n' "$1" >&2
@@ -124,6 +126,9 @@ copy_to_ehr_validate_dump_target() {
     printf 'DUMP_TARGET_REFUSED\n' >&2
     return 1
   fi
+  case "$target" in
+    *[!A-Za-z0-9._/-]*) printf 'DUMP_TARGET_REFUSED\n' >&2; return 1 ;;
+  esac
   if copy_to_ehr_path_is_desktop_checkout "$target"; then
     printf 'DUMP_TARGET_REFUSED\n' >&2
     return 1
@@ -163,7 +168,7 @@ copy_to_ehr_dump_file_on_staging_vm() {
     *) return 1 ;;
   esac
   case "$dump" in
-    *..*|*prod*|*PROD*) return 1 ;;
+    *[!A-Za-z0-9._/-]*|*..*|*prod*|*PROD*) return 1 ;;
   esac
   return 0
 }
@@ -246,79 +251,420 @@ sys.stdout.write("vm_ok\n")
 ' "$STAGING_VM_NAME" "$STAGING_RESOURCE_GROUP" "$STAGING_PUBLIC_IP"
 }
 
-copy_to_ehr_read_web_env_keys() {
-  local file="$1"
-  python3 - "$file" "$WEB_ENV_KEY_COUNT" <<'PY'
-import os, stat, sys
-path, expected = sys.argv[1], int(sys.argv[2])
-info = os.lstat(path)
-if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+copy_to_ehr_parse_web_env() {
+  local mode="$1" source="$2" dest="${3:-}"
+  python3 - "$mode" "$source" "$dest" "$WEB_ENV_KEY_COUNT" <<'PY'
+import os, re, stat, sys
+mode, source, dest, expected = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+line_re = re.compile(r"^VITE_[A-Z0-9_]+=\S+$")
+profiles = {
+    "operational-beta-v1",
+    "first-owner-staging-v1",
+    "standalone-practice-v1",
+    "independent-beta-v1",
+}
+drop_names = ("VITE_COSMANEURA_WEB_ORIGIN", "VITE_CAPTURE_UPLOAD_ORIGINS")
+
+def refuse():
     sys.stderr.write("WEB_ENV_REFUSED\n")
-    sys.exit(1)
-if stat.S_IMODE(info.st_mode) & 0o077:
-    sys.stderr.write("WEB_ENV_REFUSED\n")
-    sys.exit(1)
-keys = []
-with open(path, "r", encoding="utf-8") as handle:
-    for raw in handle:
-        line = raw.strip()
-        if not line or line.startswith("#"):
+    raise SystemExit(1)
+
+def load(path):
+    info = os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        refuse()
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        refuse()
+    blob = open(path, "rb").read()
+    if b"\r" in blob or b"\x00" in blob:
+        refuse()
+    try:
+        text = blob.decode("utf-8")
+    except UnicodeError:
+        refuse()
+    rows = []
+    seen = set()
+    profile = ""
+    for raw_line in text.split("\n"):
+        if raw_line == "":
             continue
-        if "=" not in line:
-            sys.stderr.write("WEB_ENV_REFUSED\n")
-            sys.exit(1)
-        key, value = line.split("=", 1)
-        if not key.startswith("VITE_") or value == "":
-            sys.stderr.write("WEB_ENV_REFUSED\n")
-            sys.exit(1)
-        keys.append(key)
-if len(keys) != expected:
-    sys.stderr.write("WEB_ENV_KEY_COUNT=%s\n" % len(keys))
-    sys.exit(1)
-sys.stdout.write("\n".join(keys) + "\n")
+        if (
+            not line_re.match(raw_line)
+            or "#" in raw_line
+            or '"' in raw_line
+            or "'" in raw_line
+            or " " in raw_line
+            or "\t" in raw_line
+            or raw_line.startswith("export ")
+        ):
+            refuse()
+        key, value = raw_line.split("=", 1)
+        if key in seen or value == "":
+            refuse()
+        seen.add(key)
+        if key == "VITE_WORKSPACE_FEATURE_PROFILE":
+            profile = value
+        rows.append((key, raw_line))
+    if len(rows) != expected or profile not in profiles:
+        refuse()
+    return rows, profile
+
+if mode == "keys":
+    rows, _profile = load(source)
+    sys.stdout.write("".join("%s\n" % key for key, _line in rows))
+    raise SystemExit(0)
+if mode != "stage" or not dest or os.path.realpath(source) == os.path.realpath(dest):
+    refuse()
+rows, profile = load(source)
+drop = set(drop_names) if profile in {"independent-beta-v1", "standalone-practice-v1"} else set()
+flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+if hasattr(os, "O_NOFOLLOW"):
+    flags |= os.O_NOFOLLOW
+try:
+    fd = os.open(dest, flags, 0o600)
+except OSError:
+    refuse()
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        for key, raw_line in rows:
+            if key in drop:
+                continue
+            handle.write(raw_line + "\n")
+    os.chmod(dest, 0o600)
+    if drop:
+        parent = os.path.dirname(dest)
+        own = os.path.basename(dest)
+        for name in os.listdir(parent):
+            if not name.startswith(".env") or name == own:
+                continue
+            other = os.path.join(parent, name)
+            info = os.lstat(other)
+            if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+                refuse()
+            other_blob = open(other, "rb").read()
+            for key in drop_names:
+                if (key + "=").encode("ascii") in other_blob:
+                    refuse()
+except SystemExit:
+    try:
+        os.unlink(dest)
+    except OSError:
+        pass
+    raise
+except BaseException:
+    try:
+        os.unlink(dest)
+    except OSError:
+        pass
+    refuse()
 PY
+}
+
+copy_to_ehr_read_web_env_keys() {
+  copy_to_ehr_parse_web_env keys "$1"
 }
 
 copy_to_ehr_cleanup_web_env_copy() {
   if [[ -n "${COPY_TO_EHR_WEB_ENV_COPY:-}" ]]; then
     rm -f -- "$COPY_TO_EHR_WEB_ENV_COPY"
+    unset COPY_TO_EHR_WEB_ENV_COPY
   fi
+}
+
+copy_to_ehr_local_exit() {
+  local owned="${COPY_TO_EHR_OWNED_WORKDIR:-}"
+  copy_to_ehr_cleanup_web_env_copy
+  if [[ -n "$owned" ]]; then
+    rm -rf -- "$owned"
+  fi
+}
+
+copy_to_ehr_local_signal() {
+  copy_to_ehr_local_exit
+  exit 1
 }
 
 copy_to_ehr_stage_web_env() {
   local source="$1" dest="$2"
   [[ "$source" != "$dest" ]] || return 1
   umask 077
-  python3 - "$source" "$dest" <<'PY'
-import os, sys
-source, dest = sys.argv[1:]
-if os.path.realpath(source) == os.path.realpath(dest):
+  copy_to_ehr_parse_web_env stage "$source" "$dest"
+}
+
+copy_to_ehr_run_web_build() {
+  local sha="$1" name=""
+  for name in $(compgen -v); do
+    case "$name" in
+      VITE_BUILD_SHA) ;;
+      VITE_*) unset "$name" ;;
+    esac
+  done
+  export VITE_BUILD_SHA="$sha"
+  corepack pnpm run build
+}
+
+copy_to_ehr_clone_at_sha() {
+  local dest="$1" sha="$2" head=""
+  git clone --quiet "$PUBLIC_GIT_URL" "$dest" || return 1
+  git -C "$dest" checkout --detach --quiet "$sha" || return 1
+  head=$(git -C "$dest" rev-parse HEAD) || return 1
+  [[ "$head" == "$sha" ]] || { printf 'SHA_MISMATCH\n' >&2; return 1; }
+  [[ -z "$(git -C "$dest" status --porcelain)" ]] || { printf 'DIRTY_TREE\n' >&2; return 1; }
+}
+
+copy_to_ehr_database_facts() {
+  local private_json="$1" dest="$2"
+  python3 - "$private_json" "$dest" <<'PY'
+import json, os, sys
+from urllib.parse import urlparse
+private_path, dest = sys.argv[1:]
+try:
+    raw = json.loads(open(private_path, "r", encoding="utf-8").read())["DATABASE_URL"]
+    parsed = urlparse(raw.replace("postgresql+psycopg://", "postgresql://", 1))
+    database = parsed.path.lstrip("/").split("?", 1)[0]
+    if parsed.port != 54111 or not database.startswith("cosmabot_standalone_"):
+        raise RuntimeError("refused")
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write("%s\n%s\n%s\n" % (parsed.port, database, raw))
+except Exception:
+    sys.stderr.write("LIVE_DATABASE_REFUSED\n")
     sys.exit(1)
-drop_profiles = {"independent-beta-v1", "standalone-practice-v1"}
-drop_keys = {"VITE_COSMANEURA_WEB_ORIGIN", "VITE_CAPTURE_UPLOAD_ORIGINS"}
-profile = ""
-kept = []
-with open(source, "r", encoding="utf-8") as handle:
-    for raw in handle:
-        text = raw.strip()
-        key = ""
-        if text and not text.startswith("#") and "=" in text:
-            key, value = text.split("=", 1)
-            if key == "VITE_WORKSPACE_FEATURE_PROFILE":
-                profile = value
-        kept.append((raw if raw.endswith("\n") else raw + "\n", key))
-dropping = profile in drop_profiles
-flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-if hasattr(os, "O_NOFOLLOW"):
-    flags |= os.O_NOFOLLOW
-fd = os.open(dest, flags, 0o600)
-with os.fdopen(fd, "w", encoding="utf-8") as handle:
-    for raw, key in kept:
-        if dropping and key in drop_keys:
-            continue
-        handle.write(raw)
 PY
-  chmod 600 "$dest"
+}
+
+copy_to_ehr_write_migrate_env() {
+  local private_json="$1" env_file="$2" facts="" port="" database="" raw="" short="" admin=""
+  facts=$(mktemp /tmp/copy-to-ehr-db-facts.XXXXXX)
+  chmod 600 "$facts"
+  if ! copy_to_ehr_database_facts "$private_json" "$facts"; then
+    rm -f -- "$facts"
+    return 1
+  fi
+  port=$(sed -n '1p' "$facts")
+  database=$(sed -n '2p' "$facts")
+  raw=$(sed -n '3p' "$facts")
+  rm -f -- "$facts"
+  [[ "$port" == "54111" && "$database" == cosmabot_standalone_* && -n "$raw" ]] || {
+    printf 'LIVE_DATABASE_REFUSED\n' >&2
+    return 1
+  }
+  short=$(printf '%s' "$STAGING_INSTANCE_ID" | tr -d '-')
+  short=$(printf '%s' "$short" | cut -c1-12)
+  admin="postgresql+psycopg://cbpg_${short}@/${database}?host=/var/run/postgresql&port=54111"
+  umask 077
+  {
+    printf 'STANDALONE_INSTANCE_ID=%s\n' "$STAGING_INSTANCE_ID"
+    printf 'DATABASE_ADMIN_URL=%s\n' "$admin"
+    printf 'DATABASE_URL=%s\n' "$raw"
+  } >"$env_file"
+  chmod 600 "$env_file"
+}
+
+copy_to_ehr_write_trial_migrate_env() {
+  local url_file="$1" env_file="$2" url=""
+  copy_to_ehr_trial_url_file_allowed "$url_file" || return 1
+  url=$(tr -d '[:space:]' <"$url_file")
+  umask 077
+  {
+    printf 'STANDALONE_INSTANCE_ID=%s\n' "$STAGING_INSTANCE_ID"
+    printf 'DATABASE_ADMIN_URL=%s\n' "$url"
+    printf 'DATABASE_URL=%s\n' "$url"
+  } >"$env_file"
+  chmod 600 "$env_file"
+}
+
+copy_to_ehr_run_migrate_py() {
+  local env_file="$1" source_dir="$2" status=0
+  chown 21000:21000 "$env_file" || return 1
+  chmod 600 "$env_file" || return 1
+  docker run --rm --network host --user 21000:21000 \
+    --entrypoint /usr/local/bin/python \
+    -v "$source_dir:/opt/copy-to-ehr-src:ro" \
+    -v "$env_file:/run/copy-to-ehr-migrate.env:ro" \
+    -v /var/run/postgresql:/var/run/postgresql \
+    "${STAGING_API_REPOSITORY}:${COPY_TO_EHR_SHA}" \
+    -c 'import os, runpy, sys
+from pathlib import Path
+for line in Path("/run/copy-to-ehr-migrate.env").read_text().splitlines():
+    if "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    os.environ[key] = value
+os.environ["PYTHONPATH"] = "/app/src"
+sys.exit(runpy.run_path("/opt/copy-to-ehr-src/infra/standalone/package/migrate.py", run_name="__main__"))' \
+    || status=$?
+  return "$status"
+}
+
+copy_to_ehr_wait_postgres() {
+  local container="$1" port="$2" i=0 tries="${COPY_TO_EHR_READY_TRIES:-30}"
+  while [[ "$i" -lt "$tries" ]]; do
+    if docker exec -u postgres "$container" pg_isready -h 127.0.0.1 -p "$port" >/dev/null 2>&1; then
+      printf 'POSTGRES_READY %s\n' "$port"
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  printf 'POSTGRES_NOT_READY %s\n' "$port" >&2
+  return 1
+}
+
+copy_to_ehr_wait_listener() {
+  local api_port="$1" edge_port="$2" sha="$3" i=0 tries="${COPY_TO_EHR_READY_TRIES:-30}"
+  while [[ "$i" -lt "$tries" ]]; do
+    if copy_to_ehr_expect_ready "$api_port" && copy_to_ehr_expect_version "$edge_port" "$sha"; then
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  printf 'LISTENER_NOT_READY %s %s\n' "$api_port" "$edge_port" >&2
+  return 1
+}
+
+copy_to_ehr_edge_conf_source() {
+  local root="$1"
+  if [[ -f "$root/release-r10/edge-nginx.conf" ]]; then
+    printf '%s\n' "$root/release-r10/edge-nginx.conf"
+    return 0
+  fi
+  if [[ -f "$root/release-r6r1/edge-nginx.conf" ]]; then
+    printf '%s\n' "$root/release-r6r1/edge-nginx.conf"
+    return 0
+  fi
+  return 1
+}
+
+copy_to_ehr_write_trial_edge() {
+  local source="$1" dest="$2"
+  python3 - "$source" "$dest" <<'PY'
+from pathlib import Path
+import sys
+source, dest = sys.argv[1:]
+text = Path(source).read_text()
+rewritten = text.replace("172.30.241.1:54112", "127.0.0.1:54122").replace("127.0.0.1:54110", "127.0.0.1:54120")
+if "54110" in rewritten or "54112" in rewritten:
+    sys.stderr.write("EDGE_PORT_REWRITE_FAILED\n")
+    sys.exit(1)
+if "127.0.0.1:54120" not in rewritten or "127.0.0.1:54122" not in rewritten:
+    sys.stderr.write("EDGE_PORT_REWRITE_FAILED\n")
+    sys.exit(1)
+Path(dest).write_text(rewritten)
+PY
+}
+
+copy_to_ehr_remove_trial_nft() {
+  local chain="CB21000_${STAGING_SHORT}" handle=""
+  handle=$(nft -a list chain ip filter "$chain" 2>/dev/null | awk '/copy-ehr-trial/ {print $NF; exit}') || true
+  if [[ -z "$handle" ]]; then
+    return 0
+  fi
+  case "$handle" in
+    [0-9]*) ;;
+    *) printf 'NFT_TRIAL_RULE_FAILED\n' >&2; return 1 ;;
+  esac
+  nft delete rule ip filter "$chain" handle "$handle" || {
+    printf 'NFT_TRIAL_RULE_FAILED\n' >&2
+    return 1
+  }
+}
+
+copy_to_ehr_docker_api() {
+  local name="$1"
+  shift
+  docker run -d --name "$name" \
+    --network host --userns host --user 21000:21000 --read-only \
+    --security-opt no-new-privileges:true --restart=on-failure:3 \
+    --cap-drop ALL --pids-limit 128 --memory 1536m --cpus 1.25 --dns 127.0.0.53 \
+    "$@"
+}
+
+copy_to_ehr_docker_edge() {
+  local name="$1"
+  shift
+  docker run -d --name "$name" \
+    --network host --user 21002:21002 --read-only \
+    --security-opt no-new-privileges:true --restart=on-failure:3 \
+    --cap-drop ALL --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+    "$@"
+}
+
+copy_to_ehr_write_pointer() {
+  local release_dir="$1" token="$2" tmp
+  umask 022
+  tmp=$(mktemp /tmp/copy-to-ehr-pointer.XXXXXX)
+  printf 'RELEASE_DIR=%s\n' "$release_dir" >"$tmp"
+  cat "$tmp" >/etc/cosmabot/active-release
+  rm -f -- "$tmp"
+  printf '%s\n' "$token"
+}
+
+copy_to_ehr_marker_file() {
+  if [[ -n "${COPY_TO_EHR_MARKER_FILE:-}" ]]; then
+    printf '%s\n' "$COPY_TO_EHR_MARKER_FILE"
+    return 0
+  fi
+  printf '%s/copy-to-ehr-cutover.in-progress\n' "$STAGING_DATA_ROOT"
+}
+
+copy_to_ehr_refuse_cutover_marker() {
+  local marker
+  marker=$(copy_to_ehr_marker_file)
+  if [[ -f "$marker" ]]; then
+    printf 'CUTOVER_IN_PROGRESS\n' >&2
+    return 1
+  fi
+}
+
+copy_to_ehr_write_cutover_marker() {
+  local marker
+  marker=$(copy_to_ehr_marker_file)
+  umask 022
+  printf 'in-progress\n' >"$marker"
+}
+
+copy_to_ehr_clear_cutover_marker() {
+  rm -f -- "$(copy_to_ehr_marker_file)"
+}
+
+copy_to_ehr_upload_dump_to_storage() {
+  local dump="$1" account="${2:-}"
+  [[ -n "$account" ]] || return 0
+  case "$account" in
+    [a-z0-9]*) ;;
+    *) printf 'DUMP_TARGET_REFUSED\n' >&2; return 1 ;;
+  esac
+  case "$account" in
+    *[!a-z0-9]*) printf 'DUMP_TARGET_REFUSED\n' >&2; return 1 ;;
+  esac
+  az storage blob upload \
+    --auth-mode login \
+    --account-name "$account" \
+    --container-name copy-to-ehr \
+    --name pre-migrate.dump \
+    --file "$dump" \
+    --overwrite true >/dev/null || {
+    printf 'STORAGE_UPLOAD_FAILED\n' >&2
+    return 1
+  }
+  printf 'STORAGE_UPLOAD_OK\n'
+}
+
+copy_to_ehr_sha256_file() {
+  local file="$1" hash=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    hash=$(sha256sum "$file" | awk '{print $1}')
+  else
+    hash=$(shasum -a 256 "$file" | awk '{print $1}')
+  fi
+  case "$hash" in
+    [0-9a-f]*) ;;
+    *) return 1 ;;
+  esac
+  [[ ${#hash} -eq 64 ]] || return 1
+  printf '%s\n' "$hash"
 }
 
 copy_to_ehr_pg_dump() {
@@ -397,6 +743,7 @@ copy_to_ehr_restore_gate() {
     printf 'CUTOVER_ABORT_RESTORE_CHECK\n' >&2
     return 1
   fi
+  : >"${dump}.counts"
   for table in alembic_version audit_events practice_owner_reservations; do
     case "$table" in
       alembic_version) sql="SELECT count(*) FROM public.alembic_version" ;;
@@ -411,8 +758,10 @@ copy_to_ehr_restore_gate() {
       printf 'CUTOVER_ABORT_RESTORE_CHECK\n' >&2
       return 1
     fi
+    printf '%s %s\n' "$table" "$live_count" >>"${dump}.counts"
     printf 'COUNT %s=%s\n' "$table" "$live_count"
   done
+  chmod 600 "${dump}.counts" || true
   if ! copy_to_ehr_dropdb "$scratch"; then
     printf 'CUTOVER_ABORT_RESTORE_CHECK\n' >&2
     return 1
@@ -424,53 +773,26 @@ copy_to_ehr_restore_gate() {
 }
 
 copy_to_ehr_run_live_migrate() {
-  local env_file clone status=0
+  local env_file="" clone="" status=0
   umask 077
-  env_file=$(mktemp /tmp/copy-to-ehr-migrate-env.XXXXXX)
-  chmod 600 "$env_file"
-  python3 - "$STAGING_DATA_ROOT/release-r5r1/config/api-private.json" "$env_file" "$STAGING_INSTANCE_ID" <<'PY'
-import json, sys
-from urllib.parse import urlparse
-private_path, env_path, instance = sys.argv[1:]
-try:
-    raw = json.loads(open(private_path, "r", encoding="utf-8").read())["DATABASE_URL"]
-    normalized = raw.replace("postgresql+psycopg://", "postgresql://", 1)
-    parsed = urlparse(normalized)
-    database = parsed.path.lstrip("/").split("?", 1)[0]
-    if parsed.port != 54111 or not database.startswith("cosmabot_standalone_"):
-        raise RuntimeError("refused")
-    short = instance.replace("-", "")[:12]
-    admin = "postgresql+psycopg://cbpg_%s@/%s?host=/var/run/postgresql&port=54111" % (short, database)
-    with open(env_path, "w", encoding="utf-8") as handle:
-        handle.write("STANDALONE_INSTANCE_ID=%s\n" % instance)
-        handle.write("DATABASE_ADMIN_URL=%s\n" % admin)
-        handle.write("DATABASE_URL=%s\n" % raw)
-except Exception:
-    sys.stderr.write("LIVE_DATABASE_REFUSED\n")
-    sys.exit(1)
-PY
-  clone=$(mktemp -d /var/tmp/copy-to-ehr-migrate-src.XXXXXX)
-  chmod 700 "$clone"
-  git clone --quiet "$PUBLIC_GIT_URL" "$clone/src"
-  git -C "$clone/src" checkout --detach --quiet "$COPY_TO_EHR_SHA"
-  if ! docker run --rm --network host \
-    --entrypoint /usr/local/bin/python \
-    -v "$clone/src:/opt/copy-to-ehr-src:ro" \
-    -v "$env_file:/run/copy-to-ehr-migrate.env:ro" \
-    -v /var/run/postgresql:/var/run/postgresql \
-    "${STAGING_API_REPOSITORY}:${COPY_TO_EHR_SHA}" \
-    -c 'import os, runpy, sys
-from pathlib import Path
-for line in Path("/run/copy-to-ehr-migrate.env").read_text().splitlines():
-    if "=" not in line:
-        continue
-    key, value = line.split("=", 1)
-    os.environ[key] = value
-os.environ["PYTHONPATH"] = "/app/src"
-sys.exit(runpy.run_path("/opt/copy-to-ehr-src/infra/standalone/package/migrate.py", run_name="__main__"))'
-  then
-    status=1
+  env_file=$(mktemp /tmp/copy-to-ehr-migrate-env.XXXXXX) || return 1
+  chmod 600 "$env_file" || { rm -f -- "$env_file"; return 1; }
+  if ! copy_to_ehr_write_migrate_env \
+    "$STAGING_DATA_ROOT/release-r5r1/config/api-private.json" "$env_file"; then
+    rm -f -- "$env_file"
+    return 1
   fi
+  clone=$(mktemp -d /var/tmp/copy-to-ehr-migrate-src.XXXXXX) || {
+    rm -f -- "$env_file"
+    return 1
+  }
+  chmod 700 "$clone" || { rm -rf -- "$clone"; rm -f -- "$env_file"; return 1; }
+  if ! copy_to_ehr_clone_at_sha "$clone/src" "$COPY_TO_EHR_SHA"; then
+    rm -rf -- "$clone"
+    rm -f -- "$env_file"
+    return 1
+  fi
+  copy_to_ehr_run_migrate_py "$env_file" "$clone/src" || status=$?
   rm -f -- "$env_file"
   rm -rf -- "$clone"
   return "$status"
@@ -502,31 +824,63 @@ copy_to_ehr_start_prior_listeners() {
 }
 
 copy_to_ehr_write_prior_pointer() {
-  local tmp
-  umask 022
-  tmp=$(mktemp /tmp/copy-to-ehr-pointer.XXXXXX)
-  printf 'RELEASE_DIR=%s\n' "${STAGING_DATA_ROOT}/${STAGING_PRIOR_RELEASE}" >"$tmp"
-  cat "$tmp" >/etc/cosmabot/active-release
-  rm -f -- "$tmp"
-  printf 'POINTER_R10\n'
+  copy_to_ehr_write_pointer "${STAGING_DATA_ROOT}/${STAGING_PRIOR_RELEASE}" "POINTER_R10"
 }
 
 copy_to_ehr_write_new_pointer() {
-  local tmp
-  umask 022
-  tmp=$(mktemp /tmp/copy-to-ehr-pointer.XXXXXX)
-  printf 'RELEASE_DIR=%s\n' "$COPY_TO_EHR_RELEASE" >"$tmp"
-  cat "$tmp" >/etc/cosmabot/active-release
-  rm -f -- "$tmp"
-  printf 'POINTER_NEW\n'
+  copy_to_ehr_write_pointer "$COPY_TO_EHR_RELEASE" "POINTER_NEW"
 }
 
 copy_to_ehr_restore_dump_over_live() {
-  local dump="$1" live_db="$2"
+  local dump="$1" live_db="$2" status=0 version="" table="" sql="" count="" expected=""
   copy_to_ehr_dump_file_on_staging_vm "$dump" "$STAGING_DATA_ROOT" || return 1
-  [[ -s "$dump" ]] || return 1
+  [[ -s "$dump" && -s "${dump}.counts" ]] || return 1
+  case "$live_db" in
+    cosmabot_standalone_[a-z0-9_]*) ;;
+    *) return 1 ;;
+  esac
+  status=0
+  docker exec -u postgres "$COPY_TO_EHR_PG_CONTAINER" \
+    dropdb --if-exists --no-password "$live_db" >/dev/null || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf 'PG_RESTORE_FAILED\n' >&2
+    return 1
+  fi
+  status=0
+  docker exec -u postgres "$COPY_TO_EHR_PG_CONTAINER" \
+    createdb --no-password "$live_db" >/dev/null || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf 'PG_RESTORE_FAILED\n' >&2
+    return 1
+  fi
+  status=0
   docker exec -i -u postgres "$COPY_TO_EHR_PG_CONTAINER" \
-    pg_restore --clean --if-exists --no-owner --no-password --dbname "$live_db" <"$dump" >/dev/null
+    pg_restore --single-transaction --exit-on-error --no-password --dbname "$live_db" \
+    <"$dump" >/dev/null || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    printf 'PG_RESTORE_FAILED\n' >&2
+    return 1
+  fi
+  version=$(copy_to_ehr_psql "$live_db" "SELECT version_num FROM public.alembic_version") || status=$?
+  if [[ "$status" -ne 0 || "$version" != "$STAGING_LIVE_SCHEMA" ]]; then
+    printf 'PG_RESTORE_FAILED\n' >&2
+    return 1
+  fi
+  for table in alembic_version audit_events practice_owner_reservations; do
+    case "$table" in
+      alembic_version) sql="SELECT count(*) FROM public.alembic_version" ;;
+      audit_events) sql="SELECT count(*) FROM public.audit_events" ;;
+      practice_owner_reservations) sql="SELECT count(*) FROM public.practice_owner_reservations" ;;
+      *) printf 'PG_RESTORE_FAILED\n' >&2; return 1 ;;
+    esac
+    status=0
+    count=$(copy_to_ehr_psql "$live_db" "$sql") || status=$?
+    expected=$(awk -v table="$table" '$1 == table {print $2; exit}' "${dump}.counts")
+    if [[ "$status" -ne 0 || "$count" != "$expected" || ! "$count" =~ ^[0-9]+$ ]]; then
+      printf 'PG_RESTORE_FAILED\n' >&2
+      return 1
+    fi
+  done
   printf 'DUMP_RESTORED\n'
 }
 
@@ -537,10 +891,13 @@ copy_to_ehr_remove_new_listeners() {
 }
 
 copy_to_ehr_remove_trial() {
+  local status=0
+  copy_to_ehr_remove_trial_nft || status=1
   docker rm -f \
     "cosmabot-standalone-copyehr-trial-pg-${STAGING_SHORT}" \
     "cosmabot-standalone-copyehr-trial-api-${STAGING_SHORT}" \
     "cosmabot-standalone-copyehr-trial-edge-${STAGING_SHORT}" >/dev/null 2>&1 || true
+  return "$status"
 }
 
 copy_to_ehr_expect_ready() {
@@ -578,33 +935,25 @@ copy_to_ehr_live_still_serving() {
 }
 
 copy_to_ehr_start_new_listeners() {
-  local edge_conf="${STAGING_DATA_ROOT}/release-r6r1/edge-nginx.conf"
-  [[ -f "$edge_conf" ]] || edge_conf="${STAGING_DATA_ROOT}/release-r10/edge-nginx.conf"
-  [[ -f "$edge_conf" ]] || return 1
-  docker run -d --name "cosmabot-standalone-copyehr-api-${STAGING_SHORT}" \
-    --network host --userns host --user 21000:21000 --read-only \
-    --security-opt no-new-privileges:true --restart=on-failure:3 \
-    --cap-drop ALL --pids-limit 128 --memory 1536m --cpus 1.25 --dns 127.0.0.53 \
+  local edge_conf=""
+  edge_conf=$(copy_to_ehr_edge_conf_source "$STAGING_DATA_ROOT") || return 1
+  copy_to_ehr_docker_api "cosmabot-standalone-copyehr-api-${STAGING_SHORT}" \
     --entrypoint /usr/local/bin/python \
     -v "${STAGING_DATA_ROOT}/app:${STAGING_DATA_ROOT}/app" \
     -v "${COPY_TO_EHR_RELEASE}/config/api-public.json:/run/cosmabot-standalone/api-public.json:ro" \
     -v "${STAGING_DATA_ROOT}/release-r5r1/config/api-private.json:/run/cosmabot-standalone/api-private.json:ro" \
     "${STAGING_API_REPOSITORY}:${COPY_TO_EHR_SHA}" \
-    -I /app/standalone-entrypoint.py "$LIVE_API_PORT" >/dev/null
-  docker run -d --name "cosmabot-standalone-copyehr-edge-${STAGING_SHORT}" \
-    --network host --user 21002:21002 --read-only \
-    --security-opt no-new-privileges:true --restart=on-failure:3 \
-    --cap-drop ALL --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+    -I /app/standalone-entrypoint.py "$LIVE_API_PORT" >/dev/null || return 1
+  copy_to_ehr_docker_edge "cosmabot-standalone-copyehr-edge-${STAGING_SHORT}" \
     -v "${edge_conf}:/run/cosmabot-edge/nginx.conf:ro" \
     -v "${COPY_TO_EHR_RELEASE}/web:/usr/share/nginx/html:ro" \
     --entrypoint /usr/sbin/nginx \
     "$STAGING_EDGE_IMAGE" \
-    -c /run/cosmabot-edge/nginx.conf -g 'daemon off;' >/dev/null
+    -c /run/cosmabot-edge/nginx.conf -g 'daemon off;' >/dev/null || return 1
 }
 
 copy_to_ehr_ready_for_pointer() {
-  copy_to_ehr_expect_ready "$LIVE_API_PORT" || return 1
-  copy_to_ehr_expect_version "$LIVE_EDGE_PORT" "$COPY_TO_EHR_SHA" || return 1
+  copy_to_ehr_wait_listener "$LIVE_API_PORT" "$LIVE_EDGE_PORT" "$COPY_TO_EHR_SHA" || return 1
   copy_to_ehr_expect_feature "${COPY_TO_EHR_RELEASE}/web" "$LIVE_EDGE_PORT"
 }
 
@@ -668,7 +1017,7 @@ copy_to_ehr_assert_target_schema() {
 }
 
 copy_to_ehr_disarm_cutover_trap() {
-  trap - ERR EXIT INT
+  trap - ERR EXIT INT TERM HUP
 }
 
 copy_to_ehr_cutover_trap_rollback() {
@@ -677,33 +1026,45 @@ copy_to_ehr_cutover_trap_rollback() {
   if ! copy_to_ehr_rollback_to_r10 "$COPY_TO_EHR_TRAP_DUMP" "$COPY_TO_EHR_TRAP_DB"; then
     exit 1
   fi
+  copy_to_ehr_clear_cutover_marker
   printf 'CUTOVER_ROLLBACK\n' >&2
+  if [[ "$status" -eq 0 ]]; then
+    status=1
+  fi
   exit "$status"
 }
 
 copy_to_ehr_arm_cutover_trap() {
   COPY_TO_EHR_TRAP_DUMP="$1"
   COPY_TO_EHR_TRAP_DB="$2"
-  trap copy_to_ehr_cutover_trap_rollback ERR EXIT INT
+  copy_to_ehr_write_cutover_marker || return 1
+  trap copy_to_ehr_cutover_trap_rollback ERR EXIT INT TERM HUP
 }
 
 copy_to_ehr_rollback_verify_prior() {
-  local ready_body="" ready_code="" version_commit=""
-  ready_body=$(mktemp /tmp/copy-to-ehr-ready.XXXXXX)
-  ready_code=$(curl -s -o "$ready_body" -w '%{http_code}' "http://127.0.0.1:${LIVE_API_PORT}/ready") || {
-    rm -f -- "$ready_body"
-    return 1
-  }
-  if [[ "$ready_code" != "200" ]] || ! grep -F -q '"status":"ready"' "$ready_body"; then
-    rm -f -- "$ready_body"
-    return 1
-  fi
-  rm -f -- "$ready_body"
-  version_commit=$(copy_to_ehr_read_served_commit "$LIVE_EDGE_PORT") || return 1
-  if [[ -n "${COPY_TO_EHR_SERVED_PRIOR:-}" ]]; then
-    [[ "$version_commit" == "$COPY_TO_EHR_SERVED_PRIOR" ]] || return 1
-  fi
-  copy_to_ehr_prior_matches "${COPY_TO_EHR_PRIOR:-}" "$version_commit"
+  local i=0 tries="${COPY_TO_EHR_READY_TRIES:-30}" ready_body="" ready_code="" version_commit=""
+  while [[ "$i" -lt "$tries" ]]; do
+    ready_body=$(mktemp /tmp/copy-to-ehr-ready.XXXXXX)
+    ready_code=$(curl -s -o "$ready_body" -w '%{http_code}' "http://127.0.0.1:${LIVE_API_PORT}/ready" || true)
+    if [[ "$ready_code" == "200" ]] && grep -F -q '"status":"ready"' "$ready_body"; then
+      rm -f -- "$ready_body"
+      version_commit=$(copy_to_ehr_read_served_commit "$LIVE_EDGE_PORT" || true)
+      if [[ -n "$version_commit" ]]; then
+        if [[ -z "${COPY_TO_EHR_SERVED_PRIOR:-}" || "$version_commit" == "$COPY_TO_EHR_SERVED_PRIOR" ]]; then
+          if copy_to_ehr_prior_matches "${COPY_TO_EHR_PRIOR:-}" "$version_commit"; then
+            printf 'ROLLBACK_READY\n'
+            return 0
+          fi
+        fi
+      fi
+    else
+      rm -f -- "$ready_body"
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  printf 'LISTENER_NOT_READY %s %s\n' "$LIVE_API_PORT" "$LIVE_EDGE_PORT" >&2
+  return 1
 }
 
 copy_to_ehr_rollback_to_r10() {
@@ -728,6 +1089,7 @@ copy_to_ehr_rollback_to_r10() {
     printf 'CUTOVER_ROLLBACK_FAILED\n' >&2
     return 1
   fi
+  copy_to_ehr_clear_cutover_marker
   printf 'ROLLBACK_OK\n'
 }
 
@@ -747,7 +1109,11 @@ copy_to_ehr_cutover_sequence() {
     printf 'CUTOVER_ABORT_RESTORE_CHECK\n' >&2
     return 1
   fi
-  copy_to_ehr_arm_cutover_trap "$dump" "$live_db"
+  if ! copy_to_ehr_upload_dump_to_storage "$dump" "${COPY_TO_EHR_STORAGE_ACCOUNT:-}"; then
+    printf 'CUTOVER_ABORT_RESTORE_CHECK\n' >&2
+    return 1
+  fi
+  copy_to_ehr_arm_cutover_trap "$dump" "$live_db" || return 1
   if ! copy_to_ehr_stop_live_listeners; then
     copy_to_ehr_disarm_cutover_trap
     if ! copy_to_ehr_start_prior_listeners; then
@@ -777,6 +1143,7 @@ copy_to_ehr_cutover_sequence() {
     copy_to_ehr_fail_rollback "$dump" "$live_db" || return 1
   fi
   copy_to_ehr_disarm_cutover_trap
+  copy_to_ehr_clear_cutover_marker
   printf 'CUTOVER_OK\n'
 }
 
@@ -785,6 +1152,7 @@ copy_to_ehr_cutover_main() {
   local active=""
   set +x
   umask 077
+  copy_to_ehr_refuse_cutover_marker || return 1
   active=$(tr -d '[:space:]' </etc/cosmabot/active-release)
   case "$active" in
     *"RELEASE_DIR=${STAGING_DATA_ROOT}/${STAGING_PRIOR_RELEASE}") ;;
@@ -804,22 +1172,10 @@ copy_to_ehr_cutover_main() {
   fi
   meta_file=$(mktemp /tmp/copy-to-ehr-db-meta.XXXXXX)
   chmod 600 "$meta_file"
-  python3 - "${STAGING_DATA_ROOT}/release-r5r1/config/api-private.json" "$meta_file" <<'PY'
-import json, sys
-from urllib.parse import urlparse
-private_path, out_path = sys.argv[1:]
-try:
-    raw = json.loads(open(private_path, "r", encoding="utf-8").read())["DATABASE_URL"]
-    parsed = urlparse(raw.replace("postgresql+psycopg://", "postgresql://", 1))
-    database = parsed.path.lstrip("/").split("?", 1)[0]
-    if parsed.port != 54111 or not database.startswith("cosmabot_standalone_"):
-        raise RuntimeError("refused")
-    with open(out_path, "w", encoding="utf-8") as handle:
-        handle.write("%s\n%s\n" % (parsed.port, database))
-except Exception:
-    sys.stderr.write("LIVE_DATABASE_REFUSED\n")
-    sys.exit(1)
-PY
+  if ! copy_to_ehr_database_facts "${STAGING_DATA_ROOT}/release-r5r1/config/api-private.json" "$meta_file"; then
+    rm -f -- "$meta_file"
+    return 1
+  fi
   live_port=$(sed -n '1p' "$meta_file")
   live_db=$(sed -n '2p' "$meta_file")
   rm -f -- "$meta_file"
@@ -839,17 +1195,16 @@ copy_to_ehr_api_build_main() {
   fi
   work=$(mktemp -d /var/tmp/copy-to-ehr-api.XXXXXX)
   chmod 700 "$work"
+  trap 'rm -rf -- "$work"' EXIT
   case "$work" in
     */Desktop/cosmaneura-os|*/Desktop/cosmaneura-os/*)
       printf 'DESKTOP_PATH_REFUSED\n' >&2
       return 1
       ;;
   esac
-  git clone --quiet "$PUBLIC_GIT_URL" "$work/src"
-  git -C "$work/src" checkout --detach --quiet "$COPY_TO_EHR_SHA"
-  head=$(git -C "$work/src" rev-parse HEAD)
-  [[ "$head" == "$COPY_TO_EHR_SHA" ]] || { printf 'SHA_MISMATCH\n' >&2; return 1; }
-  [[ -z "$(git -C "$work/src" status --porcelain)" ]] || { printf 'DIRTY_TREE\n' >&2; return 1; }
+  if ! copy_to_ehr_clone_at_sha "$work/src" "$COPY_TO_EHR_SHA"; then
+    return 1
+  fi
   python3 "$work/src/infra/standalone/package/prepare_api_recipe.py" \
     --source "$work/src" --output "$work/recipe"
   cp "$work/recipe/Dockerfile" "$work/src/Dockerfile.copy-to-ehr"
@@ -868,7 +1223,7 @@ copy_to_ehr_api_build_main() {
 
 copy_to_ehr_side_port_main() {
   local release="" archive="" url_file="" pass_file="" live_pg="" image="" edge_src=""
-  local public_src="" private_src=""
+  local public_src="" private_src="" env_file="" clone="" migrate_status=0
   set +x
   umask 077
   : "${COPY_TO_EHR_TRIAL_POSTGRES_PORT:=54130}"
@@ -912,7 +1267,12 @@ copy_to_ehr_side_port_main() {
     -e POSTGRES_USER=cosmabot_copyehr_trial \
     -e POSTGRES_DB=cosmabot_copy_ehr_trial \
     "$image" \
-    postgres -c listen_addresses=127.0.0.1 -c port=54130 >/dev/null
+    postgres -c listen_addresses=127.0.0.1 -c port=54130 >/dev/null \
+    || { copy_to_ehr_remove_trial; return 1; }
+  if ! copy_to_ehr_wait_postgres "cosmabot-standalone-copyehr-trial-pg-${STAGING_SHORT}" "$TRIAL_POSTGRES_PORT"; then
+    copy_to_ehr_remove_trial
+    return 1
+  fi
   public_src="${STAGING_DATA_ROOT}/release-r5r1/config/api-public.json"
   private_src="${STAGING_DATA_ROOT}/release-r5r1/config/api-private.json"
   python3 - "$public_src" "${release}/config/api-public.json" <<'PY'
@@ -946,36 +1306,36 @@ Path(dest).write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
 Path(dest).chmod(0o400)
 PY
   chown 21000:21000 "${release}/config/api-private.json"
-  edge_src="${STAGING_DATA_ROOT}/release-r10/edge-nginx.conf"
-  [[ -f "$edge_src" ]] || edge_src="${STAGING_DATA_ROOT}/release-r6r1/edge-nginx.conf"
-  python3 - "$edge_src" "${release}/edge-nginx.trial.conf" <<'PY'
-from pathlib import Path
-import sys
-source, dest = sys.argv[1:]
-text = Path(source).read_text()
-text = text.replace("172.30.241.1:54112", "127.0.0.1:54122").replace("127.0.0.1:54110", "127.0.0.1:54120")
-Path(dest).write_text(text)
-PY
+  edge_src=$(copy_to_ehr_edge_conf_source "$STAGING_DATA_ROOT") || {
+    copy_to_ehr_remove_trial
+    return 1
+  }
+  copy_to_ehr_write_trial_edge "$edge_src" "${release}/edge-nginx.trial.conf" || {
+    copy_to_ehr_remove_trial
+    return 1
+  }
   nft add rule ip filter "CB21000_${STAGING_SHORT}" tcp dport 54120 accept comment "copy-ehr-trial" \
     || { printf 'NFT_TRIAL_RULE_FAILED\n' >&2; copy_to_ehr_remove_trial; return 1; }
-  docker run --rm --network host --user 0:0 \
-    --entrypoint /usr/local/bin/python \
-    -v "${url_file}:/run/trial-database.url:ro" \
-    "${STAGING_API_REPOSITORY}:${COPY_TO_EHR_SHA}" \
-    -c 'from pathlib import Path
-from alembic.config import Config
-from alembic import command
-url = Path("/run/trial-database.url").read_text().strip()
-if ":54111" in url or not url.endswith("@127.0.0.1:54130/cosmabot_copy_ehr_trial"):
-    raise SystemExit(1)
-cfg = Config("/app/alembic.ini")
-cfg.set_main_option("sqlalchemy.url", url)
-command.upgrade(cfg, "head")' >/dev/null \
-    || { printf 'SIDE_PORT_REFUSED_LIVE_DATABASE\n' >&2; copy_to_ehr_remove_trial; return 1; }
-  docker run -d --name "cosmabot-standalone-copyehr-trial-api-${STAGING_SHORT}" \
-    --network host --userns host --user 21000:21000 --read-only \
-    --security-opt no-new-privileges:true --restart=on-failure:3 \
-    --cap-drop ALL --pids-limit 128 --memory 1536m --cpus 1.25 --dns 127.0.0.53 \
+  env_file=$(mktemp /tmp/copy-to-ehr-trial-migrate-env.XXXXXX)
+  chmod 600 "$env_file"
+  clone=$(mktemp -d /var/tmp/copy-to-ehr-trial-migrate.XXXXXX)
+  chmod 700 "$clone"
+  migrate_status=0
+  if ! copy_to_ehr_write_trial_migrate_env "$url_file" "$env_file"; then
+    migrate_status=1
+  elif ! copy_to_ehr_clone_at_sha "$clone/src" "$COPY_TO_EHR_SHA"; then
+    migrate_status=1
+  elif ! copy_to_ehr_run_migrate_py "$env_file" "$clone/src"; then
+    migrate_status=1
+    printf 'MIGRATE_FAILED\n' >&2
+  fi
+  rm -f -- "$env_file"
+  rm -rf -- "$clone"
+  if [[ "$migrate_status" -ne 0 ]]; then
+    copy_to_ehr_remove_trial
+    return 1
+  fi
+  copy_to_ehr_docker_api "cosmabot-standalone-copyehr-trial-api-${STAGING_SHORT}" \
     --entrypoint /usr/local/bin/python \
     -v "${STAGING_DATA_ROOT}/app:${STAGING_DATA_ROOT}/app" \
     -v "${release}/config/api-public.json:/run/cosmabot-standalone/api-public.json:ro" \
@@ -983,18 +1343,15 @@ command.upgrade(cfg, "head")' >/dev/null \
     "${STAGING_API_REPOSITORY}:${COPY_TO_EHR_SHA}" \
     -I /app/standalone-entrypoint.py "$TRIAL_API_PORT" >/dev/null \
     || { copy_to_ehr_remove_trial; return 1; }
-  docker run -d --name "cosmabot-standalone-copyehr-trial-edge-${STAGING_SHORT}" \
-    --network host --user 21002:21002 --read-only \
-    --security-opt no-new-privileges:true --restart=on-failure:3 \
-    --cap-drop ALL --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+  copy_to_ehr_docker_edge "cosmabot-standalone-copyehr-trial-edge-${STAGING_SHORT}" \
     -v "${release}/edge-nginx.trial.conf:/run/cosmabot-edge/nginx.conf:ro" \
     -v "${release}/web:/usr/share/nginx/html:ro" \
     --entrypoint /usr/sbin/nginx \
     "$STAGING_EDGE_IMAGE" \
     -c /run/cosmabot-edge/nginx.conf -g 'daemon off;' >/dev/null \
     || { copy_to_ehr_remove_trial; return 1; }
-  copy_to_ehr_expect_ready "$TRIAL_API_PORT" || { copy_to_ehr_remove_trial; return 1; }
-  copy_to_ehr_expect_version "$TRIAL_EDGE_PORT" "$COPY_TO_EHR_SHA" || { copy_to_ehr_remove_trial; return 1; }
+  copy_to_ehr_wait_listener "$TRIAL_API_PORT" "$TRIAL_EDGE_PORT" "$COPY_TO_EHR_SHA" \
+    || { copy_to_ehr_remove_trial; return 1; }
   copy_to_ehr_expect_feature "${release}/web" "$TRIAL_EDGE_PORT" || { copy_to_ehr_remove_trial; return 1; }
   copy_to_ehr_live_still_serving || { copy_to_ehr_remove_trial; return 1; }
   printf 'SIDE_PORT_OK\n'
@@ -1028,6 +1385,9 @@ PUBLIC_GIT_URL='$PUBLIC_GIT_URL'
 COPY_TO_EHR_SHA='$sha'
 COPY_TO_EHR_PRIOR='$prior'
 COPY_TO_EHR_DUMP='$dump'
+COPY_TO_EHR_READY_TRIES=30
+COPY_TO_EHR_STORAGE_ACCOUNT='$COPY_TO_EHR_STORAGE_ACCOUNT'
+COPY_TO_EHR_MARKER_FILE='$STAGING_DATA_ROOT/copy-to-ehr-cutover.in-progress'
 EOF
 }
 
@@ -1042,7 +1402,9 @@ copy_to_ehr_render_api_build() {
   local sha="$1" body
   body=$(copy_to_ehr_remote_prelude "$sha" "" "")
   body="${body}
-$(declare -f copy_to_ehr_api_build_main)
+$(declare -f \
+    copy_to_ehr_clone_at_sha \
+    copy_to_ehr_api_build_main)
 copy_to_ehr_api_build_main"
   copy_to_ehr_wrap_remote "$body"
 }
@@ -1054,10 +1416,20 @@ copy_to_ehr_render_side_port() {
 $(declare -f \
     copy_to_ehr_release_dir \
     copy_to_ehr_trial_url_file_allowed \
+    copy_to_ehr_remove_trial_nft \
     copy_to_ehr_remove_trial \
     copy_to_ehr_expect_ready \
     copy_to_ehr_expect_version \
     copy_to_ehr_expect_feature \
+    copy_to_ehr_wait_postgres \
+    copy_to_ehr_wait_listener \
+    copy_to_ehr_edge_conf_source \
+    copy_to_ehr_write_trial_edge \
+    copy_to_ehr_write_trial_migrate_env \
+    copy_to_ehr_clone_at_sha \
+    copy_to_ehr_run_migrate_py \
+    copy_to_ehr_docker_api \
+    copy_to_ehr_docker_edge \
     copy_to_ehr_live_still_serving \
     copy_to_ehr_side_port_main)
 copy_to_ehr_side_port_main"
@@ -1073,6 +1445,10 @@ $(declare -f \
     copy_to_ehr_read_served_commit \
     copy_to_ehr_confirm_prior_identity \
     copy_to_ehr_assert_target_schema \
+    copy_to_ehr_marker_file \
+    copy_to_ehr_refuse_cutover_marker \
+    copy_to_ehr_write_cutover_marker \
+    copy_to_ehr_clear_cutover_marker \
     copy_to_ehr_disarm_cutover_trap \
     copy_to_ehr_cutover_trap_rollback \
     copy_to_ehr_arm_cutover_trap \
@@ -1086,10 +1462,16 @@ $(declare -f \
     copy_to_ehr_createdb \
     copy_to_ehr_dropdb \
     copy_to_ehr_restore_gate \
+    copy_to_ehr_upload_dump_to_storage \
+    copy_to_ehr_database_facts \
+    copy_to_ehr_write_migrate_env \
+    copy_to_ehr_clone_at_sha \
+    copy_to_ehr_run_migrate_py \
     copy_to_ehr_run_live_migrate \
     copy_to_ehr_migrate_live \
     copy_to_ehr_stop_live_listeners \
     copy_to_ehr_start_prior_listeners \
+    copy_to_ehr_write_pointer \
     copy_to_ehr_write_prior_pointer \
     copy_to_ehr_write_new_pointer \
     copy_to_ehr_restore_dump_over_live \
@@ -1097,6 +1479,10 @@ $(declare -f \
     copy_to_ehr_expect_ready \
     copy_to_ehr_expect_version \
     copy_to_ehr_expect_feature \
+    copy_to_ehr_wait_listener \
+    copy_to_ehr_edge_conf_source \
+    copy_to_ehr_docker_api \
+    copy_to_ehr_docker_edge \
     copy_to_ehr_start_new_listeners \
     copy_to_ehr_ready_for_pointer \
     copy_to_ehr_post_switch_checks \
@@ -1107,8 +1493,23 @@ copy_to_ehr_cutover_main"
   copy_to_ehr_wrap_remote "$body"
 }
 
+copy_to_ehr_require_sentinel() {
+  local name="$1" output="$2" index=""
+  case "$name" in
+    api-build) grep -qx 'API_IMAGE_OK' <<<"$output" ;;
+    side-port) grep -qx 'SIDE_PORT_OK' <<<"$output" ;;
+    cutover) grep -qx 'CUTOVER_OK' <<<"$output" ;;
+    web-chunk-*)
+      index="${name#web-chunk-}"
+      grep -qx "CHUNK_OK ${index}" <<<"$output"
+      ;;
+    web-verify) grep -qx "ARCHIVE_SHA256 ${COPY_TO_EHR_ARCHIVE_SHA256}" <<<"$output" ;;
+    *) return 1 ;;
+  esac
+}
+
 copy_to_ehr_invoke_remote() {
-  local name="$1" body="$2" file result
+  local name="$1" body="$2" file result filtered=""
   if [[ "${COPY_TO_EHR_EXECUTE:-0}" != "1" ]]; then
     printf 'dry-run: az vm run-command invoke --subscription %s --resource-group %s --name %s --command-id RunShellScript --scripts @%s\n' \
       "$STAGING_SUBSCRIPTION_ID" "$STAGING_RESOURCE_GROUP" "$STAGING_VM_NAME" "$name"
@@ -1129,7 +1530,11 @@ copy_to_ehr_invoke_remote() {
     copy_to_ehr_die "run-command ${name} failed"
   fi
   rm -f -- "$file"
-  printf '%s' "$result" | copy_to_ehr_filter_run_output
+  filtered=$(printf '%s' "$result" | copy_to_ehr_filter_run_output) || copy_to_ehr_die "run-command ${name} output refused"
+  printf '%s\n' "$filtered"
+  if ! copy_to_ehr_require_sentinel "$name" "$filtered"; then
+    copy_to_ehr_die "run-command ${name} did not report success"
+  fi
 }
 
 copy_to_ehr_filter_run_output() {
@@ -1151,6 +1556,12 @@ allowed = {
     "OK", "REFUSED", "ABORT", "DUMP_BYTES", "COUNT", "ROLLBACK",
     "CHUNK", "POINTER", "READY", "VERSION", "COPY_TO_EHR", "PRIOR",
     "DISK", "API_IMAGE", "POST_SWITCH", "RESTORE", "SCHEMA",
+    "API_BUILD_FAILED", "WEB_ARCHIVE_MISSING", "LIVE_POINTER_CHANGED",
+    "PG_DUMP_FAILED", "SHA_MISMATCH", "DIRTY_TREE", "ACTIVE_RELEASE_NOT_R10",
+    "NFT_TRIAL_RULE_FAILED", "MIGRATE_FAILED", "PG_RESTORE_FAILED",
+    "STORAGE_UPLOAD_FAILED", "EDGE_PORT_REWRITE_FAILED", "CUTOVER_IN_PROGRESS",
+    "ARCHIVE_SHA256", "ARCHIVE_SHA256_FAILED", "DUMP_RESTORED",
+    "POSTGRES_NOT_READY", "LISTENER_NOT_READY",
 }
 
 def whole(token):
@@ -1283,6 +1694,7 @@ copy_to_ehr_main() {
   else
     printf '%s\n' 'Tonight for existing live users: nothing changes.'
   fi
+  printf '%s\n' 'Cutover stops live staging until release-r10 is serving again. The build and the side-port trial load the staging VM.'
   copy_to_ehr_require_sha "$sha" source || copy_to_ehr_die "--sha must be 40 lowercase hex characters"
   if copy_to_ehr_path_is_desktop_checkout "$PWD"; then
     copy_to_ehr_die "refusing a path inside ~/Desktop/cosmaneura-os"
@@ -1303,8 +1715,12 @@ copy_to_ehr_main() {
     [[ -n "$expect_prior" ]] || copy_to_ehr_die "--cutover requires --expect-prior-sha"
     copy_to_ehr_require_sha "$expect_prior" prior || copy_to_ehr_die "--expect-prior-sha must be 8 to 40 lowercase hex characters"
   fi
+  COPY_TO_EHR_STORAGE_ACCOUNT=""
   case "$dump_target" in
-    /subscriptions/*) dump_file="${STAGING_DATA_ROOT}/copy-to-ehr-dumps/${sha}/pre-migrate.dump" ;;
+    /subscriptions/*)
+      dump_file="${STAGING_DATA_ROOT}/copy-to-ehr-dumps/${sha}/pre-migrate.dump"
+      COPY_TO_EHR_STORAGE_ACCOUNT="${dump_target##*/}"
+      ;;
     *) dump_file="$dump_target" ;;
   esac
   copy_to_ehr_validate_dump_target "$dump_target" || copy_to_ehr_die "dump target is outside the staging resource group or is on this Mac"
@@ -1314,6 +1730,9 @@ copy_to_ehr_main() {
     if [[ "$execute" -eq 1 ]]; then
       workdir=$(mktemp -d "${TMPDIR:-/tmp}/copy-to-ehr-src.XXXXXX")
       chmod 700 "$workdir"
+      COPY_TO_EHR_OWNED_WORKDIR="$workdir"
+      trap copy_to_ehr_local_exit EXIT
+      trap copy_to_ehr_local_signal INT TERM HUP
     else
       workdir='${TMPDIR:-/tmp}/copy-to-ehr-src.XXXXXX'
     fi
@@ -1328,27 +1747,27 @@ copy_to_ehr_main() {
 
 copy_to_ehr_execute() {
   local sha="$1" workdir="$2" web_env="$3" dump_file="$4" cutover="$5" prior="$6"
-  local free_kib="" head="" release="" archive="" keys=""
+  local free_kib="" release="" archive="" keys="" dest=""
   free_kib=$(df -Pk "$workdir" | awk 'NR==2 {print $4}')
   if [[ -z "$free_kib" || "$free_kib" -lt "$MIN_FREE_KIB" ]]; then
     copy_to_ehr_die "not enough free disk before the web build"
   fi
-  git clone --quiet "$PUBLIC_GIT_URL" "$workdir/src"
-  git -C "$workdir/src" checkout --detach --quiet "$sha"
-  head=$(git -C "$workdir/src" rev-parse HEAD)
-  [[ "$head" == "$sha" ]] || copy_to_ehr_die "checkout HEAD does not equal --sha"
-  [[ -z "$(git -C "$workdir/src" status --porcelain)" ]] || copy_to_ehr_die "checkout is not clean"
+  copy_to_ehr_clone_at_sha "$workdir/src" "$sha" || copy_to_ehr_die "checkout is not the requested clean sha"
   [[ -f "$web_env" && ! -L "$web_env" ]] || copy_to_ehr_die "web env file is missing"
-  keys=$(copy_to_ehr_read_web_env_keys "$web_env")
+  keys=$(copy_to_ehr_read_web_env_keys "$web_env") || copy_to_ehr_die "web env file refused"
   printf '%s\n' "$keys" | sed 's/^/web env key: /'
-  COPY_TO_EHR_WEB_ENV_COPY="$workdir/src/web/.env.production"
-  trap copy_to_ehr_cleanup_web_env_copy EXIT
-  copy_to_ehr_stage_web_env "$web_env" "$COPY_TO_EHR_WEB_ENV_COPY"
+  dest="$workdir/src/web/.env.production"
+  copy_to_ehr_stage_web_env "$web_env" "$dest" || copy_to_ehr_die "web env copy refused"
+  COPY_TO_EHR_WEB_ENV_COPY="$dest"
+  trap copy_to_ehr_local_exit EXIT
+  trap copy_to_ehr_local_signal INT TERM HUP
   (
+    COPY_TO_EHR_OWNED_WORKDIR=
     cd "$workdir/src/web"
     "$workdir/src/scripts/install-client-deps.sh"
-    VITE_BUILD_SHA="$sha" corepack pnpm run build
+    copy_to_ehr_run_web_build "$sha"
   )
+  copy_to_ehr_cleanup_web_env_copy
   node "$workdir/src/scripts/package-staging-web.mjs" \
     --dist "$workdir/src/web/dist" --output "$workdir/web-package"
   python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["commit"]==sys.argv[2]' \
@@ -1409,6 +1828,32 @@ PY
     copy_to_ehr_invoke_remote "web-chunk-${index}" "$body"
     index=$((index + 1))
   done
+  COPY_TO_EHR_ARCHIVE_SHA256=$(copy_to_ehr_sha256_file "$archive") || copy_to_ehr_die "web archive hash failed"
+  body=$(python3 - "$remote_path" "$STAGING_DATA_ROOT" <<'PY'
+import sys
+dest, root = sys.argv[1:]
+if not dest.startswith(root + "/"):
+    raise SystemExit(1)
+script = """exec /bin/bash <<'COPY_TO_EHR_BASH_BODY'
+set -euo pipefail
+set +x
+dest='%s'
+case "$dest" in
+  %s/*) ;;
+  *) printf 'CHUNK_PATH_REFUSED\\n' >&2; exit 1 ;;
+esac
+hash=$(sha256sum "$dest" | awk '{print $1}')
+case "$hash" in
+  [0-9a-f]*) ;;
+  *) printf 'ARCHIVE_SHA256_FAILED\\n' >&2; exit 1 ;;
+esac
+printf 'ARCHIVE_SHA256 %%s\\n' "$hash"
+COPY_TO_EHR_BASH_BODY
+""" % (dest, root)
+sys.stdout.write(script)
+PY
+)
+  copy_to_ehr_invoke_remote "web-verify" "$body"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
