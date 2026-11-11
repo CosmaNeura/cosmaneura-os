@@ -16,6 +16,10 @@ GRANT SELECT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO cosmas_patient_de
 
 DO $$
 BEGIN
+  IF to_regprocedure('public._cosmas_apply_patient_deletion_plan(uuid, jsonb)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb)
+      TO cosmas_patient_deletion;
+  END IF;
   IF to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)') IS NOT NULL THEN
     ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb)
       OWNER TO cosmas_patient_deletion;

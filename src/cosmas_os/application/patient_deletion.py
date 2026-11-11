@@ -165,7 +165,7 @@ def _require_deletion_role(session: Session) -> None:
         )
     )
     if not ready:
-        raise DomainError("patient record deletion role is not configured")
+        raise DomainError("deletion role not configured")
 
 
 def _require_admin(session: Session, actor_principal_id: str, *, lock: bool) -> Principal:
@@ -191,7 +191,7 @@ def _patient_id(value: str) -> str:
     try:
         return str(UUID(value))
     except (TypeError, ValueError):
-        raise DomainError("invalid patient id") from None
+        raise DomainError("patient not found") from None
 
 
 def _report(
@@ -306,6 +306,47 @@ def _collect_rows(session: Session, patient_id: str) -> dict[str, set[tuple[str,
         incoming[edge.parent].append(edge)
     dirty = {"patient_links"}
     steps = 0
+    while dirty:
+        steps += 1
+        if steps > _MAX_STEPS:
+            raise DomainError("patient records could not be deleted")
+        parent = dirty.pop()
+        parent_key = keys.get(parent)
+        parent_rows = rows.get(parent) or set()
+        if parent_key is None or not parent_rows:
+            continue
+        for edge in incoming.get(parent, ()):
+            if edge.child in _PRESERVE:
+                raise DomainError("patient records could not be deleted")
+            child_key = keys.get(edge.child)
+            if child_key is None:
+                raise DomainError("patient records could not be deleted")
+            found = _child_rows(session, edge, parent_key, child_key, parent_rows, columns, patient_id)
+            fresh = found - rows[edge.child]
+            if fresh:
+                rows[edge.child].update(fresh)
+                dirty.add(edge.child)
+    # Generic path: every public table with patient_link_id for this patient,
+    # including rows the FK walk can miss when only a composite path exists.
+    for table, table_columns in columns.items():
+        if table in _PRESERVE or "patient_link_id" not in table_columns:
+            continue
+        key = keys.get(table)
+        if key is None:
+            raise DomainError("patient records could not be deleted")
+        selected = ", ".join(f"t.{_quote(column)}::text" for column in key.columns)
+        for record in session.execute(
+            text(
+                f"SELECT {selected} FROM public.{_quote(table)} AS t "
+                "WHERE t.patient_link_id = CAST(:patient AS uuid)"
+            ),
+            {"patient": patient_id},
+        ):
+            identity = tuple(str(value) for value in record)
+            if identity not in rows[table]:
+                rows[table].add(identity)
+                dirty.add(table)
+    # Walk again from any newly discovered patient_link_id rows.
     while dirty:
         steps += 1
         if steps > _MAX_STEPS:

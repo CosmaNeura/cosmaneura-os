@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -74,6 +75,10 @@ _ENSURE_ROLE_STATEMENTS = (
     """
     DO $$
     BEGIN
+      IF to_regprocedure('public._cosmas_apply_patient_deletion_plan(uuid, jsonb)') IS NOT NULL THEN
+        GRANT EXECUTE ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb)
+          TO cosmas_patient_deletion;
+      END IF;
       IF to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)') IS NOT NULL THEN
         ALTER FUNCTION public.delete_patient_keyed_records(uuid, jsonb)
           OWNER TO cosmas_patient_deletion;
@@ -679,11 +684,202 @@ def _literal(column_type: str) -> str:
         return "TIMESTAMPTZ '2026-09-10 12:00:00+00'"
     if column_type == "text":
         return "'a'"
+    if column_type == "integer[]":
+        return "ARRAY[1]::integer[]"
     matched = re.fullmatch(r"character varying(?:\((\d+)\))?", column_type)
     if matched:
         length = int(matched.group(1) or "1")
         return "'" + ("a" * min(length, 32)) + "'"
     raise AssertionError(f"unsupported column type {column_type}")
+
+
+def _patient_link_tables(session: Session) -> list[str]:
+    return [
+        str(table)
+        for table in session.scalars(
+            text(
+                "SELECT table_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND column_name = 'patient_link_id' "
+                "ORDER BY table_name"
+            )
+        )
+    ]
+
+
+def _seed_patient_linked_row(
+    connection,
+    table: str,
+    *,
+    patient_id: str,
+    box_id: str,
+    owner_id: str,
+    known: dict[str, str],
+) -> None:
+    """Insert one synthetic row for a patient_link_id table. Fail closed on gaps."""
+
+    columns = connection.execute(
+        text(
+            "SELECT a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull, "
+            "pg_get_expr(ad.adbin, ad.adrelid) IS NOT NULL "
+            "FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "LEFT JOIN pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum "
+            "WHERE n.nspname = 'public' AND c.relname = :table "
+            "AND a.attnum > 0 AND NOT a.attisdropped AND a.attgenerated = '' "
+            "ORDER BY a.attnum"
+        ),
+        {"table": table},
+    ).all()
+    names: list[str] = []
+    values: list[str] = []
+    present = {str(name) for name, _type, _required, _default in columns}
+    for name, column_type, required, has_default in columns:
+        column = str(name)
+        if column == "patient_link_id":
+            names.append(_quote(column))
+            values.append(f"'{patient_id}'::uuid")
+            continue
+        if column == "box_id" and "box_id" in present:
+            names.append(_quote(column))
+            values.append(f"'{box_id}'::uuid")
+            continue
+        if column == "owner_id" and "owner_id" in present:
+            names.append(_quote(column))
+            values.append(f"'{owner_id}'::uuid")
+            continue
+        if column in known:
+            names.append(_quote(column))
+            values.append(f"'{known[column]}'::uuid")
+            continue
+        if has_default and str(column_type).startswith("timestamp"):
+            continue
+        if not required:
+            continue
+        names.append(_quote(column))
+        if str(column_type) == "uuid":
+            values.append(f"'{uuid4()}'::uuid")
+        elif "sha256" in column or column.endswith("_hash") or column.endswith("hash"):
+            values.append("'" + ("ab" * 32) + "'")
+        elif column == "idempotency_key":
+            values.append(f"'seedkey_{uuid4().hex[:8]}'")
+        else:
+            values.append(_literal(str(column_type)))
+    if "patient_link_id" not in {str(name) for name, *_ in columns}:
+        raise AssertionError(f"{table} has no patient_link_id column")
+    connection.execute(
+        text(
+            f"INSERT INTO public.{_quote(table)} ({', '.join(names)}) "
+            f"VALUES ({', '.join(values)})"
+        )
+    )
+
+
+def _check_constraints(connection, tables: Sequence[str]) -> list[tuple[str, str, str]]:
+    rows = connection.execute(
+        text(
+            "SELECT c.relname, con.conname, pg_get_constraintdef(con.oid) "
+            "FROM pg_constraint con "
+            "JOIN pg_class c ON c.oid = con.conrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND con.contype = 'c' "
+            "AND c.relname = ANY(:tables) "
+            "ORDER BY c.relname, con.conname"
+        ),
+        {"tables": list(tables)},
+    ).all()
+    return [(str(table), str(name), str(definition)) for table, name, definition in rows]
+
+
+def _seed_all_patient_linked_tables(session: Session, practice: dict[str, object]) -> list[str]:
+    """Seed every patient_link_id table for one patient. Name any table that cannot be seeded."""
+
+    casey = practice["casey"]
+    assert isinstance(casey, dict)
+    patient_id = str(casey["patient_id"])
+    box_id = str(practice["box_id"])
+    owner_id = str(practice["owner_id"])
+    known = {
+        "ticket_id": str(casey["ticket_id"]),
+        "workspace_id": str(casey["workspace_id"]),
+        "appointment_id": str(casey["appointment_id"]),
+        "recording_id": str(casey["recording_id"]),
+        "target_workspace_id": str(casey["workspace_id"]),
+        "origin_workspace_id": str(casey["workspace_id"]),
+    }
+    finish_id = session.scalar(
+        select(PrivateRecordingFinish.id).where(
+            PrivateRecordingFinish.recording_id == casey["recording_id"]
+        )
+    )
+    if finish_id is not None:
+        known["finish_id"] = str(finish_id)
+    note_id = session.scalar(
+        select(WorkspaceNote.id).where(WorkspaceNote.workspace_id == casey["workspace_id"]).limit(1)
+    )
+    if note_id is not None:
+        known["note_id"] = str(note_id)
+    tables = _patient_link_tables(session)
+    if len(tables) != 34:
+        raise AssertionError(f"expected 34 patient-linked tables, found {len(tables)}: {tables}")
+    bind = session.get_bind()
+    with bind.connect() as connection:
+        transaction = connection.begin()
+        dropped: list[tuple[str, str, str]] = []
+        try:
+            connection.execute(text("SET LOCAL session_replication_role = replica"))
+            # Generic path: temporarily clear CHECKs so every patient_link_id
+            # table can take one synthetic row. Restore before the test returns.
+            dropped = _check_constraints(connection, tables)
+            for table, name, _definition in dropped:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE public.{_quote(table)} "
+                        f"DROP CONSTRAINT {_quote(name)}"
+                    )
+                )
+            for table in tables:
+                existing = connection.scalar(
+                    text(
+                        f"SELECT count(*) FROM public.{_quote(table)} "
+                        "WHERE patient_link_id = CAST(:patient AS uuid)"
+                    ),
+                    {"patient": patient_id},
+                )
+                if int(existing or 0) > 0:
+                    continue
+                try:
+                    _seed_patient_linked_row(
+                        connection,
+                        table,
+                        patient_id=patient_id,
+                        box_id=box_id,
+                        owner_id=owner_id,
+                        known=known,
+                    )
+                except Exception as exc:  # noqa: BLE001 - name the table; never skip
+                    raise AssertionError(
+                        f"could not seed patient-linked table {table}: {exc}"
+                    ) from exc
+            for table, name, definition in dropped:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE public.{_quote(table)} "
+                        f"ADD CONSTRAINT {_quote(name)} {definition} NOT VALID"
+                    )
+                )
+            transaction.commit()
+        except Exception:
+            transaction.rollback()
+            raise
+    session.expire_all()
+    counts = _patient_link_counts(session, patient_id)
+    missing = [table for table in tables if counts.get(table, 0) < 1]
+    if missing:
+        raise AssertionError(
+            "could not seed patient-linked table(s): " + ", ".join(missing)
+        )
+    return tables
 
 
 def _guarded_triggers(connection) -> list[tuple[str, str]]:
@@ -787,6 +983,29 @@ def _drop_patient_deletion_role(admin_engine, databases: tuple[str, ...]) -> Non
                         text(f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {DELETION_ROLE}")
                     )
                     connection.execute(text(f"REVOKE ALL ON SCHEMA public FROM {DELETION_ROLE}"))
+                    connection.execute(
+                        text(
+                            "DO $$ BEGIN "
+                            "IF to_regprocedure('public.delete_patient_keyed_records(uuid, jsonb)') "
+                            "IS NOT NULL THEN "
+                            "REVOKE ALL ON FUNCTION "
+                            "public.delete_patient_keyed_records(uuid, jsonb) "
+                            "FROM cosmas_patient_deletion; "
+                            "END IF; "
+                            "IF to_regprocedure("
+                            "'public._cosmas_apply_patient_deletion_plan(uuid, jsonb)') "
+                            "IS NOT NULL THEN "
+                            "REVOKE ALL ON FUNCTION "
+                            "public._cosmas_apply_patient_deletion_plan(uuid, jsonb) "
+                            "FROM cosmas_patient_deletion; "
+                            "END IF; "
+                            "END $$"
+                        )
+                    )
+                    connection.execute(
+                        text("REASSIGN OWNED BY cosmas_patient_deletion TO CURRENT_USER")
+                    )
+                    connection.execute(text("DROP OWNED BY cosmas_patient_deletion"))
         finally:
             engine.dispose()
     with admin_engine.connect() as connection:
@@ -1224,7 +1443,7 @@ def test_confirm_refuses_when_deletion_role_is_missing(engine, tmp_path, monkeyp
         assert all(path.is_file() for path in files)
         before = _patient_link_counts(session, patient_id)
         _drop_patient_deletion_role(admin, (str(session.scalar(text("SELECT current_database()"))),))
-        with pytest.raises(DomainError, match="patient record deletion role is not configured"):
+        with pytest.raises(DomainError, match="deletion role not configured"):
             _calls(session, str(arranged["owner_id"]), patient_id, blob, confirm=True)
         session.rollback()
         assert _patient_link_counts(session, patient_id) == before
@@ -1333,3 +1552,217 @@ def test_migration_applies_as_restricted_migrator_with_and_without_deletion_role
             connection.execute(text(f"DROP ROLE IF EXISTS {with_role}"))
         _ensure_patient_deletion_role_on(create_engine(url))
         admin.dispose()
+
+
+def test_admin_cli_prints_each_fixed_refusal_reason(practice) -> None:
+    session = practice["session"]
+    owner = str(practice["owner_id"])
+    staff = str(practice["staff_id"])
+    casey = practice["casey"]
+    names = practice["names"]
+    assert isinstance(casey, dict) and isinstance(names, dict)
+    patient_id = str(casey["patient_id"])
+    admin_role, admin_url = _separate_admin_identity(session)
+    env = {"COSMAS_ADMIN_DATABASE_URL": admin_url}
+    try:
+        missing_flags = CliRunner().invoke(
+            cli_app,
+            ["delete-patient-records", patient_id, "--actor", owner],
+            env=env,
+        )
+        assert missing_flags.exit_code == 1
+        assert (missing_flags.stderr or "").strip() == "confirm required"
+        assert str(names["label"]) not in (missing_flags.stderr or "")
+
+        bad_patient = CliRunner().invoke(
+            cli_app,
+            ["delete-patient-records", "not-a-patient-id", "--actor", owner, "--dry-run"],
+            env=env,
+        )
+        assert bad_patient.exit_code == 1
+        assert (bad_patient.stderr or "").strip() == "patient not found"
+        assert "Traceback" not in (bad_patient.stderr or "")
+
+        not_admin = CliRunner().invoke(
+            cli_app,
+            ["delete-patient-records", patient_id, "--actor", staff, "--confirm"],
+            env=env,
+        )
+        assert not_admin.exit_code == 1
+        assert (not_admin.stderr or "").strip() == "admin authority required"
+        assert str(names["label"]) not in (not_admin.stderr or "")
+    finally:
+        _drop_admin_identity(session, admin_role)
+
+    admin = create_engine(
+        make_url(os.environ.get("DATABASE_URL", settings.database_url)).set(database="postgres"),
+        isolation_level="AUTOCOMMIT",
+    )
+    try:
+        _drop_patient_deletion_role(
+            admin, (str(session.scalar(text("SELECT current_database()"))),)
+        )
+        admin_role, admin_url = _separate_admin_identity(session)
+        try:
+            no_role = CliRunner().invoke(
+                cli_app,
+                ["delete-patient-records", patient_id, "--actor", owner, "--confirm"],
+                env={"COSMAS_ADMIN_DATABASE_URL": admin_url},
+            )
+            assert no_role.exit_code == 1
+            assert (no_role.stderr or "").strip() == "deletion role not configured"
+            assert "Traceback" not in (no_role.stderr or "")
+            assert str(names["label"]) not in (no_role.stderr or "")
+            assert session.get(PatientLink, patient_id) is not None
+        finally:
+            _drop_admin_identity(session, admin_role)
+    finally:
+        _ensure_patient_deletion_role(session)
+        admin.dispose()
+
+
+def test_ticket_keyed_audit_event_is_redacted_and_second_patient_stays(practice) -> None:
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    morgan = practice["morgan"]
+    names = practice["names"]
+    assert isinstance(casey, dict) and isinstance(morgan, dict) and isinstance(names, dict)
+    patient_id = str(casey["patient_id"])
+    ticket_id = str(casey["ticket_id"])
+    morgan_ticket = str(morgan["ticket_id"])
+    label = str(names["label"])
+    ticket_event = AuditEvent(
+        box_id=str(practice["box_id"]),
+        aggregate_type="ticket",
+        aggregate_id=ticket_id,
+        event_type="ticket.synthetic_label",
+        actor_principal_id=owner,
+        outcome="recorded",
+        detail={"label": label, "note": str(names["note"])},
+    )
+    morgan_event = AuditEvent(
+        box_id=str(practice["box_id"]),
+        aggregate_type="ticket",
+        aggregate_id=morgan_ticket,
+        event_type="ticket.synthetic_label",
+        actor_principal_id=owner,
+        outcome="recorded",
+        detail={"label": str(names["morgan_label"])},
+    )
+    session.add(ticket_event)
+    session.add(morgan_event)
+    session.commit()
+    ticket_event_id = ticket_event.id
+    morgan_event_id = morgan_event.id
+
+    _calls(session, owner, patient_id, blob, confirm=True)
+    session.expire_all()
+
+    redacted = session.get(AuditEvent, ticket_event_id)
+    assert redacted is not None
+    assert redacted.aggregate_id == "redacted"
+    assert redacted.detail == {}
+    assert redacted.event_type == "ticket.synthetic_label"
+    assert label not in json.dumps(redacted.detail)
+
+    kept = session.get(AuditEvent, morgan_event_id)
+    assert kept is not None
+    assert kept.aggregate_id == morgan_ticket
+    assert kept.detail == {"label": str(names["morgan_label"])}
+    assert session.get(PatientLink, str(morgan["patient_id"])) is not None
+
+
+def test_confirm_clears_all_thirty_four_patient_linked_tables(practice) -> None:
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_id = str(casey["patient_id"])
+    tables = _seed_all_patient_linked_tables(session, practice)
+    assert len(tables) == 34
+    before = _patient_link_counts(session, patient_id)
+    assert all(before[table] >= 1 for table in tables)
+    _calls(session, owner, patient_id, blob, confirm=True)
+    after = _patient_link_counts(session, patient_id)
+    leftover = [table for table in tables if after.get(table, 0) != 0]
+    assert leftover == [], f"patient-linked rows left in: {', '.join(leftover)}"
+    assert len(tables) == 34
+
+
+def test_admin_delete_as_nonsuperuser_with_deletion_role(practice) -> None:
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    assert isinstance(casey, dict) and isinstance(blob, LocalBlobAdapter)
+    patient_id = str(casey["patient_id"])
+    runtime_url = os.environ.get("DATABASE_URL", settings.database_url)
+    parsed = make_url(runtime_url)
+    password = parsed.password
+    assert isinstance(password, str) and password
+    role = "patient_admin_ns_" + uuid4().hex[:10]
+    quoted = session.scalar(text("SELECT quote_literal(:password)"), {"password": password})
+    assert isinstance(quoted, str)
+    database = str(session.scalar(text("SELECT current_database()")))
+    _autocommit(
+        session,
+        f"CREATE ROLE {role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT PASSWORD {quoted}",
+    )
+    try:
+        _autocommit(session, f"GRANT CONNECT ON DATABASE {_quote(database)} TO {role}")
+        _autocommit(session, f"GRANT USAGE ON SCHEMA public TO {role}")
+        _autocommit(session, f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}")
+        _autocommit(session, f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}")
+        _autocommit(
+            session,
+            "GRANT EXECUTE ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) "
+            f"TO {role}",
+        )
+        _autocommit(
+            session,
+            "GRANT EXECUTE ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb) "
+            f"TO {role}",
+        )
+        # Own/has the deletion role without becoming a superuser.
+        _autocommit(session, f"GRANT {DELETION_ROLE} TO {role}")
+        is_super = session.scalar(
+            text("SELECT rolsuper FROM pg_roles WHERE rolname = :role"), {"role": role}
+        )
+        assert is_super is False
+        admin_url = parsed.set(username=role).render_as_string(hide_password=False)
+        assert make_url(admin_url).username == role
+        cli = CliRunner().invoke(
+            cli_app,
+            ["delete-patient-records", patient_id, "--actor", owner, "--confirm"],
+            env={"COSMAS_ADMIN_DATABASE_URL": admin_url},
+        )
+        assert cli.exit_code == 0, cli.stderr
+        report = json.loads(cli.stdout)
+        assert report["deleted"] is True
+        assert session.get(PatientLink, patient_id) is None
+        assert session.scalar(
+            select(func.count()).select_from(AuditEvent).where(
+                AuditEvent.event_type == "patient.records_deleted",
+                AuditEvent.aggregate_id == patient_id,
+            )
+        ) == 1
+    finally:
+        _autocommit(session, f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role}")
+        _autocommit(session, f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {role}")
+        _autocommit(
+            session,
+            "REVOKE ALL ON FUNCTION public.delete_patient_keyed_records(uuid, jsonb) "
+            f"FROM {role}",
+        )
+        _autocommit(
+            session,
+            "REVOKE ALL ON FUNCTION public._cosmas_apply_patient_deletion_plan(uuid, jsonb) "
+            f"FROM {role}",
+        )
+        _autocommit(session, f"REVOKE ALL ON SCHEMA public FROM {role}")
+        _autocommit(session, f"REVOKE ALL ON DATABASE {_quote(database)} FROM {role}")
+        _autocommit(session, f"REVOKE {DELETION_ROLE} FROM {role}")
+        _autocommit(session, f"DROP ROLE IF EXISTS {role}")

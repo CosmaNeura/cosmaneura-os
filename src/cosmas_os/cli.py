@@ -730,13 +730,27 @@ def verify_beta_offboarding_acceptance_cmd(
 def delete_patient_records_cmd(
     patient_link_id: str = typer.Argument(..., help="Internal patient id"),
     actor_principal_id: str = typer.Option(..., "--actor"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
     confirm: bool = typer.Option(False, "--confirm"),
 ) -> None:
     """Count or delete one patient's records. The practice owner is the admin."""
 
     from cosmas_os.application.patient_deletion import delete_patient_records, storage_roots
     from cosmas_os.application.services import Container
-    from cosmas_os.domain.rules import AuthorizationError
+    from cosmas_os.domain.rules import AuthorizationError, DomainError
+
+    _CLI_REFUSALS = frozenset(
+        {
+            "deletion role not configured",
+            "admin authority required",
+            "patient not found",
+            "confirm required",
+        }
+    )
+    if dry_run == confirm:
+        # Need exactly one of --dry-run or --confirm. Default (neither) refuses.
+        typer.echo("confirm required", err=True)
+        raise typer.Exit(1)
 
     admin_url = _require_admin_database_url()
     engine = None
@@ -755,6 +769,10 @@ def delete_patient_records_cmd(
         )
     except AuthorizationError:
         typer.echo("admin authority required", err=True)
+        raise typer.Exit(1) from None
+    except DomainError as exc:
+        reason = str(exc)
+        typer.echo(reason if reason in _CLI_REFUSALS else "patient records could not be deleted", err=True)
         raise typer.Exit(1) from None
     except Exception:
         typer.echo("patient records could not be deleted", err=True)
