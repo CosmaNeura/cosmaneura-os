@@ -19,6 +19,8 @@ import type {NativeRecorderSnapshot} from '../../clients/capture/src/native/owne
 import type {MicrophoneInput} from '../../clients/capture/src/native/microphone-input';
 import type {ProviderRecorderSnapshot} from '../../clients/capture/src/configured/provider-binding';
 import {hasEmptyPreparationTransfer,transferEmptyPreparation} from '../../clients/capture/src/flow/empty-preparation-transfer';
+import { workspaceAuthHeaders } from "./workspace-auth-headers";
+import { workspaceApiBase } from "./workspace-base";
 
 export interface CaptureRuntime {
   controller: Pick<CaptureFlowController, "snapshot" | "subscribe" | "startRecording" |
@@ -42,9 +44,19 @@ export const openCaptureRuntime: CaptureRuntimeFactory = async (workspaceId, ses
   const origins = String(import.meta.env.VITE_CAPTURE_UPLOAD_ORIGINS ?? "").split(",").map(value => value.trim()).filter(Boolean);
   if (!origins.length) throw new BffResponseError(503, "capture_connection_required", null);
   const abort = new AbortController();
+  const apiBase = workspaceApiBase(identity);
+  const apiOrigin = new URL(apiBase).origin;
+  // Independent-beta staging: upload origins are CosmaBot's API only; attach auth.
+  const authorizeCosmaBot = origins.length === 1 && origins[0] === apiOrigin
+    ? async () => {
+        const headers = await workspaceAuthHeaders(identity, apiBase);
+        headers.set("Content-Type", "application/octet-stream");
+        return headers;
+      }
+    : undefined;
   const uploadTarget = new HttpCiphertextUploadTarget(origins, (input, init) => fetch(input, {
     ...init, signal: init?.signal ? AbortSignal.any([init.signal, abort.signal]) : abort.signal,
-  }));
+  }), authorizeCosmaBot);
   const release = await acquireCaptureFlowLock();
   let flow: EncryptedIndexedDbFlowStore | undefined;
   let queueStore: Awaited<ReturnType<typeof openCaptureQueueStorage>> | undefined;

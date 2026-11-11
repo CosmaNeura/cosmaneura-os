@@ -137,6 +137,12 @@ def admit(
         if w.appointment_id is None:
             raise ws.WorkspaceError("capture_connection_required", 409)
         appointment = ws._encounter(session, box, w.appointment_id, w.patient_link_id, owner=w.owner_id)
+        from cosmas_os.application import real_patient_recording as rpr
+        from cosmas_os.config import settings as runtime_settings
+        # Checked on every capture start; Box kill/enable flips apply without redeploy.
+        rpr.require_recording_start_allowed(
+            session, box_id=box, appointment=appointment, runtime=runtime_settings
+        )
         identity = session.scalar(
             select(ExternalIdentity)
             .where(

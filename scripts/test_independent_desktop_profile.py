@@ -43,24 +43,36 @@ class IndependentDesktopProfile(unittest.TestCase):
         (self.web / "index.html").write_text("<html><head></head><body>Invented test renderer</body></html>")
         self.helper = self.root / "helper.app"
         (self.helper / "Contents").mkdir(parents=True)
-        validated = composer._identity.validate(self.identity, "desktop", self.identity["apiOrigin"])
-        (self.helper / "Contents/Info.plist").write_bytes(plistlib.dumps({
-            "CFBundleIdentifier": validated["bundle"], "CFBundleExecutable": "CosmasDesktopAuth",
-            "CosmasNativeAuth": validated["auth"], "CosmasNativeIdentity": validated["identity"],
-            "CosmasConfiguredCapture": {"enabled": False}, "LSMinimumSystemVersion": "14.0",
-        }))
+        self.validated = composer._identity.validate(self.identity, "desktop", self.identity["apiOrigin"])
+        self._write_helper(capture_enabled=True)
         self.runtime = self.root / "Electron.app"
         (self.runtime / "Contents").mkdir(parents=True)
         (self.runtime / "Contents/Info.plist").write_bytes(plistlib.dumps({
             "CFBundleIdentifier": "com.github.Electron", "CFBundleVersion": "43.4.1", "LSMinimumSystemVersion": "12.0",
         }))
 
-    def write_profile(self, profile="independent-beta-v1"):
+    def _write_helper(self, capture_enabled):
+        capture = ({"enabled": True, "apiOrigin": self.identity["apiOrigin"]} if capture_enabled
+                   else {"enabled": False})
+        (self.helper / "Contents/Info.plist").write_bytes(plistlib.dumps({
+            "CFBundleIdentifier": self.validated["bundle"], "CFBundleExecutable": "CosmasDesktopAuth",
+            "CosmasNativeAuth": self.validated["auth"], "CosmasNativeIdentity": self.validated["identity"],
+            "CosmasConfiguredCapture": capture, "LSMinimumSystemVersion": "14.0",
+        }))
+
+    def write_profile(self, profile="independent-beta-v1", *, core_capture=True):
+        independent = profile == "independent-beta-v1"
+        capture = independent and core_capture
+        self._write_helper(capture_enabled=capture)
         env = {"VITE_WORKSPACE_FEATURE_PROFILE": profile, "VITE_WORKSPACE_HOSTED_CLIENT": "desktop",
                "VITE_WORKSPACE_DATA_MODE": "synthetic", "VITE_WORKSPACE_HOSTED_API_ORIGIN": self.identity["apiOrigin"],
-               "VITE_API_BASE": "app://cosmas/api", "VITE_WORKSPACE_WEB_ORIGIN": "", "VITE_COSMANEURA_WEB_ORIGIN": "",
-               "VITE_CAPTURE_UPLOAD_ORIGINS": "", "VITE_WORKSPACE_CAPTURE_MODE": "disabled",
+               "VITE_API_BASE": "app://cosmas/api", "VITE_WORKSPACE_WEB_ORIGIN": "",
+               "VITE_COSMANEURA_WEB_ORIGIN": "https://staging-app.cosmaneura.com" if capture else "",
+               "VITE_CAPTURE_UPLOAD_ORIGINS": self.identity["apiOrigin"] if capture else "",
+               "VITE_WORKSPACE_CAPTURE_MODE": "browser_microphone" if capture else "disabled",
                "VITE_CLERK_PUBLISHABLE_KEY": self.identity["publishableKey"]}
+        if independent:
+            env["VITE_WORKSPACE_CAPTURE_ENABLED"] = "true" if capture else "false"
         output = subprocess.check_output(["node", "--input-type=module", "-e",
                                           "const m=await import(process.argv[1]);process.stdout.write(JSON.stringify("
                                           "m.resolveBetaFeatureProfile(JSON.parse(process.argv[2])).manifest));",
@@ -71,21 +83,35 @@ class IndependentDesktopProfile(unittest.TestCase):
             "version": 1, **{key: manifest[key] for key in ("client", "dataMode", "apiOrigin", "apiBase", "pageOrigin")},
         }))
 
-    def arguments(self, output, extra=()):
+    def arguments(self, output, extra=(), profile="independent-beta-v1", *, core_capture=True):
+        capture = () if not (profile == "independent-beta-v1" and core_capture) else (
+            "--cosmaneura-web-origin", "https://staging-app.cosmaneura.com",
+            "--capture-upload-origin", self.identity["apiOrigin"], "--microphone-capture")
         return ["prepare-desktop-synthetic.py",
                 "--web-dist", str(self.web), "--output", str(output), "--native-auth-helper", str(self.helper),
                 "--installation-profile", "beta", "--hosted-api-origin", self.identity["apiOrigin"],
                 "--data-mode", "synthetic", "--native-identity-config", str(self.identity_path),
-                "--app-version", "0.1.143", "--build-number", "1103", *extra]
+                "--app-version", "0.1.143", "--build-number", "1103", *capture, *extra]
 
-    def compose(self, profile="independent-beta-v1"):
-        self.write_profile(profile)
+    def compose(self, profile="independent-beta-v1", *, core_capture=True):
+        self.write_profile(profile, core_capture=core_capture)
         output = self.root / profile
-        # Read the actual repository-owned boundary. Only Git provenance is an
-        # invented test value; no legacy source, native binary or service is used.
+        # The three retained source templates are replaced with inert invented
+        # text. Actual public validation, compilation, file copying and emitted
+        # descriptors execute; no legacy source or native binary is accessed.
+        def source_template(command, **_kwargs):
+            self.assertEqual(command[:2], ["git", "show"])
+            return b"const RENDERER_ASSETS = Object.freeze({\n});\nexport const invented = true;\n"
         provenance = {"version": 1, "commit": "1" * 40, "tree": "2" * 40, "dirty": False}
-        with patch.object(sys, "argv", self.arguments(output)), \
-                patch.object(composer._source_module, "provenance", return_value=provenance):
+        import types
+        fake_capture = types.ModuleType("native_capture_build")
+        fake_capture.prepare = lambda *_args, **_kwargs: None
+        # Native capture ownership packaging needs macOS tooling; keep the Linux
+        # unit path on public profile/config checks and invent the capture stage.
+        with patch.object(sys, "argv", self.arguments(output, profile=profile, core_capture=core_capture)), \
+                patch.object(composer._source_module, "provenance", return_value=provenance), \
+                patch.object(composer.subprocess, "check_output", side_effect=source_template), \
+                patch.dict("sys.modules", {"native_capture_build": fake_capture}):
             composer.main()
         app = output / "app"
         return app, json.loads((app / "synthetic-build.json").read_text())
@@ -94,7 +120,9 @@ class IndependentDesktopProfile(unittest.TestCase):
         app, configuration = self.compose()
         self.assertEqual(configuration["installation"]["storageScope"], "identity-v1")
         self.assertEqual(configuration["nativeIdentity"], self.identity)
-        self.assertFalse(configuration["nativeCaptureEnabled"])
+        self.assertTrue(configuration["nativeCaptureEnabled"])
+        self.assertEqual(configuration["cosmaneuraWebOrigin"], "https://staging-app.cosmaneura.com")
+        self.assertEqual(configuration["captureUploadOrigins"], [self.identity["apiOrigin"]])
         package = self.root / "independent.app"
         with patch.object(sys, "argv", ["package-desktop-synthetic.py", "--electron-app", str(self.runtime),
                                         "--composed-app", str(app), "--output", str(package)]):
