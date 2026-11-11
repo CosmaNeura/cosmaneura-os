@@ -1200,10 +1200,15 @@ EHR beta. It follows the October 31 pointer switch on
 `vm-cosmabot-staging-eus2-lab01`. It does not use the Container Apps /
 `render.py` path.
 
+The script requires bash 4 or newer. The macOS system bash is 3.2 and is
+refused with `BASH_TOO_OLD`. Install Homebrew bash and run that.
+
 The script is a dry-run until `--execute`. Without `--cutover` it leaves
 `release-r10` on ports 54110 and 54112 and trials the new build on 54120 and
-54122, with a throwaway database on 54130. The live database is not migrated
-until cutover. Cutover also requires `--expect-prior-sha`. Cutover stops the
+54122, with a throwaway database on 54130. That database is
+`cosmabot_standalone_copy_ehr_trial`. The trial creates `cbpg_e0a414184674`
+and `cosmabot_runtime_e0a414184674` with different passwords before migrate.
+The live database is not migrated until cutover. Cutover also requires `--expect-prior-sha`. Cutover stops the
 live listeners, so staging is down until `release-r10` is serving again or the
 new release passes its checks. The image build, web transfer, and side-port
 trial load the staging VM. On `--execute`, the local web build runs
@@ -1265,15 +1270,23 @@ second dump and checks that one. Rollback restores the second dump, and the
 row counts are the counts from that quiesced database.
 
 Rollback does not drop the live database before a restore into a new database
-has succeeded. The new database is created with the live database's owner and
-encoding, and `pg_restore` keeps owners and ACLs (`--single-transaction
---exit-on-error`, no `--clean`, no `--no-owner`). The same restore flags are
-used for the scratch gate. After the alembic version and the row counts match
-on the new database, the script terminates other sessions and renames the new
-database into place. If the migration never started, or it started and the
-alembic version and row counts are unchanged, rollback restarts `release-r10`
-without restoring. A restore failure prints `CUTOVER_ROLLBACK_FAILED` and
-exits non-zero.
+has succeeded. The new database is created with the live database's owner,
+encoding, `datcollate`, and `datctype`. `pg_restore` keeps object owners and
+ACLs (`--single-transaction --exit-on-error`, no `--clean`, no `--no-owner`).
+Before the rename, the script copies the live connection limit, the database
+ACL (`datacl`), and `pg_db_role_setting` rows onto the new database. It does
+not copy the tablespace, the database OID, or frozen transaction ids. A
+`datacl` or role setting the script cannot parse makes the pre-stop gate
+print `DATABASE_SHAPE_REFUSED` and leave the listeners up. The same
+`pg_restore` flags are used for the scratch gate. After the alembic version
+and the row counts match on the new database, the script terminates other
+sessions and renames the new database into place. If the migration never
+started, including when the quiesced dump file is already gone, or it started
+and the alembic version and row counts are unchanged, rollback restarts
+`release-r10` without restoring. A failed drop of the renamed-aside database
+prints `OLD_DATABASE_DROP_FAILED` and still restarts `release-r10`. A failed
+rename back to the live name prints `RENAME_BACK_FAILED`. A restore failure
+prints `CUTOVER_ROLLBACK_FAILED` and exits non-zero.
 
 `CUTOVER_IN_PROGRESS` means the marker file
 `/var/lib/cosmabot/standalone/e0a41418-4674-456e-8512-7d5de7a78670/copy-to-ehr-cutover.in-progress`

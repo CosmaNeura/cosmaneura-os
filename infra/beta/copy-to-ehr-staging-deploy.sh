@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Copy to EHR staging deploy for John's Mac.
+# Requires bash 4 or newer. macOS system bash 3.2 is refused.
 #
 # Dry-run unless --execute. Refuses every target except the staging allowlist.
 # Transport is `az vm run-command invoke` (RunShellScript). This is the Oct 31
@@ -9,6 +10,11 @@
 # rg-cosmas-os-vm-staging-eus2-lab01. This script never downloads it, never
 # uploads it, and never copies it to the operator Mac. A /subscriptions/*
 # dump target is refused.
+if [[ -z "${BASH_VERSINFO+x}" || "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+  printf 'BASH_TOO_OLD\n' >&2
+  printf 'copy-to-ehr staging deploy refused: bash 4 or newer is required\n' >&2
+  exit 1
+fi
 set -euo pipefail
 
 # DEFAULT_SOURCE_SHA is the only default candidate. When PR 341 moves, change
@@ -170,17 +176,51 @@ copy_to_ehr_prior_matches() {
   return 1
 }
 
+copy_to_ehr_trial_migrator_role() {
+  printf 'cbpg_%s\n' "$STAGING_SHORT"
+}
+
+copy_to_ehr_trial_runtime_role() {
+  printf 'cosmabot_runtime_%s\n' "$STAGING_SHORT"
+}
+
+copy_to_ehr_trial_database_name() {
+  printf 'cosmabot_standalone_copy_ehr_trial\n'
+}
+
+copy_to_ehr_trial_url_password() {
+  local url="$1" role="$2" database="" prefix="" rest=""
+  database=$(copy_to_ehr_trial_database_name)
+  prefix="postgresql+psycopg://${role}:"
+  case "$url" in
+    "${prefix}"*"@127.0.0.1:54130/${database}") ;;
+    *) return 1 ;;
+  esac
+  rest="${url#"$prefix"}"
+  rest="${rest%"@127.0.0.1:54130/${database}"}"
+  [[ "$rest" =~ ^[A-Za-z0-9_-]{24,}$ ]] || return 1
+  printf '%s\n' "$rest"
+}
+
 copy_to_ehr_trial_url_file_allowed() {
-  local file="$1" url
+  local file="$1" admin="" runtime="" admin_pass="" runtime_pass="" blob=""
+  local migrator="" runtime_role="" live_db=""
   [[ -f "$file" && ! -L "$file" ]] || return 1
-  url=$(tr -d '[:space:]' <"$file")
-  case "$url" in
-    *54111*|*5432*|*54329*|*cosmabot_standalone_*|*cosmabot_copy_ehr_scratch*) return 1 ;;
+  admin=$(sed -n '1p' "$file" | tr -d '[:space:]')
+  runtime=$(sed -n '2p' "$file" | tr -d '[:space:]')
+  [[ -n "$admin" && -n "$runtime" ]] || return 1
+  [[ -z "$(sed -n '3p' "$file" | tr -d '[:space:]')" ]] || return 1
+  migrator=$(copy_to_ehr_trial_migrator_role)
+  runtime_role=$(copy_to_ehr_trial_runtime_role)
+  live_db="cosmabot_standalone_${STAGING_SHORT}"
+  blob="${admin#*@}${runtime#*@}"
+  case "$blob" in
+    *54111*|*5432*|*54329*|*54321*|*${live_db}*|*cosmabot_copy_ehr_scratch*|*cosmabot_copy_ehr_trial*) return 1 ;;
   esac
-  case "$url" in
-    postgresql+psycopg://cosmabot_copyehr_trial:*@127.0.0.1:54130/cosmabot_copy_ehr_trial) return 0 ;;
-  esac
-  return 1
+  admin_pass=$(copy_to_ehr_trial_url_password "$admin" "$migrator") || return 1
+  runtime_pass=$(copy_to_ehr_trial_url_password "$runtime" "$runtime_role") || return 1
+  [[ "$admin_pass" != "$runtime_pass" ]] || return 1
+  return 0
 }
 
 copy_to_ehr_assert_account_json() {
@@ -455,17 +495,59 @@ copy_to_ehr_write_migrate_env() {
   chmod 600 "$env_file"
 }
 
+copy_to_ehr_write_trial_url_file() {
+  local dest="$1" admin_pass="$2" runtime_pass="$3" database=""
+  database=$(copy_to_ehr_trial_database_name)
+  [[ "$admin_pass" =~ ^[A-Za-z0-9_-]{24,}$ ]] || return 1
+  [[ "$runtime_pass" =~ ^[A-Za-z0-9_-]{24,}$ ]] || return 1
+  [[ "$admin_pass" != "$runtime_pass" ]] || return 1
+  umask 077
+  {
+    printf 'postgresql+psycopg://%s:%s@127.0.0.1:54130/%s\n' \
+      "$(copy_to_ehr_trial_migrator_role)" "$admin_pass" "$database"
+    printf 'postgresql+psycopg://%s:%s@127.0.0.1:54130/%s\n' \
+      "$(copy_to_ehr_trial_runtime_role)" "$runtime_pass" "$database"
+  } >"$dest"
+  chmod 400 "$dest"
+}
+
 copy_to_ehr_write_trial_migrate_env() {
-  local url_file="$1" env_file="$2" url=""
+  local url_file="$1" env_file="$2" admin="" runtime=""
   copy_to_ehr_trial_url_file_allowed "$url_file" || return 1
-  url=$(tr -d '[:space:]' <"$url_file")
+  admin=$(sed -n '1p' "$url_file" | tr -d '[:space:]')
+  runtime=$(sed -n '2p' "$url_file" | tr -d '[:space:]')
   umask 077
   {
     printf 'STANDALONE_INSTANCE_ID=%s\n' "$STAGING_INSTANCE_ID"
-    printf 'DATABASE_ADMIN_URL=%s\n' "$url"
-    printf 'DATABASE_URL=%s\n' "$url"
+    printf 'DATABASE_ADMIN_URL=%s\n' "$admin"
+    printf 'DATABASE_URL=%s\n' "$runtime"
   } >"$env_file"
   chmod 600 "$env_file"
+}
+
+copy_to_ehr_create_trial_roles() {
+  local container="$1" admin_pass="$2" runtime_pass="$3"
+  local migrator="" runtime="" database=""
+  migrator=$(copy_to_ehr_trial_migrator_role)
+  runtime=$(copy_to_ehr_trial_runtime_role)
+  database=$(copy_to_ehr_trial_database_name)
+  [[ "$admin_pass" =~ ^[A-Za-z0-9_-]{24,}$ ]] || return 1
+  [[ "$runtime_pass" =~ ^[A-Za-z0-9_-]{24,}$ ]] || return 1
+  [[ "$admin_pass" != "$runtime_pass" ]] || return 1
+  # The migrator owns the throwaway database and holds ADMIN on the runtime
+  # role. prepare_standalone_database connects as the migrator and ALTERs the
+  # runtime password. The runtime stays LOGIN and non-admin, which is the
+  # attribute set _ensure_unprivileged_role applies for a superuser caller.
+  docker exec -u postgres "$container" psql -d postgres -v ON_ERROR_STOP=1 -c \
+    "CREATE ROLE ${migrator} LOGIN PASSWORD '${admin_pass}' NOSUPERUSER NOCREATEDB CREATEROLE NOREPLICATION NOBYPASSRLS INHERIT" \
+    >/dev/null || return 1
+  docker exec -u postgres "$container" psql -d postgres -v ON_ERROR_STOP=1 -c \
+    "CREATE ROLE ${runtime} LOGIN PASSWORD '${runtime_pass}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT" \
+    >/dev/null || return 1
+  docker exec -u postgres "$container" psql -d postgres -v ON_ERROR_STOP=1 -c \
+    "GRANT ${runtime} TO ${migrator} WITH ADMIN OPTION" >/dev/null || return 1
+  docker exec -u postgres "$container" psql -d postgres -v ON_ERROR_STOP=1 -c \
+    "CREATE DATABASE ${database} OWNER ${migrator}" >/dev/null || return 1
 }
 
 copy_to_ehr_run_migrate_py() {
@@ -476,12 +558,14 @@ copy_to_ehr_run_migrate_py() {
   chmod -R a+rX "$source_dir" || return 1
   docker run --rm --network host --userns host --user 21000:21000 \
     --entrypoint /usr/local/bin/python \
+    -e PYTHONPATH=/app/src \
     -v "$source_dir:/opt/copy-to-ehr-src:ro" \
     -v "$env_file:/run/copy-to-ehr-migrate.env:ro" \
     -v /var/run/postgresql:/var/run/postgresql \
     "${STAGING_API_REPOSITORY}:${COPY_TO_EHR_SHA}" \
     -c 'import os, runpy, sys
 from pathlib import Path
+os.environ["PYTHONPATH"] = "/app/src"
 sys.path.insert(0, "/app/src")
 for line in Path("/run/copy-to-ehr-migrate.env").read_text().splitlines():
     if "=" not in line:
@@ -603,18 +687,29 @@ copy_to_ehr_pointer_file() {
 }
 
 copy_to_ehr_write_pointer() {
-  local release_dir="$1" token="$2" dest="" tmp="" dir=""
+  local release_dir="$1" token="$2" dest="" tmp="" dir="" old_umask=""
   dest=$(copy_to_ehr_pointer_file)
   dir=$(dirname -- "$dest")
   mkdir -p -- "$dir"
+  old_umask=$(umask)
   umask 022
-  tmp=$(mktemp "$dir/active-release.XXXXXX")
+  tmp=$(mktemp "$dir/active-release.XXXXXX") || { umask "$old_umask"; return 1; }
   if ! printf 'RELEASE_DIR=%s\n' "$release_dir" >"$tmp"; then
     rm -f -- "$tmp"
+    umask "$old_umask"
     return 1
   fi
-  chmod 644 "$tmp" || { rm -f -- "$tmp"; return 1; }
-  mv -f "$tmp" "$dest"
+  if ! chmod 644 "$tmp"; then
+    rm -f -- "$tmp"
+    umask "$old_umask"
+    return 1
+  fi
+  if ! mv -f "$tmp" "$dest"; then
+    rm -f -- "$tmp"
+    umask "$old_umask"
+    return 1
+  fi
+  umask "$old_umask"
   printf '%s\n' "$token"
 }
 
@@ -636,10 +731,15 @@ copy_to_ehr_refuse_cutover_marker() {
 }
 
 copy_to_ehr_write_cutover_marker() {
-  local marker
+  local marker="" old_umask=""
   marker=$(copy_to_ehr_marker_file)
+  old_umask=$(umask)
   umask 022
-  printf 'in-progress\n' >"$marker"
+  if ! printf 'in-progress\n' >"$marker"; then
+    umask "$old_umask"
+    return 1
+  fi
+  umask "$old_umask"
 }
 
 copy_to_ehr_clear_cutover_marker() {
@@ -672,22 +772,16 @@ copy_to_ehr_pg_dump() {
 }
 
 copy_to_ehr_restore_target_ok() {
-  case "$1" in
-    cosmabot_copy_ehr_scratch) return 0 ;;
-    cosmabot_standalone_[a-z0-9_]*_copy_ehr_in) return 0 ;;
-    cosmabot_standalone_[a-z0-9_]*_copy_ehr_old) return 0 ;;
-  esac
+  [[ "$1" =~ ^cosmabot_copy_ehr_scratch$ ]] && return 0
+  [[ "$1" =~ ^cosmabot_standalone_[a-z0-9_]+_copy_ehr_in$ ]] && return 0
+  [[ "$1" =~ ^cosmabot_standalone_[a-z0-9_]+_copy_ehr_old$ ]] && return 0
   return 1
 }
 
 copy_to_ehr_live_db_name_ok() {
-  case "$1" in
-    cosmabot_standalone_[a-z0-9_]*) ;;
-    *) return 1 ;;
-  esac
-  case "$1" in
-    *_copy_ehr_in|*_copy_ehr_old|cosmabot_copy_ehr_scratch|cosmabot_copy_ehr_trial) return 1 ;;
-  esac
+  [[ "$1" =~ ^cosmabot_standalone_[a-z0-9_]+$ ]] || return 1
+  [[ "$1" =~ _copy_ehr_(in|old)$ ]] && return 1
+  [[ "$1" == "cosmabot_copy_ehr_scratch" || "$1" == "cosmabot_copy_ehr_trial" ]] && return 1
   return 0
 }
 
@@ -724,11 +818,7 @@ copy_to_ehr_restore_gate() {
     printf 'DUMP_PATH_REFUSED\n' >&2
     return 1
   }
-  case "$live_db" in
-    cosmabot_standalone_[a-z0-9_]*) ;;
-    *) printf 'LIVE_DATABASE_NAME_REFUSED\n' >&2; return 1 ;;
-  esac
-  if [[ "$live_db" == "$scratch" || "$live_db" == "cosmabot_copy_ehr_trial" ]]; then
+  if ! copy_to_ehr_live_db_name_ok "$live_db"; then
     printf 'LIVE_DATABASE_NAME_REFUSED\n' >&2
     return 1
   fi
@@ -743,6 +833,7 @@ copy_to_ehr_restore_gate() {
   chmod 600 "$dump" || true
   bytes=$(wc -c <"$dump" | tr -d '[:space:]')
   printf 'DUMP_BYTES=%s\n' "$bytes"
+  copy_to_ehr_dropdb "$scratch" || true
   if ! copy_to_ehr_createdb "$scratch"; then
     printf 'CUTOVER_ABORT_RESTORE_CHECK\n' >&2
     return 1
@@ -778,6 +869,11 @@ copy_to_ehr_restore_gate() {
     printf 'COUNT %s=%s\n' "$table" "$live_count"
   done
   chmod 600 "${dump}.counts" || true
+  if ! copy_to_ehr_read_database_shape "$live_db"; then
+    copy_to_ehr_dropdb "$scratch" || true
+    printf 'DATABASE_SHAPE_REFUSED\n' >&2
+    return 1
+  fi
   if ! copy_to_ehr_dropdb "$scratch"; then
     printf 'CUTOVER_ABORT_RESTORE_CHECK\n' >&2
     return 1
@@ -882,15 +978,141 @@ copy_to_ehr_rename_database() {
     "ALTER DATABASE \"${source}\" RENAME TO \"${dest}\";" >/dev/null
 }
 
+copy_to_ehr_database_acl_ok() {
+  python3 -c 'import re, sys
+acl = sys.argv[1]
+if acl == "-":
+    raise SystemExit(0)
+if len(acl) < 2 or acl[0] != "{" or acl[-1] != "}":
+    raise SystemExit(1)
+body = acl[1:-1]
+if body == "":
+    raise SystemExit(0)
+item = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)?=([CcT]\*?)+/[A-Za-z_][A-Za-z0-9_]*")
+for part in body.split(","):
+    if not item.fullmatch(part):
+        raise SystemExit(1)
+' "$1"
+}
+
+copy_to_ehr_database_settings_ok() {
+  local settings="$1"
+  [[ -z "$settings" || "$settings" == "-" ]] && return 0
+  python3 -c 'import re, sys
+text = sys.argv[1]
+role_re = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+key_re = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+value_re = re.compile(r"[A-Za-z0-9_./+-]*")
+for item in text.split(","):
+    role, sep, rest = item.partition(":")
+    key, eq, value = rest.partition("=")
+    if sep != ":" or eq != "=":
+        raise SystemExit(1)
+    if role and not role_re.fullmatch(role):
+        raise SystemExit(1)
+    if not key_re.fullmatch(key) or not value_re.fullmatch(value):
+        raise SystemExit(1)
+' "$settings"
+}
+
+copy_to_ehr_read_database_shape() {
+  local live_db="$1" row="" collate="" ctype="" limit="" acl="" settings=""
+  copy_to_ehr_live_db_name_ok "$live_db" || return 1
+  row=$(copy_to_ehr_psql postgres "SELECT datcollate || '|' || datctype || '|' || datconnlimit::text || '|' || coalesce(datacl::text, '-') FROM pg_catalog.pg_database WHERE datname = '${live_db}'") || return 1
+  IFS='|' read -r collate ctype limit acl <<<"$row"
+  [[ "$collate" =~ ^[A-Za-z0-9._@+-]+$ ]] || return 1
+  [[ "$ctype" =~ ^[A-Za-z0-9._@+-]+$ ]] || return 1
+  [[ "$limit" =~ ^-?[0-9]+$ ]] || return 1
+  [[ -n "$acl" ]] || return 1
+  copy_to_ehr_database_acl_ok "$acl" || return 1
+  settings=$(copy_to_ehr_psql postgres "SELECT coalesce(string_agg(coalesce(r.rolname, '') || ':' || cfg, ','), '-') FROM pg_catalog.pg_db_role_setting s LEFT JOIN pg_catalog.pg_roles r ON r.oid = s.setrole AND s.setrole <> 0, LATERAL unnest(s.setconfig) AS cfg WHERE s.setdatabase = (SELECT oid FROM pg_catalog.pg_database WHERE datname = '${live_db}')") || return 1
+  [[ -z "$settings" ]] && settings="-"
+  copy_to_ehr_database_settings_ok "$settings" || return 1
+  COPY_TO_EHR_SHAPE_COLLATE="$collate"
+  COPY_TO_EHR_SHAPE_CTYPE="$ctype"
+  COPY_TO_EHR_SHAPE_LIMIT="$limit"
+  COPY_TO_EHR_SHAPE_ACL="$acl"
+  COPY_TO_EHR_SHAPE_SETTINGS="$settings"
+}
+
+copy_to_ehr_apply_database_acl() {
+  local database="$1" acl="$2" sql=""
+  copy_to_ehr_restore_target_ok "$database" || return 1
+  copy_to_ehr_database_acl_ok "$acl" || return 1
+  [[ "$acl" == "-" ]] && return 0
+  sql=$(python3 -c 'import sys
+database, acl = sys.argv[1:]
+names = {"c": "CONNECT", "C": "CREATE", "T": "TEMPORARY"}
+body = acl[1:-1]
+lines = ["REVOKE ALL PRIVILEGES ON DATABASE \"%s\" FROM PUBLIC;" % database]
+if body:
+    for item in body.split(","):
+        grantee, rest = item.split("=", 1)
+        privs, _grantor = rest.split("/", 1)
+        who = "PUBLIC" if grantee == "" else grantee
+        plain = []
+        granted = []
+        i = 0
+        while i < len(privs):
+            letter = privs[i]
+            option = i + 1 < len(privs) and privs[i + 1] == "*"
+            if option:
+                i += 2
+            else:
+                i += 1
+            (granted if option else plain).append(names[letter])
+        if plain:
+            lines.append("GRANT %s ON DATABASE \"%s\" TO %s;" % (", ".join(plain), database, who))
+        if granted:
+            lines.append("GRANT %s ON DATABASE \"%s\" TO %s WITH GRANT OPTION;" % (", ".join(granted), database, who))
+sys.stdout.write("\n".join(lines) + "\n")
+' "$database" "$acl") || return 1
+  docker exec -u postgres "$COPY_TO_EHR_PG_CONTAINER" \
+    psql -d postgres -v ON_ERROR_STOP=1 -c "$sql" >/dev/null
+}
+
+copy_to_ehr_apply_database_settings() {
+  local database="$1" settings="$2" sql=""
+  copy_to_ehr_restore_target_ok "$database" || return 1
+  copy_to_ehr_database_settings_ok "$settings" || return 1
+  [[ -z "$settings" || "$settings" == "-" ]] && return 0
+  sql=$(python3 -c 'import sys
+database, settings = sys.argv[1:]
+lines = []
+for item in settings.split(","):
+    role, rest = item.split(":", 1)
+    key, value = rest.split("=", 1)
+    if role:
+        lines.append("ALTER ROLE \"%s\" IN DATABASE \"%s\" SET %s TO %s;" % (role, database, key, value))
+    else:
+        lines.append("ALTER DATABASE \"%s\" SET %s TO %s;" % (database, key, value))
+sys.stdout.write("\n".join(lines) + "\n")
+' "$database" "$settings") || return 1
+  docker exec -u postgres "$COPY_TO_EHR_PG_CONTAINER" \
+    psql -d postgres -v ON_ERROR_STOP=1 -c "$sql" >/dev/null
+}
+
+copy_to_ehr_apply_database_shape() {
+  local database="$1"
+  copy_to_ehr_restore_target_ok "$database" || return 1
+  [[ "${COPY_TO_EHR_SHAPE_LIMIT:-}" =~ ^-?[0-9]+$ ]] || return 1
+  docker exec -u postgres "$COPY_TO_EHR_PG_CONTAINER" \
+    psql -d postgres -v ON_ERROR_STOP=1 -c \
+    "ALTER DATABASE \"${database}\" WITH CONNECTION LIMIT ${COPY_TO_EHR_SHAPE_LIMIT};" >/dev/null \
+    || return 1
+  copy_to_ehr_apply_database_acl "$database" "${COPY_TO_EHR_SHAPE_ACL:--}" || return 1
+  copy_to_ehr_apply_database_settings "$database" "${COPY_TO_EHR_SHAPE_SETTINGS:--}" || return 1
+}
+
 copy_to_ehr_restore_dump_over_live() {
   local dump="$1" live_db="$2" incoming="" old="" owner="" encoding=""
   copy_to_ehr_dump_file_on_staging_vm "$dump" "$STAGING_DATA_ROOT" || return 1
-  [[ -s "$dump" && -s "${dump}.counts" ]] || return 1
   copy_to_ehr_live_db_name_ok "$live_db" || return 1
   if [[ "${COPY_TO_EHR_DB_TOUCHED:-0}" != "1" ]]; then
     printf 'RESTORE_SKIPPED_UNTOUCHED\n'
     return 0
   fi
+  [[ -s "$dump" && -s "${dump}.counts" ]] || return 1
   if copy_to_ehr_database_matches_dump "$live_db" "${dump}.counts"; then
     printf 'RESTORE_SKIPPED_UNTOUCHED\n'
     return 0
@@ -905,6 +1127,10 @@ copy_to_ehr_restore_dump_over_live() {
   }
   [[ "$owner" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { printf 'PG_RESTORE_FAILED\n' >&2; return 1; }
   [[ "$encoding" =~ ^[A-Za-z0-9_]+$ ]] || { printf 'PG_RESTORE_FAILED\n' >&2; return 1; }
+  if ! copy_to_ehr_read_database_shape "$live_db"; then
+    printf 'PG_RESTORE_FAILED\n' >&2
+    return 1
+  fi
   incoming="${live_db}_copy_ehr_in"
   old="${live_db}_copy_ehr_old"
   copy_to_ehr_restore_target_ok "$incoming" || { printf 'PG_RESTORE_FAILED\n' >&2; return 1; }
@@ -914,7 +1140,14 @@ copy_to_ehr_restore_dump_over_live() {
     return 1
   fi
   if ! docker exec -u postgres "$COPY_TO_EHR_PG_CONTAINER" \
-    createdb --no-password --owner "$owner" --encoding "$encoding" --template template0 "$incoming" >/dev/null; then
+    createdb --no-password --owner "$owner" --encoding "$encoding" \
+    --lc-collate "$COPY_TO_EHR_SHAPE_COLLATE" --lc-ctype "$COPY_TO_EHR_SHAPE_CTYPE" \
+    --template template0 "$incoming" >/dev/null; then
+    printf 'PG_RESTORE_FAILED\n' >&2
+    return 1
+  fi
+  if ! copy_to_ehr_apply_database_shape "$incoming"; then
+    copy_to_ehr_dropdb "$incoming" || true
     printf 'PG_RESTORE_FAILED\n' >&2
     return 1
   fi
@@ -939,15 +1172,16 @@ copy_to_ehr_restore_dump_over_live() {
     return 1
   fi
   if ! copy_to_ehr_rename_database "$incoming" "$live_db"; then
-    copy_to_ehr_rename_database "$old" "$live_db" || true
+    if ! copy_to_ehr_rename_database "$old" "$live_db"; then
+      printf 'RENAME_BACK_FAILED\n' >&2
+    fi
     copy_to_ehr_dropdb "$incoming" || true
     printf 'PG_RESTORE_FAILED\n' >&2
     return 1
   fi
   copy_to_ehr_terminate_connections "$old" || true
   if ! copy_to_ehr_dropdb "$old"; then
-    printf 'PG_RESTORE_FAILED\n' >&2
-    return 1
+    printf 'OLD_DATABASE_DROP_FAILED\n' >&2
   fi
   printf 'DUMP_RESTORED\n'
 }
@@ -1219,11 +1453,11 @@ copy_to_ehr_cutover_sequence() {
   fi
   copy_to_ehr_disarm_cutover_trap
   copy_to_ehr_clear_cutover_marker
+  printf 'CUTOVER_OK\n'
   if ! copy_to_ehr_remove_trial; then
     printf 'TRIAL_TEARDOWN_FAILED\n' >&2
     return 1
   fi
-  printf 'CUTOVER_OK\n'
 }
 
 copy_to_ehr_cutover_main() {
@@ -1303,6 +1537,7 @@ copy_to_ehr_api_build_main() {
 
 copy_to_ehr_side_port_main() {
   local release="" archive="" url_file="" pass_file="" live_pg="" image="" edge_src=""
+  local admin_pass="" runtime_pass=""
   local public_src="" private_src="" env_file="" clone="" migrate_status=0
   set +x
   umask 077
@@ -1328,26 +1563,31 @@ copy_to_ehr_side_port_main() {
   url_file="${release}/trial-database.url"
   python3 -c 'import secrets; print(secrets.token_urlsafe(32))' >"$pass_file"
   chmod 400 "$pass_file"
-  {
-    printf 'postgresql+psycopg://cosmabot_copyehr_trial:'
-    tr -d '[:space:]' <"$pass_file"
-    printf '@127.0.0.1:54130/cosmabot_copy_ehr_trial\n'
-  } >"$url_file"
-  chmod 400 "$url_file"
-  if ! copy_to_ehr_trial_url_file_allowed "$url_file"; then
-    printf 'SIDE_PORT_REFUSED_LIVE_DATABASE\n' >&2
-    return 1
-  fi
+  admin_pass=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+  runtime_pass=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
   docker run -d --name "cosmabot-standalone-copyehr-trial-pg-${STAGING_SHORT}" \
     --network host \
     -v "${pass_file}:/run/pgpass:ro" \
     -e POSTGRES_PASSWORD_FILE=/run/pgpass \
-    -e POSTGRES_USER=cosmabot_copyehr_trial \
-    -e POSTGRES_DB=cosmabot_copy_ehr_trial \
     "$image" \
     postgres -c listen_addresses=127.0.0.1 -c port=54130 >/dev/null \
     || { copy_to_ehr_remove_trial; return 1; }
   if ! copy_to_ehr_wait_postgres "cosmabot-standalone-copyehr-trial-pg-${STAGING_SHORT}" "$TRIAL_POSTGRES_PORT"; then
+    copy_to_ehr_remove_trial
+    return 1
+  fi
+  if ! copy_to_ehr_create_trial_roles \
+    "cosmabot-standalone-copyehr-trial-pg-${STAGING_SHORT}" "$admin_pass" "$runtime_pass"; then
+    printf 'TRIAL_ROLES_FAILED\n' >&2
+    copy_to_ehr_remove_trial
+    return 1
+  fi
+  if ! copy_to_ehr_write_trial_url_file "$url_file" "$admin_pass" "$runtime_pass"; then
+    copy_to_ehr_remove_trial
+    return 1
+  fi
+  if ! copy_to_ehr_trial_url_file_allowed "$url_file"; then
+    printf 'SIDE_PORT_REFUSED_LIVE_DATABASE\n' >&2
     copy_to_ehr_remove_trial
     return 1
   fi
@@ -1371,15 +1611,28 @@ data["COPY_TO_EHR_FALLBACK_ENABLED"] = True
 Path(dest).write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
 Path(dest).chmod(0o644)
 PY
-  python3 - "$private_src" "${release}/config/api-private.json" "$url_file" <<'PY'
+  python3 - "$private_src" "${release}/config/api-private.json" "$url_file" \
+    "$(copy_to_ehr_trial_migrator_role)" "$(copy_to_ehr_trial_runtime_role)" \
+    "$(copy_to_ehr_trial_database_name)" "cosmabot_standalone_${STAGING_SHORT}" <<'PY'
 import json, sys
 from pathlib import Path
-source, dest, url_path = sys.argv[1:]
-url = Path(url_path).read_text().strip()
-if ":54111" in url or "cosmabot_standalone_" in url:
+source, dest, url_path, migrator, runtime_role, database, live_db = sys.argv[1:]
+lines = [line.strip() for line in Path(url_path).read_text().splitlines() if line.strip()]
+if len(lines) != 2:
+    raise SystemExit(1)
+admin, runtime = lines
+blob = admin + runtime
+if ":54111" in blob or ":5432" in blob or live_db in blob or "cosmabot_copy_ehr_scratch" in blob:
+    raise SystemExit(1)
+suffix = "@127.0.0.1:54130/" + database
+if not admin.startswith("postgresql+psycopg://" + migrator + ":") or not admin.endswith(suffix):
+    raise SystemExit(1)
+if not runtime.startswith("postgresql+psycopg://" + runtime_role + ":") or not runtime.endswith(suffix):
+    raise SystemExit(1)
+if admin == runtime:
     raise SystemExit(1)
 data = json.loads(Path(source).read_text())
-data["DATABASE_URL"] = url
+data["DATABASE_URL"] = runtime
 Path(dest).write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
 Path(dest).chmod(0o400)
 PY
@@ -1495,7 +1748,13 @@ copy_to_ehr_render_side_port() {
   body="${body}
 $(declare -f \
     copy_to_ehr_release_dir \
+    copy_to_ehr_trial_migrator_role \
+    copy_to_ehr_trial_runtime_role \
+    copy_to_ehr_trial_database_name \
+    copy_to_ehr_trial_url_password \
     copy_to_ehr_trial_url_file_allowed \
+    copy_to_ehr_write_trial_url_file \
+    copy_to_ehr_create_trial_roles \
     copy_to_ehr_remove_trial_nft \
     copy_to_ehr_remove_trial \
     copy_to_ehr_expect_ready \
@@ -1541,6 +1800,12 @@ $(declare -f \
     copy_to_ehr_pg_dump \
     copy_to_ehr_restore_target_ok \
     copy_to_ehr_live_db_name_ok \
+    copy_to_ehr_database_acl_ok \
+    copy_to_ehr_database_settings_ok \
+    copy_to_ehr_read_database_shape \
+    copy_to_ehr_apply_database_acl \
+    copy_to_ehr_apply_database_settings \
+    copy_to_ehr_apply_database_shape \
     copy_to_ehr_pg_restore \
     copy_to_ehr_psql \
     copy_to_ehr_createdb \
@@ -1667,7 +1932,9 @@ allowed = {
     "API_BUILD_FAILED", "WEB_ARCHIVE_MISSING", "LIVE_POINTER_CHANGED",
     "PG_DUMP_FAILED", "SHA_MISMATCH", "DIRTY_TREE", "ACTIVE_RELEASE_NOT_R10",
     "NFT_TRIAL_RULE_FAILED", "MIGRATE_FAILED", "PG_RESTORE_FAILED",
-    "STORAGE_UPLOAD_FAILED", "EDGE_PORT_REWRITE_FAILED", "CUTOVER_IN_PROGRESS",
+    "EDGE_PORT_REWRITE_FAILED", "CUTOVER_IN_PROGRESS",
+    "OLD_DATABASE_DROP_FAILED", "RENAME_BACK_FAILED", "DATABASE_SHAPE_REFUSED",
+    "TRIAL_ROLES_FAILED", "BASH_TOO_OLD",
     "ARCHIVE_SHA256", "ARCHIVE_SHA256_FAILED", "DUMP_RESTORED",
     "POSTGRES_NOT_READY", "LISTENER_NOT_READY",
     "LIVE_POSTGRES_CONTAINER_NOT_FOUND", "TEARDOWN",
@@ -1834,7 +2101,6 @@ copy_to_ehr_main() {
   fi
   dump_file="$dump_target"
   copy_to_ehr_validate_dump_target "$dump_target" || copy_to_ehr_die "dump target is outside the staging resource group or is on this Mac"
-  copy_to_ehr_validate_dump_target "$dump_file" || copy_to_ehr_die "dump file is not on the staging VM"
   copy_to_ehr_check_az
   if [[ "$teardown" -eq 1 ]]; then
     export COPY_TO_EHR_EXECUTE="$execute"
@@ -1878,10 +2144,10 @@ copy_to_ehr_execute() {
   trap copy_to_ehr_local_signal INT TERM HUP
   (
     COPY_TO_EHR_OWNED_WORKDIR=
-    cd "$workdir/src/web"
-    "$workdir/src/scripts/install-client-deps.sh"
-    copy_to_ehr_run_web_build "$sha"
-  )
+    cd "$workdir/src/web" || exit 1
+    "$workdir/src/scripts/install-client-deps.sh" || exit 1
+    copy_to_ehr_run_web_build "$sha" || exit 1
+  ) || copy_to_ehr_die "web build failed"
   copy_to_ehr_cleanup_web_env_copy
   node "$workdir/src/scripts/package-staging-web.mjs" \
     --dist "$workdir/src/web/dist" --output "$workdir/web-package"

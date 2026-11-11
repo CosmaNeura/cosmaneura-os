@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # Shell checks for the Copy to EHR staging deploy script. No Azure, no Docker.
+# Requires bash 4 or newer, same as the deploy script.
+if [[ -z "${BASH_VERSINFO+x}" || "${BASH_VERSINFO[0]}" -lt 4 ]]; then
+  printf 'BASH_TOO_OLD\n' >&2
+  printf 'copy-to-ehr staging deploy tests refused: bash 4 or newer is required\n' >&2
+  exit 1
+fi
 set -uo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -37,6 +43,20 @@ expect_fail() {
   fi
   pass "$name"
 }
+
+need() {
+  "$@" || exit 1
+}
+
+caught=0
+(
+  need false
+) || caught=$?
+if [[ "$caught" -ne 0 ]]; then
+  pass "a deliberate failing assertion is caught"
+else
+  fail "a deliberate failing assertion is caught"
+fi
 
 staging_account="$root_dir/account.json"
 staging_vm="$root_dir/vm.json"
@@ -262,14 +282,26 @@ else
 fi
 
 trial_url="$root_dir/trial.url"
-printf '%s\n' 'postgresql+psycopg://cosmabot_copyehr_trial:synthetic-trial-password@127.0.0.1:54130/cosmabot_copy_ehr_trial' >"$trial_url"
+{
+  printf '%s\n' 'postgresql+psycopg://cbpg_e0a414184674:synthetic-trial-password-admin-0001@127.0.0.1:54130/cosmabot_standalone_copy_ehr_trial'
+  printf '%s\n' 'postgresql+psycopg://cosmabot_runtime_e0a414184674:synthetic-trial-password-runtime-002@127.0.0.1:54130/cosmabot_standalone_copy_ehr_trial'
+} >"$trial_url"
+old_trial_url="$root_dir/old-trial.url"
+printf '%s\n' 'postgresql+psycopg://cosmabot_copyehr_trial:synthetic-trial-password-admin-0001@127.0.0.1:54130/cosmabot_copy_ehr_trial' >"$old_trial_url"
+same_pass_url="$root_dir/same-pass.url"
+{
+  printf '%s\n' 'postgresql+psycopg://cbpg_e0a414184674:synthetic-trial-password-admin-0001@127.0.0.1:54130/cosmabot_standalone_copy_ehr_trial'
+  printf '%s\n' 'postgresql+psycopg://cosmabot_runtime_e0a414184674:synthetic-trial-password-admin-0001@127.0.0.1:54130/cosmabot_standalone_copy_ehr_trial'
+} >"$same_pass_url"
 live_url="$root_dir/live.url"
-printf '%s\n' 'postgresql+psycopg://cosmabot_runtime_e0a414184674:synthetic@127.0.0.1:54111/cosmabot_standalone_e0a414184674' >"$live_url"
+printf '%s\n' 'postgresql+psycopg://cosmabot_runtime_e0a414184674:synthetic-live-password-00000001@127.0.0.1:54111/cosmabot_standalone_e0a414184674' >"$live_url"
 (
   # shellcheck disable=SC1090
   source "$target"
-  copy_to_ehr_trial_url_file_allowed "$trial_url"
+  copy_to_ehr_trial_url_file_allowed "$trial_url" || exit 1
   if copy_to_ehr_trial_url_file_allowed "$live_url"; then exit 1; fi
+  if copy_to_ehr_trial_url_file_allowed "$old_trial_url"; then exit 1; fi
+  if copy_to_ehr_trial_url_file_allowed "$same_pass_url"; then exit 1; fi
 )
 if [[ $? -eq 0 ]]; then
   pass "trial database url cannot be the live database"
@@ -390,6 +422,14 @@ fi
   copy_to_ehr_pg_restore() { return 0; }
   copy_to_ehr_dropdb() { return 0; }
   copy_to_ehr_psql() {
+    if [[ "$2" == *datcollate* ]]; then
+      printf 'C|C|-1|-\n'
+      return 0
+    fi
+    if [[ "$2" == *pg_db_role_setting* ]]; then
+      printf '%s\n' '-'
+      return 0
+    fi
     if [[ "$2" == *version_num* ]]; then
       printf '%s\n' 'bb57e3d10c964'
     else
@@ -1081,6 +1121,8 @@ set +e
   COPY_TO_EHR_DB_TOUCHED=1
   copy_to_ehr_psql() {
     case "$2" in
+      *datcollate*) printf 'C|C|-1|-\n' ;;
+      *pg_db_role_setting*) printf '%s\n' '-' ;;
       *pg_get_userbyid*) printf 'postgres\n' ;;
       *pg_encoding_to_char*) printf 'UTF8\n' ;;
       *version_num*) printf 'changed000000\n' ;;
@@ -1138,7 +1180,16 @@ set +e
   COPY_TO_EHR_DB_TOUCHED=1
   : >"$root_dir/count-start.log"
   docker() { return 0; }
-  copy_to_ehr_psql() { printf 'wrong\n'; return 0; }
+  copy_to_ehr_psql() {
+    case "$2" in
+      *datcollate*) printf 'C|C|-1|-\n' ;;
+      *pg_db_role_setting*) printf '%s\n' '-' ;;
+      *pg_get_userbyid*) printf 'postgres\n' ;;
+      *pg_encoding_to_char*) printf 'UTF8\n' ;;
+      *) printf 'wrong\n' ;;
+    esac
+    return 0
+  }
   copy_to_ehr_start_prior_listeners() { printf 'STARTED\n' >>"$root_dir/count-start.log"; return 0; }
   if copy_to_ehr_rollback_to_r10 "$dump" cosmabot_standalone_e0a414184674; then
     exit 1
@@ -1362,8 +1413,9 @@ set +e
   mkdir -p "$src/infra/standalone/package"
   chmod 700 "$src" "$src/infra" "$src/infra/standalone" "$src/infra/standalone/package"
   cat >"$src/infra/standalone/package/migrate.py" <<PY
-import sys
-open("$root_dir/migrate-marker", "w").write("yes\\n" if "/app/src" in sys.path else "no\\n")
+import os, sys
+ok = "/app/src" in sys.path and os.environ.get("PYTHONPATH") == "/app/src"
+open("$root_dir/migrate-marker", "w").write("yes\\n" if ok else "no\\n")
 PY
   chmod 600 "$src/infra/standalone/package/migrate.py"
   envf="$root_dir/migrate.env"
@@ -1390,8 +1442,9 @@ PY
   python3 -c 'import os,sys; mode=os.stat(sys.argv[1]).st_mode; raise SystemExit(0 if mode & 0o004 else 1)' "$src/infra/standalone/package/migrate.py"
   python3 -c 'import os,sys; mode=os.stat(sys.argv[1]).st_mode; raise SystemExit(0 if (mode & 0o005) == 0o005 else 1)' "$src"
   python3 -c 'import os,sys; mode=os.stat(sys.argv[1]).st_mode & 0o777; raise SystemExit(0 if mode == 0o600 else 1)' "$envf"
-  grep -q '21000:21000' "$root_dir/chown.txt"
-  grep -qx 'yes' "$root_dir/migrate-marker"
+  grep -q '21000:21000' "$root_dir/chown.txt" || exit 1
+  grep -qx 'yes' "$root_dir/migrate-marker" || exit 1
+  python3 -c 'import pathlib,sys; raw=pathlib.Path(sys.argv[1]).read_bytes().split(b"\0"); raise SystemExit(0 if b"PYTHONPATH=/app/src" in raw else 1)' "$root_dir/docker-args" || exit 1
 ) >"$root_dir/migrate-user.out" 2>"$root_dir/migrate-user.err"
 status=$?
 set -e
@@ -1454,6 +1507,14 @@ set +e
   copy_to_ehr_pg_restore() { return 0; }
   copy_to_ehr_dropdb() { return 0; }
   copy_to_ehr_psql() {
+    if [[ "$2" == *datcollate* ]]; then
+      printf 'C|C|-1|-\n'
+      return 0
+    fi
+    if [[ "$2" == *pg_db_role_setting* ]]; then
+      printf '%s\n' '-'
+      return 0
+    fi
     if [[ "$2" == *version_num* ]]; then
       printf 'bb57e3d10c964\n'
       return 0
@@ -1745,6 +1806,429 @@ if [[ -s "$sub_stubs/az.log" ]]; then
   fail "subscription dump target reached azure"
 else
   pass "subscription dump target stopped before azure"
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  vm="$root_dir/trial-vm"
+  STAGING_DATA_ROOT="$vm"
+  release="${vm}/release-copy-ehr-e29bf5a2de0e"
+  mkdir -p "$vm/release-r5r1/config" "$release"
+  printf '{}\n' >"$vm/release-r5r1/config/api-public.json"
+  printf '%s\n' '{"DATABASE_URL":"postgresql+psycopg://old:synthetic-old-password-000000@127.0.0.1:9/old"}' >"$vm/release-r5r1/config/api-private.json"
+  printf 'archive\n' >"${release}/cosmabot-web-e29bf5a2de0eddec1663b1185076472ef172b590.tar.gz"
+  COPY_TO_EHR_SHA=e29bf5a2de0eddec1663b1185076472ef172b590
+  log="$root_dir/trial-order.log"
+  : >"$log"
+  copy_to_ehr_live_still_serving() { return 0; }
+  chown() { return 0; }
+  copy_to_ehr_extract_web() { return 0; }
+  copy_to_ehr_remove_trial() { return 0; }
+  copy_to_ehr_wait_postgres() { printf 'WAIT\n' >>"$log"; return 0; }
+  copy_to_ehr_edge_conf_source() { printf '%s\n' "$vm/edge.conf"; }
+  printf 'server {}\n' >"$vm/edge.conf"
+  copy_to_ehr_write_trial_edge() { return 0; }
+  copy_to_ehr_clone_at_sha() { return 0; }
+  copy_to_ehr_run_migrate_py() { cp "$1" "$root_dir/trial-migrate.env"; printf 'MIGRATE\n' >>"$log"; return 0; }
+  copy_to_ehr_docker_api() { return 0; }
+  copy_to_ehr_docker_edge() { return 0; }
+  copy_to_ehr_wait_listener() { return 0; }
+  copy_to_ehr_expect_feature() { return 0; }
+  nft() { return 0; }
+  docker() {
+    printf '%s\n' "$*" >>"$log"
+    if [[ "$1" == "ps" ]]; then
+      printf '%s\n' 'abc123 127.0.0.1:54111->5432/tcp'
+    elif [[ "$1" == "inspect" ]]; then
+      printf '%s\n' 'sha256:synthetic'
+    fi
+    return 0
+  }
+  copy_to_ehr_side_port_main || exit 1
+  awk '
+    $1 == "WAIT" {wait=NR}
+    $0 ~ /CREATE ROLE cbpg_e0a414184674 / {role=NR}
+    $1 == "MIGRATE" {migrate=NR}
+    END {exit !(wait && role && migrate && wait < role && role < migrate)}
+  ' "$log" || exit 1
+  grep -q 'CREATE ROLE cosmabot_runtime_e0a414184674 ' "$log" || exit 1
+  grep -q 'GRANT cosmabot_runtime_e0a414184674 TO cbpg_e0a414184674 WITH ADMIN OPTION' "$log" || exit 1
+  grep -q 'CREATE DATABASE cosmabot_standalone_copy_ehr_trial OWNER cbpg_e0a414184674' "$log" || exit 1
+  python3 - "$root_dir/trial-migrate.env" <<'PY' || exit 1
+import sys
+from urllib.parse import urlparse
+env = {}
+for line in open(sys.argv[1], encoding="utf-8"):
+    key, value = line.rstrip("\n").split("=", 1)
+    env[key] = value
+admin = urlparse(env["DATABASE_ADMIN_URL"].replace("postgresql+psycopg://", "postgresql://", 1))
+runtime = urlparse(env["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://", 1))
+if admin.username == runtime.username or not admin.password or admin.password == runtime.password:
+    raise SystemExit(1)
+if admin.username != "cbpg_e0a414184674" or runtime.username != "cosmabot_runtime_e0a414184674":
+    raise SystemExit(1)
+if admin.username == "cosmabot_runtime_e0a414184674":
+    raise SystemExit(1)
+if (admin.hostname, admin.port, admin.path) != ("127.0.0.1", 54130, "/cosmabot_standalone_copy_ehr_trial"):
+    raise SystemExit(1)
+if (runtime.hostname, runtime.port, runtime.path) != (admin.hostname, admin.port, admin.path):
+    raise SystemExit(1)
+if "54111" in env["DATABASE_ADMIN_URL"] or "54111" in env["DATABASE_URL"]:
+    raise SystemExit(1)
+if "cosmabot_standalone_e0a414184674" in env["DATABASE_ADMIN_URL"] + env["DATABASE_URL"]:
+    raise SystemExit(1)
+PY
+  python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); url=data["DATABASE_URL"]; raise SystemExit(0 if url.startswith("postgresql+psycopg://cosmabot_runtime_e0a414184674:") and ":54130/" in url else 1)' \
+    "${release}/config/api-private.json" || exit 1
+) >"$root_dir/trial-roles.out" 2>"$root_dir/trial-roles.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "trial migrate roles differ, target 54130, and are created before migrate"
+else
+  fail "trial migrate roles differ, target 54130, and are created before migrate"
+  cat "$root_dir/trial-roles.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  vm="$root_dir/untouched-vm"
+  STAGING_DATA_ROOT="$vm"
+  dump="$vm/copy-to-ehr-dumps/missing.dump"
+  mkdir -p "$(dirname "$dump")"
+  COPY_TO_EHR_DB_TOUCHED=0
+  log="$root_dir/untouched.log"
+  : >"$log"
+  copy_to_ehr_remove_new_listeners() { return 0; }
+  copy_to_ehr_start_prior_listeners() { printf 'START_R10\n' >>"$log"; return 0; }
+  copy_to_ehr_write_prior_pointer() { return 0; }
+  copy_to_ehr_rollback_verify_prior() { return 0; }
+  docker() { printf '%s\n' "$*" >>"$log"; return 0; }
+  copy_to_ehr_rollback_to_r10 "$dump" cosmabot_standalone_e0a414184674 || exit 1
+  grep -qx 'START_R10' "$log" || exit 1
+  if grep -q 'dropdb' "$log"; then exit 1; fi
+) >"$root_dir/untouched.out" 2>"$root_dir/untouched.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -qx 'RESTORE_SKIPPED_UNTOUCHED' "$root_dir/untouched.out"; then
+  pass "an untouched database with a missing dump restarts r10"
+else
+  fail "an untouched database with a missing dump restarts r10"
+  cat "$root_dir/untouched.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  vm="$root_dir/swap-vm"
+  STAGING_DATA_ROOT="$vm"
+  dump="$vm/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  printf 'PGDMP' >"$dump"
+  printf 'alembic_version 4\naudit_events 4\npractice_owner_reservations 4\n' >"${dump}.counts"
+  chmod 600 "$dump" "${dump}.counts"
+  COPY_TO_EHR_PG_CONTAINER=pg-stub
+  COPY_TO_EHR_DB_TOUCHED=1
+  log="$root_dir/swap.log"
+  : >"$log"
+  docker() {
+    printf '%s\n' "$*" >>"$log"
+    case "$*" in
+      *datcollate*) printf 'C|C|-1|-\n' ;;
+      *pg_db_role_setting*) printf '%s\n' '-' ;;
+      *pg_get_userbyid*) printf 'postgres\n' ;;
+      *pg_encoding_to_char*) printf 'UTF8\n' ;;
+      *version_num*)
+        if [[ "$*" == *_copy_ehr_in* ]]; then printf 'bb57e3d10c964\n'; else printf 'changed000000\n'; fi
+        ;;
+      *'count(*)'*)
+        if [[ "$*" == *_copy_ehr_in* ]]; then printf '4\n'; else printf '9\n'; fi
+        ;;
+    esac
+    return 0
+  }
+  copy_to_ehr_restore_dump_over_live "$dump" cosmabot_standalone_e0a414184674 || exit 1
+  awk '
+    /createdb / {createdb=NR}
+    /pg_restore / {restore=NR}
+    /version_num/ {verify=NR}
+    /pg_terminate_backend/ && !term {term=NR}
+    /RENAME TO "cosmabot_standalone_e0a414184674_copy_ehr_old"/ {old=NR}
+    /_copy_ehr_in" RENAME TO "cosmabot_standalone_e0a414184674"/ {live=NR}
+    END {exit !(createdb && restore && verify && term && old && live && createdb < restore && restore < verify && verify < term && term < old && old < live)}
+  ' "$log" || exit 1
+  grep -q -- '--lc-collate C' "$log" || exit 1
+  grep -q -- '--lc-ctype C' "$log" || exit 1
+  grep -q 'CONNECTION LIMIT -1' "$log" || exit 1
+) >"$root_dir/swap.out" 2>"$root_dir/swap.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -qx 'DUMP_RESTORED' "$root_dir/swap.out"; then
+  pass "a restore swap creates, verifies, then renames into place"
+else
+  fail "a restore swap creates, verifies, then renames into place"
+  cat "$root_dir/swap.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  vm="$root_dir/rename-vm"
+  STAGING_DATA_ROOT="$vm"
+  dump="$vm/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  printf 'PGDMP' >"$dump"
+  printf 'alembic_version 4\naudit_events 4\npractice_owner_reservations 4\n' >"${dump}.counts"
+  chmod 600 "$dump" "${dump}.counts"
+  COPY_TO_EHR_PG_CONTAINER=pg-stub
+  COPY_TO_EHR_DB_TOUCHED=1
+  log="$root_dir/rename.log"
+  : >"$log"
+  docker() {
+    printf '%s\n' "$*" >>"$log"
+    case "$*" in
+      *datcollate*) printf 'C|C|-1|-\n' ;;
+      *pg_db_role_setting*) printf '%s\n' '-' ;;
+      *pg_get_userbyid*) printf 'postgres\n' ;;
+      *pg_encoding_to_char*) printf 'UTF8\n' ;;
+      *version_num*)
+        if [[ "$*" == *_copy_ehr_in* ]]; then printf 'bb57e3d10c964\n'; else printf 'changed000000\n'; fi
+        ;;
+      *'count(*)'*)
+        if [[ "$*" == *_copy_ehr_in* ]]; then printf '4\n'; else printf '9\n'; fi
+        ;;
+      *'_copy_ehr_in" RENAME TO "cosmabot_standalone_e0a414184674"'*) return 1 ;;
+    esac
+    return 0
+  }
+  if copy_to_ehr_restore_dump_over_live "$dump" cosmabot_standalone_e0a414184674; then
+    exit 1
+  fi
+  grep -q '_copy_ehr_old" RENAME TO "cosmabot_standalone_e0a414184674"' "$log" || exit 1
+) >"$root_dir/rename.out" 2>"$root_dir/rename.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -qx 'PG_RESTORE_FAILED' "$root_dir/rename.err"; then
+  pass "a failed second rename renames the old database back"
+else
+  fail "a failed second rename renames the old database back"
+  cat "$root_dir/rename.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  vm="$root_dir/rename-back-vm"
+  STAGING_DATA_ROOT="$vm"
+  dump="$vm/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  printf 'PGDMP' >"$dump"
+  printf 'alembic_version 4\naudit_events 4\npractice_owner_reservations 4\n' >"${dump}.counts"
+  chmod 600 "$dump" "${dump}.counts"
+  COPY_TO_EHR_PG_CONTAINER=pg-stub
+  COPY_TO_EHR_DB_TOUCHED=1
+  docker() {
+    case "$*" in
+      *datcollate*) printf 'C|C|-1|-\n' ;;
+      *pg_db_role_setting*) printf '%s\n' '-' ;;
+      *pg_get_userbyid*) printf 'postgres\n' ;;
+      *pg_encoding_to_char*) printf 'UTF8\n' ;;
+      *version_num*)
+        if [[ "$*" == *_copy_ehr_in* ]]; then printf 'bb57e3d10c964\n'; else printf 'changed000000\n'; fi
+        ;;
+      *'count(*)'*)
+        if [[ "$*" == *_copy_ehr_in* ]]; then printf '4\n'; else printf '9\n'; fi
+        ;;
+      *'RENAME TO "cosmabot_standalone_e0a414184674";'*) return 1 ;;
+    esac
+    return 0
+  }
+  if copy_to_ehr_restore_dump_over_live "$dump" cosmabot_standalone_e0a414184674; then
+    exit 1
+  fi
+) >"$root_dir/rename-back.out" 2>"$root_dir/rename-back.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -qx 'RENAME_BACK_FAILED' "$root_dir/rename-back.err"; then
+  pass "a failed rename back prints its own token"
+else
+  fail "a failed rename back prints its own token"
+  cat "$root_dir/rename-back.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  vm="$root_dir/drop-old-vm"
+  STAGING_DATA_ROOT="$vm"
+  dump="$vm/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  printf 'PGDMP' >"$dump"
+  printf 'alembic_version 4\naudit_events 4\npractice_owner_reservations 4\n' >"${dump}.counts"
+  chmod 600 "$dump" "${dump}.counts"
+  COPY_TO_EHR_PG_CONTAINER=pg-stub
+  COPY_TO_EHR_DB_TOUCHED=1
+  log="$root_dir/drop-old.log"
+  : >"$log"
+  copy_to_ehr_remove_new_listeners() { return 0; }
+  copy_to_ehr_start_prior_listeners() { printf 'START_R10\n' >>"$log"; return 0; }
+  copy_to_ehr_write_prior_pointer() { return 0; }
+  copy_to_ehr_rollback_verify_prior() { return 0; }
+  drop_old_count=0
+  docker() {
+    printf '%s\n' "$*" >>"$log"
+    case "$*" in
+      *datcollate*) printf 'C|C|-1|-\n' ;;
+      *pg_db_role_setting*) printf '%s\n' '-' ;;
+      *pg_get_userbyid*) printf 'postgres\n' ;;
+      *pg_encoding_to_char*) printf 'UTF8\n' ;;
+      *version_num*)
+        if [[ "$*" == *_copy_ehr_in* ]]; then printf 'bb57e3d10c964\n'; else printf 'changed000000\n'; fi
+        ;;
+      *'count(*)'*)
+        if [[ "$*" == *_copy_ehr_in* ]]; then printf '4\n'; else printf '9\n'; fi
+        ;;
+    esac
+    if [[ "$*" == *dropdb* && "$*" == *_copy_ehr_old ]]; then
+      drop_old_count=$((drop_old_count + 1))
+      if [[ "$drop_old_count" -ge 2 ]]; then
+        return 1
+      fi
+    fi
+    return 0
+  }
+  copy_to_ehr_rollback_to_r10 "$dump" cosmabot_standalone_e0a414184674 || exit 1
+  grep -qx 'START_R10' "$log" || exit 1
+) >"$root_dir/drop-old.out" 2>"$root_dir/drop-old.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -qx 'OLD_DATABASE_DROP_FAILED' "$root_dir/drop-old.err" && grep -qx 'DUMP_RESTORED' "$root_dir/drop-old.out"; then
+  pass "a failed drop of the old database still restarts r10"
+else
+  fail "a failed drop of the old database still restarts r10"
+  cat "$root_dir/drop-old.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  vm="$root_dir/shape-vm"
+  dump="$vm/copy-to-ehr-dumps/pre-migrate.dump"
+  mkdir -p "$(dirname "$dump")"
+  log="$root_dir/shape.log"
+  : >"$log"
+  copy_to_ehr_pg_dump() { printf 'DUMP\n' >>"$log"; printf 'PGDMP' >"$1"; }
+  copy_to_ehr_createdb() { return 0; }
+  copy_to_ehr_pg_restore() { return 0; }
+  copy_to_ehr_dropdb() { return 0; }
+  copy_to_ehr_psql() {
+    if [[ "$2" == *version_num* ]]; then
+      printf 'bb57e3d10c964\n'
+    elif [[ "$2" == *datcollate* ]]; then
+      printf 'C|C|-1|{not-an-acl}\n'
+    elif [[ "$2" == *pg_db_role_setting* ]]; then
+      printf '%s\n' '-'
+    else
+      printf '1\n'
+    fi
+  }
+  copy_to_ehr_stop_live_listeners() { printf 'STOP\n' >>"$log"; return 0; }
+  if copy_to_ehr_restore_gate "$vm" "$dump" cosmabot_standalone_e0a414184674; then
+    exit 1
+  fi
+  if grep -qx 'STOP' "$log"; then exit 1; fi
+) >"$root_dir/shape.out" 2>"$root_dir/shape.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]] && grep -qx 'DATABASE_SHAPE_REFUSED' "$root_dir/shape.err"; then
+  pass "a database shape the script cannot copy refuses before listeners stop"
+else
+  fail "a database shape the script cannot copy refuses before listeners stop"
+  cat "$root_dir/shape.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  old=$(umask)
+  umask 077
+  pointer="$root_dir/umask-pointer/active-release"
+  COPY_TO_EHR_POINTER_FILE="$pointer"
+  copy_to_ehr_write_pointer "${STAGING_DATA_ROOT}/release-r10" POINTER_R10 || exit 1
+  [[ "$(umask)" == "0077" ]] || exit 1
+  mv() { return 1; }
+  if copy_to_ehr_write_pointer "${STAGING_DATA_ROOT}/release-r10" POINTER_R10; then
+    exit 1
+  fi
+  [[ "$(umask)" == "0077" ]] || exit 1
+  umask "$old"
+) >"$root_dir/umask.out" 2>"$root_dir/umask.err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  pass "the pointer write restores umask and checks mv"
+else
+  fail "the pointer write restores umask and checks mv"
+  cat "$root_dir/umask.err" >&2 || true
+fi
+
+status=0
+set +e
+(
+  # shellcheck disable=SC1090
+  source "$target"
+  work="$root_dir/web-build"
+  mkdir -p "$work"
+  env_file="$root_dir/web-build.env"
+  cat >"$env_file" <<'EOF'
+VITE_PUBLIC_1=one
+VITE_PUBLIC_2=two
+VITE_PUBLIC_3=three
+VITE_PUBLIC_4=four
+VITE_PUBLIC_5=five
+VITE_PUBLIC_6=six
+VITE_PUBLIC_7=seven
+VITE_PUBLIC_8=eight
+VITE_PUBLIC_9=nine
+VITE_PUBLIC_10=ten
+VITE_WORKSPACE_FEATURE_PROFILE=independent-beta-v1
+EOF
+  chmod 600 "$env_file"
+  df() { printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'; printf 'tmp 99999999 1 99999999 1%% %s\n' "$2"; }
+  copy_to_ehr_clone_at_sha() {
+    mkdir -p "$1/web" "$1/scripts"
+    printf '%s\n' '#!/bin/sh' 'exit 1' >"$1/scripts/install-client-deps.sh"
+    chmod 700 "$1/scripts/install-client-deps.sh"
+    return 0
+  }
+  copy_to_ehr_execute e29bf5a2de0eddec1663b1185076472ef172b590 "$work" "$env_file" \
+    "${STAGING_DATA_ROOT}/copy-to-ehr-dumps/pre-migrate.dump" 0 9dfd4cfd
+) >"$root_dir/web-build.out" 2>"$root_dir/web-build.err"
+status=$?
+set -e
+if [[ "$status" -ne 0 ]] && grep -q 'web build failed' "$root_dir/web-build.err"; then
+  pass "a failed web build is caught without relying on set -e"
+else
+  fail "a failed web build is caught without relying on set -e"
+  cat "$root_dir/web-build.err" >&2 || true
 fi
 
 if [[ "$failures" -eq 0 ]]; then
