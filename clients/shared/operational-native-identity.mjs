@@ -11,10 +11,14 @@ export const STAGING_INSTALLATION_PROFILE = 'staging';
 /**
  * Exact Clerk hosts pinned per dedicated profile. No wildcards.
  * Staging may also use a strict `*.clerk.accounts.dev` host with pk_test_
- * (handled separately). Live operational-beta-v1 allows only clerk.cosmas.ai.
+ * (handled separately). operational-beta-v1 admits clerk.cosmas.ai and
+ * clerk.staging.cosmas.ai (CTO DECISION_LOG 12 Nov 2026 10:12 ET — shipped
+ * TestFlight/Mac builds). clerk.beta.cosmas.ai stays production-only.
  */
 const DEDICATED_CLERK_HOSTS_BY_PROFILE = Object.freeze({
-  [OPERATIONAL_NATIVE_PROFILE]: Object.freeze(new Set(['clerk.cosmas.ai'])),
+  [OPERATIONAL_NATIVE_PROFILE]: Object.freeze(new Set([
+    'clerk.cosmas.ai', 'clerk.staging.cosmas.ai',
+  ])),
   [STAGING_NATIVE_PROFILE]: Object.freeze(new Set(['clerk.staging.cosmas.ai'])),
   [PRODUCTION_NATIVE_PROFILE]: Object.freeze(new Set(['clerk.beta.cosmas.ai'])),
 });

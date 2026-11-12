@@ -372,10 +372,17 @@ def prepare(args):
     previous_path = os.environ.get("PATH")
     os.environ["PATH"] = str(node.parent) + os.pathsep + (previous_path or "")
     try:
-        identity = identity_module.load(inputs / "apple-identity.json", "apple")
+        # Installation-profile fence at load: omitted/beta refuse operational-production-v1.
+        identity = identity_module.load(
+            inputs / "apple-identity.json", "apple",
+            installation_profile=args.installation_profile)
         # Check retained custody before creating output or invoking a compiler.
         scaffold_info = plistlib.loads((repository / "apps/capture/ios/App/App/Info.plist").read_bytes())
-        configured_info(scaffold_info, old_info, identity, practice, navigation.validate_google)
+        custody = configured_info(scaffold_info, old_info, identity, practice, navigation.validate_google)
+        # Early Infos installation-profile fence (reachable before stages) so F17 /
+        # omitted-or-beta production-review refusal does not require a renderer build.
+        apply_installation_profile_to_configured_info(
+            copy.deepcopy(custody), args.installation_profile, identity=identity)
         output.mkdir(mode=0o700)
         (output / ".incomplete").write_text("Owned iPhone candidate preparation incomplete\n")
         env = dict(os.environ)

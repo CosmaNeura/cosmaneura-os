@@ -155,6 +155,32 @@ test('first-owner release preserves operational identity and refuses native capt
     assert.throws(()=>validateOperationalReleaseProfile({...config,...change},profile,info));
 });
 
+test('shipped operational-beta-v1 on clerk.staging.cosmas.ai packages (CTO 12 Nov 10:12 ET)',()=>{
+  const identity={version:1,profile:'operational-beta-v1',client:'desktop',
+    apiOrigin:'https://api.staging.cosmas.ai',
+    frontendOrigin:'https://clerk.staging.cosmas.ai',
+    publishableKey:'pk_live_'+Buffer.from('clerk.staging.cosmas.ai$').toString('base64'),
+    organizationId:'org_invented_beta',audience:'cosmas-os-beta-api'};
+  const profile=resolveBetaFeatureProfile({VITE_WORKSPACE_FEATURE_PROFILE:'first-owner-staging-v1',
+    VITE_WORKSPACE_HOSTED_CLIENT:'desktop',VITE_WORKSPACE_DATA_MODE:'synthetic',
+    VITE_WORKSPACE_HOSTED_API_ORIGIN:identity.apiOrigin,VITE_API_BASE:'app://cosmas/api',
+    VITE_WORKSPACE_WEB_ORIGIN:'',VITE_COSMANEURA_WEB_ORIGIN:'',VITE_CAPTURE_UPLOAD_ORIGINS:'',
+    VITE_WORKSPACE_CAPTURE_MODE:'disabled'}).manifest;
+  const info={CFBundleIdentifier:'com.cosmasos.beta.desktop',CFBundleShortVersionString:'0.1.0',CFBundleVersion:'1120'};
+  const config={nativeIdentity:identity,mode:'hosted-beta-authenticated',dataMode:'synthetic',
+    apiOrigin:identity.apiOrigin,appVersion:info.CFBundleShortVersionString,buildNumber:info.CFBundleVersion,
+    installation:{bundleIdentifier:info.CFBundleIdentifier},nativeCaptureEnabled:false};
+  assert.deepEqual(validateOperationalReleaseProfile(config,profile,info),identity);
+  // clerk.beta is refused on operational-beta-v1 (production-only).
+  assert.throws(()=>validateOperationalReleaseProfile({
+    ...config,
+    nativeIdentity:{...identity,frontendOrigin:'https://clerk.beta.cosmas.ai',
+      publishableKey:'pk_live_'+Buffer.from('clerk.beta.cosmas.ai$').toString('base64'),
+      apiOrigin:'https://api.beta.cosmas.ai'},
+    apiOrigin:'https://api.beta.cosmas.ai',
+  },{...profile,apiOrigin:'https://api.beta.cosmas.ai'},info));
+});
+
 for(const signed of [false,true]) test(`desktop recording helpers preserve ${signed?'signed':'unsigned'} manifests outside ASAR`,async t=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-capture-asar-'))),source=join(root,'input');
   t.after(()=>rm(root,{recursive:true,force:true}));

@@ -4,7 +4,7 @@
  * Separate from the three operational profiles in
  * operational-native-identity.mjs (operational-beta-v1,
  * operational-staging-v1, operational-production-v1). Post-#354,
- * operational-beta-v1 is pinned to clerk.cosmas.ai only.
+ * operational-beta-v1 admits clerk.cosmas.ai and clerk.staging.cosmas.ai.
  *
  * Accepts only *.synthetic.example origins with a pk_test_ placeholder that
  * encodes the invented host. No real Clerk keys, no live hosts.
@@ -87,8 +87,8 @@ export function validateSyntheticIphoneSimIdentity(value, client, apiOrigin) {
 /**
  * Prove the operational validator never accepts the synthetic-iphone-sim-v1
  * profile name, and that dedicated beta/staging/production allow-lists refuse
- * *.synthetic.example. Post-#354 operational-beta-v1 is pinned to
- * clerk.cosmas.ai only (no open non-accounts.dev host rule).
+ * *.synthetic.example. operational-beta-v1 admits only clerk.cosmas.ai and
+ * clerk.staging.cosmas.ai (no open non-accounts.dev host rule).
  */
 export function assertSyntheticProfileRefusedByLiveValidators({
   client = 'apple',
@@ -139,7 +139,7 @@ export function assertSyntheticProfileRefusedByLiveValidators({
     }
   }
 
-  // Live beta is pinned to clerk.cosmas.ai and never selects synthetic-iphone-sim-v1.
+  // Live beta admits clerk.cosmas.ai / clerk.staging.cosmas.ai only; never synthetic-iphone-sim-v1.
   if (!LIVE_PROFILES.includes(OPERATIONAL_NATIVE_PROFILE)) {
     throw new Error('operational-beta-v1 missing from live profile set');
   }

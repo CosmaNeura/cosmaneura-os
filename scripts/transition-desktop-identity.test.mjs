@@ -27,7 +27,8 @@ async function fixture(t) {
     client: 'desktop', apiOrigin: 'https://api.example.invalid',
     publishableKey: (shared ? 'pk_test_' : 'pk_live_') + Buffer.from(host + '$').toString('base64'),
     frontendOrigin: 'https://' + host, organizationId: shared ? 'org_shared' : 'org_original', audience: shared ? '' : 'cosmas-api'});
-  const sourceIdentity = identity('clerk.cosmas.ai'), targetIdentity = identity('invented.clerk.accounts.dev', true);
+  // Shipped beta source host (CTO DECISION_LOG 12 Nov 2026 10:12 ET); keep visible.
+  const sourceIdentity = identity('clerk.staging.cosmas.ai'), targetIdentity = identity('invented.clerk.accounts.dev', true);
   const config = {mode: 'hosted-beta-authenticated', dataMode: 'synthetic', apiOrigin: sourceIdentity.apiOrigin, nativeIdentity: sourceIdentity,
     installation: {version: 1, profile: 'beta', bundleIdentifier: 'com.cosmasos.beta.desktop', storageGeneration: 1,
       electronVersion: '43.4.1', rendererPartition: 'persist:cosmasos-operational-beta', authHelperBundleIdentifier: 'com.cosmasos.beta.desktop.auth'}};

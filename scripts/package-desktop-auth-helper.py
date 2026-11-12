@@ -41,7 +41,9 @@ def main():
     qualification = _binding.directory(args.qualification)
     output = args.output.resolve()
     receipt = args.compiler_receipt.absolute()
-    identity = _identity.load(args.native_identity_config, "desktop")
+    # Desktop production identity is unsupported; omitted installation_profile
+    # refuses operational-production-v1 at load (CTO DECISION_LOG 12 Nov 2026 10:05 ET).
+    identity = _identity.load(args.native_identity_config, "desktop", installation_profile=None)
     practice = None
     if args.native_practice_config is not None:
         try:

@@ -16,13 +16,12 @@ import {
 } from './synthetic-iphone-sim-identity.mjs';
 
 /**
- * Dedicated Clerk hosts after post-#354: operational-beta-v1 is pinned to
- * clerk.cosmas.ai only (no open non-accounts.dev host rule). The prior
- * byte-identical SHA pin of operational-native-identity.mjs intentionally
- * breaks once that file changes; this pin checks the allow-list instead.
+ * Dedicated Clerk hosts: operational-beta-v1 admits clerk.cosmas.ai and
+ * clerk.staging.cosmas.ai (CTO DECISION_LOG 12 Nov 2026 10:12 ET). No open
+ * non-accounts.dev host rule. clerk.beta.cosmas.ai stays production-only.
  */
 const OPERATIONAL_HOSTS_AT_MAIN = Object.freeze({
-  [OPERATIONAL_NATIVE_PROFILE]: Object.freeze(['clerk.cosmas.ai']),
+  [OPERATIONAL_NATIVE_PROFILE]: Object.freeze(['clerk.cosmas.ai', 'clerk.staging.cosmas.ai']),
   [STAGING_NATIVE_PROFILE]: Object.freeze(['clerk.staging.cosmas.ai']),
   [PRODUCTION_NATIVE_PROFILE]: Object.freeze(['clerk.beta.cosmas.ai']),
 });
@@ -35,12 +34,12 @@ function pkLiveFor(host) {
   return 'pk_live_' + Buffer.from(host + '$').toString('base64');
 }
 
-test('dedicatedClerkHostsByProfile pins operational-beta-v1 to clerk.cosmas.ai (post-#354)', () => {
+test('dedicatedClerkHostsByProfile pins operational-beta-v1 to clerk.cosmas.ai and clerk.staging.cosmas.ai', () => {
   assert.deepEqual(dedicatedClerkHostsByProfile(), OPERATIONAL_HOSTS_AT_MAIN);
   assert.deepEqual(
     dedicatedClerkHostsByProfile()[OPERATIONAL_NATIVE_PROFILE],
-    ['clerk.cosmas.ai'],
-    'operational-beta-v1 must allow only clerk.cosmas.ai after post-#354',
+    ['clerk.cosmas.ai', 'clerk.staging.cosmas.ai'],
+    'operational-beta-v1 admits clerk.cosmas.ai and clerk.staging.cosmas.ai (CTO 12 Nov 10:12 ET)',
   );
   assert.equal(isLiveOperationalNativeProfile(OPERATIONAL_NATIVE_PROFILE), true);
   assert.equal(isLiveOperationalNativeProfile(STAGING_NATIVE_PROFILE), true);

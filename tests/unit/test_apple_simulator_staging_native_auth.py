@@ -57,16 +57,22 @@ BETA_ORIGIN = "https://clerk.beta.cosmas.ai"
 BETA_API = "https://api.beta.cosmas.ai"
 
 
-def test_beta_address_is_accepted_for_synthetic_data_only():
+def test_beta_address_is_accepted_only_for_operational_production_synthetic():
+    """clerk.beta is admitted only for operational-production-v1 (CTO 10:05/10:12)."""
     script = composition()
     key = live_key(BETA_HOST)
+    production = identity_document(
+        BETA_API, BETA_ORIGIN, key, profile="operational-production-v1")
     script.authorize_simulator_staging_native_auth(
-        {"identity": identity_document(BETA_API, BETA_ORIGIN, key)},
-        "synthetic", hosted_workspace=True)
+        {"identity": production}, "synthetic", hosted_workspace=True)
     with pytest.raises(ValueError, match="requires synthetic data mode"):
         script.authorize_simulator_staging_native_auth(
+            {"identity": production}, "authorized_beta", hosted_workspace=True)
+    # operational-beta-v1 + clerk.beta is refused (not in beta host set / pair gate).
+    with pytest.raises(ValueError, match="clerk.staging.cosmas.ai"):
+        script.authorize_simulator_staging_native_auth(
             {"identity": identity_document(BETA_API, BETA_ORIGIN, key)},
-            "authorized_beta", hosted_workspace=True)
+            "synthetic", hosted_workspace=True)
 
 
 def test_beta_clerk_does_not_accept_the_staging_api():
@@ -172,15 +178,12 @@ def test_cli_exposes_the_simulator_staging_flag():
 @pytest.mark.parametrize(("api", "frontend", "key"), [
     (STAGING_API, "https://clerk.cosmaneura.com", live_key("clerk.cosmaneura.com")),
     (STAGING_API, "https://app.cosmaneura.com", live_key("app.cosmaneura.com")),
-    ("https://api.cosmaneura.com", STAGING_ORIGIN, STAGING_KEY),
 ])
 def test_production_hosts_are_refused(tmp_path, api, frontend, key):
-    """prepare() refuses production hosts before writing output.
+    """prepare() refuses non-allow-listed Clerk hosts at identity load.
 
-    Guard order is intentional: post-#354, operational-beta-v1 is pinned to
-    clerk.cosmas.ai, so Node identity validation fails closed first with the
-    profile mismatch. The authorize gate still refuses the same hosts when
-    called on a pre-validated identity (see test_authorize_refuses_production_hosts).
+    operational-beta-v1 admits only clerk.cosmas.ai and clerk.staging.cosmas.ai,
+    so Node identity validation fails closed first for cosmaneura hosts.
     """
     script = composition()
     output = tmp_path / "output"
@@ -193,6 +196,24 @@ def test_production_hosts_are_refused(tmp_path, api, frontend, key):
             data_mode="synthetic", allow_simulator_staging_native_auth=True,
             verification_variant="w8m", simulator_custody=True)
     assert "Clerk identity profile" in str(caught.value)
+    assert not output.exists()
+
+
+def test_staging_clerk_with_production_api_refused_at_authorize(tmp_path):
+    """Staging Clerk host loads on operational-beta-v1; cosmaneura API still refused."""
+    script = composition()
+    output = tmp_path / "output"
+    api = "https://api.cosmaneura.com"
+    with pytest.raises(ValueError, match="refuses production hosts") as caught:
+        script.prepare(
+            tmp_path / "source", tmp_path / "web", output,
+            hosted_workspace=True, workspace_api_origin=api,
+            native_auth_clerk_archive=tmp_path / "clerk.tar.gz",
+            native_identity_config=write_identity(
+                tmp_path, identity_document(api, STAGING_ORIGIN, STAGING_KEY)),
+            data_mode="synthetic", allow_simulator_staging_native_auth=True,
+            verification_variant="w8m", simulator_custody=True)
+    assert "api.cosmaneura.com" in str(caught.value)
     assert not output.exists()
 
 
@@ -238,7 +259,7 @@ def test_host_outside_the_allowlist_is_refused(tmp_path):
 def test_non_synthetic_data_mode_is_refused(tmp_path):
     script = composition()
     output = tmp_path / "output"
-    # Staging hosts require operational-staging-v1 after the beta pin to clerk.cosmas.ai.
+    # Staging profile still requires synthetic data mode.
     # data_mode() refuses authorized_beta before authorize's synthetic-data check.
     with pytest.raises(ValueError, match="requires (explicit )?synthetic data mode"):
         script.prepare(

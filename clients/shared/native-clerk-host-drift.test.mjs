@@ -26,6 +26,15 @@ const SWIFT_PATH = fileURLToPath(new URL(
  */
 export const INTENTIONAL_CLERK_HOST_DRIFT = Object.freeze([
   Object.freeze({
+    profile: OPERATIONAL_NATIVE_PROFILE,
+    swift: Object.freeze(['clerk.cosmas.ai']),
+    js: Object.freeze(['clerk.cosmas.ai', 'clerk.staging.cosmas.ai']),
+    reason: 'CTO DECISION_LOG 12 Nov 2026 10:12 ET: JS/Python operational-beta-v1 admits '
+      + 'clerk.cosmas.ai and clerk.staging.cosmas.ai for shipped TestFlight 1107/1110/1120 '
+      + 'and synthetic Mac 1120. Swift still pins clerk.cosmas.ai only on this branch; '
+      + 'a separate Swift PR will align. PENDING_SWIFT_PR — do not treat as silent skip.',
+  }),
+  Object.freeze({
     profile: STAGING_NATIVE_PROFILE,
     swift: Object.freeze([]),
     js: Object.freeze(['clerk.staging.cosmas.ai']),
@@ -33,7 +42,7 @@ export const INTENTIONAL_CLERK_HOST_DRIFT = Object.freeze([
       + 'pk_live_ (and separately allows strict *.clerk.accounts.dev with pk_test_). '
       + 'Swift operationalStaging has an empty dedicated allow-list and admits only the '
       + 'accounts.dev path. Named filming-hold exception; owner decision pending. '
-      + 'Live operational-beta-v1 and production-review hosts are not part of this exception.',
+      + 'Production-review hosts are not part of this exception.',
   }),
 ]);
 
@@ -77,16 +86,20 @@ export function assertSwiftJsClerkHostsAligned(swiftHosts, jsHosts, exceptions =
   }
 }
 
-test('shared profile Clerk hosts match Swift allow-list except named staging exception', () => {
+test('shared profile Clerk hosts match Swift allow-list except named exceptions', () => {
   const source = readFileSync(SWIFT_PATH, 'utf8');
   const swiftHosts = extractSwiftAllowedClerkHosts(source);
   const jsHosts = dedicatedClerkHostsByProfile();
   assertSwiftJsClerkHostsAligned(swiftHosts, jsHosts);
+  // PENDING_SWIFT_PR: Swift still clerk.cosmas.ai only; JS includes staging for shipped builds.
   assert.deepEqual(swiftHosts[OPERATIONAL_NATIVE_PROFILE], ['clerk.cosmas.ai']);
-  assert.deepEqual(jsHosts[OPERATIONAL_NATIVE_PROFILE], ['clerk.cosmas.ai']);
+  assert.deepEqual(jsHosts[OPERATIONAL_NATIVE_PROFILE], ['clerk.cosmas.ai', 'clerk.staging.cosmas.ai']);
   assert.deepEqual(swiftHosts[PRODUCTION_NATIVE_PROFILE], ['clerk.beta.cosmas.ai']);
   assert.deepEqual(jsHosts[PRODUCTION_NATIVE_PROFILE], ['clerk.beta.cosmas.ai']);
-  assert.equal(INTENTIONAL_CLERK_HOST_DRIFT.some(item => item.profile === OPERATIONAL_NATIVE_PROFILE), false);
+  assert.equal(INTENTIONAL_CLERK_HOST_DRIFT.some(item => item.profile === OPERATIONAL_NATIVE_PROFILE), true);
+  assert.match(
+    INTENTIONAL_CLERK_HOST_DRIFT.find(item => item.profile === OPERATIONAL_NATIVE_PROFILE).reason,
+    /PENDING_SWIFT_PR/);
 });
 
 test('Clerk host drift detector fails when either side is mutated', () => {

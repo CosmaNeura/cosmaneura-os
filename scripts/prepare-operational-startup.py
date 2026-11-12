@@ -414,7 +414,9 @@ def main():
     parser.add_argument("--research", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    identity = load_native_identity(args.identity, "desktop")["identity"]
+    # Desktop production identity is unsupported; omitted installation_profile
+    # refuses operational-production-v1 at load (CTO DECISION_LOG 12 Nov 2026 10:05 ET).
+    identity = load_native_identity(args.identity, "desktop", installation_profile=None)["identity"]
     bindings = public_json(args.bindings)
     inputs = compile_inputs(identity, bindings)
     if args.connections is not None:

@@ -87,9 +87,15 @@ test('production profile accepts only clerk.beta.cosmas.ai and staging rejects p
       organizationId:'org_invented_beta',audience:'cosmas-os-beta-api',
     };
     assert.deepEqual(shared.validateOperationalNativeIdentity(beta,client,beta.apiOrigin),beta);
+    // Shipped staging Clerk host is admitted on operational-beta-v1 (CTO 12 Nov 10:12 ET).
+    const betaStaging={
+      ...beta,
+      frontendOrigin:'https://clerk.staging.cosmas.ai',
+      publishableKey:liveKey('clerk.staging.cosmas.ai'),
+    };
+    assert.deepEqual(shared.validateOperationalNativeIdentity(betaStaging,client,beta.apiOrigin),betaStaging);
     for (const changed of [
       {frontendOrigin:'https://clerk.beta.cosmas.ai',publishableKey:liveKey('clerk.beta.cosmas.ai')},
-      {frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:liveKey('clerk.staging.cosmas.ai')},
       {frontendOrigin:'https://clerk.example.invalid',publishableKey:liveKey('clerk.example.invalid')},
       {frontendOrigin:'https://clerk.cosmaneura.com',publishableKey:liveKey('clerk.cosmaneura.com')},
     ]) assert.throws(()=>shared.validateOperationalNativeIdentity({...beta,...changed},client,beta.apiOrigin));

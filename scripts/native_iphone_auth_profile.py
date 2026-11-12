@@ -44,10 +44,18 @@ STAGING_ORIGINS = {
     "web": "https://staging.cosmas.ai",
 }
 SWIFT_OPERATIONAL_BETA_CLERK_HOST = "clerk.cosmas.ai"
+# JS/Python beta set (CTO DECISION_LOG 12 Nov 2026 10:12 ET). Swift still
+# pins clerk.cosmas.ai only until a separate Swift PR.
+OPERATIONAL_BETA_CLERK_HOSTS = frozenset({
+    "clerk.cosmas.ai",
+    "clerk.staging.cosmas.ai",
+})
 SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST = "clerk.beta.cosmas.ai"
 # Strict *.clerk.accounts.dev host (no suffix tricks / lookalikes).
+# Each DNS label must start and end with [a-z0-9] (no leading/trailing hyphen),
+# matching Swift NativeClerkAccountConfiguration host validation.
 ACCOUNTS_DEV_HOST = re.compile(
-    r"^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.clerk\.accounts\.dev$"
+    r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.clerk\.accounts\.dev$"
 )
 ACCOUNTS_DEV_SUFFIX = ".clerk.accounts.dev"
 

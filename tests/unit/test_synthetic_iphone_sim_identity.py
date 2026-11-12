@@ -41,8 +41,9 @@ def test_synthetic_iphone_sim_identity_node_suite() -> None:
     assert "synthetic-iphone-sim-v1" in blob or "synthetic.example" in blob
     # Post-#354: the Node suite pins dedicatedClerkHostsByProfile instead of a
     # byte-identical SHA of operational-native-identity.mjs (that file changes).
-    assert "dedicatedClerkHostsByProfile pins operational-beta-v1 to clerk.cosmas.ai" in blob
+    assert "dedicatedClerkHostsByProfile pins operational-beta-v1 to clerk.cosmas.ai and clerk.staging.cosmas.ai" in blob
     assert "clerk.cosmas.ai" in blob
+    assert "clerk.staging.cosmas.ai" in blob
 
 
 def test_synthetic_validator_source_requires_synthetic_example_hosts() -> None:

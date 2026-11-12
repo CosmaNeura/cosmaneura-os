@@ -48,9 +48,9 @@ test('staging profile accepts its own Clerk instance and rejects other live host
     assert.throws(()=>validateOperationalNativeDataMode('authorized_beta',value));
     const otherAudience={...value,audience:'invented-staging-audience'};
     assert.deepEqual(validateOperationalNativeIdentity(otherAudience,client,otherAudience.apiOrigin),otherAudience);
-    // operational-beta-v1 is pinned to clerk.cosmas.ai only; staging host must throw.
+    // CTO 12 Nov 10:12 ET: operational-beta-v1 also admits clerk.staging.cosmas.ai.
     const betaOnStaging={...value,profile:'operational-beta-v1'};
-    assert.throws(()=>validateOperationalNativeIdentity(betaOnStaging,client,betaOnStaging.apiOrigin));
+    assert.deepEqual(validateOperationalNativeIdentity(betaOnStaging,client,betaOnStaging.apiOrigin),betaOnStaging);
     for (const changed of [
       {frontendOrigin:'https://clerk.cosmaneura.com',publishableKey:productionClerkKey},
       {frontendOrigin:identity.frontendOrigin,publishableKey:identity.publishableKey},
@@ -65,15 +65,23 @@ test('staging profile accepts its own Clerk instance and rejects other live host
     ]) assert.throws(()=>validateOperationalNativeIdentity({...value,...changed},client,value.apiOrigin),
       /Operational native identity/,JSON.stringify(changed));
   }
-  // clerk.cosmaneura.com / clerk.example.invalid / staging host are not valid operational-beta-v1 hosts.
+  // clerk.cosmaneura.com / clerk.example.invalid / clerk.beta are not operational-beta-v1 hosts.
   for (const bad of [
     {...identity,client:'apple',frontendOrigin:'https://clerk.cosmaneura.com',
       publishableKey:productionClerkKey,audience:'cosmas-os-beta-api'},
     {...identity,client:'apple',frontendOrigin:'https://clerk.example.invalid',
       publishableKey:liveKey('clerk.example.invalid'),audience:'cosmas-os-beta-api'},
-    {...identity,client:'apple',frontendOrigin:'https://clerk.staging.cosmas.ai',
-      publishableKey:dedicatedStagingKey,audience:'cosmas-os-beta-api'},
+    {...identity,client:'apple',frontendOrigin:'https://clerk.beta.cosmas.ai',
+      publishableKey:liveKey('clerk.beta.cosmas.ai'),audience:'cosmas-os-beta-api'},
   ]) assert.throws(()=>validateOperationalNativeIdentity(bad,'apple',bad.apiOrigin));
+  // Shipped beta-on-staging host is accepted for operational-beta-v1.
+  assert.deepEqual(validateOperationalNativeIdentity({
+    ...identity,client:'apple',frontendOrigin:'https://clerk.staging.cosmas.ai',
+    publishableKey:dedicatedStagingKey,audience:'cosmas-os-beta-api',
+  },'apple','https://api.example.invalid'),{
+    ...identity,client:'apple',frontendOrigin:'https://clerk.staging.cosmas.ai',
+    publishableKey:dedicatedStagingKey,audience:'cosmas-os-beta-api',
+  });
   // Staging also refuses the former production/example hosts (not its dedicated allow-list).
   for (const bad of [
     {...identity,client:'apple',profile:'operational-staging-v1',frontendOrigin:'https://clerk.cosmaneura.com',
@@ -120,13 +128,19 @@ test('operational identity binds the decoded production frontend, client and API
   assert.equal(operationalNativeBundle('desktop'),'com.cosmasos.beta.desktop.auth');
   assert.equal(operationalNativeBundle('apple'),'com.cosmasos.beta.ios');
   assert.equal(operationalNativeAuthSettings(identity).enabled,true);
+  // Shipped staging Clerk host is admitted on operational-beta-v1 (CTO 10:12 ET).
+  assert.deepEqual(validateOperationalNativeIdentity({
+    ...identity,frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:dedicatedStagingKey,
+  },'desktop',identity.apiOrigin),{
+    ...identity,frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:dedicatedStagingKey,
+  });
   for (const changed of [
     {...identity,client:'apple'}, {...identity,apiOrigin:'https://other.example.invalid'},
     {...identity,publishableKey:'pk_test_'+btoa('clerk.cosmas.ai$')},
     {...identity,frontendOrigin:'https://other.example.invalid'},
     {...identity,frontendOrigin:'https://clerk.cosmas.ai:443'},
     {...identity,frontendOrigin:'https://clerk.example.invalid',publishableKey:liveKey('clerk.example.invalid')},
-    {...identity,frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:dedicatedStagingKey},
+    {...identity,frontendOrigin:'https://clerk.beta.cosmas.ai',publishableKey:liveKey('clerk.beta.cosmas.ai')},
     {...identity,frontendOrigin:'https://clerk.cosmaneura.com',publishableKey:productionClerkKey},
     {...identity,publishableKey:'pk_live_'+btoa('invented.clerk.accounts.dev$'),frontendOrigin:'https://invented.clerk.accounts.dev'},
     {...identity,publishableKey:identity.publishableKey+' '}, {...identity,audience:'with spaces'},

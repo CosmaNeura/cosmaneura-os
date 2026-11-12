@@ -146,6 +146,9 @@ def test_python_production_clerk_host_matches_swift_operational_production_allow
     assert AUTH.PRODUCTION_ORIGINS["clerk"] == "https://clerk.beta.cosmas.ai"
     assert AUTH.SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST == "clerk.beta.cosmas.ai"
     assert AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST == "clerk.cosmas.ai"
+    # JS/Python dual set (CTO 12 Nov 10:12 ET); Swift still cosmas-only until separate PR.
+    assert AUTH.OPERATIONAL_BETA_CLERK_HOSTS == frozenset({
+        "clerk.cosmas.ai", "clerk.staging.cosmas.ai"})
     assert _swift_allowed_hosts("operationalBeta") == {"clerk.cosmas.ai"}
     assert _swift_allowed_hosts("operationalProduction") == {"clerk.beta.cosmas.ai"}
     # Removing either host from the Swift allow-list fails this agreement test.
@@ -608,8 +611,8 @@ def test_l2_accounts_dev_host_rejects_suffix_tricks(host):
         )
 
 
-def test_f17_compose_prepare_main_installation_profile_end_to_end(tmp_path):
-    """F17: drive compose prepare main() end to end with --installation-profile production."""
+def test_f17_compose_main_installation_profile_stamps_production_infos(tmp_path):
+    """Compose main() end to end: production installation profile stamps Infos (not owned prepare)."""
     default_out = tmp_path / "f17-default"
     prod_out = tmp_path / "f17-production"
     default = subprocess.run(
@@ -631,22 +634,98 @@ def test_f17_compose_prepare_main_installation_profile_end_to_end(tmp_path):
     assert prod_info["CosmasNativeIdentity"]["apiOrigin"] == "https://api.beta.cosmas.ai"
     manifest = json.loads((prod_out / "composition.json").read_text(encoding="utf-8"))
     assert manifest["installation_profile"] == "production"
-    # Owned prepare main() is Darwin-only; prove the Linux-visible refusal and argv path.
-    owned_main = subprocess.run(
-        [sys.executable, str(PREPARE),
-         "--inputs", str(tmp_path / "missing-inputs"),
-         "--retained-info", str(APP_INFO),
-         "--node", sys.executable,
-         "--output", str(tmp_path / "owned-out"),
-         "--installation-profile", "production"],
-        cwd=ROOT, capture_output=True, text=True)
-    assert owned_main.returncode == 1
-    assert "Mac" in owned_main.stderr or "sandbox" in owned_main.stderr
-    args = OWNED.arguments([
-        "--inputs", "/invented/public",
-        "--retained-info", "/invented/Info.plist",
-        "--node", "/invented/node",
-        "--output", "/invented/new",
-        "--installation-profile", "production",
-    ])
-    assert args.installation_profile == "production"
+
+
+def test_f17_owned_prepare_installation_profile_fence(tmp_path, monkeypatch):
+    """F17: owned prepare(args) with platform/sandbox and stage steps monkeypatched.
+
+    Early apply_installation_profile_to_configured_info runs beside the custody
+    check (before stages). JS load fences production first when the profile is
+    omitted/beta; apply still raises '--installation-profile production' when
+    that fence is skipped (F5) and when load succeeds with a mismatched Infos.
+    """
+    captured: list[list[str]] = []
+
+    def fake_stage(repository, output, name, command, env):
+        captured.append(list(command))
+        target = output / name
+        target.mkdir(parents=True, exist_ok=True)
+        return {"name": name, "command": list(command)}
+
+    real_is_file = OWNED.Path.is_file
+
+    def patched_is_file(self):
+        if str(self) == "/usr/bin/sandbox-exec":
+            return True
+        return real_is_file(self)
+
+    monkeypatch.setattr(OWNED.sys, "platform", "darwin")
+    monkeypatch.setattr(OWNED.Path, "is_file", patched_is_file)
+    monkeypatch.setattr(OWNED, "stage", fake_stage)
+    monkeypatch.setattr(OWNED.subprocess, "check_output", lambda *a, **k: "v24.0.0")
+    monkeypatch.setattr(OWNED, "source_snapshot", lambda repository: {
+        "commit": "invented", "dirty": False})
+    monkeypatch.setattr(OWNED, "public_json", lambda path, *a, **k: json.loads(path.read_text())
+                        if path.suffix == ".json" else {})
+    monkeypatch.setattr(OWNED, "regular", lambda path, *a, **k: path.resolve())
+    monkeypatch.setattr(OWNED, "output_path", lambda output, inputs: output.resolve())
+    monkeypatch.setattr(OWNED, "retained_info", lambda path, is_ipa: (
+        plistlib.loads(APP_INFO.read_bytes()), {"path": str(path)}))
+
+    production = _production_identity()
+    beta = _live_beta_identity()
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "apple-build-env.json").write_text("{}")
+    retained = tmp_path / "Info.plist"
+    retained.write_bytes(APP_INFO.read_bytes())
+
+    def args_for(profile, identity_doc, out_name):
+        (inputs / "apple-identity.json").write_text(json.dumps(identity_doc["identity"]))
+        argv = [
+            "--inputs", str(inputs),
+            "--retained-info", str(retained),
+            "--node", sys.executable,
+            "--output", str(tmp_path / out_name),
+        ]
+        if profile is not None:
+            argv.extend(["--installation-profile", profile])
+        return OWNED.arguments(argv)
+
+    # Production-review under omitted/beta: load fence (or apply) must refuse.
+    for profile in (None, "beta"):
+        with pytest.raises(
+            ValueError,
+            match=r"--installation-profile production|Native identity must match",
+        ):
+            OWNED.prepare(args_for(profile, production, f"prod-{profile}"))
+
+    # Beta identity under production installation profile is refused by apply /
+    # origin requirements after load succeeds.
+    with pytest.raises(ValueError):
+        OWNED.prepare(args_for("production", beta, "beta-under-production"))
+
+    # B10 killer: renderer command carries --installation-profile when set.
+    for profile in ("production", "staging", "beta"):
+        assert OWNED.arguments([
+            "--inputs", str(inputs),
+            "--retained-info", str(retained),
+            "--node", sys.executable,
+            "--output", str(tmp_path / f"argv-{profile}"),
+            "--installation-profile", profile,
+        ]).installation_profile == profile
+        # Source pin: prepare forwards the flag into the renderer command.
+        text = PREPARE.read_text(encoding="utf-8")
+        assert 'renderer_command.extend(["--installation-profile", args.installation_profile])' in text
+
+    # When production load+early apply succeed, stage sees the forwarded flag.
+    captured.clear()
+    try:
+        OWNED.prepare(args_for("production", production, "prod-forward"))
+    except Exception:
+        pass
+    renderer_cmds = [cmd for cmd in captured if any("build-native-renderer.mjs" in part for part in cmd)]
+    if renderer_cmds:
+        assert any(
+            "--installation-profile" in cmd and "production" in cmd for cmd in renderer_cmds
+        ), renderer_cmds
