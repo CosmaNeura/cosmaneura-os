@@ -74,6 +74,6 @@ cohort eligibility, and any default-on decision remain separate gates.
 - `swift test --sanitize=thread` covers the transport; the same command in `../ios-pcm-capture`
   covers the reviewed bridge-core concurrency suite.
 - An iOS 15 simulator build of the `CosmaneuraIOSPCMCapacitor` product checks strict Swift 6 and the
-  pinned Capacitor 8.5.0 boundary.
+  pinned Capacitor 8.5.1 boundary.
 - `npm test --workspace @cosmaneura-scribe/capacitor-ios-pcm` verifies canonical bounded Base64,
   exclusive ArrayBuffer ownership, and clearing. Type checking and formatting run separately.

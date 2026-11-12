@@ -386,16 +386,16 @@ def _localize_capacitor_package_text(text: str, local_path: str) -> str:
         raise ValueError("Capacitor package already names the composed local path.")
     clients_vendor = "../../../apple/vendor/capacitor-swift-pm-8.5.1"
     replacement = f'.package(name: "capacitor-swift-pm", path: "{local_path}")'
-    # Frozen apps/capture scaffold still records remote exact 8.5.0; composition
-    # rewrites that pin to the owned 8.5.1 local mirror path.
+    # Reviewed apps/capture remote pin is exact 8.5.1; composition rewrites
+    # that pin to the owned 8.5.1 local mirror path (drift back to 8.5.0 fails).
     candidates = [
-        f'.package(url: "{REMOTE_CAPACITOR_PACKAGE_URL}", exact: "8.5.0")',
+        f'.package(url: "{REMOTE_CAPACITOR_PACKAGE_URL}", exact: "8.5.1")',
         f'.package(name: "capacitor-swift-pm", path: "{clients_vendor}")',
     ]
     multiline_remote = re.compile(
         r'\.package\(\s*url:\s*"'
         + re.escape(REMOTE_CAPACITOR_PACKAGE_URL)
-        + r'"\s*,\s*exact:\s*"8\.5\.0"\s*\)',
+        + r'"\s*,\s*exact:\s*"8\.5\.1"\s*\)',
         re.MULTILINE,
     )
     multiline_clients = re.compile(

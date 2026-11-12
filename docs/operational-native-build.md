@@ -8,8 +8,8 @@ project and renderer workflow. It uses the committed `clients/apple` and
 checkout or private chat operator is needed. Capacitor/Cordova 8.5.1 come from
 the owned mirror at `clients/apple/vendor/capacitor-swift-pm-8.5.1` (local path
 binary targets). Portable composition copies that mirror into the candidate and
-clears the historical remote Swift PM pin, so offline `xcodebuild` does not
-download Ionic release zips. Commit the reviewed source first, keep the Git
+clears the reviewed remote Swift PM pin (`8.5.1`), so offline `xcodebuild` does
+not download Ionic release zips. Commit the reviewed source first, keep the Git
 tree clean, and use the already installed Python environment, Node 24, and
 locked renderer dependencies. The build subprocesses cannot use the network
 and do not install dependencies.

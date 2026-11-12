@@ -22,11 +22,10 @@ baseline, not a new qualified build.
   `tracked_equivalent` mapping; do not evolve both copies independently.
 - Vendored ClerkKit 1.5.5: `native-plugins/cosmas-native-auth/vendor`, with its MIT
   LICENSE and SDK source retained.
-- Capacitor/Cordova 8.5.0 remote pin: frozen scaffold still records the
-  historical remote pin in Package.resolved. Owned builds use
-  `clients/apple/vendor/capacitor-swift-pm-8.5.1` (revision
-  `6afa7424fd2fcd8ca1e577478e8a00af284b7e82`); portable composition copies that
-  mirror and retires the remote binary zip download.
+- Capacitor/Cordova 8.5.1: scaffold Package.resolved and CapApp-SPM pins are
+  `8.5.1` (revision `6afa7424fd2fcd8ca1e577478e8a00af284b7e82`). Owned builds
+  use `clients/apple/vendor/capacitor-swift-pm-8.5.1`; portable composition
+  copies that mirror and retires the remote binary zip download.
 - Legacy `CosmaneuraScribe*` package names identify the already-consumed generic
   components. Keep their names and attribution; they are not Scribe server code.
 
