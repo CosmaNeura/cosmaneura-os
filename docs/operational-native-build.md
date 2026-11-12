@@ -38,7 +38,9 @@ the scaffold's disabled native capture and accepts renderer capture modes
 `disabled` or `synthetic`; it does not configure a native microphone workflow.
 
 The default **omits `CosmasNativePracticeConnection`** and preserves the existing
-Beta identity and navigation. To prepare the separately reviewed native
+Beta identity and navigation. Production-review Infos use
+`--installation-profile production`; omit that flag (or pass `beta`/`staging`)
+for live and staging candidates. To prepare the separately reviewed native
 practice-connection candidate, additionally supply
 `--native-practice-config /absolute/path/to/reviewed-public-native-practice.json`.
 That file contains the exact Info dictionary: `enabled` boolean,
@@ -51,6 +53,8 @@ and `keychainNamespace`. Choose exactly one closed environment:
 | --- | --- | --- | --- | --- | --- |
 | Synthetic staging | `operational-staging-v1` | `pk_test_` encoding its `.clerk.accounts.dev` frontend | empty | `https://enrollment-api.staging.cosmas.ai` | `exact` or `synthetic-practice-uuid-staging-v1` |
 | Real-data production | `operational-beta-v1` | `pk_live_` encoding `clerk.cosmas.ai` | non-empty Clerk session `aud` (same value as production `CLERK_AUDIENCE`) | `https://enrollment-api.cosmas.ai` | `practice-uuid-production-v1` |
+
+`operational-production-v1` on `clerk.beta.cosmas.ai` / `api.beta.cosmas.ai` is the production-review identity selected with `--installation-profile production` (CTO decision, 11 Nov 2026 6:55pm ET). It is not a `--native-practice-config` realm; no native practice connection is approved for it. `clerk.cosmas.ai` / `operational-beta-v1` remains the live profile and is reserved for the later per-practice enrollment design.
 
 The reviewed stable `keychainNamespace` is 64 lowercase hexadecimal characters in
 either environment. No credential or server secret belongs in this file.

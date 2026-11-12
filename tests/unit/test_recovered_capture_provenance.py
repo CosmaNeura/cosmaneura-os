@@ -130,7 +130,7 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/DesktopAuthProtocolTests.swift": "2833750395acfdd6d0becc3779322538aa375a1e2fe79ff27d04c82b6b820d81",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/GoogleConnectionNavigationTests.swift": "7f25b506b325cfbf76e7fc4ad1082c2406ca238f5ef054793de8213dda3c8eba",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/KeychainInteractionPolicyTests.swift": "56391c581b190e2e7a1176a874925219d41ae99a8c494028830a5eeaa6b58af4",
-    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeClerkConfigurationTests.swift": "c9fca94f2910eff940f51c553e305653c20cf9b1eb09f3e148bec94e596cebdb",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeClerkConfigurationTests.swift": "55a57ec480e82913989275888dcfbf5a6f2c95b5784f03637c6bd03e6d0c9e07",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativePrivateRecordingGateTests.swift": "64f3e14a85b5ea321acedb01526ef6aa1f253dfe43266c349fec58ef2473b984",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift": "dda52ed7cbf2976050d93be2a97de0f4474ba7ea348e1bb967cf94603f62c83a",
 }
@@ -398,12 +398,14 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     derived = [item for item in manifest["files"] if item["role"] == "derived-app-resource-wiring"]
     assert len(derived) == 1
     assert derived[0]["path"] == "ios/App/App.xcodeproj/project.pbxproj"
-    usage = [item for item in manifest["files"] if item["role"] == "derived-usage-description"]
+    usage = [item for item in manifest["files"] if item["role"] == "derived-owned-info-plist"]
     assert len(usage) == 1
     assert usage[0]["path"] == "ios/App/App/Info.plist"
     assert usage[0]["scaffold_input_sha256"] == _sha256(ROOT / "apps/capture/ios/App/App/Info.plist")
     assert usage[0]["derivation_source"] == "scripts/compose-portable-iphone.py"
     assert usage[0]["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)
+    assert usage[0]["auth_profile_source"] == "scripts/native_iphone_auth_profile.py"
+    assert usage[0].get("production_native_auth") is False
     assert (output / "apps/capture/ios/App/App/Info.plist").read_bytes() != (
         ROOT / "apps/capture/ios/App/App/Info.plist"
     ).read_bytes()
@@ -438,17 +440,23 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
             privacy_lines = [line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" in line]
             assert len(privacy_lines) == 4
             assert "".join(line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" not in line) == original.read_text(encoding="utf-8")
-        elif item["role"] == "derived-usage-description":
+        elif item["role"] == "derived-owned-info-plist":
             assert item["owner"] == "apps/capture"
             assert item["path"] == "ios/App/App/Info.plist"
             original = ROOT / "apps/capture" / item["path"]
             assert item["scaffold_input_sha256"] == _sha256(original)
             assert item["derivation_source"] == "scripts/compose-portable-iphone.py"
             assert item["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)
+            assert item["auth_profile_source"] == "scripts/native_iphone_auth_profile.py"
+            assert item["auth_profile_source_sha256"] == _sha256(
+                ROOT / "scripts/native_iphone_auth_profile.py")
+            assert item.get("production_native_auth") is False
             info = plistlib.loads(placed.read_bytes())
             scaffold = plistlib.loads(original.read_bytes())
             assert info["NSMicrophoneUsageDescription"] != scaffold["NSMicrophoneUsageDescription"]
             assert info["NSSpeechRecognitionUsageDescription"] != scaffold["NSSpeechRecognitionUsageDescription"]
+            assert info["CosmasNativeAuth"]["enabled"] is False
+            assert info["CosmasNativeAuth"]["frontendOrigin"] == ""
             assert "ITSAppUsesNonExemptEncryption" not in info
             assert "ITSAppUsesNonExemptEncryption" not in scaffold
         elif item["role"] == "derived-capacitor-localization":
@@ -558,16 +566,17 @@ def test_composed_project_includes_privacy_manifest_and_usage_strings(tmp_path):
 
 def test_compose_refuses_non_true_export_compliance_key(tmp_path, monkeypatch):
     module = _portable()
-    original_apply = module._apply_owned_usage_descriptions
+    original_apply = module._derive_owned_info_plist
 
-    def inject_false_then_apply(repository, output, placed):
+    def inject_false_then_apply(repository, output, placed, *, installation_profile=None):
         destination = output / module.APP_SCAFFOLD / "ios/App/App/Info.plist"
         info = plistlib.loads(destination.read_bytes())
         info["ITSAppUsesNonExemptEncryption"] = False
         destination.write_bytes(plistlib.dumps(info, sort_keys=False))
-        return original_apply(repository, output, placed)
+        return original_apply(
+            repository, output, placed, installation_profile=installation_profile)
 
-    monkeypatch.setattr(module, "_apply_owned_usage_descriptions", inject_false_then_apply)
+    monkeypatch.setattr(module, "_derive_owned_info_plist", inject_false_then_apply)
     output = tmp_path / "refused-export"
     with pytest.raises(ValueError, match="Refusing"):
         module.compose(ROOT, output)

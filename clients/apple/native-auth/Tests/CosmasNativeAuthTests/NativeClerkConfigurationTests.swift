@@ -250,4 +250,45 @@ private func configuration() throws -> NativeClerkConfiguration {
                 profile: .operationalProduction)
         }
     }
+
+    @Test func allowListGuardsAcceptPinnedHostsAndRefuseCrossProfileAndUnlistedHosts() throws {
+        // Removing a host from allowedClerkHosts, or dropping the contains(host)
+        // guard in NativeClerkAccountConfiguration, fails these expectations.
+        #expect(NativeIdentityProfile.operationalBeta.allowedClerkHosts == ["clerk.cosmas.ai"])
+        #expect(NativeIdentityProfile.operationalProduction.allowedClerkHosts == ["clerk.beta.cosmas.ai"])
+
+        let liveHost = "clerk.cosmas.ai"
+        let liveKey = "pk_live_" + Data((liveHost + "$").utf8).base64EncodedString()
+        let live = try NativeClerkConfiguration(
+            publishableKey: liveKey, frontendOrigin: "https://" + liveHost,
+            organizationID: "org_beta", bundleIdentifier: "com.cosmasos.beta.ios",
+            profile: .operationalBeta)
+        #expect(live.frontendOrigin == "https://clerk.cosmas.ai")
+        #expect(throws: NativeAuthError.unavailable) {
+            try NativeClerkConfiguration(
+                publishableKey: "pk_live_" + Data("clerk.beta.cosmas.ai$".utf8).base64EncodedString(),
+                frontendOrigin: "https://clerk.beta.cosmas.ai", organizationID: "org_beta",
+                bundleIdentifier: "com.cosmasos.beta.ios", profile: .operationalBeta)
+        }
+
+        let productionHost = "clerk.beta.cosmas.ai"
+        let productionKey = "pk_live_" + Data((productionHost + "$").utf8).base64EncodedString()
+        let production = try NativeClerkConfiguration(
+            publishableKey: productionKey, frontendOrigin: "https://" + productionHost,
+            organizationID: "org_beta", bundleIdentifier: "com.cosmasos.beta.ios",
+            profile: .operationalProduction)
+        #expect(production.frontendOrigin == "https://clerk.beta.cosmas.ai")
+        #expect(throws: NativeAuthError.unavailable) {
+            try NativeClerkConfiguration(
+                publishableKey: liveKey, frontendOrigin: "https://" + liveHost,
+                organizationID: "org_beta", bundleIdentifier: "com.cosmasos.beta.ios",
+                profile: .operationalProduction)
+        }
+        #expect(throws: NativeAuthError.unavailable) {
+            try NativeClerkConfiguration(
+                publishableKey: "pk_live_" + Data("clerk.example.invalid$".utf8).base64EncodedString(),
+                frontendOrigin: "https://clerk.example.invalid", organizationID: "org_beta",
+                bundleIdentifier: "com.cosmasos.beta.ios", profile: .operationalProduction)
+        }
+    }
 }
