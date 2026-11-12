@@ -9,13 +9,13 @@
       "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
       "source_git_blob": "ae8df46c94352b455796caa7e8b4d9458f9cafc5",
       "source_sha256": "911b2b74eeb4d79a1cf3b7877cf4cec8e80cb4293b6d8c3e6f34fa9503436cb5",
-      "sha256": "8a16ff1283d0c8c9e2ee339ee6c445b04d220d1442b644e8fdfeb0dda2c7fbc9"
+      "sha256": "be0ec5f1a91eaee29c328ba827fa0e74ad32b5ed331a79c97dacaafaca1e56a7"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift": {
       "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
       "source_git_blob": "75b4aed3982577e706a149c685e3e89f9e9b5618",
       "source_sha256": "e25c89ef4059d3af0a9e32ea87b15edc8049b3c08472112b991325b207fd4c05",
-      "sha256": "4d274e92a316772d67b0b3fe3658c1cf55f7155bfde2e01610e152989431e395"
+      "sha256": "08ea87b138d73336fda3c1ed17daace57f3cba2fbbe6deb13baaff3535548eff"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/IOSPCMCore.swift": {
       "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
