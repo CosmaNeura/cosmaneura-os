@@ -1,4 +1,7 @@
-"""Fail-closed draft-light synth-ci contract (workflow YAML only)."""
+"""Fail-closed draft-light synth-ci contract (workflow YAML only).
+
+Locks light-mode skip, fail-closed gate, and required check names.
+"""
 
 from __future__ import annotations
 
