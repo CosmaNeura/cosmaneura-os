@@ -1,0 +1,14 @@
+.copy-to-ehr-strip{margin:1rem 0;padding:1rem 0;border-top:1px solid #d9dfd6}
+.copy-to-ehr-strip header h3{margin:0 0 .35rem;font-size:1.05rem}
+.copy-to-ehr-strip .copy-to-ehr-actions,
+.copy-to-ehr-strip .copy-to-ehr-extras{display:flex;flex-wrap:wrap;gap:.6rem;margin:.75rem 0}
+.copy-to-ehr-strip button{min-height:44px}
+.copy-to-ehr-strip label{display:block;margin-top:.75rem}
+.copy-to-ehr-strip textarea{display:block;box-sizing:border-box;width:100%;min-height:8rem;margin-top:.5rem;padding:.75rem;font:inherit;line-height:1.5;resize:vertical}
+.copy-to-ehr-not-sent,
+.copy-to-ehr-lock{margin:.75rem 0;padding:.65rem .75rem;border-radius:6px;line-height:1.45}
+.copy-to-ehr-not-sent{background:#f7efe6;color:#5c3b16}
+.copy-to-ehr-lock{background:#f3e8e6;color:#6b2f28}
+.copy-to-ehr-popout{display:inline-flex;flex-direction:column;gap:.4rem;align-items:flex-start}
+.copy-to-ehr-guidance{margin-top:.5rem;max-width:28rem;line-height:1.45}
+.copy-to-ehr-mount{margin-top:1rem}

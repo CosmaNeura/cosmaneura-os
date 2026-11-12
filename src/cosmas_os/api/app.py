@@ -2438,6 +2438,28 @@ app.include_router(ehr_read_router(
 app.add_middleware(EhrReadBoundary)
 allowed_headers.append("X-Cosmas-Ehr-Read")
 
+from cosmas_os.api.copy_to_ehr_remote_routes import (  # noqa: E402
+    router as copy_to_ehr_remote_router,
+)
+from cosmas_os.api.copy_to_ehr_routes import (  # noqa: E402
+    CopyToEhrFlagHeaderMiddleware,
+    install_copy_to_ehr_draft_loader,
+)
+from cosmas_os.api.copy_to_ehr_routes import (  # noqa: E402
+    router as copy_to_ehr_router,
+)
+
+install_copy_to_ehr_draft_loader(enabled=settings.copy_to_ehr_enabled, open_session=session_scope)
+app.include_router(copy_to_ehr_router(configuration=lambda: settings))
+app.include_router(copy_to_ehr_remote_router(
+    configuration=lambda: settings,
+    identity_dependency=_identity,
+    session_dependency=get_session,
+    workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity,
+))
+allowed_headers.append("X-Cosmas-Copy-To-Ehr")
+
 
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: E402
 from cosmas_os.standalone_runtime import StandaloneRequestBoundary  # noqa: E402
@@ -2447,6 +2469,7 @@ app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
 allowed_headers.append("X-Cosmas-Workspace-Protocol")
 allowed_headers.append("X-Cosmas-Clinical-Team")
 allowed_headers.append("X-Cosmas-Conversations")
+app.add_middleware(CopyToEhrFlagHeaderMiddleware, configuration=lambda: settings)
 # Origin policy covers compatibility failures before any inner handler runs.
 app.add_middleware(
     CORSMiddleware,
@@ -2454,5 +2477,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT"],
     allow_headers=allowed_headers,
-    expose_headers=["X-Cosmas-Workspace-Protocol", PUBLIC_ADMISSION_HEADER, PUBLIC_ENROLLMENT_USER_HEADER],
+    expose_headers=[
+        "X-Cosmas-Workspace-Protocol",
+        "X-Cosmas-Copy-To-Ehr-Flags",
+        PUBLIC_ADMISSION_HEADER,
+        PUBLIC_ENROLLMENT_USER_HEADER,
+    ],
 )

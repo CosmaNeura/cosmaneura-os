@@ -1,19 +1,30 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { NoteOperation, Workspace, WorkspaceEntry } from "./workspace-api";
+import type { AuthenticatedWorkspaceIdentity, NoteOperation, Workspace, WorkspaceEntry } from "./workspace-api";
 import { CaptureGapNotice } from "./CaptureGapNotice";
 import { captureGapKey, validateCaptureGapReview, type CaptureGapReview } from "./capture-gap-review";
 import { useUnsavedWork } from "./unsaved-work";
 import { EditorRecoveryNotice, editorData, editorDraft, useEditorRecovery } from "./editor-recovery";
 import { DraftStoreError } from "./draft-store";
 import {canReviewChiefNote,supportsChiefNoteSource,type ChiefNoteOffer} from './chief-note-source';
+import { CopyToEhrMount } from "./CopyToEhrMount";
 
-export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange,onTeamDrafts,compact=false,notebookDirty=false,chiefNoteOffer }: {
+export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange,onTeamDrafts,compact=false,notebookDirty=false,chiefNoteOffer,
+  copyToEhrEnabled=false,copyToEhrFallbackOffer=false,copyToEhrRemoteEnabled=false,copyToEhrIdentity,copyToEhrProfileId='atlas_md',copyToEhrHighlightedKey=null }: {
   workspace: Workspace; locked: boolean; onSave: (operation: NoteOperation) => void; onSources: () => void; active?:boolean;
   onStateChange?:(state:'editing'|'review'|'saved')=>void;
   onTeamDrafts?:(noteId:string)=>void;
   compact?:boolean;
   notebookDirty?:boolean;
   chiefNoteOffer?:ChiefNoteOffer;
+  /** copy_to_ehr_enabled — defaults false so live users see no change. */
+  copyToEhrEnabled?:boolean;
+  /** Visit connector-failure offer. Shows that the note was not sent. */
+  copyToEhrFallbackOffer?:boolean;
+  /** copy_to_ehr_remote_enabled. Passed through; defaults false. */
+  copyToEhrRemoteEnabled?:boolean;
+  copyToEhrIdentity?:AuthenticatedWorkspaceIdentity;
+  copyToEhrProfileId?:string;
+  copyToEhrHighlightedKey?:string|null;
 }) {
   const latest = workspace.note?.latest;
   const core = !!latest?.core_source;
@@ -178,6 +189,10 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
         onChange={e => { setReconciled(e.target.checked); setConfirmed(false); }} />I checked the newer sources and reconciled this note.</label>}</div>}
 
     {latest?.review && !dirty && !otherVersion && <p className="team-fine">Version {latest.version} reviewed by you at {new Date(latest.review.created_at).toLocaleString()}.{sourcesChanged ? " That review predates the source changes." : ""}</p>}
+    {latest?.review && !dirty && !otherVersion && copyToEhrIdentity && (copyToEhrEnabled || copyToEhrFallbackOffer) &&
+      <CopyToEhrMount enabled={copyToEhrEnabled} fallbackOffer={copyToEhrFallbackOffer} remoteEnabled={copyToEhrRemoteEnabled}
+        identity={copyToEhrIdentity} draftId={latest.id} expectedRevision={String(latest.version)} profileId={copyToEhrProfileId}
+        locked={locked} highlightedKey={copyToEhrHighlightedKey} />}
     {compactReview&&nextSteps}
     {!!workspace.note?.history.length && <details className="team-history"><summary>Note version history</summary>
       {[...workspace.note.history].reverse().map(n => <article key={n.id}><small>Version {n.version} · {n.review ? "Review recorded" : "Unreviewed"}{n.sources_changed ? " · Sources changed" : ""}</small><p>{n.content}</p></article>)}
