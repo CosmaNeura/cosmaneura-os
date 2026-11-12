@@ -548,15 +548,23 @@ def _operator_print(message: str) -> None:
         pass
 
 
-def _tofu_runtime_status(proc: subprocess.Popen, log_path: Path) -> str:
+def _tofu_runtime_status(
+    proc: subprocess.Popen, log_path: Path, *, interrupt_sent: bool
+) -> str:
     alive = proc.poll() is None
     pid = getattr(proc, "pid", "?")
     if alive:
-        return (
-            f"tofu pid {pid} is STILL RUNNING; it received one graceful interrupt and no further "
-            f"signal; do not retry, move or edit the private directory until it exits; follow the log "
-            f"path. log={log_path}"
-        )
+        if interrupt_sent:
+            detail = (
+                "it received one graceful interrupt and no further signal; "
+                "do not retry, move or edit the private directory until it exits; follow the log path"
+            )
+        else:
+            detail = (
+                "no signal was sent; do not retry, move or edit the private directory until it exits; "
+                "follow the log path"
+            )
+        return f"tofu pid {pid} is STILL RUNNING; {detail}. log={log_path}"
     code = getattr(proc, "returncode", proc.poll())
     return f"tofu pid {pid} is not running (exit={code}). log={log_path}"
 
@@ -635,67 +643,92 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path) -> dict:
     returncode = None
     proc: subprocess.Popen | None = None
     previous_handlers: dict[int, object] = {}
+    interrupt_sent = False
+    handlers_installed = False
 
     def _route_to_keyboard_interrupt(signum, frame):  # noqa: ARG001
         raise KeyboardInterrupt()
+
+    def _restore_handlers() -> None:
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)  # type: ignore[arg-type]
 
     try:
         with open(log_path, "wb") as log_stream:
             for sig in (signal.SIGTERM, signal.SIGHUP):
                 previous_handlers[sig] = signal.signal(sig, _route_to_keyboard_interrupt)
+            handlers_installed = True
             apply_started = True
             try:
-                proc = subprocess.Popen(
-                    argv,
-                    cwd=folder / "module",
-                    env=env,
-                    stdin=subprocess.DEVNULL,
-                    stdout=log_stream,
-                    stderr=subprocess.STDOUT,
-                    umask=0o077,
-                    start_new_session=True,
-                )
-            except OSError:
-                apply_started = False
-                raise
-            try:
+                try:
+                    proc = subprocess.Popen(
+                        argv,
+                        cwd=folder / "module",
+                        env=env,
+                        stdin=subprocess.DEVNULL,
+                        stdout=log_stream,
+                        stderr=subprocess.STDOUT,
+                        umask=0o077,
+                        start_new_session=True,
+                    )
+                except OSError:
+                    apply_started = False
+                    raise
                 try:
                     returncode = proc.wait(timeout=None)
                 except KeyboardInterrupt as first:
                     proc.send_signal(signal.SIGINT)
+                    interrupt_sent = True
                     _operator_print(
                         f"graceful stop requested, do not press Ctrl-C again; log={log_path}"
                     )
                     try:
                         returncode = proc.wait(timeout=None)
                     except KeyboardInterrupt as second:
-                        _operator_print(_tofu_runtime_status(proc, log_path))
+                        status = _tofu_runtime_status(
+                            proc, log_path, interrupt_sent=True
+                        )
+                        _operator_print(status)
                         raise ApplyAttempted(
                             "Apply interrupted after start; OpenTofu must be left to finish. "
-                            f"{APPLY_RECOVERY} {_tofu_runtime_status(proc, log_path)}"
+                            f"{APPLY_RECOVERY} {status}"
                         ) from second
                     raise ApplyAttempted(
                         "Apply interrupted after start; "
-                        f"{APPLY_RECOVERY} {_tofu_runtime_status(proc, log_path)}"
+                        f"{APPLY_RECOVERY} "
+                        f"{_tofu_runtime_status(proc, log_path, interrupt_sent=True)}"
                     ) from first
             finally:
-                for sig, handler in previous_handlers.items():
-                    signal.signal(sig, handler)  # type: ignore[arg-type]
+                if handlers_installed:
+                    _restore_handlers()
+                    handlers_installed = False
     except ApplyAttempted:
         raise
     except BaseException as exc:
+        if handlers_installed:
+            _restore_handlers()
+            handlers_installed = False
         if apply_started:
-            status = f" {_tofu_runtime_status(proc, log_path)}" if proc is not None else ""
+            if proc is None:
+                raise ApplyAttempted(
+                    "Apply was attempted and did not complete cleanly; tofu may have started; "
+                    f"private logs retained. {APPLY_RECOVERY} log={log_path}"
+                ) from exc
+            status = _tofu_runtime_status(proc, log_path, interrupt_sent=interrupt_sent)
             raise ApplyAttempted(
                 "Apply was attempted and did not complete cleanly; private logs retained. "
-                f"{APPLY_RECOVERY}{status} log={log_path}"
+                f"{APPLY_RECOVERY} {status}"
             ) from exc
         raise
     if returncode:
-        status = f" {_tofu_runtime_status(proc, log_path)}" if proc is not None else ""
+        status = (
+            _tofu_runtime_status(proc, log_path, interrupt_sent=interrupt_sent)
+            if proc is not None
+            else f"log={log_path}"
+        )
         raise ApplyAttempted(
             "Apply was attempted and failed; private logs retained. "
-            f"{APPLY_RECOVERY}{status} log={log_path}"
+            f"{APPLY_RECOVERY} {status}"
         )
     return {"applied": True, "plan_sha256": plan_sha, "resource_group": RESOURCE_GROUP, "first_apply_only": True}
 
@@ -736,11 +769,11 @@ def main() -> None:
             result = apply(args.private_dir, confirm_apply=args.confirm_apply, approval_path=args.approval)
         try:
             print(json.dumps(result, sort_keys=True))
-        except OSError:
+        except Exception:
             if isinstance(result, dict) and result.get("applied"):
                 _operator_print(
                     "Encrypted local bootstrap: apply was attempted and did not complete cleanly. "
-                    f"Result print failed after tofu started. {APPLY_RECOVERY}"
+                    f"tofu exited 0 and only the result print failed. {APPLY_RECOVERY}"
                 )
                 raise SystemExit(2) from None
             raise
@@ -754,6 +787,7 @@ def main() -> None:
             "Encrypted local bootstrap refused; inspect reviewed inputs or private logs. No apply was attempted."
         )
         raise SystemExit(1) from None
+
 
 
 if __name__ == "__main__":

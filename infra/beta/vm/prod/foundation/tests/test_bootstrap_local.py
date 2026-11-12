@@ -422,23 +422,31 @@ class BootstrapSafety(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
             return subprocess.CompletedProcess(argv, 0, b"", b"")
 
+        signals: list[int] = []
+        terminates: list[bool] = []
+        kills: list[bool] = []
+
         class FakeProc:
             def __init__(self, argv, **kwargs):
                 popen_calls.append((argv, kwargs))
                 self.pid = 4242
+                self.returncode = 0
 
             def wait(self, timeout=None):
                 self.last_wait_timeout = timeout
                 return 0
 
+            def poll(self):
+                return 0
+
             def send_signal(self, sig):
-                self.last_signal = sig
+                signals.append(sig)
 
             def terminate(self):
-                raise AssertionError("terminate must not be called")
+                terminates.append(True)
 
             def kill(self):
-                raise AssertionError("kill must not be called")
+                kills.append(True)
 
         def fake_owner(*args, **kwargs):
             owner_calls.append(1)
@@ -450,7 +458,7 @@ class BootstrapSafety(unittest.TestCase):
             subprocess,
             "Popen",
             side_effect=lambda *a, **k: FakeProc(a[0], **k),
-        ):
+        ), patch.object(os, "kill") as mock_kill, patch.object(os, "killpg", create=True) as mock_killpg:
             result = bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
         self.assertTrue(result["applied"])
         self.assertEqual(len(popen_calls), 1)
@@ -460,6 +468,9 @@ class BootstrapSafety(unittest.TestCase):
         self.assertEqual(len(show_calls), 1)
         self.assertEqual(show_calls[0][-1], str(self.folder / "plans/first.tfplan"))
         self.assertEqual(len(owner_calls), 1)
+        self._assert_never_killed(signals, terminates, kills, expected_signals=[])
+        mock_kill.assert_not_called()
+        mock_killpg.assert_not_called()
 
     def test_apply_recompute_extra_create_delete_and_tampered_summary(self):
         plan_sha, summary, plan_json = self._planned()
@@ -536,45 +547,76 @@ class BootstrapSafety(unittest.TestCase):
 
         return run
 
-    def test_apply_interrupt_forwards_one_sigint_no_kill(self):
-        plan_sha, summary, plan_json = self._planned()
-        approval = self._approval(plan_sha, summary["summary_sha256"])
-        signals = []
-        wait_timeouts = []
+    def _recording_fake_proc(
+        self,
+        *,
+        wait_behavior,
+        poll_value=None,
+        pid: int = 4242,
+        initial_returncode=None,
+    ):
+        """FakeProc that records send_signal/terminate/kill instead of raising."""
+        signals: list[int] = []
+        terminates: list[bool] = []
+        kills: list[bool] = []
 
         class FakeProc:
             def __init__(self):
-                self.pid = 4242
-                self.returncode = None
+                self.pid = pid
+                self.returncode = initial_returncode
                 self._waits = 0
 
             def wait(self, timeout=None):
-                wait_timeouts.append(timeout)
-                self._waits += 1
-                if self._waits == 1:
-                    raise KeyboardInterrupt()
-                self.returncode = 0
-                return 0
+                return wait_behavior(self, timeout)
 
             def poll(self):
+                if callable(poll_value):
+                    return poll_value(self)
+                if poll_value is not None:
+                    return poll_value
                 return self.returncode
 
             def send_signal(self, sig):
                 signals.append(sig)
 
             def terminate(self):
-                raise AssertionError("terminate must not be called")
+                terminates.append(True)
 
             def kill(self):
-                raise AssertionError("kill must not be called")
+                kills.append(True)
 
+        return FakeProc(), signals, terminates, kills
+
+    def _assert_never_killed(self, signals, terminates, kills, *, expected_signals):
+        self.assertEqual(list(signals), expected_signals)
+        self.assertEqual(terminates, [])
+        self.assertEqual(kills, [])
+
+    def test_apply_interrupt_forwards_one_sigint_no_kill(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        wait_timeouts = []
+
+        def wait_behavior(proc, timeout):
+            wait_timeouts.append(timeout)
+            proc._waits += 1
+            if proc._waits == 1:
+                raise KeyboardInterrupt()
+            proc.returncode = 0
+            return 0
+
+        proc, signals, terminates, kills = self._recording_fake_proc(wait_behavior=wait_behavior)
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
-        ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
+        ), patch.object(subprocess, "Popen", return_value=proc), patch.object(
+            os, "kill"
+        ) as mock_kill, patch.object(os, "killpg", create=True) as mock_killpg, self.assertRaises(
             bootstrap.ApplyAttempted
         ) as err:
             bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
-        self.assertEqual(signals, [signal.SIGINT])
+        self._assert_never_killed(signals, terminates, kills, expected_signals=[signal.SIGINT])
+        mock_kill.assert_not_called()
+        mock_killpg.assert_not_called()
         self.assertEqual(wait_timeouts, [None, None])
         self.assertIn("interrupted", str(err.exception).lower())
         self.assertIn("partial-apply recovery", str(err.exception).lower())
@@ -584,70 +626,55 @@ class BootstrapSafety(unittest.TestCase):
             with self.subTest(sig=sig):
                 plan_sha, summary, plan_json = self._planned()
                 approval = self._approval(plan_sha, summary["summary_sha256"])
-                signals = []
+                sentinel_hits: list[int] = []
+                previous = signal.getsignal(sig)
 
-                class FakeProc:
-                    def __init__(self):
-                        self.pid = 4242
-                        self.returncode = None
-                        self._waits = 0
+                def sentinel(signum, frame):  # noqa: ARG001
+                    sentinel_hits.append(signum)
 
-                    def wait(self, timeout=None):
-                        self._waits += 1
-                        if self._waits == 1:
+                signal.signal(sig, sentinel)
+                try:
+
+                    def wait_behavior(proc, timeout):
+                        proc._waits += 1
+                        if proc._waits == 1:
                             signal.raise_signal(sig)
-                        self.returncode = 0
+                        proc.returncode = 0
                         return 0
 
-                    def poll(self):
-                        return self.returncode
-
-                    def send_signal(self, sent):
-                        signals.append(sent)
-
-                    def terminate(self):
-                        raise AssertionError("terminate must not be called")
-
-                    def kill(self):
-                        raise AssertionError("kill must not be called")
-
-                with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
-                    bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
-                ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
-                    bootstrap.ApplyAttempted
-                ):
-                    bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
-                self.assertEqual(signals, [signal.SIGINT])
+                    proc, signals, terminates, kills = self._recording_fake_proc(
+                        wait_behavior=wait_behavior
+                    )
+                    with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+                        bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
+                    ), patch.object(subprocess, "Popen", return_value=proc), patch.object(
+                        os, "kill"
+                    ) as mock_kill, patch.object(
+                        os, "killpg", create=True
+                    ) as mock_killpg, self.assertRaises(bootstrap.ApplyAttempted):
+                        bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+                    self._assert_never_killed(
+                        signals, terminates, kills, expected_signals=[signal.SIGINT]
+                    )
+                    mock_kill.assert_not_called()
+                    mock_killpg.assert_not_called()
+                    self.assertEqual(signal.getsignal(sig), sentinel)
+                    self.assertEqual(sentinel_hits, [])
+                finally:
+                    signal.signal(sig, previous)
 
     def test_apply_print_oserror_still_sends_sigint(self):
         plan_sha, summary, plan_json = self._planned()
         approval = self._approval(plan_sha, summary["summary_sha256"])
-        signals = []
 
-        class FakeProc:
-            def __init__(self):
-                self.pid = 4242
-                self.returncode = None
-                self._waits = 0
+        def wait_behavior(proc, timeout):
+            proc._waits += 1
+            if proc._waits == 1:
+                raise KeyboardInterrupt()
+            proc.returncode = 0
+            return 0
 
-            def wait(self, timeout=None):
-                self._waits += 1
-                if self._waits == 1:
-                    raise KeyboardInterrupt()
-                self.returncode = 0
-                return 0
-
-            def poll(self):
-                return self.returncode
-
-            def send_signal(self, sig):
-                signals.append(sig)
-
-            def terminate(self):
-                raise AssertionError("terminate must not be called")
-
-            def kill(self):
-                raise AssertionError("kill must not be called")
+        proc, signals, terminates, kills = self._recording_fake_proc(wait_behavior=wait_behavior)
 
         def raising_operator_print(message: str) -> None:
             if "graceful stop" in message:
@@ -655,77 +682,66 @@ class BootstrapSafety(unittest.TestCase):
 
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
-        ), patch.object(subprocess, "Popen", return_value=FakeProc()), patch.object(
+        ), patch.object(subprocess, "Popen", return_value=proc), patch.object(
             bootstrap, "_operator_print", side_effect=raising_operator_print
-        ), self.assertRaises(bootstrap.ApplyAttempted):
+        ), patch.object(os, "kill") as mock_kill, patch.object(
+            os, "killpg", create=True
+        ) as mock_killpg, self.assertRaises(bootstrap.ApplyAttempted):
             bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
-        self.assertEqual(signals, [signal.SIGINT])
+        self._assert_never_killed(signals, terminates, kills, expected_signals=[signal.SIGINT])
+        mock_kill.assert_not_called()
+        mock_killpg.assert_not_called()
 
     def test_apply_second_interrupt_still_running_message(self):
         plan_sha, summary, plan_json = self._planned()
         approval = self._approval(plan_sha, summary["summary_sha256"])
-        signals = []
 
-        class FakeProc:
-            def __init__(self):
-                self.pid = 4242
+        def wait_behavior(proc, timeout):
+            raise KeyboardInterrupt()
 
-            def wait(self, timeout=None):
-                raise KeyboardInterrupt()
-
-            def poll(self):
-                return None
-
-            def send_signal(self, sig):
-                signals.append(sig)
-
-            def terminate(self):
-                raise AssertionError("terminate must not be called")
-
-            def kill(self):
-                raise AssertionError("kill must not be called")
-
+        proc, signals, terminates, kills = self._recording_fake_proc(
+            wait_behavior=wait_behavior, poll_value=None
+        )
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
-        ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
+        ), patch.object(subprocess, "Popen", return_value=proc), patch.object(
+            os, "kill"
+        ) as mock_kill, patch.object(os, "killpg", create=True) as mock_killpg, self.assertRaises(
             bootstrap.ApplyAttempted
         ) as err:
             bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
-        self.assertEqual(signals, [signal.SIGINT])
+        self._assert_never_killed(signals, terminates, kills, expected_signals=[signal.SIGINT])
+        mock_kill.assert_not_called()
+        mock_killpg.assert_not_called()
         msg = str(err.exception)
+        self.assertIn("OpenTofu must be left to finish", msg)
         self.assertIn("4242", msg)
         self.assertIn("STILL RUNNING", msg)
+        self.assertIsInstance(err.exception.__cause__, KeyboardInterrupt)
 
     def test_apply_wait_non_keyboard_interrupt_becomes_attempted(self):
         plan_sha, summary, plan_json = self._planned()
         approval = self._approval(plan_sha, summary["summary_sha256"])
 
-        class FakeProc:
-            def __init__(self):
-                self.pid = 4242
+        def wait_behavior(proc, timeout):
+            raise RuntimeError("wait exploded")
 
-            def wait(self, timeout=None):
-                raise RuntimeError("wait exploded")
-
-            def poll(self):
-                return None
-
-            def send_signal(self, sig):
-                raise AssertionError("send_signal must not be called")
-
-            def terminate(self):
-                raise AssertionError("terminate must not be called")
-
-            def kill(self):
-                raise AssertionError("kill must not be called")
-
+        proc, signals, terminates, kills = self._recording_fake_proc(
+            wait_behavior=wait_behavior, poll_value=None
+        )
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
-        ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
+        ), patch.object(subprocess, "Popen", return_value=proc), patch.object(
+            os, "kill"
+        ) as mock_kill, patch.object(os, "killpg", create=True) as mock_killpg, self.assertRaises(
             bootstrap.ApplyAttempted
         ) as err:
             bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self._assert_never_killed(signals, terminates, kills, expected_signals=[])
+        mock_kill.assert_not_called()
+        mock_killpg.assert_not_called()
         self.assertIn("attempted", str(err.exception).lower())
+        self.assertIn("no signal was sent", str(err.exception).lower())
 
     def test_apply_earlier_partial_notice_before_refusal(self):
         self.prepare()
@@ -745,39 +761,24 @@ class BootstrapSafety(unittest.TestCase):
         plan_sha, summary, plan_json = self._planned()
         approval = self._approval(plan_sha, summary["summary_sha256"])
 
-        def run(argv, **kwargs):
-            if argv[1] == "version":
-                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
-            if argv[1] == "show":
-                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
-            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        def wait_behavior(proc, timeout):
+            proc.returncode = 1
+            return 1
 
-        class FakeProc:
-            def __init__(self):
-                self.pid = 4242
-                self.returncode = 1
-
-            def wait(self, timeout=None):
-                return 1
-
-            def poll(self):
-                return 1
-
-            def send_signal(self, sig):
-                return None
-
-            def terminate(self):
-                raise AssertionError("terminate must not be called")
-
-            def kill(self):
-                raise AssertionError("kill must not be called")
-
+        proc, signals, terminates, kills = self._recording_fake_proc(
+            wait_behavior=wait_behavior, initial_returncode=1, poll_value=1
+        )
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
-            bootstrap, "command", side_effect=run
-        ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
+            bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
+        ), patch.object(subprocess, "Popen", return_value=proc), patch.object(
+            os, "kill"
+        ) as mock_kill, patch.object(os, "killpg", create=True) as mock_killpg, self.assertRaises(
             bootstrap.ApplyAttempted
         ) as err:
             bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self._assert_never_killed(signals, terminates, kills, expected_signals=[])
+        mock_kill.assert_not_called()
+        mock_killpg.assert_not_called()
         self.assertIn("attempted", str(err.exception).lower())
         self.assertNotIn("No apply was attempted", str(err.exception))
 
@@ -785,33 +786,13 @@ class BootstrapSafety(unittest.TestCase):
         plan_sha, summary, plan_json = self._planned()
         approval = self._approval(plan_sha, summary["summary_sha256"])
 
-        def run(argv, **kwargs):
-            if argv[1] == "version":
-                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
-            if argv[1] == "show":
-                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
-            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        def wait_behavior(proc, timeout):
+            proc.returncode = 1
+            return 1
 
-        class FakeProc:
-            def __init__(self):
-                self.pid = 4242
-                self.returncode = 1
-
-            def wait(self, timeout=None):
-                return 1
-
-            def poll(self):
-                return 1
-
-            def send_signal(self, sig):
-                return None
-
-            def terminate(self):
-                raise AssertionError("terminate must not be called")
-
-            def kill(self):
-                raise AssertionError("kill must not be called")
-
+        proc, signals, terminates, kills = self._recording_fake_proc(
+            wait_behavior=wait_behavior, initial_returncode=1, poll_value=1
+        )
         argv = [
             "bootstrap_local.py",
             "apply",
@@ -826,11 +807,18 @@ class BootstrapSafety(unittest.TestCase):
         err_buf = StringIO()
         with patch.object(sys, "argv", argv), patch.object(
             bootstrap, "owner_context", return_value=self.context
-        ), patch.object(bootstrap, "command", side_effect=run), patch.object(
-            subprocess, "Popen", return_value=FakeProc()
-        ), patch.object(sys, "stderr", err_buf), self.assertRaises(SystemExit) as err:
+        ), patch.object(
+            bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
+        ), patch.object(subprocess, "Popen", return_value=proc), patch.object(
+            os, "kill"
+        ) as mock_kill, patch.object(os, "killpg", create=True) as mock_killpg, patch.object(
+            sys, "stderr", err_buf
+        ), self.assertRaises(SystemExit) as err:
             bootstrap.main()
         self.assertEqual(err.exception.code, 2)
+        self._assert_never_killed(signals, terminates, kills, expected_signals=[])
+        mock_kill.assert_not_called()
+        mock_killpg.assert_not_called()
         stderr = err_buf.getvalue()
         self.assertIn("Partial-apply recovery", stderr)
         self.assertNotIn("No apply was attempted", stderr)
@@ -839,26 +827,13 @@ class BootstrapSafety(unittest.TestCase):
         plan_sha, summary, plan_json = self._planned()
         approval = self._approval(plan_sha, summary["summary_sha256"])
 
-        class FakeProc:
-            def __init__(self):
-                self.pid = 4242
-                self.returncode = 0
+        def wait_behavior(proc, timeout):
+            proc.returncode = 0
+            return 0
 
-            def wait(self, timeout=None):
-                return 0
-
-            def poll(self):
-                return 0
-
-            def send_signal(self, sig):
-                return None
-
-            def terminate(self):
-                raise AssertionError("terminate must not be called")
-
-            def kill(self):
-                raise AssertionError("kill must not be called")
-
+        proc, signals, terminates, kills = self._recording_fake_proc(
+            wait_behavior=wait_behavior, initial_returncode=0, poll_value=0
+        )
         argv = [
             "bootstrap_local.py",
             "apply",
@@ -868,16 +843,33 @@ class BootstrapSafety(unittest.TestCase):
             "--approval",
             str(approval),
         ]
+        from io import StringIO
+
+        err_buf = StringIO()
+        real_print = print
+
+        def result_print_fails(*args, **kwargs):
+            if kwargs.get("file") is err_buf or kwargs.get("file") is sys.stderr:
+                return real_print(*args, **kwargs)
+            raise ValueError("stdout dead")
 
         with patch.object(sys, "argv", argv), patch.object(
             bootstrap, "owner_context", return_value=self.context
         ), patch.object(
             bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
-        ), patch.object(subprocess, "Popen", return_value=FakeProc()), patch(
-            "builtins.print", side_effect=OSError("stdout dead")
-        ), self.assertRaises(SystemExit) as err:
+        ), patch.object(subprocess, "Popen", return_value=proc), patch.object(
+            os, "kill"
+        ) as mock_kill, patch.object(os, "killpg", create=True) as mock_killpg, patch.object(
+            sys, "stderr", err_buf
+        ), patch("builtins.print", side_effect=result_print_fails), self.assertRaises(
+            SystemExit
+        ) as err:
             bootstrap.main()
         self.assertEqual(err.exception.code, 2)
+        self._assert_never_killed(signals, terminates, kills, expected_signals=[])
+        mock_kill.assert_not_called()
+        mock_killpg.assert_not_called()
+        self.assertIn("tofu exited 0 and only the result print failed", err_buf.getvalue())
 
 
 class EncryptionProof(unittest.TestCase):
