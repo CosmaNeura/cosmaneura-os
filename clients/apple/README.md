@@ -78,8 +78,8 @@ Release-excludes proof (Linux-safe source check; also run on Mac before a Releas
 python3 clients/apple/ui-tests/prove_release_excludes_demo_fixture.py
 ```
 
-Owned iPhone builds use Capacitor 8.5.0 from
-`clients/apple/vendor/capacitor-swift-pm-8.5.0` (local path binary targets;
+Owned iPhone builds use Capacitor 8.5.1 from
+`clients/apple/vendor/capacitor-swift-pm-8.5.1` (local path binary targets;
 release-asset SHA-256 recorded in that directory's SOURCE_MANIFEST.json).
 `scripts/compose-portable-iphone.py` and
 `scripts/prepare-owned-iphone-candidate.py` copy that mirror into the composed
@@ -194,7 +194,7 @@ update. This establishes simulator custody only; native login, actual microphone
 capture and physical-device signing/storage still require their own evidence.
 See `docs/reference/cosmasos-beta/W8_SIMULATOR_CUSTODY_CHECKPOINT.md`.
 The existing `clients/capture` dependency already supplies the exact Capacitor
-8.5.0 JS package, verified against Scribe's pinned lockfile and cached tarball.
+8.5.1 JS package, verified against Scribe's pinned lockfile and cached tarball.
 
 The optional W36 local workspace policy adds an explicit CSP to a fresh separate
 Apple variant. Pass `--workspace-api-origin http://127.0.0.1:8046` to

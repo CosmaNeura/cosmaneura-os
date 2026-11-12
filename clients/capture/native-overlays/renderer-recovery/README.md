@@ -51,7 +51,7 @@ Validation uses actual Swift Core/transport implementations with fake permission
 and audio drivers: pending permission, freeze/release failure and retry, concurrent
 closure, racing Begin, late frames, permanent old-bridge rejection, and retained
 ownership in a different bridge. iOS 17 simulator module compilation checks the
-actual plugin API against cached Capacitor 8.5.0. Native renderer termination,
+actual plugin API against cached Capacitor 8.5.1. Native renderer termination,
 physical-device behavior and the complete recovery UI remain separate acceptance
 work. Local evidence and immutable before snapshots are in
 `/private/tmp/cosmas-w31-native-stop`.

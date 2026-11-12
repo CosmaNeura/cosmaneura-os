@@ -1,0 +1,30 @@
+{
+  "schema": "cosmabot-owned-capacitor-swift-pm/v1",
+  "package_name": "capacitor-swift-pm",
+  "version": "8.5.1",
+  "upstream_revision": "6afa7424fd2fcd8ca1e577478e8a00af284b7e82",
+  "upstream_repository": "https://github.com/ionic-team/capacitor-swift-pm.git",
+  "license": "LICENSE.md",
+  "license_spdx": "MIT",
+  "purpose": "Replace remote binaryTarget zip downloads with an owned local mirror for reproducible offline iPhone builds.",
+  "remote_binary_targets_retired": true,
+  "release_assets": [
+    {
+      "name": "Capacitor.xcframework.zip",
+      "url": "https://github.com/ionic-team/capacitor-swift-pm/releases/download/8.5.1/Capacitor.xcframework.zip",
+      "sha256": "c6ca2c8eb19a51e984320c1747bd9a18e4e8a39afad7524d4d8d0c0403944eb4",
+      "unpacked_directory": "Capacitor.xcframework"
+    },
+    {
+      "name": "Cordova.xcframework.zip",
+      "url": "https://github.com/ionic-team/capacitor-swift-pm/releases/download/8.5.1/Cordova.xcframework.zip",
+      "sha256": "bee4a9362e93e8205be4dd43c0bec3e49ff77645b9f132a22bc8db01f4809563",
+      "unpacked_directory": "Cordova.xcframework"
+    }
+  ],
+  "local_package_entry": "Package.swift",
+  "notes": [
+    "Binary XCFrameworks remain vendor-built artifacts; ownership here means the exact reviewed bytes are retained in this repository and referenced by local path, not re-downloaded during composition or offline xcodebuild.",
+    "Do not replace these frameworks from an ambient SPM cache without updating this manifest and the portable composition tests."
+  ]
+}

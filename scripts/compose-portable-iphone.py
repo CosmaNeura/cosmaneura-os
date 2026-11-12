@@ -30,16 +30,16 @@ IMPLEMENTATION_OWNERS = ("clients/apple", "clients/capture")
 SUPPORTING_CLIENT = "clients/shared"
 APP_SCAFFOLD = "apps/capture"
 PROVENANCE_NAME = "SOURCE_PROVENANCE.json"
-OWNED_CAPACITOR_VENDOR = "clients/apple/vendor/capacitor-swift-pm-8.5.0"
+OWNED_CAPACITOR_VENDOR = "clients/apple/vendor/capacitor-swift-pm-8.5.1"
 COMPOSED_CAPACITOR_VENDOR = "native-plugins/capacitor-swift-pm"
 REMOTE_CAPACITOR_PACKAGE_URL = "https://github.com/ionic-team/capacitor-swift-pm.git"
 OWNED_CAPACITOR_RELEASE_SHA256 = {
-    "Capacitor.xcframework.zip": "357220fe6dad73cb78bc1dc83e16e89d59c3d7dac8f9b17545a5be64bba25130",
-    "Cordova.xcframework.zip": "a3dc72b5a559948d548f0ee2926b989492acc1023a0c86a1bf85477587f83a10",
+    "Capacitor.xcframework.zip": "c6ca2c8eb19a51e984320c1747bd9a18e4e8a39afad7524d4d8d0c0403944eb4",
+    "Cordova.xcframework.zip": "bee4a9362e93e8205be4dd43c0bec3e49ff77645b9f132a22bc8db01f4809563",
 }
 OWNED_CAPACITOR_FRAMEWORK_INFO_SHA256 = {
     "Capacitor.xcframework/Info.plist": "713105ab60c0f696453457049eee406997bbe4435b8c48ae877101303c5272fe",
-    "Cordova.xcframework/Info.plist": "25ef8fe4b91042eaeb5a52cafa72ad1327ac35b194f265ffc53ab269a1d8a452",
+    "Cordova.xcframework/Info.plist": "2fe83c683373324422f11eb3934495303236cf65f867f22f1f3666eb8640fb46",
 }
 # Package manifests rewritten from remote Capacitor URL to the owned local path.
 CAPACITOR_LOCALIZATION_TARGETS = (
@@ -384,16 +384,18 @@ def _localize_capacitor_package_text(text: str, local_path: str) -> str:
     """Replace remote or clients-tree Capacitor pins with the composed local path."""
     if local_path in text and text.count(f'path: "{local_path}"') == 1 and REMOTE_CAPACITOR_PACKAGE_URL not in text:
         raise ValueError("Capacitor package already names the composed local path.")
-    clients_vendor = "../../../apple/vendor/capacitor-swift-pm-8.5.0"
+    clients_vendor = "../../../apple/vendor/capacitor-swift-pm-8.5.1"
     replacement = f'.package(name: "capacitor-swift-pm", path: "{local_path}")'
+    # Reviewed apps/capture remote pin is exact 8.5.1; composition rewrites
+    # that pin to the owned 8.5.1 local mirror path (drift back to 8.5.0 fails).
     candidates = [
-        f'.package(url: "{REMOTE_CAPACITOR_PACKAGE_URL}", exact: "8.5.0")',
+        f'.package(url: "{REMOTE_CAPACITOR_PACKAGE_URL}", exact: "8.5.1")',
         f'.package(name: "capacitor-swift-pm", path: "{clients_vendor}")',
     ]
     multiline_remote = re.compile(
         r'\.package\(\s*url:\s*"'
         + re.escape(REMOTE_CAPACITOR_PACKAGE_URL)
-        + r'"\s*,\s*exact:\s*"8\.5\.0"\s*\)',
+        + r'"\s*,\s*exact:\s*"8\.5\.1"\s*\)',
         re.MULTILINE,
     )
     multiline_clients = re.compile(
@@ -430,11 +432,11 @@ def _add_owned_capacitor_vendor(repository: Path, output: Path, placed: list[dic
     manifest_path = vendor / "SOURCE_MANIFEST.json"
     manifest = json.loads(_regular_file(repository, manifest_path).read_text(encoding="utf-8"))
     if (
-        manifest.get("version") != "8.5.0"
-        or manifest.get("upstream_revision") != "4f71d0b979f2f957326f04353eca7604ee937e1e"
+        manifest.get("version") != "8.5.1"
+        or manifest.get("upstream_revision") != "6afa7424fd2fcd8ca1e577478e8a00af284b7e82"
         or manifest.get("remote_binary_targets_retired") is not True
     ):
-        raise ValueError("Owned Capacitor vendor manifest is not the reviewed 8.5.0 mirror.")
+        raise ValueError("Owned Capacitor vendor manifest is not the reviewed 8.5.1 mirror.")
     assets = {
         item["name"]: item["sha256"]
         for item in manifest.get("release_assets", [])
@@ -472,7 +474,7 @@ def _add_owned_capacitor_vendor(repository: Path, output: Path, placed: list[dic
                 "owner": "clients/apple",
                 "sha256": _digest(destination),
                 "authoritative_counterpart": f"{OWNED_CAPACITOR_VENDOR}/{relative}",
-                "wiring_note": "Owned Capacitor 8.5.0 mirror; remote binary zip downloads retired.",
+                "wiring_note": "Owned Capacitor 8.5.1 mirror; remote binary zip downloads retired.",
             }
         )
 

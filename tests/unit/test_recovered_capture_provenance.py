@@ -105,7 +105,7 @@ SYNTHETIC_MICROPHONE_USAGE = (
     "invented encounter audio."
 )
 EXTERNAL_CAPTURE_SNAPSHOT = "ea7f99d0278a05706531ffb1288cb1df7acf507b"
-FROZEN_CAPTURE_PROVENANCE_SHA256 = "7b036ef60bf1141b575dad0f8c46dc4cdc1dfa01b7b4ac7e3276ff06b0e17c54"
+FROZEN_CAPTURE_PROVENANCE_SHA256 = "ab6b9ac9af69cafcc8a890852fa1d37b2fa340b026324d177425de91d58dd208"
 
 # Reviewed owned-source evolution for the native practice connection. These
 # exact current bytes supplement, never rewrite, frozen 1107 provenance. Every
@@ -137,10 +137,10 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
 
 # Owned Capacitor path pins in capture package manifests. Historical recovery
 # still records the remote binary package URL; current owners use the reviewed
-# local mirror under clients/apple/vendor/capacitor-swift-pm-8.5.0.
+# local mirror under clients/apple/vendor/capacitor-swift-pm-8.5.1.
 REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256 = {
-    "clients/capture/native-configured/ios-pcm-capacitor/Package.swift": "37f8274fc2c5413f93e52524429407bafc92c2cd3df9a4b3bfe536ae4f655c96",
-    "clients/capture/native-configured/secure-queue/Package.swift": "b47bd6945b0f2d12908fa4a6f32bdff36b8345bdcd7860ff4a689520863a3e23",
+    "clients/capture/native-configured/ios-pcm-capacitor/Package.swift": "33d141a2d7abe06f71ad8ae5b92a6f6893598bba21d78c490e4833a1329f5f2b",
+    "clients/capture/native-configured/secure-queue/Package.swift": "31981af9e8ec7723052bd187ddee047bf73a8614637ec9213c4ea56f4ddb4ce1",
 }
 
 # Reviewed owned IOSPCM plugin evolution (DEBUG synthetic XCUITest start path).
@@ -229,9 +229,11 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
     assert differed == [
         "native-plugins/cosmas-native-auth/Package.swift",
         "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
+        "native-plugins/ios-pcm-capacitor/Package.swift",
         "native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift",
         "native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift",
         "native-plugins/native-recording-pcm/Package.swift",
+        "native-plugins/secure-queue/Package.swift",
     ]
 
 
@@ -254,13 +256,14 @@ def test_reviewed_owned_capacitor_package_pins_retire_remote_binary_urls():
     record = json.loads(PROVENANCE.read_text(encoding="utf-8"))
     counterparts = [item["tracked_equivalent"] for item in record["files"]
                     if item["tracked_equivalent"] is not None]
-    vendor = ROOT / "clients/apple/vendor/capacitor-swift-pm-8.5.0"
+    vendor = ROOT / "clients/apple/vendor/capacitor-swift-pm-8.5.1"
     assert (vendor / "Package.swift").is_file()
     assert (vendor / "Capacitor.xcframework/Info.plist").is_file()
     assert (vendor / "Cordova.xcframework/Info.plist").is_file()
     manifest = json.loads((vendor / "SOURCE_MANIFEST.json").read_text(encoding="utf-8"))
     assert manifest["remote_binary_targets_retired"] is True
-    assert manifest["version"] == "8.5.0"
+    assert manifest["version"] == "8.5.1"
+    assert manifest["upstream_revision"] == "6afa7424fd2fcd8ca1e577478e8a00af284b7e82"
     for name, digest in REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256.items():
         assert name.startswith("clients/capture/native-configured/")
         assert name.endswith("Package.swift")
@@ -271,8 +274,8 @@ def test_reviewed_owned_capacitor_package_pins_retire_remote_binary_urls():
         text = (ROOT / name).read_text(encoding="utf-8")
         assert _sha256(ROOT / name) == digest
         assert "https://github.com/ionic-team/capacitor-swift-pm.git" not in text
-        assert "clients/apple/vendor/capacitor-swift-pm-8.5.0" in text or \
-            "../../../apple/vendor/capacitor-swift-pm-8.5.0" in text
+        assert "clients/apple/vendor/capacitor-swift-pm-8.5.1" in text or \
+            "../../../apple/vendor/capacitor-swift-pm-8.5.1" in text
 
 
 def test_reviewed_owned_iospcm_plugin_pin_covers_synthetic_uitest_start_path():
@@ -370,7 +373,7 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     assert manifest["scaffold_role"] == "frozen-1107-evidence"
     assert manifest["external_snapshot_required"] is False
     assert manifest["remote_capacitor_package_required"] is False
-    assert manifest["owned_capacitor_vendor"] == "clients/apple/vendor/capacitor-swift-pm-8.5.0"
+    assert manifest["owned_capacitor_vendor"] == "clients/apple/vendor/capacitor-swift-pm-8.5.1"
     assert manifest["composed_capacitor_vendor"] == "apps/capture/native-plugins/capacitor-swift-pm"
     assert manifest["qualified_install"] is False
     assert manifest["compiled_signed_or_installed"] is False

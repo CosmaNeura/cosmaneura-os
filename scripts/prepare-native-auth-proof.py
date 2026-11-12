@@ -91,15 +91,15 @@ def prepare(
         else:
             shutil.copytree(root / "clients/capture/native-configured/secure-queue",
                             capture_root / "secure-queue")
-        capacitor_vendor = root / "clients/apple/vendor/capacitor-swift-pm-8.5.0"
+        capacitor_vendor = root / "clients/apple/vendor/capacitor-swift-pm-8.5.1"
         if not (capacitor_vendor / "Package.swift").is_file():
-            raise ValueError("Owned Capacitor 8.5.0 mirror is missing.")
+            raise ValueError("Owned Capacitor 8.5.1 mirror is missing.")
         if (capture_root / "capacitor-swift-pm").exists():
             raise ValueError("Owned Capacitor destination already exists.")
         shutil.copytree(capacitor_vendor, capture_root / "capacitor-swift-pm")
         queue_package = capture_root / "secure-queue/Package.swift"
         queue_text = queue_package.read_text(encoding="utf-8")
-        queue_marker = 'path: "../../../apple/vendor/capacitor-swift-pm-8.5.0"'
+        queue_marker = 'path: "../../../apple/vendor/capacitor-swift-pm-8.5.1"'
         if queue_text.count(queue_marker) != 1:
             raise ValueError("Secure queue Capacitor dependency layout changed.")
         queue_package.write_text(
