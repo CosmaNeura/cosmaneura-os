@@ -22,13 +22,14 @@ private let stagingOrganization = "org_invented_beta"
     }
 
     @Test func deviceBundleKeepsProductionClerkPinnedAndSimulatorHostOnSimulatorProfile() throws {
-        // operationalBeta Infos pin clerk.cosmas.ai; clerk.staging.cosmas.ai stays on simulatorStaging.
-        #expect(throws: NativeAuthError.unavailable) {
-            try NativeClerkConfiguration(
-                publishableKey: stagingKey, frontendOrigin: "https://" + stagingHost,
-                organizationID: stagingOrganization, bundleIdentifier: "com.cosmasos.beta.ios",
-                profile: .operationalBeta)
-        }
+        // operationalBeta admits clerk.staging.cosmas.ai alongside clerk.cosmas.ai so
+        // rebuilds keep the identity already shipped to device users.
+        let betaStaging = try NativeClerkConfiguration(
+            publishableKey: stagingKey, frontendOrigin: "https://" + stagingHost,
+            organizationID: stagingOrganization, bundleIdentifier: "com.cosmasos.beta.ios",
+            profile: .operationalBeta)
+        #expect(betaStaging.frontendOrigin == "https://" + stagingHost)
+        #expect(betaStaging.callbackURL == "com.cosmasos.beta.ios://callback")
         let productionHost = "clerk.cosmas.ai"
         let productionKey = "pk_live_" + Data((productionHost + "$").utf8).base64EncodedString()
         let device = try NativeClerkConfiguration(
