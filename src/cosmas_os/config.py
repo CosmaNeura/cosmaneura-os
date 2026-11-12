@@ -154,6 +154,11 @@ class Settings(BaseSettings):
     workspace_athena_fhir_sandbox_enabled: bool = False
     workspace_athena_allergies_enabled: bool = False
     workspace_athena_medications_enabled: bool = False
+    # Copy-to-EHR clipboard paste. Default off; nothing changes for live users tonight.
+    # Remote and fallback flags are owned by tracks C and D; A only declares them.
+    copy_to_ehr_enabled: bool = False
+    copy_to_ehr_remote_enabled: bool = False
+    copy_to_ehr_fallback_enabled: bool = False
     google_connection_client_id: str = ""
     google_connection_client_secret: SecretStr | None = None
     google_connection_callback_uri: str = ""
