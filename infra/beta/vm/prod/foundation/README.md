@@ -14,9 +14,10 @@ See `../README.md` for John's exact commands. This helper is **first-apply-only*
 OpenAI opt-in must be in the first apply's inputs or wait for a separately
 reviewed day-2 tool. Do not run raw tofu by hand.
 
-Azure OpenAI is a separate module (variable default `false`). Set
-`"enable_azure_openai": true` in reviewed inputs to include `gpt-4.1-dzus`, the
-OpenAI private endpoint, and `privatelink.openai.azure.com` in the plan.
+Azure OpenAI is a separate module (variable default `false`). John's first-apply
+reviewed inputs set `"enable_azure_openai": true` to include `gpt-4.1-dzus` at
+capacity **1**, the OpenAI private endpoint, and `privatelink.openai.azure.com`.
+That creates resources only (`routes_runtime_traffic` stays false).
 
 A shared-module refactor with staging is a later ticket. Staging files stay
 byte-unchanged here.
@@ -31,14 +32,15 @@ python3 bootstrap_local.py apply --confirm-apply --approval <absolute-approval.j
 
 Inputs omit generated `state_namespace` and `bootstrap_key_file`; the preparer
 supplies them. No application secret is accepted. Provider-generated sensitive
-attributes can still exist inside encrypted state/plans. Keep the whole folder
-private, retain the key with a separately protected recovery copy, and never
-print or commit decrypted state/plans or private command logs. Losing the key
-makes these artifacts unrecoverable. Encryption does not protect against a
-compromised operator account that can also read the key.
+attributes can still exist inside encrypted state/plans (**CTO decision, 11 Nov
+2026**). Keep the whole folder private, retain the key with a separately
+protected recovery copy, and never print or commit decrypted state/plans or
+private command logs. Losing the key makes these artifacts unrecoverable.
+Encryption does not protect against a compromised operator account that can
+also read the key.
 
 With `enable_azure_openai=true`, the Azure OpenAI account keys land in tofu
 state. The state must stay encrypted, its encryption key is never in the repo,
 and the backend is the private local encrypted backend — handled like staging's
-state. After first apply, rotate the OpenAI account keys and reload Key Vault
-via `--file` as documented in `../README.md`.
+state. Host secret install and LLM cutover are separate later tickets; see
+`../README.md`.

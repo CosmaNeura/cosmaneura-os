@@ -1,7 +1,6 @@
 """Local bootstrap refusal tests and an actual OpenTofu encryption-only proof."""
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import json
 import os
@@ -206,25 +205,86 @@ class BootstrapSafety(unittest.TestCase):
             bootstrap.plan(self.folder)
         azure.assert_not_called()
         command.assert_not_called()
-        # Fingerprint covers the openai module path: changing the source digest map entry changes source_sha256.
-        files = bootstrap.source_manifest()
-        self.assertIn("modules/azure_openai/main.tf", files)
-        mutated = dict(files)
-        mutated["modules/azure_openai/main.tf"] = "0" * 64
-        self.assertNotEqual(
-            hashlib.sha256(bootstrap.json_bytes(files)).hexdigest(),
-            hashlib.sha256(bootstrap.json_bytes(mutated)).hexdigest(),
-        )
 
-    def test_m13_apply_refuses_staging_rg_profile_and_missing_manifest(self):
-        approval = self.root / "approval.json"
-        approval.write_text(json.dumps({
+    def test_extra_openai_module_file_refuses_plan_before_owner(self):
+        self.prepare()
+        extra = self.folder / "module/modules/azure_openai/unreviewed.tf"
+        bootstrap.write_private(extra, b'# unreviewed\n')
+        with patch.object(bootstrap, "owner_context") as azure, patch.object(bootstrap, "command") as command, self.assertRaises(bootstrap.Refused):
+            bootstrap.plan(self.folder)
+        azure.assert_not_called()
+        command.assert_not_called()
+
+    def _write_plan_artifacts(self, plan_bytes=b"invented-encrypted-plan-bytes"):
+        plans = self.folder / "plans"
+        plans.mkdir(mode=0o700, exist_ok=True)
+        plan_path = plans / "first.tfplan"
+        if plan_path.exists():
+            plan_path.unlink()
+        for name in ("plan-summary.json", "plan-result.json"):
+            path = self.folder / name
+            if path.exists():
+                path.unlink()
+        bootstrap.write_private(plan_path, plan_bytes)
+        plan_sha = bootstrap.digest(plan_path)
+        plan_json = {
+            "resource_changes": [
+                {"type": "azurerm_resource_group", "change": {"actions": ["create"]}},
+            ]
+        }
+        summary = bootstrap.sanitize_plan_summary(
+            plan_json,
+            inputs={**self.inputs, "enable_azure_openai": False},
+            plan_sha256=plan_sha,
+        )
+        bootstrap.write_private(self.folder / "plan-summary.json", bootstrap.json_bytes(summary))
+        result = {
+            "planned": True,
+            "plan_sha256": plan_sha,
+            "summary_sha256": summary["summary_sha256"],
+            "enable_azure_openai": False,
+            "applied": False,
+            "first_apply_only": True,
+        }
+        bootstrap.write_private(self.folder / "plan-result.json", bootstrap.json_bytes(result))
+        return plan_sha, summary, plan_json
+
+    def _planned(self):
+        if not self.folder.exists():
+            self.prepare()
+        return self._write_plan_artifacts()
+
+    def _approval(self, plan_sha: str, summary_sha: str, *, mode=0o600, inside_repo=False, symlink=False, extra=None, drop=None):
+        payload = {
             "reviewer": "john@example.invalid",
             "review_reference": "ticket",
-            "plan_sha256": "a" * 64,
-            "summary_sha256": "b" * 64,
-        }))
-        approval.chmod(0o600)
+            "plan_sha256": plan_sha,
+            "summary_sha256": summary_sha,
+        }
+        if extra:
+            payload.update(extra)
+        if drop:
+            for key in drop:
+                payload.pop(key, None)
+        if inside_repo:
+            path = bootstrap.REPO / f".tmp-approval-{secrets.token_hex(4)}.json"
+            self.addCleanup(lambda p=path: p.unlink(missing_ok=True))
+        else:
+            path = self.root / f"approval-{secrets.token_hex(4)}.json"
+        path.write_text(json.dumps(payload))
+        path.chmod(mode)
+        if symlink:
+            link = self.root / f"approval-link-{secrets.token_hex(4)}.json"
+            link.symlink_to(path)
+            return link
+        return path
+
+    def _assert_no_apply(self, calls):
+        for argv in calls:
+            self.assertNotIn("apply", argv)
+
+    def test_m13_apply_refuses_staging_rg_profile_and_missing_manifest(self):
+        approval = self._approval("a" * 64, "b" * 64)
         with self.assertRaises(bootstrap.Refused) as missing:
             bootstrap.apply(self.root / "missing-folder", confirm_apply=True, approval_path=approval)
         self.assertIn("0700", str(missing.exception).lower() + "canonical" + str(missing.exception))
@@ -232,24 +292,182 @@ class BootstrapSafety(unittest.TestCase):
         manifest = json.loads((self.folder / "manifest.json").read_text())
         manifest["resource_group"] = "".join(["rg-cosmas-os-vm-", "staging", "-eus2-lab01"])
         (self.folder / "manifest.json").write_text(json.dumps(manifest))
-        # protected digest no longer matches
+        with patch.object(bootstrap, "owner_context") as azure, patch.object(bootstrap, "command") as command, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        azure.assert_not_called()
+        command.assert_not_called()
+        # Manifest rewrite fails verify (source/namespace/resource_group binding).
+        self.assertIn("reviewed", str(err.exception).lower())
+
+    def test_apply_name_guard_refusals_and_malformed_manifest(self):
+        plan_sha, summary, _ = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        # Staging resource group in manifest after rewriting protected digest is still refused by explicit check.
+        manifest_path = self.folder / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["resource_group"] = "rg-cosmas-os-vm-staging-eus2-lab01"
+        # Restore protected digest so _verify_prepared gets past file hash... actually changing
+        # manifest content breaks protected digest. Use patch on read_json for resource_group check path:
+        with patch.object(bootstrap, "_verify_prepared", return_value=(manifest, {**self.inputs})), patch.object(
+            bootstrap, "owner_context"
+        ) as azure, patch.object(bootstrap, "command") as command, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertIn("production", str(err.exception).lower())
+        azure.assert_not_called()
+        self._assert_no_apply([c.args[0] for c in command.call_args_list] if command.call_args_list else [])
+        manifest["resource_group"] = bootstrap.RESOURCE_GROUP
+        manifest["profile"] = "cosmabot-vm/eastus2/lab01/local-initial"
+        with patch.object(bootstrap, "_verify_prepared", return_value=(manifest, {**self.inputs})), patch.object(
+            bootstrap, "owner_context"
+        ) as azure, patch.object(bootstrap, "command") as command, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertIn("namespace", str(err.exception).lower())
+        azure.assert_not_called()
+        # Malformed / missing plan artifacts
+        (self.folder / "plan-summary.json").unlink()
         with patch.object(bootstrap, "owner_context") as azure, patch.object(bootstrap, "command") as command, self.assertRaises(bootstrap.Refused):
             bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
         azure.assert_not_called()
         command.assert_not_called()
 
     def test_apply_refuses_without_confirm_flag(self):
-        approval = self.root / "approval2.json"
-        approval.write_text(json.dumps({
-            "reviewer": "john@example.invalid",
-            "review_reference": "ticket",
-            "plan_sha256": "a" * 64,
-            "summary_sha256": "b" * 64,
-        }))
-        approval.chmod(0o600)
+        approval = self._approval("a" * 64, "b" * 64)
         with self.assertRaises(bootstrap.Refused) as err:
             bootstrap.apply(self.folder, confirm_apply=False, approval_path=approval)
         self.assertIn("refusing apply without --confirm-apply", str(err.exception))
+
+    def _refuse_apply(self, approval, *, needle: str):
+        with patch.object(bootstrap, "owner_context") as azure, patch.object(
+            bootstrap, "command"
+        ) as command, patch.object(subprocess, "Popen") as popen, self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertNotIsInstance(err.exception, bootstrap.ApplyAttempted)
+        self.assertIn(needle, str(err.exception).lower())
+        azure.assert_not_called()
+        popen.assert_not_called()
+        self._assert_no_apply([c.args[0] for c in command.call_args_list])
+
+    def test_approval_binding_refusals(self):
+        plan_sha, summary, plan_json = self._planned()
+        self._refuse_apply(
+            self._approval("0" * 64, summary["summary_sha256"]),
+            needle="plan_sha256",
+        )
+        self._refuse_apply(
+            self._approval(plan_sha, "0" * 64),
+            needle="summary_sha256",
+        )
+        self._refuse_apply(
+            self._approval(plan_sha, summary["summary_sha256"], inside_repo=True),
+            needle="outside",
+        )
+        self._refuse_apply(
+            self._approval(plan_sha, summary["summary_sha256"], mode=0o644),
+            needle="ownership or mode",
+        )
+        self._refuse_apply(
+            self._approval(plan_sha, summary["summary_sha256"], symlink=True),
+            needle="outside",
+        )
+        self._refuse_apply(
+            self._approval(plan_sha, summary["summary_sha256"], drop=["reviewer"]),
+            needle="approval file must contain",
+        )
+        self._refuse_apply(
+            self._approval(plan_sha, summary["summary_sha256"], extra={"note": "nope"}),
+            needle="approval file must contain",
+        )
+        # plan-result hash mismatch
+        bad_result = json.loads((self.folder / "plan-result.json").read_text())
+        bad_result["plan_sha256"] = "0" * 64
+        (self.folder / "plan-result.json").write_text(json.dumps(bad_result))
+        (self.folder / "plan-result.json").chmod(0o600)
+        self._refuse_apply(
+            self._approval(plan_sha, summary["summary_sha256"]),
+            needle="plan-result.json",
+        )
+        # change plan file after review
+        plan_sha, summary, plan_json = self._write_plan_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        (self.folder / "plans/first.tfplan").write_bytes(b"tampered-after-review")
+        (self.folder / "plans/first.tfplan").chmod(0o600)
+        self._refuse_apply(approval, needle="plan-result.json")
+        # tampered plan-summary.json (body + stored hash diverge from plan-result)
+        plan_sha, summary, plan_json = self._write_plan_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        summary_path = self.folder / "plan-summary.json"
+        tampered = json.loads(summary_path.read_text())
+        tampered["create"] = {"azurerm_resource_group": 99}
+        tampered["summary_sha256"] = "0" * 64
+        summary_path.write_text(json.dumps(tampered))
+        summary_path.chmod(0o600)
+        self._refuse_apply(approval, needle="plan-summary.json")
+
+    def test_apply_positive_one_tofu_apply_and_recompute(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        popen_calls = []
+
+        def run(argv, **kwargs):
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        class FakeProc:
+            def __init__(self, argv):
+                popen_calls.append(argv)
+
+            def wait(self, timeout=None):
+                return 0
+
+            def terminate(self):
+                return None
+
+            def kill(self):
+                return None
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run
+        ), patch.object(subprocess, "Popen", side_effect=lambda *a, **k: FakeProc(a[0])):
+            result = bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertTrue(result["applied"])
+        self.assertEqual(len(popen_calls), 1)
+        self.assertEqual(popen_calls[0][1], "apply")
+        self.assertEqual(popen_calls[0][-1], str(self.folder / "plans/first.tfplan"))
+
+    def test_apply_failure_reports_attempted(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+
+        def run(argv, **kwargs):
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        class FakeProc:
+            def wait(self, timeout=None):
+                return 1
+
+            def terminate(self):
+                return None
+
+            def kill(self):
+                return None
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run
+        ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
+            bootstrap.ApplyAttempted
+        ) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertIn("attempted", str(err.exception).lower())
+        self.assertNotIn("No apply was attempted", str(err.exception))
 
 
 class EncryptionProof(unittest.TestCase):

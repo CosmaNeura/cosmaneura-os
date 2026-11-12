@@ -38,12 +38,12 @@ output "foundation" {
 }
 
 output "azure_openai_endpoint" {
-  description = "Prod OpenAI account endpoint when enable_azure_openai=true; null when off."
+  description = "Cognitive account base URL when enable_azure_openai=true (not the app WORKSPACE_LLM_ENDPOINT setting); null when off."
   value       = module.azure_openai.endpoint
 }
 
 output "azure_openai_deployment_name" {
-  description = "Prod deployment name when enabled (gpt-4.1-dzus); null when off."
+  description = "Prod deployment name when enabled (gpt-4.1-dzus); null when off. Resources only until a later LLM cutover; routes_runtime_traffic stays false."
   value       = module.azure_openai.deployment_name
 }
 

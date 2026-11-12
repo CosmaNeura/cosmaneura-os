@@ -216,10 +216,8 @@ print(f"enable_azure_openai (effective): {summary.get('enable_azure_openai')}")
 print(f"plan_sha256: {result['plan_sha256']}")
 print(f"summary_sha256: {result['summary_sha256']}")
 print("Review complete. Plan saved under the private directory. Nothing was applied.")
-print("First-apply-only. After John's yes, bind an approval file to plan_sha256 + summary_sha256, then:")
-print(
-    "  bash infra/beta/apply-cosmabot-prod-foundation.sh "
-    "--confirm-apply --approval /absolute/path/approval.json "
-    f"--private-dir {sys.argv[2]}"
-)
+print("First-apply-only. After John's yes, bind an approval file (0600, outside the repo) to:")
+print(f"  plan_sha256={result['plan_sha256']}")
+print(f"  summary_sha256={result['summary_sha256']}")
+print("Then follow the Apply section in infra/beta/vm/prod/README.md.")
 PY

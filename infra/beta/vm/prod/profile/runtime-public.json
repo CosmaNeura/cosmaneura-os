@@ -2,12 +2,6 @@
   "profile": "cosmabot-vm-prod-v1",
   "web_origin": "https://beta.cosmas.ai",
   "api_origin": "https://api.beta.cosmas.ai",
-  "dns": {
-    "records": [
-      {"name": "beta.cosmas.ai", "type": "A", "proxy": false, "note": "Placeholder record type only; DNS cutover is a separate later ticket"},
-      {"name": "api.beta.cosmas.ai", "type": "A", "proxy": false, "note": "Placeholder record type only; DNS cutover is a separate later ticket"}
-    ]
-  },
   "runtime": {
     "environment": {
       "COSMAS_ENV": "early_adopter_beta",
@@ -21,21 +15,27 @@
     },
     "secret_names": [
       "CLERK_SECRET_KEY",
-      "WORKSPACE_LLM_API_KEY",
+      "CLERK_ACCOUNT_DELETION_SECRET",
+      "DATABASE_PASSWORD",
+      "POSTGRES_PASSWORD",
+      "REDIS_PASSWORD",
       "HUMAN_DEPLOY_EVIDENCE_REF"
     ],
     "notes": [
-      "Values live in Key Vault and are installed by the release operator as 0400 host files; the runtime identity cannot read the vault.",
-      "With enable_azure_openai=false, prod has no LLM endpoint until the OpenAI opt-in. Do not point at any shared model account.",
-      "With enable_azure_openai=true, set WORKSPACE_LLM_ENDPOINT from the foundation module output azure_openai_endpoint (prod account only), keep model gpt-4.1, and load WORKSPACE_LLM_API_KEY from Key Vault per the secret-loading section. Deployment name created by the module is gpt-4.1-dzus (deployment_created_when_enabled).",
-      "REAL_PATIENT_RECORDING_ENABLED stays false in the production hosting profile."
+      "Values live in Key Vault. Installing secrets onto the host as 0400 files is a separate later ticket; this PR creates infrastructure only and the prod VM holds no secrets until a release ticket.",
+      "routes_runtime_traffic is false: enable_azure_openai creates resources only and routes no runtime traffic. Prod has no LLM traffic until a separate later cutover.",
+      "The shared model account key must never be loaded into prod. WORKSPACE_LLM_API_KEY is declared only at the later LLM cutover, not in this first-apply profile.",
+      "Module output azure_openai_endpoint is the Cognitive account base URL, not the app WORKSPACE_LLM_ENDPOINT setting form until the app cutover ticket.",
+      "REAL_PATIENT_RECORDING_ENABLED stays false in the production hosting profile.",
+      "allow_extension_operations stays true for the monitor agent; Run Command must never carry secret values (CTO decision, 11 Nov 2026)."
     ]
   },
   "azure_openai_module": {
     "enabled_by_default": false,
     "deployment_created_when_enabled": "gpt-4.1-dzus",
-    "routes_runtime_traffic": true,
+    "routes_runtime_traffic": false,
     "model": "gpt-4.1",
-    "model_version": "2025-04-14"
+    "model_version": "2025-04-14",
+    "first_apply_capacity": 1
   }
 }

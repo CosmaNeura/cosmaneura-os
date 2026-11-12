@@ -81,24 +81,34 @@ for needle in (
 print("staging foundation has no production names")
 PY
 
-# Prod README/scripts must not contain DNS-record change steps for beta hosts.
+# Prod README/profile/scripts must not contain DNS-record change steps.
 python3 - "$repo_dir" <<'PY'
 from pathlib import Path
 import sys
 repo = Path(sys.argv[1])
 paths = [
     repo / "infra/beta/vm/prod/README.md",
+    repo / "infra/beta/vm/prod/profile/runtime-public.json",
     repo / "infra/beta/review-cosmabot-prod-foundation.sh",
     repo / "infra/beta/apply-cosmabot-prod-foundation.sh",
 ]
+needles = (
+    "az network dns",
+    "nsupdate",
+    "dns record set",
+    "cloudflare api",
+    "update the beta.cosmas.ai",
+    "A records at the DNS provider",
+)
 for path in paths:
-    text = path.read_text()
-    for needle in ("az network dns", "nsupdate", "dns record set", "cloudflare api"):
-        if needle in text.lower() if needle.islower() else needle in text:
-            # case-insensitive check
-            if needle.lower() in text.lower():
-                raise SystemExit(f"{path} contains DNS mutation step: {needle}")
-print("no DNS-record change steps in prod README/scripts")
+    text = path.read_text().lower()
+    for needle in needles:
+        if needle.lower() in text:
+            raise SystemExit(f"{path} contains DNS mutation step: {needle}")
+profile = (repo / "infra/beta/vm/prod/profile/runtime-public.json").read_text()
+if '"dns"' in profile or "dns.records" in profile:
+    raise SystemExit("profile must not declare dns.records")
+print("no DNS-record change steps in prod README/profile/scripts")
 PY
 
 [[ ! -s "$COSMABOT_STUB_MARKER" ]] || { echo "stub marker written unexpectedly" >&2; exit 1; }

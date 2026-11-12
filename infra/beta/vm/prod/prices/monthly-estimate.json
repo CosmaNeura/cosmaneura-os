@@ -9,7 +9,8 @@
     "Checked-in retail estimate for the CosmaBot production VM foundation shape.",
     "VM/ACR/storage envelope priced_on 2026-09-25; Azure OpenAI Data Zone token rates and OpenAI PE/DNS priced_on 2026-11-11 (Azure Retail Prices API eastus2).",
     "Not an Azure invoice, reservation quote, or spending cap. No credits, tax, or transfer assumed.",
-    "Standing costs only in the printed totals. Token usage is pay-as-you-go and not included. Illustrative capacity-bounded ceiling at DataZoneStandard capacity 10 is operator-estimated from traffic, not a hard Azure cap."
+    "Standing costs only in the printed totals. Token usage is pay-as-you-go and not included.",
+    "First-apply DataZoneStandard capacity is 1 (1000 TPM). Continuous-use ceiling at that capacity is 1000 TPM × 60 × 730 ≈ 43,800,000 tokens/month; dollar spend depends on input/output mix and is not a standing fee. Capacity increases only in the later LLM cutover ticket."
   ],
   "line_items": [
     {
@@ -89,5 +90,5 @@
     }
   ],
   "warning_threshold_usd": 300,
-  "illustrative_token_assumption": "Standing OpenAI network + envelope only; token spend excluded. Capacity-bounded ceiling is operator-estimated from DataZoneStandard capacity 10 traffic, not printed as a dollar total here."
+  "illustrative_token_assumption": "Standing OpenAI network + envelope only; token spend excluded. First-apply capacity 1 ceiling ≈ 43,800,000 tokens/month at continuous 1000 TPM; not printed as a dollar total here."
 }

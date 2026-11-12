@@ -31,7 +31,7 @@ resource "azurerm_linux_virtual_machine" "workload" {
     version   = var.ubuntu_image_version
   }
   boot_diagnostics {}
-  tags = merge(local.tags, { component = "production-workload", control_path = "azure-run-command" })
+  tags = merge(local.tags, { component = "production-workload", control_path = "separate-release-ticket" })
   lifecycle { prevent_destroy = true }
 }
 resource "azurerm_managed_disk" "data" {

@@ -129,11 +129,29 @@ def validate_rendered(bundle: dict) -> None:
     if params["workspace_llm_deployment"] != "gpt-4.1":
         raise DryRunError("model_deployment_must_stay_gpt41")
     if "WORKSPACE_LLM_ENDPOINT" in profile["runtime"]["environment"]:
-        raise DryRunError("workspace_llm_endpoint_must_be_absent_until_optin")
+        raise DryRunError("workspace_llm_endpoint_must_be_absent_until_cutover")
     if profile["runtime"]["environment"].get("WORKSPACE_LLM_USDZ_ENABLED") != "false":
         raise DryRunError("usdz_must_default_false_in_profile")
+    if profile["azure_openai_module"].get("routes_runtime_traffic") is not False:
+        raise DryRunError("routes_runtime_traffic_must_be_false")
+    if profile["azure_openai_module"].get("first_apply_capacity") != 1:
+        raise DryRunError("first_apply_capacity_must_be_1")
+    if "WORKSPACE_LLM_API_KEY" in profile["runtime"]["secret_names"]:
+        raise DryRunError("workspace_llm_api_key_must_wait_for_cutover")
+    if "dns" in profile:
+        raise DryRunError("profile_must_not_declare_dns_records")
     if "cosmas" + "code" in json.dumps(profile).lower():
         raise DryRunError("prod_must_not_reference_shared_model_account")
+    expected_secrets = {
+        "CLERK_SECRET_KEY",
+        "CLERK_ACCOUNT_DELETION_SECRET",
+        "DATABASE_PASSWORD",
+        "POSTGRES_PASSWORD",
+        "REDIS_PASSWORD",
+        "HUMAN_DEPLOY_EVIDENCE_REF",
+    }
+    if set(profile["runtime"]["secret_names"]) != expected_secrets:
+        raise DryRunError("secret_names_must_match_first_apply_set")
     if "CLERK_SECRET_KEY" not in params["clerk_secret_names_only"]:
         raise DryRunError("clerk_secret_name_required")
     # No secret values may appear in the checked-in profile.
@@ -142,6 +160,10 @@ def validate_rendered(bundle: dict) -> None:
         raise DryRunError("clerk_secret_values_forbidden")
     if prices["label"] != "estimate" or not prices.get("price_date"):
         raise DryRunError("price_table_must_be_labeled_estimate_with_date")
+    if "43,800,000" not in " ".join(prices.get("notes", [])) and "43800000" not in json.dumps(
+        prices
+    ):
+        raise DryRunError("price_notes_must_state_capacity_1_token_ceiling")
     default_total = monthly_total(prices, include_openai=False)
     optin_total = monthly_total(prices, include_openai=True)
     if default_total <= 0 or optin_total <= 0:
@@ -171,7 +193,7 @@ def validate_openai_opt_in_source() -> None:
         '"gpt-4.1-dzus"',
         '"2025-04-14"',
         '"DataZoneStandard"',
-        "capacity = 10",
+        "capacity = 1",
         '"privatelink.openai.azure.com"',
         "public_network_access_enabled = false",
         'subresource_names              = ["account"]',
@@ -182,10 +204,24 @@ def validate_openai_opt_in_source() -> None:
             raise DryRunError(f"openai_opt_in_source_missing:{needle}")
     if re.search(r"local_auth_enabled\s*=\s*false", module):
         raise DryRunError("openai_must_keep_local_key_auth")
-    if 'role_definition_name             = "Cognitive Services OpenAI User"' in module:
+    if "azurerm_role_assignment" in module:
         raise DryRunError("openai_must_not_grant_runtime_mi_role")
     if "runtime_principal_id" in (FOUNDATION / "modules/azure_openai/variables.tf").read_text():
         raise DryRunError("openai_must_not_grant_runtime_mi_role")
+    # Every resource block must gate on the enable variable via count/for_each.
+    for match in re.finditer(r'resource\s+"[^"]+"\s+"[^"]+"\s*\{', module):
+        start = match.end()
+        depth = 1
+        i = start
+        while i < len(module) and depth:
+            if module[i] == "{":
+                depth += 1
+            elif module[i] == "}":
+                depth -= 1
+            i += 1
+        body = module[start:i]
+        if not re.search(r"(count|for_each)\s*=\s*[^\n]*var\.enabled", body):
+            raise DryRunError("openai_resource_missing_enable_gate")
 
 
 class _expect:
@@ -199,6 +235,66 @@ class _expect:
         if exc_type is None:
             raise DryRunError(f"expected_{self.exc_type.__name__}")
         return issubclass(exc_type, self.exc_type)
+
+
+def validate_secret_name_alignment(readme: str) -> None:
+    """Table rows, set --name values, and profile secret_names must match 1:1."""
+    profile = load_json(ROOT / "profile" / "runtime-public.json")
+    secret_names = set(profile["runtime"]["secret_names"])
+    table = readme.split("Names-only mapping", 1)[1].split("## ", 1)[0]
+    host_files: set[str] = set()
+    kv_from_table: set[str] = set()
+    for line in table.splitlines():
+        if not line.startswith("|") or line.startswith("| ---") or "Key Vault secret name" in line:
+            continue
+        cells = [cell.strip().strip("`") for cell in line.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        kv_name, host_name = cells[0], cells[1]
+        if not kv_name or not host_name:
+            continue
+        kv_from_table.add(kv_name.replace("-", "_"))
+        host_files.add(host_name)
+    set_names = set(
+        re.findall(
+            r"--name\s+([A-Z][A-Z0-9-]+)",
+            readme.split("Load secrets into Key Vault", 1)[1].split("## Later LLM cutover", 1)[0],
+        )
+    )
+    from_kv = {name.replace("-", "_") for name in set_names}
+    if host_files != secret_names:
+        raise DryRunError(f"secret_table_host_files_mismatch:{sorted(host_files ^ secret_names)}")
+    if kv_from_table != secret_names:
+        raise DryRunError(f"secret_table_kv_mismatch:{sorted(kv_from_table ^ secret_names)}")
+    if from_kv != secret_names:
+        raise DryRunError(f"secret_set_commands_mismatch:{sorted(from_kv ^ secret_names)}")
+
+
+def validate_no_run_command() -> None:
+    """Forbid Run Command transports in prod IaC/docs/scripts (item 9b)."""
+    paths = [
+        ROOT / "README.md",
+        REPO / "infra/beta/review-cosmabot-prod-foundation.sh",
+        REPO / "infra/beta/apply-cosmabot-prod-foundation.sh",
+        ROOT / "name_guards.py",
+        FOUNDATION / "bootstrap_local.py",
+        *FOUNDATION.rglob("*.tf"),
+    ]
+    forbidden = (
+        r"az\s+vm\s+run-command",
+        r"run-command\s+invoke",
+        r"runcommand",
+        r"invoke[^\n]*--scripts",
+        r"--scripts[^\n]*install-secrets",
+        r'control_path\s*=\s*"[^"]*run-command',
+    )
+    for path in paths:
+        if not path.is_file() or "tests" in path.parts:
+            continue
+        text = path.read_text()
+        for pattern in forbidden:
+            if re.search(pattern, text, re.I):
+                raise DryRunError(f"run_command_forbidden:{path}:{pattern}")
 
 
 def validate_foundation_source() -> None:
@@ -250,22 +346,61 @@ def validate_foundation_source() -> None:
         if "azurerm_key_vault_secret" in path.read_text():
             raise DryRunError(f"key_vault_secret_resource_forbidden:{path}")
     readme = (ROOT / "README.md").read_text()
-    if "Load secrets (release operator, after apply, before any runtime start)" not in readme:
+    if "Load secrets into Key Vault" not in readme:
         raise DryRunError("readme_secret_loading_section_missing")
-    secret = readme.split("Load secrets", 1)[1].split("## DNS", 1)[0]
+    if "CTO decision, 11 Nov 2026" not in readme:
+        raise DryRunError("readme_must_cite_cto_decision_date")
+    if "Approved temporary path" in readme:
+        raise DryRunError("readme_must_not_use_approved_temporary_path_label")
+    if "needs CTO yes" in readme or "needs-CTO-yes" in readme:
+        raise DryRunError("readme_must_not_use_needs_cto_yes_label")
+    secret = readme.split("Load secrets into Key Vault", 1)[1].split("## Later LLM cutover", 1)[0]
     if "--file" not in secret:
         raise DryRunError("readme_secret_loading_must_use_file_not_value")
-    # Forbid command forms that pass a secret via --value= / --value <secret>
     if re.search(r"--value(=|\s+\S)", secret):
         raise DryRunError("readme_secret_loading_must_use_file_not_value")
-    if "cosmas" + "code" in readme.lower():
+    if "set -euo pipefail" not in secret:
+        raise DryRunError("readme_secret_block_must_use_strict_shell")
+    if "trap cleanup EXIT" not in secret:
+        raise DryRunError("readme_secret_block_must_trap_cleanup")
+    if "--public-network-access Disabled" not in secret:
+        raise DryRunError("readme_secret_block_must_revert_public_access")
+    if "network-rule list" not in secret or "publicNetworkAccess" not in secret:
+        raise DryRunError("readme_secret_block_must_verify_revert")
+    if "POSTGRES-PASSWORD" not in secret or "REDIS-PASSWORD" not in secret:
+        raise DryRunError("readme_secret_block_must_set_postgres_and_redis")
+    if "separate later ticket" not in secret.lower() and "separate later ticket" not in readme.lower():
+        raise DryRunError("readme_must_state_host_install_is_later_ticket")
+    if "routes_runtime_traffic" not in readme or "false" not in readme:
+        raise DryRunError("readme_must_state_routes_runtime_traffic_false")
+    if "Later LLM cutover" not in readme:
+        raise DryRunError("readme_must_document_llm_cutover_list")
+    validate_secret_name_alignment(readme)
+    if "cosmas" + "code" in readme.lower() and "never be loaded" not in readme.lower():
         raise DryRunError("prod_readme_must_not_reference_shared_model_account")
-    dns_section = readme.split("## DNS", 1)[1].split("## ", 1)[0]
-    for needle in ("az network dns", "dns record", "nsupdate", "cloudflare", "TTL"):
-        if needle.lower() in dns_section.lower() and "separate later ticket" not in dns_section:
-            raise DryRunError("dns_section_must_not_change_records")
-    if "Nothing in #356 touches DNS" not in dns_section:
+    # Whole-README / profile / scripts DNS mutation scan (no "later ticket" escape).
+    dns_needles = (
+        "az network dns",
+        "dns record set",
+        "nsupdate",
+        "cloudflare api",
+        "update the beta.cosmas.ai",
+        "A records at the DNS provider",
+    )
+    scan_targets = [
+        readme,
+        (ROOT / "profile" / "runtime-public.json").read_text(),
+        (REPO / "infra/beta/review-cosmabot-prod-foundation.sh").read_text(),
+        (REPO / "infra/beta/apply-cosmabot-prod-foundation.sh").read_text(),
+    ]
+    for text in scan_targets:
+        lowered = text.lower()
+        for needle in dns_needles:
+            if needle.lower() in lowered:
+                raise DryRunError(f"dns_record_change_wording_forbidden:{needle}")
+    if "## DNS" not in readme or "Nothing in #356 touches DNS" not in readme:
         raise DryRunError("dns_one_liner_missing")
+    validate_no_run_command()
     staging_foundation = REPO / "infra/beta/vm/foundation"
     staging_text = "\n".join(
         path.read_text()

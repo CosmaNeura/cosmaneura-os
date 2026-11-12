@@ -10,6 +10,10 @@ output "deployment_name" {
   value = var.enabled ? azurerm_cognitive_deployment.gpt41_dzus[0].name : null
 }
 
+output "deployment_capacity" {
+  value = var.enabled ? azurerm_cognitive_deployment.gpt41_dzus[0].sku[0].capacity : null
+}
+
 output "private_endpoint_id" {
   value = var.enabled ? azurerm_private_endpoint.openai[0].id : null
 }

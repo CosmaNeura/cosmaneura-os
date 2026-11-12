@@ -364,8 +364,20 @@ run "azure_openai_opt_in_creates_dzus_and_private_path" {
       module.azure_openai.deployment_name == "gpt-4.1-dzus" &&
       module.azure_openai.private_endpoint_id != null &&
       module.azure_openai.private_dns_zone_id != null &&
-      output.azure_openai_deployment_name == "gpt-4.1-dzus"
+      output.azure_openai_deployment_name == "gpt-4.1-dzus" &&
+      module.azure_openai.deployment_capacity == 1
     )
-    error_message = "Opt-in plan must create gpt-4.1-dzus with private endpoint and DNS."
+    error_message = "Opt-in plan must create gpt-4.1-dzus capacity 1 with private endpoint and DNS."
+  }
+}
+
+run "workload_control_path_not_run_command" {
+  command = plan
+  assert {
+    condition = (
+      azurerm_linux_virtual_machine.workload.allow_extension_operations == true &&
+      azurerm_linux_virtual_machine.workload.tags["control_path"] == "separate-release-ticket"
+    )
+    error_message = "VM must keep allow_extension_operations true and must not name Run Command on control_path."
   }
 }

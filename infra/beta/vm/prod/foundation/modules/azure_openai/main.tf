@@ -1,9 +1,9 @@
 # Separate Azure OpenAI module. Variable default remains false for module safety.
 # When enable_azure_openai=true in reviewed inputs, these resources appear in the
-# plan John reviews. Local key auth stays enabled: CosmaBot loads
-# WORKSPACE_LLM_API_KEY from a 0400 host file (see prod README secret loading).
-# Do not disable local auth. Do not grant Cognitive Services OpenAI User to the
-# runtime identity — the app uses the API key, not managed-identity token auth.
+# plan John reviews. First-apply capacity is the minimum DataZoneStandard unit
+# (1). Capacity increases only in the later LLM cutover ticket. Local key auth
+# stays enabled for that later cutover; do not grant Cognitive Services OpenAI
+# User to the runtime identity.
 
 resource "azurerm_cognitive_account" "openai" {
   count                         = var.enabled ? 1 : 0
@@ -35,7 +35,7 @@ resource "azurerm_cognitive_deployment" "gpt41_dzus" {
 
   sku {
     name     = "DataZoneStandard"
-    capacity = 10
+    capacity = 1
   }
 }
 

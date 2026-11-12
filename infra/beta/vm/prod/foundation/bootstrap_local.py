@@ -49,6 +49,12 @@ class Refused(RuntimeError):
     pass
 
 
+class ApplyAttempted(Refused):
+    """Raised after tofu apply has started (success path never raises this)."""
+
+    pass
+
+
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -517,17 +523,66 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path) -> dict:
     env = execution_environment(folder)
     if owner_context(clean_environment(), inputs) != manifest["context"]:
         raise Refused("Owner CLI context changed since preparation")
-    result = command(
-        [str(tofu), "apply", "-input=false", "-lock=true", "-lock-timeout=30s", str(plan_path)],
+    # Recompute the sanitised summary from the hashed plan before apply.
+    show = command(
+        [str(tofu), "show", "-json", str(plan_path)],
         cwd=folder / "module",
         env=env,
-        timeout=600,
+        timeout=120,
     )
-    write_private(folder / "logs/apply.log", result.stdout + result.stderr)
-    if result.returncode:
-        raise Refused(
-            "Apply failed; private logs retained. Partial-apply recovery: keep the private directory, "
-            "do not run raw tofu by hand, and open a separately reviewed recovery ticket before retry."
+    if show.returncode:
+        raise Refused("Cannot re-show the reviewed plan before apply")
+    recomputed = sanitize_plan_summary(
+        json.loads(show.stdout),
+        inputs=inputs,
+        plan_sha256=plan_sha,
+    )
+    if recomputed["summary_sha256"] != summary["summary_sha256"]:
+        raise Refused("Recomputed plan summary does not match plan-summary.json")
+    if recomputed["summary_sha256"] != plan_result.get("summary_sha256"):
+        raise Refused("Recomputed plan summary does not match plan-result.json")
+    if recomputed["summary_sha256"] != read_json(approval_path)["summary_sha256"]:
+        raise Refused("Recomputed plan summary does not match approval summary_sha256")
+    logs = folder / "logs"
+    logs.mkdir(mode=0o700, exist_ok=True)
+    log_path = logs / f"apply-{secrets.token_hex(8)}.log"
+    argv = [
+        str(tofu),
+        "apply",
+        "-input=false",
+        "-lock=true",
+        "-lock-timeout=30s",
+        str(plan_path),
+    ]
+    with open(log_path, "wb") as log_stream:
+        proc = subprocess.Popen(
+            argv,
+            cwd=folder / "module",
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_stream,
+            stderr=subprocess.STDOUT,
+            umask=0o077,
+        )
+        try:
+            returncode = proc.wait()
+        except KeyboardInterrupt as exc:
+            proc.terminate()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            raise ApplyAttempted(
+                "Apply interrupted after start; private logs retained. Partial-apply recovery: keep the "
+                "private directory, do not run raw tofu by hand, and open a separately reviewed recovery "
+                f"ticket before retry. log={log_path}"
+            ) from exc
+    if returncode:
+        raise ApplyAttempted(
+            "Apply was attempted and failed; private logs retained. Partial-apply recovery: keep the "
+            "private directory, do not run raw tofu by hand, and open a separately reviewed recovery "
+            f"ticket before retry. log={log_path}"
         )
     return {"applied": True, "plan_sha256": plan_sha, "resource_group": RESOURCE_GROUP, "first_apply_only": True}
 
@@ -566,6 +621,12 @@ def main() -> None:
         else:
             result = apply(args.private_dir, confirm_apply=args.confirm_apply, approval_path=args.approval)
         print(json.dumps(result, sort_keys=True))
+    except ApplyAttempted as exc:
+        print(
+            f"Encrypted local bootstrap: apply was attempted and did not complete cleanly. {exc}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from None
     except (Refused, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         print(
             "Encrypted local bootstrap refused; inspect reviewed inputs or private logs. No apply was attempted.",

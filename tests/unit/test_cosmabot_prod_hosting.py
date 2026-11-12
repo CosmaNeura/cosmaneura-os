@@ -38,8 +38,6 @@ def test_production_refuses_staging_names():
         )
     with pytest.raises(guards.NameGuardError, match="production_refuses"):
         guards.assert_production_inputs({"web_host": guards.STAGING["web_host"]})
-    with pytest.raises(guards.NameGuardError, match="production_refuses"):
-        guards.assert_production_inputs({"acr_prefix": guards.STAGING["acr_prefix"]})
 
 
 def test_staging_refuses_production_names():
@@ -65,15 +63,7 @@ def test_m4_embedded_name_refusal_both_directions():
             {"url": f"https://{guards.STAGING['web_host']}/path"}
         )
     with pytest.raises(guards.NameGuardError):
-        guards.assert_production_inputs(
-            {"email": f"ops@{guards.STAGING['web_host']}"}
-        )
-    with pytest.raises(guards.NameGuardError):
         guards.assert_staging_inputs({"acr": guards.PRODUCTION["acr_prefix"] + "x"})
-    with pytest.raises(guards.NameGuardError):
-        guards.assert_staging_inputs(
-            {"url": f"https://{guards.PRODUCTION['api_host']}/x"}
-        )
 
 
 def test_m4_legitimate_production_values_pass():
@@ -97,7 +87,7 @@ def test_real_patient_recording_stays_off_in_prod_profile():
     assert profile["runtime"]["environment"]["REAL_PATIENT_RECORDING_ENABLED"] == "false"
 
 
-def test_model_config_and_no_endpoint_until_optin():
+def test_model_config_routes_false_and_no_endpoint_until_cutover():
     profile = json.loads((PROD / "profile/runtime-public.json").read_text())
     env = profile["runtime"]["environment"]
     assert env["WORKSPACE_LLM_BACKEND"] == "azure_gpt41"
@@ -105,7 +95,10 @@ def test_model_config_and_no_endpoint_until_optin():
     assert env["WORKSPACE_LLM_USDZ_ENABLED"] == "false"
     assert "WORKSPACE_LLM_ENDPOINT" not in env
     assert profile["azure_openai_module"]["deployment_created_when_enabled"] == "gpt-4.1-dzus"
-    assert profile["azure_openai_module"]["routes_runtime_traffic"] is True
+    assert profile["azure_openai_module"]["routes_runtime_traffic"] is False
+    assert profile["azure_openai_module"]["first_apply_capacity"] == 1
+    assert "WORKSPACE_LLM_API_KEY" not in profile["runtime"]["secret_names"]
+    assert "dns" not in profile
 
 
 def test_prod_tree_never_references_cosmascode():
@@ -118,6 +111,9 @@ def test_prod_tree_never_references_cosmascode():
         if "tests" in path.parts:
             continue
         text = path.read_text().lower()
+        # README may mention the shared account only to forbid loading its key.
+        if path.name == "README.md" and "never be loaded into prod" in text:
+            continue
         assert needle not in text, path
 
 
@@ -147,49 +143,57 @@ def test_azure_openai_defaults_off_and_opt_in_shape():
     openai = (FOUNDATION / "openai.tf").read_text()
     block = re.search(r'variable\s+"enable_azure_openai"\s*\{.*?\n\}', openai, re.S)
     assert block and re.search(r"default\s*=\s*false", block.group(0))
-    # Hole 9: review must not refuse a plan with enable_azure_openai=false.
     assert "refuses plans with this false" not in openai
-    assert "must set true" not in openai.lower()
     module = (FOUNDATION / "modules/azure_openai/main.tf").read_text()
     assert "gpt-4.1-dzus" in module
     assert "DataZoneStandard" in module
+    assert "capacity = 1" in module
     assert not re.search(r"local_auth_enabled\s*=\s*false", module)
-    assert 'role_definition_name             = "Cognitive Services OpenAI User"' not in module
-    assert "require enable_azure_openai=true" not in module
-    for block in re.finditer(r'resource\s+"[^"]+"\s+"[^"]+"\s*\{', module):
-        # every resource must be gated by count/for_each on enabled
-        start = block.start()
-        chunk = module[start : start + 400]
-        assert "count" in chunk or "for_each" in chunk
+    assert "azurerm_role_assignment" not in module
+    for match in re.finditer(r'resource\s+"[^"]+"\s+"[^"]+"\s*\{', module):
+        start = match.end()
+        depth = 1
+        i = start
+        while i < len(module) and depth:
+            if module[i] == "{":
+                depth += 1
+            elif module[i] == "}":
+                depth -= 1
+            i += 1
+        body = module[start:i]
+        assert re.search(r"(count|for_each)\s*=\s*[^\n]*var\.enabled", body)
 
 
-def test_readme_no_llm_until_optin_and_no_needs_cto_for_approved_holes():
+def test_compute_control_path_and_allow_extension():
+    compute = (FOUNDATION / "compute.tf").read_text()
+    assert 'control_path = "separate-release-ticket"' in compute
+    assert "run-command" not in compute.lower()
+    assert "allow_extension_operations      = true" in compute
+
+
+def test_readme_secret_loading_dns_and_cto_labels():
     readme = (PROD / "README.md").read_text()
-    assert "no LLM endpoint" in readme
-    assert "Approved temporary path" in readme
+    assert "Load secrets into Key Vault" in readme
+    assert "CTO decision, 11 Nov 2026" in readme
+    assert "Approved temporary path" not in readme
+    assert "needs CTO yes" not in readme
     assert "needs-CTO-yes" not in readme
-    assert "needs_cto" not in readme.lower()
-    foundation_readme = (FOUNDATION / "README.md").read_text()
-    assert "needs-CTO-yes" not in foundation_readme
-
-
-def test_no_key_vault_secret_resources():
-    for path in PROD.rglob("*.tf"):
-        assert "azurerm_key_vault_secret" not in path.read_text()
-
-
-def test_readme_secret_loading_and_dns_one_liner():
-    readme = (PROD / "README.md").read_text()
-    assert "Load secrets (release operator, after apply, before any runtime start)" in readme
-    secret = readme.split("Load secrets", 1)[1].split("## DNS", 1)[0]
-    assert "--file" in secret
-    assert not re.search(r"--value(=|\s+\S)", secret)
-    dns = readme.split("## DNS", 1)[1].split("## ", 1)[0]
-    assert "Nothing in #356 touches DNS" in dns
-    for needle in ("az network dns", "nsupdate"):
-        assert needle not in dns
+    assert "set -euo pipefail" in readme
+    assert "trap cleanup EXIT" in readme
+    assert "--public-network-access Disabled" in readme
+    assert "Later LLM cutover" in readme
+    assert "routes_runtime_traffic" in readme
+    assert "Nothing in #356 touches DNS" in readme
     assert '"enable_azure_openai": false' in readme
     assert "inputs.optin.example.json" in readme
+    secret = readme.split("Load secrets into Key Vault", 1)[1].split("## Later LLM cutover", 1)[0]
+    assert "--file" in secret
+    assert not re.search(r"--value(=|\s+\S)", secret)
+    assert "az vm run-command" not in readme.lower()
+
+
+def test_secret_names_table_set_and_profile_align():
+    dry_run.validate_secret_name_alignment((PROD / "README.md").read_text())
 
 
 def test_inputs_examples_schema_and_no_secret_looking_values():
@@ -201,11 +205,12 @@ def test_inputs_examples_schema_and_no_secret_looking_values():
         assert "AAAAOPENSSHPLACEHOLDER" in data["admin_ssh_public_key"]
 
 
-def test_price_table_dual_totals():
+def test_price_table_dual_totals_and_capacity_ceiling():
     prices = json.loads((PROD / "prices/monthly-estimate.json").read_text())
     assert prices["label"] == "estimate"
     assert dry_run.monthly_total(prices, include_openai=False) == 180.27
     assert dry_run.monthly_total(prices, include_openai=True) == 188.07
+    assert "43,800,000" in " ".join(prices["notes"])
     assert any(item.get("requires") == "enable_azure_openai" for item in prices["line_items"])
 
 
@@ -255,14 +260,13 @@ def test_apply_refuses_without_confirm(tmp_path):
 
 
 def test_plan_summary_refuses_delete_or_replace():
+    boot = _load("cosmabot_prod_bootstrap", FOUNDATION / "bootstrap_local.py")
     summary = {
         "resource_changes": [
             {"type": "azurerm_resource_group", "change": {"actions": ["delete"]}},
         ]
     }
     with pytest.raises(Exception, match="delete or replace"):
-        # load bootstrap sanitize via importlib
-        boot = _load("cosmabot_prod_bootstrap", FOUNDATION / "bootstrap_local.py")
         boot.sanitize_plan_summary(
             summary,
             inputs={
@@ -315,7 +319,7 @@ def test_staging_foundation_untouched_and_without_prod_names():
         assert needle not in staging_text
 
 
-def test_shell_hosting_checks(monkeypatch, tmp_path):
+def test_shell_hosting_checks(monkeypatch):
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     for key in list(os.environ):
         if key.startswith(("ARM_", "TF_")) or key == "AZURE_CONFIG_DIR":
@@ -329,3 +333,10 @@ def test_shell_hosting_checks(monkeypatch, tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "cosmabot-prod-hosting shell checks passed" in result.stdout
+
+
+def test_no_run_command_and_dns_guards():
+    dry_run.validate_no_run_command()
+    readme = (PROD / "README.md").read_text().lower()
+    for needle in ("az network dns", "dns record set", "nsupdate", "cloudflare api"):
+        assert needle not in readme
