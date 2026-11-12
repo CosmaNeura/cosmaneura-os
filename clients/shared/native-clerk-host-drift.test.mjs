@@ -15,14 +15,16 @@ export const INTENTIONAL_CLERK_HOST_DRIFT = Object.freeze([
     swift: Object.freeze([]),
     js: Object.freeze(['clerk.staging.cosmas.ai']),
     reason: 'JS operational-staging-v1 accepts dedicated clerk.staging.cosmas.ai with pk_live_; '
-      + 'Swift operationalStaging has an empty allow-list and refuses it. Unchanged this PR; CTO decides.',
+      + 'Swift operationalStaging has an empty allow-list and refuses it. Unchanged this PR. '
+      + 'Named exception approved by CTO (decision B, 11 Nov 2026). Follow-up after #354: '
+      + 'invented-host-input.json beta identity becomes clerk.cosmas.ai, goldens regenerated, JS beta pinned.',
   }),
   Object.freeze({
     profile: OPERATIONAL_NATIVE_PROFILE,
     swift: Object.freeze(['clerk.cosmas.ai']),
     js: Object.freeze([]),
-    reason: 'Item 1 stop: checked-in infra/standalone/invented-host-input.json uses operational-beta-v1 '
-      + 'with https://identity.standalone.example.com. JS dedicated allow-list was not tightened this PR.',
+    reason: 'Named exception approved by CTO (decision B, 11 Nov 2026). Follow-up after #354: '
+      + 'invented-host-input.json beta identity becomes clerk.cosmas.ai, goldens regenerated, JS beta pinned.',
   }),
 ]);
 
