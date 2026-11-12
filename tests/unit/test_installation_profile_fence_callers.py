@@ -25,7 +25,7 @@ SHARED = ROOT / "clients/shared/operational-native-identity.mjs"
 # outside this set fails CI. Tests and the shared module itself are excluded.
 RAW_VALIDATE_ALLOW_LIST = frozenset({
     "scripts/prepare-workspace-identity.mjs",  # 1d: intentional; fence at package/prepare
-    "scripts/transition-desktop-identity.mjs",  # offline beta→staging; Release Lead check pending
+    # transition-desktop-identity.mjs routes through loadOperationalNativeIdentity.
     "clients/shared/native-practice-profile.mjs",
     "clients/shared/synthetic-iphone-sim-identity.mjs",
     # clients/desktop/native-identity-config.mjs re-exports only (no call site).
@@ -100,18 +100,43 @@ def test_raw_validate_callers_match_explicit_allow_list():
 
 
 def test_native_identity_build_refuses_production_without_installation_profile(tmp_path):
-    """N1 killer: validate must use loadOperationalNativeIdentity; None refuses production."""
+    """N1 killer: validate must use loadOperationalNativeIdentity; None/beta/staging refuse production."""
     production = _identity(
         "operational-production-v1", "https://clerk.beta.cosmas.ai", "https://api.beta.cosmas.ai")
     path = _write(tmp_path / "production.json", production)
     with pytest.raises(ValueError, match="Native identity must match"):
         IDENTITY.load(path, "apple", installation_profile=None)
-    with pytest.raises(ValueError, match="Native identity must match"):
-        IDENTITY.validate(production, "apple", installation_profile=None)
-    with pytest.raises(ValueError, match="Native identity must match"):
-        IDENTITY.validate(production, "apple", installation_profile="beta")
+    for profile in (None, "beta", "staging"):
+        with pytest.raises(ValueError, match="Native identity must match"):
+            IDENTITY.validate(production, "apple", installation_profile=profile)
     ok = IDENTITY.validate(production, "apple", installation_profile="production")
     assert ok["identity"]["profile"] == "operational-production-v1"
+
+
+def test_prepare_apple_admits_production_only_under_installation_profile_production(tmp_path):
+    """prepare-apple --installation-profile production admits clerk.beta / api.beta;
+    every other installation profile refuses operational-production-v1 at identity load."""
+    production = _identity(
+        "operational-production-v1", "https://clerk.beta.cosmas.ai", "https://api.beta.cosmas.ai")
+    identity_path = _write(tmp_path / "id.json", production)
+    for profile in (None, "beta", "staging"):
+        with pytest.raises(ValueError, match="Native identity must match"):
+            APPLE_MOD.prepare(
+                tmp_path / "source", tmp_path / "web", tmp_path / f"refuse-{profile}",
+                hosted_workspace=True, workspace_api_origin=production["apiOrigin"],
+                native_auth_clerk_archive=tmp_path / "clerk.tar.gz",
+                native_identity_config=identity_path, data_mode="synthetic",
+                allow_simulator_staging_native_auth=True,
+                installation_profile=profile)
+    # Admit past the fence; missing web build proves load+authorize already succeeded.
+    with pytest.raises(FileNotFoundError):
+        APPLE_MOD.prepare(
+            tmp_path / "source", tmp_path / "web", tmp_path / "admit-production",
+            hosted_workspace=True, workspace_api_origin=production["apiOrigin"],
+            native_auth_clerk_archive=tmp_path / "clerk.tar.gz",
+            native_identity_config=identity_path, data_mode="synthetic",
+            allow_simulator_staging_native_auth=True,
+            installation_profile="production")
 
 
 def test_native_identity_build_keeps_beta_and_staging_under_every_profile(tmp_path):

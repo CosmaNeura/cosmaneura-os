@@ -7,7 +7,7 @@ import {homedir} from 'node:os';
 import {dirname, isAbsolute, join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {promisify} from 'node:util';
-import {validateOperationalNativeIdentity} from '../clients/desktop/native-identity-config.mjs';
+import {loadOperationalNativeIdentity} from '../clients/desktop/native-identity-config.mjs';
 
 const run = promisify(execFile);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -22,8 +22,12 @@ function checkedPlan(plan, now) {
       !/^[0-9a-f]{64}$/.test(plan.sourceMarkerSha256) || typeof plan.expiresAt !== 'string' ||
       !/(Z|\+00:00)$/.test(plan.expiresAt) || !(Date.parse(plan.expiresAt) > now) ||
       Date.parse(plan.expiresAt) > now + 24 * 60 * 60 * 1000) refuse();
-  const source = validateOperationalNativeIdentity(plan.sourceIdentity, 'desktop', plan.sourceIdentity?.apiOrigin);
-  const target = validateOperationalNativeIdentity(plan.targetIdentity, 'desktop', source.apiOrigin);
+  // Offline beta→staging only: omit installation profile so operational-production-v1
+  // is refused here the same way as other loaders (requireProductionInstallationProfile).
+  const source = loadOperationalNativeIdentity(
+    plan.sourceIdentity, 'desktop', plan.sourceIdentity?.apiOrigin, undefined);
+  const target = loadOperationalNativeIdentity(
+    plan.targetIdentity, 'desktop', source.apiOrigin, undefined);
   if (source.profile !== 'operational-beta-v1' || target.profile !== 'operational-staging-v1' ||
       source.frontendOrigin === target.frontendOrigin) refuse();
   const marker = identity => ({contract: 'cosmas-os-desktop-installation-v1',

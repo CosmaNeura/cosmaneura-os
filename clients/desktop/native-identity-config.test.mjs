@@ -220,6 +220,10 @@ test('desktop path refuses operational-production-v1 unless installation.profile
     installation: {...betaInstallation, profile: 'production'},
   }, join(base, 'production'), '43.4.1');
   assert.ok(ok.includes('com.cosmasos.beta.desktop'));
-  // Mutation note: dropping loadOperationalNativeIdentity's production-profile
-  // refusal in installation-state.mjs lets the beta/staging rejects above succeed.
+  // B11 note: prepareDesktopState always passing 'production' into
+  // loadOperationalNativeIdentity still fails the later
+  // requiredInstallationProfile check (production identity requires
+  // installation.profile === 'production'). Equivalent for these rejects;
+  // B6 (skip requireProductionInstallationProfile in the shared loader) is
+  // killed by the JS loader suite instead.
 });

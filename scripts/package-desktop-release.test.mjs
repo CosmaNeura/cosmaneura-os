@@ -7,7 +7,10 @@ import {tmpdir} from 'node:os';
 import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile,verifyStaticAssetInventory,validateSourceProvenance,desktopAuthSigningEntitlements,validateDesktopAuthSigningEntitlements,validateDesktopAuthProvisioningProfile} from './package-desktop-release.mjs';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {CAPTURE_HELPERS,verifyDesktopCapturePackage} from '../clients/desktop/native-capture-package.mjs';
-const tools=await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS);
+// Identity/fence tests must load without release tools (backend-4 NODE_SUITES).
+// ASAR packaging tests below skip when COSMAS_RELEASE_TOOLS is unset.
+const hasReleaseTools=Boolean(process.env.COSMAS_RELEASE_TOOLS);
+const tools=hasReleaseTools?await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS):null;
 
 test('desktop source-owner helper has only its macOS App ID, team and private Keychain group',()=>{
   const team='JVV65668U6',bundle='com.cosmasos.beta.desktop.auth';
@@ -181,7 +184,7 @@ test('shipped operational-beta-v1 on clerk.staging.cosmas.ai packages (CTO 12 No
   },{...profile,apiOrigin:'https://api.beta.cosmas.ai'},info));
 });
 
-for(const signed of [false,true]) test(`desktop recording helpers preserve ${signed?'signed':'unsigned'} manifests outside ASAR`,async t=>{
+for(const signed of [false,true]) test(`desktop recording helpers preserve ${signed?'signed':'unsigned'} manifests outside ASAR`,{skip:!hasReleaseTools},async t=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-capture-asar-'))),source=join(root,'input');
   t.after(()=>rm(root,{recursive:true,force:true}));
   const files={};
@@ -221,7 +224,7 @@ for(const signed of [false,true]) test(`desktop recording helpers preserve ${sig
   }
 });
 
-test('real ASAR preserves executable custody and catches changed packed and unpacked bytes',async()=>{
+test('real ASAR preserves executable custody and catches changed packed and unpacked bytes',{skip:!hasReleaseTools},async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-real-asar-'))), source=join(root,'input');
   const native={'CosmasDesktopAuth.app/Contents/MacOS/CosmasDesktopAuth':'invented executable',
     'CosmasDesktopAuth.app/Contents/Info.plist':'invented config'};
@@ -243,7 +246,7 @@ test('real ASAR preserves executable custody and catches changed packed and unpa
   await writeFile(join(archive+'.unpacked','native-auth',manifest.executable),'changed executable');
   await assert.rejects(verifyArchive(tools.asar,archive,expected));
 });
-test('fuse adaptation keeps capability restrictions and selects the supplied V8 snapshot',()=>{
+test('fuse adaptation keeps capability restrictions and selects the supplied V8 snapshot',{skip:!hasReleaseTools},()=>{
   const f=fuseConfiguration(tools.fuses),o=tools.fuses.FuseV1Options;
   assert.equal(f.resetAdHocDarwinSignature,false);assert.equal(f.strictlyRequireAllFuses,true);
   assert.equal(f[o.RunAsNode],false);assert.equal(f[o.EnableNodeOptionsEnvironmentVariable],false);
@@ -252,7 +255,7 @@ test('fuse adaptation keeps capability restrictions and selects the supplied V8 
   assert.equal(f[o.LoadBrowserProcessSpecificV8Snapshot],false);
 });
 
-test('official default-app metadata must match its actual header before replacement',async()=>{
+test('official default-app metadata must match its actual header before replacement',{skip:!hasReleaseTools},async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-template-asar-'))),input=join(root,'source'),app=join(root,'Template.app');
   await mkdir(input);await writeFile(join(input,'main.js'),'invented template');
   const archive=join(app,'Contents/Resources/default_app.asar');

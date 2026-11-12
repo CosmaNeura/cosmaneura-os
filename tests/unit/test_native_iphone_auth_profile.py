@@ -700,13 +700,37 @@ def test_f17_owned_prepare_installation_profile_fence(tmp_path, monkeypatch):
         ):
             OWNED.prepare(args_for(profile, production, f"prod-{profile}"))
 
+    # Bypass retained-bundle custody so prepare can reach renderer stages for
+    # F17 beta-under-production refusal and the B10 forwarding assertions.
+    def fake_configured(before, retained_info, identity, practice=None, validate_google=None):
+        return {
+            "CFBundleIdentifier": identity["bundle"],
+            "CosmasNativeIdentity": copy.deepcopy(identity["identity"]),
+            "CosmasNativeAuth": copy.deepcopy(identity["auth"]),
+        }
+
+    monkeypatch.setattr(OWNED, "configured_info", fake_configured)
+
     # Beta identity under production installation profile is refused by apply /
     # origin requirements after load succeeds.
     with pytest.raises(ValueError):
         OWNED.prepare(args_for("production", beta, "beta-under-production"))
 
-    # B10 killer: renderer command carries --installation-profile when set.
-    for profile in ("production", "staging", "beta"):
+    # B10 killer: renderer argv must carry --installation-profile when set.
+    # Soft-skip when stages never run lets the mutant survive.
+    text = PREPARE.read_text(encoding="utf-8")
+    assert 'renderer_command.extend(["--installation-profile", args.installation_profile])' in text
+    # Dedicated staging host requires a non-empty audience for JS load.
+    staging = _staging_identity()
+    staging["identity"]["audience"] = "cosmas-os-staging"
+    staging["auth"]["audience"] = "cosmas-os-staging"
+    staging["identity"]["publishableKey"] = _live_key("clerk.staging.cosmas.ai")
+    staging["auth"]["publishableKey"] = staging["identity"]["publishableKey"]
+    for profile, identity_doc, out_name in (
+        ("production", production, "prod-forward"),
+        ("staging", staging, "staging-forward"),
+        ("beta", beta, "beta-forward"),
+    ):
         assert OWNED.arguments([
             "--inputs", str(inputs),
             "--retained-info", str(retained),
@@ -714,18 +738,19 @@ def test_f17_owned_prepare_installation_profile_fence(tmp_path, monkeypatch):
             "--output", str(tmp_path / f"argv-{profile}"),
             "--installation-profile", profile,
         ]).installation_profile == profile
-        # Source pin: prepare forwards the flag into the renderer command.
-        text = PREPARE.read_text(encoding="utf-8")
-        assert 'renderer_command.extend(["--installation-profile", args.installation_profile])' in text
-
-    # When production load+early apply succeed, stage sees the forwarded flag.
-    captured.clear()
-    try:
-        OWNED.prepare(args_for("production", production, "prod-forward"))
-    except Exception:
-        pass
-    renderer_cmds = [cmd for cmd in captured if any("build-native-renderer.mjs" in part for part in cmd)]
-    if renderer_cmds:
+        captured.clear()
+        try:
+            OWNED.prepare(args_for(profile, identity_doc, out_name))
+        except Exception:
+            # Later compose/bindings may fail after the renderer stage is queued.
+            pass
+        renderer_cmds = [
+            cmd for cmd in captured
+            if any("build-native-renderer.mjs" in part for part in cmd)
+        ]
+        assert renderer_cmds, (
+            f"B10: prepare must reach the renderer stage under --installation-profile {profile}"
+        )
         assert any(
-            "--installation-profile" in cmd and "production" in cmd for cmd in renderer_cmds
+            "--installation-profile" in cmd and profile in cmd for cmd in renderer_cmds
         ), renderer_cmds

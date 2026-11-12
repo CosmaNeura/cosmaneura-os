@@ -132,6 +132,19 @@ test('L2 accounts.dev host match rejects suffix tricks', () => {
   }, 'apple', staging.apiOrigin));
 });
 
+test('identity client must match the selected loader client', () => {
+  // B4 killer: dropping value.client !== client lets apple identities load as desktop.
+  const apple = {
+    version: 1, profile: shared.OPERATIONAL_NATIVE_PROFILE, client: 'apple',
+    apiOrigin: 'https://api.example.invalid',
+    frontendOrigin: 'https://clerk.cosmas.ai', publishableKey: liveKey('clerk.cosmas.ai'),
+    organizationId: 'org_invented_beta', audience: 'cosmas-os-beta-api',
+  };
+  assert.deepEqual(shared.validateOperationalNativeIdentity(apple, 'apple', apple.apiOrigin), apple);
+  assert.throws(() => shared.validateOperationalNativeIdentity(apple, 'desktop', apple.apiOrigin));
+  assert.throws(() => shared.loadOperationalNativeIdentity(apple, 'desktop', apple.apiOrigin, 'beta'));
+});
+
 test('JS loaders refuse operational-production-v1 without production installation profile', () => {
   const production = {
     version: 1, profile: shared.PRODUCTION_NATIVE_PROFILE, client: 'desktop',

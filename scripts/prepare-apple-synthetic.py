@@ -63,9 +63,10 @@ STAGING_API_ORIGIN = "https://api.staging.cosmas.ai"
 # Web addresses the synthetic simulator may follow. Clerk and API hosts use the
 # same name with the clerk. and api. labels. Synthetic data mode stays required.
 # beta.cosmas.ai is the production-review Clerk/API web set. CTO DECISION_LOG
-# 12 Nov 2026 10:05 ET: simulator admit clerk.beta / api.beta ONLY for
+# 12 Nov 2026 10:05/10:12 ET: simulator admit clerk.beta / api.beta ONLY for
 # operational-production-v1 under --installation-profile production; refuse for
-# every other profile. Live Infos stay on operational-beta-v1 / clerk.cosmas.ai.
+# every other profile. Live Infos are operational-beta-v1 on
+# clerk.staging.cosmas.ai, with clerk.cosmas.ai also admitted.
 ALLOWED_SYNTHETIC_WEB_HOSTS = ("staging.cosmas.ai", "beta.cosmas.ai")
 FORBIDDEN_COSMA_HOSTS = frozenset({
     "cosmas.ai",
