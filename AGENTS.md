@@ -149,7 +149,8 @@ work.
   pushing; push once per round. A red `synth-ci-gate` on an unlabelled draft
   means light mode, not a CI failure. Add the `ci:full` label before asking
   for Fable review. Never post commit statuses or check runs. Never add
-  workflow files on branches.
+  workflow files on branches. Do not treat a cancelled superseded draft run
+  as a product defect.
 
 ## Risk discipline
 
