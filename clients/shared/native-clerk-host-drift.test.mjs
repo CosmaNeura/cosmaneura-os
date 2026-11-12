@@ -21,10 +21,11 @@ export const INTENTIONAL_CLERK_HOST_DRIFT = Object.freeze([
   }),
   Object.freeze({
     profile: OPERATIONAL_NATIVE_PROFILE,
-    swift: Object.freeze(['clerk.cosmas.ai']),
+    swift: Object.freeze(['clerk.cosmas.ai', 'clerk.staging.cosmas.ai']),
     js: Object.freeze([]),
-    reason: 'Named exception approved by CTO (decision B, 11 Nov 2026). Follow-up after #354: '
-      + 'invented-host-input.json beta identity becomes clerk.cosmas.ai, goldens regenerated, JS beta pinned.',
+    reason: 'Swift operational-beta-v1 admits clerk.cosmas.ai and clerk.staging.cosmas.ai; '
+      + 'JS still has an empty dedicated allow-list for that profile. Exact named exception; '
+      + 'JS side unchanged this PR.',
   }),
 ]);
 
