@@ -145,6 +145,13 @@ work.
 - Do not weaken CI, Trivy scanning, or the main branch ruleset.
 - Apply infrastructure, change live Clerk settings, publish signed Mac and
   iPhone builds, and deploy to production when the task calls for them.
+- Draft-light CI: run the relevant tests inside the cloud agent before
+  pushing; push once per round. A red `synth-ci-gate` on an unlabelled draft
+  means light mode, not a CI failure. Add the `ci:full` label before asking
+  for Fable review. Never post commit statuses or check runs. Never add
+  workflow files on branches. Do not treat a cancelled superseded draft run
+  as a product defect. Adding any label to a PR re-triggers Synth CI and
+  cancels the run in flight.
 
 ## Risk discipline
 
