@@ -4,22 +4,18 @@ import XCTest
 ///
 /// Caller (outside this package, in the bundled PCM Capacitor plugin):
 /// `clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift`
-/// `load()` at lines 41–54 constructs `IOSPCMBridgeCore` → `LiveAppleAudioSystem`,
-/// which creates `AVAudioEngine()` at
-/// `clients/capture/native-configured/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift:63`
-/// during Capacitor plugin registration. That path does **not** call
-/// `requestRecordPermission` (no prompt) but still touches `AVAudioSession` /
-/// `AVAudioEngine`, which surfaces as a silent `kTCCServiceMicrophone` preflight.
+/// `load()` constructs `IOSPCMBridgeCore` → `LiveAppleAudioSystem`.
+/// That path does **not** call `requestRecordPermission` (no prompt) at load.
 ///
-/// CosmaBot-side mitigation in this PR (clients/apple only):
+/// CosmaBot-side mitigation (clients/apple):
 /// Debug `com.cosmasos.synthetic` presents `CosmasSyntheticDemoSurface` and
 /// returns before `openWorkspace()` / `CosmasBridgeViewController`, so Capacitor
-/// never loads `IOSPCMCapacitorPlugin` on that configuration — no mic touch.
+/// never loads `IOSPCMCapacitorPlugin` on that default configuration — no mic touch.
 ///
-/// Residual: Release/TestFlight capture-off builds that open the WebView still
-/// register the plugin. Deferring live AVFoundation until an explicit start
-/// requires editing `IOSPCMCapacitorPlugin.load()` (clients/capture), which is
-/// outside this PR's clients/apple-only scope.
+/// `-COSMAS_SKIP_SYNTHETIC_DEMO` opens the real bridge/plugin path for the
+/// automatic mic-permission XCUITest. Start-recording requests permission only
+/// through the plugin's shared `requestStartRecordingMicPermission` entry.
+/// Every START_CAPTURE / SKIP_DEMO / uiTest hook stays behind `#if DEBUG`.
 final class MicrophoneLaunchPreflightTests: XCTestCase {
     func testDebugSyntheticDemoReturnsBeforeWorkspaceBridge() throws {
         let root = URL(fileURLWithPath: #filePath)
@@ -35,6 +31,49 @@ final class MicrophoneLaunchPreflightTests: XCTestCase {
         XCTAssertTrue(
             bridgeSource.contains("IOSPCMCapacitorPlugin"),
             "Bridge still owns IOSPCM; Debug synthetic must not construct it"
+        )
+        // Mic prompt must go through the loaded plugin, not a ViewController-local call.
+        XCTAssertFalse(
+            bridgeSource.contains("AVAudioApplication.requestRecordPermission"),
+            "Bridge must not call AVAudioApplication.requestRecordPermission directly"
+        )
+        XCTAssertTrue(
+            bridgeSource.contains("uiTestStartRecordingThroughLoadedPlugin"),
+            "START_CAPTURE must invoke IOSPCMCapacitorPlugin.uiTestStartRecordingThroughLoadedPlugin"
+        )
+        XCTAssertTrue(
+            source.contains("CosmasSyntheticDemoSurface.skipLaunchArgument"),
+            "Synthetic UI-test boot must skip practice-host failure before openWorkspace"
+        )
+    }
+
+    func testUiTestHooksAreDebugOnlyInSources() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bridge = try String(contentsOf: root.appendingPathComponent("CosmasBridgeViewController.swift"), encoding: .utf8)
+        let workspace = try String(contentsOf: root.appendingPathComponent("CosmasWorkspaceViewController.swift"), encoding: .utf8)
+        XCTAssertTrue(
+            bridge.contains("#if DEBUG\n        // Synthetic Simulator XCUITest only"),
+            "Bridge uiTest hooks must be #if DEBUG"
+        )
+        XCTAssertTrue(
+            workspace.contains("#if DEBUG\n        // Synthetic Simulator XCUITest: skip practice-host boot"),
+            "Workspace skip-demo path must be #if DEBUG"
+        )
+        let clients = root.deletingLastPathComponent()
+        let plugin = try String(
+            contentsOf: clients
+                .appendingPathComponent("capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            plugin.contains("#if DEBUG\n    /// Synthetic Simulator XCUITest only"),
+            "Plugin uiTestStartRecordingThroughLoadedPlugin must be #if DEBUG"
+        )
+        XCTAssertTrue(
+            plugin.contains("uiTestStartRecordingThroughLoadedPlugin"),
+            "Plugin must expose the DEBUG XCUITest start-recording hook"
         )
     }
 }

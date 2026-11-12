@@ -2,6 +2,9 @@ import UIKit
 import WebKit
 import Capacitor
 import CosmaneuraIOSPCMCapacitor
+#if DEBUG
+import AVFAudio
+#endif
 #if canImport(CosmasWorkspaceAuthPlugin)
 import CosmasWorkspaceAuthPlugin
 #endif
@@ -173,6 +176,23 @@ import CosmasNativeAuth
             return
         }
         capturePlugin = plugin
+        #if DEBUG
+        // Synthetic Simulator XCUITest only. Never compiled into Release/TestFlight.
+        let uiTestSkipDemo = Bundle.main.bundleIdentifier == "com.cosmasos.synthetic"
+            && ProcessInfo.processInfo.arguments.contains("-COSMAS_SKIP_SYNTHETIC_DEMO")
+        let uiTestStartCapture = uiTestSkipDemo
+            && ProcessInfo.processInfo.arguments.contains("-COSMAS_UI_TEST_START_CAPTURE")
+        if uiTestSkipDemo {
+            exposeUiTestPluginLoadedMarker()
+            exposeUiTestMicPermissionMarker(currentRecordPermissionMarker())
+        }
+        if uiTestStartCapture {
+            Task { [weak self] in
+                let result = await plugin.uiTestStartRecordingThroughLoadedPlugin()
+                self?.exposeUiTestMicPermissionMarker(result)
+            }
+        }
+        #endif
         #if canImport(CosmasWorkspaceAuthPlugin)
         do {
             guard let auth = bridge?.plugin(withName: "CosmasWorkspaceAuth") as? CosmasWorkspaceAuthPlugin else {
@@ -182,6 +202,15 @@ import CosmasNativeAuth
             speechPlugin = bridge?.plugin(withName: "CosmasPrivateSpeech") as? CosmasPrivateSpeechPlugin
             try auth.prepareCosmaneuraNavigation(on: webView)
         } catch {
+            #if DEBUG
+            if uiTestSkipDemo {
+                // Keep the loaded IOSPCM plugin; synthetic auth is expected to
+                // fail without real Clerk keys. Do not quarantine XCUITest probes.
+                startedNavigation = true
+                super.viewDidLoad()
+                return
+            }
+            #endif
             quarantine()
             onFailure?()
             return
@@ -191,10 +220,45 @@ import CosmasNativeAuth
         navigationProxy = proxy
         webView.navigationDelegate = proxy
         do { try installLifecycle(on: webView) }
-        catch { quarantine(); onFailure?(); return }
+        catch {
+            #if DEBUG
+            if uiTestSkipDemo {
+                startedNavigation = true
+                super.viewDidLoad()
+                return
+            }
+            #endif
+            quarantine(); onFailure?(); return
+        }
         startedNavigation = true
         super.viewDidLoad()
     }
+
+    #if DEBUG
+    private func exposeUiTestPluginLoadedMarker() {
+        guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic" else { return }
+        view.accessibilityIdentifier = "cosmas.uiTest.iospcm.loaded"
+    }
+
+    private func exposeUiTestMicPermissionMarker(_ token: String) {
+        guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic" else { return }
+        let marker = UIView()
+        marker.isAccessibilityElement = true
+        marker.accessibilityIdentifier = "cosmas.uiTest.micPermission.\(token)"
+        marker.frame = .zero
+        marker.isUserInteractionEnabled = false
+        view.addSubview(marker)
+    }
+
+    private func currentRecordPermissionMarker() -> String {
+        switch AVAudioApplication.shared.recordPermission {
+        case .undetermined: return "undetermined"
+        case .denied: return "denied"
+        case .granted: return "granted"
+        @unknown default: return "unknown"
+        }
+    }
+    #endif
 
     fileprivate func receive(_ message: WKScriptMessage) {
         if message.name == "cosmasPresentation" { receivePresentation(message); return }
