@@ -28,7 +28,7 @@ Fable reviews after required CI is green at the same head (and Beta where it app
 ### 2b. Hard: any one of these
 1. **2 or more failed Fable review rounds** (VERDICT HOLES) on the same PR.
 2. **2 or more red CI runs on the same failure:** the same check or test fails at two different heads.
-3. **Very large:** more than **1,500 changed lines** (additions + deletions) or more than **25 files**. This is about the 90th percentile of our PRs (30-day p90: **2,658** lines for PRs created 15 Oct–12 Nov 2026).
+3. **Very large:** more than **1,500 changed lines** (additions + deletions) or more than **25 files**. For reference, the 30-day p90 was 2,658 changed lines (PRs created 15 Oct–12 Nov 2026).
 4. Fable reports CONFIDENCE: low, or the author disputes a High or Blocking finding.
 5. A 3rd round of review on any PR.
 
