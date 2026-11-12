@@ -150,7 +150,8 @@ work.
   means light mode, not a CI failure. Add the `ci:full` label before asking
   for Fable review. Never post commit statuses or check runs. Never add
   workflow files on branches. Do not treat a cancelled superseded draft run
-  as a product defect.
+  as a product defect. Adding any label to a PR re-triggers Synth CI and
+  cancels the run in flight.
 
 ## Risk discipline
 
