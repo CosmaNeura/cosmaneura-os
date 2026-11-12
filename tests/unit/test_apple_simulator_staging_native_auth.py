@@ -57,16 +57,22 @@ BETA_ORIGIN = "https://clerk.beta.cosmas.ai"
 BETA_API = "https://api.beta.cosmas.ai"
 
 
-def test_beta_address_is_accepted_for_synthetic_data_only():
+def test_beta_address_is_accepted_only_for_operational_production_synthetic():
+    """clerk.beta is admitted only for operational-production-v1 (CTO 10:05/10:12)."""
     script = composition()
     key = live_key(BETA_HOST)
+    production = identity_document(
+        BETA_API, BETA_ORIGIN, key, profile="operational-production-v1")
     script.authorize_simulator_staging_native_auth(
-        {"identity": identity_document(BETA_API, BETA_ORIGIN, key)},
-        "synthetic", hosted_workspace=True)
+        {"identity": production}, "synthetic", hosted_workspace=True)
     with pytest.raises(ValueError, match="requires synthetic data mode"):
         script.authorize_simulator_staging_native_auth(
+            {"identity": production}, "authorized_beta", hosted_workspace=True)
+    # operational-beta-v1 + clerk.beta is refused (not in beta host set / pair gate).
+    with pytest.raises(ValueError, match="clerk.staging.cosmas.ai"):
+        script.authorize_simulator_staging_native_auth(
             {"identity": identity_document(BETA_API, BETA_ORIGIN, key)},
-            "authorized_beta", hosted_workspace=True)
+            "synthetic", hosted_workspace=True)
 
 
 def test_beta_clerk_does_not_accept_the_staging_api():
@@ -172,12 +178,16 @@ def test_cli_exposes_the_simulator_staging_flag():
 @pytest.mark.parametrize(("api", "frontend", "key"), [
     (STAGING_API, "https://clerk.cosmaneura.com", live_key("clerk.cosmaneura.com")),
     (STAGING_API, "https://app.cosmaneura.com", live_key("app.cosmaneura.com")),
-    ("https://api.cosmaneura.com", STAGING_ORIGIN, STAGING_KEY),
 ])
 def test_production_hosts_are_refused(tmp_path, api, frontend, key):
+    """prepare() refuses non-allow-listed Clerk hosts at identity load.
+
+    operational-beta-v1 admits only clerk.cosmas.ai and clerk.staging.cosmas.ai,
+    so Node identity validation fails closed first for cosmaneura hosts.
+    """
     script = composition()
     output = tmp_path / "output"
-    with pytest.raises(ValueError, match="refuses production hosts") as caught:
+    with pytest.raises(ValueError, match="Native identity must match") as caught:
         script.prepare(
             tmp_path / "source", tmp_path / "web", output,
             hosted_workspace=True, workspace_api_origin=api,
@@ -185,10 +195,43 @@ def test_production_hosts_are_refused(tmp_path, api, frontend, key):
             native_identity_config=write_identity(tmp_path, identity_document(api, frontend, key)),
             data_mode="synthetic", allow_simulator_staging_native_auth=True,
             verification_variant="w8m", simulator_custody=True)
+    assert "Clerk identity profile" in str(caught.value)
+    assert not output.exists()
+
+
+def test_staging_clerk_with_production_api_refused_at_authorize(tmp_path):
+    """Staging Clerk host loads on operational-beta-v1; cosmaneura API still refused."""
+    script = composition()
+    output = tmp_path / "output"
+    api = "https://api.cosmaneura.com"
+    with pytest.raises(ValueError, match="refuses production hosts") as caught:
+        script.prepare(
+            tmp_path / "source", tmp_path / "web", output,
+            hosted_workspace=True, workspace_api_origin=api,
+            native_auth_clerk_archive=tmp_path / "clerk.tar.gz",
+            native_identity_config=write_identity(
+                tmp_path, identity_document(api, STAGING_ORIGIN, STAGING_KEY)),
+            data_mode="synthetic", allow_simulator_staging_native_auth=True,
+            verification_variant="w8m", simulator_custody=True)
+    assert "api.cosmaneura.com" in str(caught.value)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(("api", "frontend", "key"), [
+    (STAGING_API, "https://clerk.cosmaneura.com", live_key("clerk.cosmaneura.com")),
+    (STAGING_API, "https://app.cosmaneura.com", live_key("app.cosmaneura.com")),
+    ("https://api.cosmaneura.com", STAGING_ORIGIN, STAGING_KEY),
+])
+def test_authorize_refuses_production_hosts(api, frontend, key):
+    """Authorize gate still names the production hosts when identity is pre-loaded."""
+    script = composition()
+    with pytest.raises(ValueError, match="refuses production hosts") as caught:
+        script.authorize_simulator_staging_native_auth(
+            {"identity": identity_document(api, frontend, key)},
+            "synthetic", hosted_workspace=True)
     assert "clerk.cosmaneura.com" in str(caught.value)
     assert "app.cosmaneura.com" in str(caught.value)
     assert "api.cosmaneura.com" in str(caught.value)
-    assert not output.exists()
 
 
 def test_host_outside_the_allowlist_is_refused(tmp_path):
@@ -196,7 +239,8 @@ def test_host_outside_the_allowlist_is_refused(tmp_path):
     output = tmp_path / "output"
     document = identity_document(
         "https://api.example.invalid", "https://identity.example.invalid", live_key("identity.example.invalid"))
-    with pytest.raises(ValueError, match="clerk.staging.cosmas.ai") as caught:
+    # Pinned dedicated hosts refuse this identity at load; authorize never runs.
+    with pytest.raises(ValueError, match="Native identity must match") as caught:
         script.prepare(
             tmp_path / "source", tmp_path / "web", output,
             hosted_workspace=True, workspace_api_origin=document["apiOrigin"],
@@ -205,18 +249,26 @@ def test_host_outside_the_allowlist_is_refused(tmp_path):
             data_mode="synthetic", allow_simulator_staging_native_auth=True)
     assert "production hosts" not in str(caught.value)
     assert not output.exists()
+    # Authorize path still points callers at the staging allow-list.
+    with pytest.raises(ValueError, match="clerk.staging.cosmas.ai") as authorize_caught:
+        script.authorize_simulator_staging_native_auth(
+            {"identity": document}, "synthetic", hosted_workspace=True)
+    assert "production hosts" not in str(authorize_caught.value)
 
 
 def test_non_synthetic_data_mode_is_refused(tmp_path):
     script = composition()
     output = tmp_path / "output"
-    with pytest.raises(ValueError, match="requires synthetic data mode"):
+    # Staging profile still requires synthetic data mode.
+    # data_mode() refuses authorized_beta before authorize's synthetic-data check.
+    with pytest.raises(ValueError, match="requires (explicit )?synthetic data mode"):
         script.prepare(
             tmp_path / "source", tmp_path / "web", output,
             hosted_workspace=True, workspace_api_origin=STAGING_API,
             native_auth_clerk_archive=tmp_path / "clerk.tar.gz",
             native_identity_config=write_identity(
-                tmp_path, identity_document(STAGING_API, STAGING_ORIGIN, STAGING_KEY)),
+                tmp_path, identity_document(
+                    STAGING_API, STAGING_ORIGIN, STAGING_KEY, profile="operational-staging-v1")),
             data_mode="authorized_beta", allow_simulator_staging_native_auth=True)
     assert not output.exists()
 
@@ -231,7 +283,8 @@ def test_flag_absent_keeps_the_device_custody_refusal(tmp_path):
             hosted_workspace=True, workspace_api_origin=STAGING_API,
             native_auth_clerk_archive=tmp_path / "clerk.tar.gz",
             native_identity_config=write_identity(
-                tmp_path, identity_document(STAGING_API, STAGING_ORIGIN, STAGING_KEY)),
+                tmp_path, identity_document(
+                    STAGING_API, STAGING_ORIGIN, STAGING_KEY, profile="operational-staging-v1")),
             data_mode="synthetic")
     assert str(caught.value) == script.DEVICE_CUSTODY_REFUSAL
     assert "clerk.staging.cosmas.ai" not in str(caught.value)
@@ -241,7 +294,9 @@ def test_flag_absent_keeps_the_device_custody_refusal(tmp_path):
 def test_default_device_and_synthetic_paths_are_unchanged_without_the_flag(tmp_path):
     script = composition()
     device = tmp_path / "device"
-    with pytest.raises(FileNotFoundError):
+    # Production cosmaneura hosts are not a dedicated beta/staging/production
+    # Clerk host; identity load refuses before the missing-web FileNotFoundError.
+    with pytest.raises(ValueError, match="Native identity must match"):
         script.prepare(
             tmp_path / "source", tmp_path / "missing-web", device,
             hosted_workspace=True, workspace_api_origin="https://api.cosmaneura.com",
@@ -256,8 +311,10 @@ def test_default_device_and_synthetic_paths_are_unchanged_without_the_flag(tmp_p
             tmp_path / "source", tmp_path / "missing-web", staging_device,
             hosted_workspace=True, workspace_api_origin=STAGING_API,
             native_auth_clerk_archive=tmp_path / "clerk.tar.gz",
-            native_identity_config=write_identity(tmp_path / "staging", identity_document(
-                STAGING_API, STAGING_ORIGIN, STAGING_KEY)),
+            native_identity_config=write_identity(
+                tmp_path / "staging",
+                identity_document(
+                    STAGING_API, STAGING_ORIGIN, STAGING_KEY, profile="operational-staging-v1")),
             data_mode="synthetic")
     assert not staging_device.exists()
     synthetic = tmp_path / "synthetic"
@@ -271,7 +328,8 @@ def test_default_device_and_synthetic_paths_are_unchanged_without_the_flag(tmp_p
 def hosted_inputs(root: Path, feature_profile: str) -> tuple[Path, Path, dict]:
     """Build the Apple web manifest. Shared identity preparation also emits web,
     so the helper supplies a Core origin even when the Apple profile clears it."""
-    candidate = identity_document(STAGING_API, STAGING_ORIGIN, STAGING_KEY)
+    candidate = identity_document(
+        STAGING_API, STAGING_ORIGIN, STAGING_KEY, profile="operational-staging-v1")
     candidate["client"] = "desktop"
     result = subprocess.run(
         [

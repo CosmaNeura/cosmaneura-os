@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {createHash} from 'node:crypto';
-import {readFileSync} from 'node:fs';
-import {fileURLToPath} from 'node:url';
 import {
   dedicatedClerkHostsByProfile,
   OPERATIONAL_NATIVE_PROFILE,
@@ -18,16 +15,16 @@ import {
   validateSyntheticIphoneSimIdentity,
 } from './synthetic-iphone-sim-identity.mjs';
 
-/** Frozen operational allow-lists at the #357 tip this branch started from. */
+/**
+ * Dedicated Clerk hosts: operational-beta-v1 admits clerk.cosmas.ai and
+ * clerk.staging.cosmas.ai (CTO DECISION_LOG 12 Nov 2026 10:12 ET). No open
+ * non-accounts.dev host rule. clerk.beta.cosmas.ai stays production-only.
+ */
 const OPERATIONAL_HOSTS_AT_MAIN = Object.freeze({
-  [OPERATIONAL_NATIVE_PROFILE]: Object.freeze([]),
+  [OPERATIONAL_NATIVE_PROFILE]: Object.freeze(['clerk.cosmas.ai', 'clerk.staging.cosmas.ai']),
   [STAGING_NATIVE_PROFILE]: Object.freeze(['clerk.staging.cosmas.ai']),
   [PRODUCTION_NATIVE_PROFILE]: Object.freeze(['clerk.beta.cosmas.ai']),
 });
-
-/** SHA-256 of operational-native-identity.mjs at origin/main tip b95379ff. */
-const OPERATIONAL_IDENTITY_SHA256_AT_MAIN =
-  '3771a149d41036144dabde7fea2a53fb10764ac002a045f5450c7122b6548036';
 
 function pkTestFor(host) {
   return 'pk_test_' + Buffer.from(host + '$').toString('base64');
@@ -37,16 +34,13 @@ function pkLiveFor(host) {
   return 'pk_live_' + Buffer.from(host + '$').toString('base64');
 }
 
-test('operational-native-identity.mjs stays byte-identical to main tip b95379ff', () => {
-  const path = fileURLToPath(new URL('./operational-native-identity.mjs', import.meta.url));
-  const raw = readFileSync(path);
-  const digest = createHash('sha256').update(raw).digest('hex');
-  assert.equal(
-    digest,
-    OPERATIONAL_IDENTITY_SHA256_AT_MAIN,
-    'operational-native-identity.mjs must stay byte-identical to main (b95379ff)',
-  );
+test('dedicatedClerkHostsByProfile pins operational-beta-v1 to clerk.cosmas.ai and clerk.staging.cosmas.ai', () => {
   assert.deepEqual(dedicatedClerkHostsByProfile(), OPERATIONAL_HOSTS_AT_MAIN);
+  assert.deepEqual(
+    dedicatedClerkHostsByProfile()[OPERATIONAL_NATIVE_PROFILE],
+    ['clerk.cosmas.ai', 'clerk.staging.cosmas.ai'],
+    'operational-beta-v1 admits clerk.cosmas.ai and clerk.staging.cosmas.ai (CTO 12 Nov 10:12 ET)',
+  );
   assert.equal(isLiveOperationalNativeProfile(OPERATIONAL_NATIVE_PROFILE), true);
   assert.equal(isLiveOperationalNativeProfile(STAGING_NATIVE_PROFILE), true);
   assert.equal(isLiveOperationalNativeProfile(PRODUCTION_NATIVE_PROFILE), true);
@@ -84,6 +78,21 @@ test('three operational profiles still accept their dedicated hosts and refuse s
     staging,
   );
 
+  const beta = {
+    version: 1,
+    profile: OPERATIONAL_NATIVE_PROFILE,
+    client: 'apple',
+    apiOrigin: 'https://api.example.invalid',
+    frontendOrigin: 'https://clerk.cosmas.ai',
+    publishableKey: pkLiveFor('clerk.cosmas.ai'),
+    organizationId: 'org_invented_beta',
+    audience: 'cosmas-os-beta-api',
+  };
+  assert.deepEqual(
+    validateOperationalNativeIdentity(beta, 'apple', beta.apiOrigin),
+    beta,
+  );
+
   assert.throws(() => validateOperationalNativeIdentity({
     ...production,
     frontendOrigin: 'https://clerk.synthetic.example',
@@ -96,6 +105,12 @@ test('three operational profiles still accept their dedicated hosts and refuse s
     publishableKey: pkTestFor('clerk.synthetic.example'),
     audience: '',
   }, 'apple', staging.apiOrigin));
+
+  assert.throws(() => validateOperationalNativeIdentity({
+    ...beta,
+    frontendOrigin: 'https://clerk.synthetic.example',
+    publishableKey: pkLiveFor('clerk.synthetic.example'),
+  }, 'apple', beta.apiOrigin));
 });
 
 test('synthetic-iphone-sim-v1 accepts clerk.synthetic.example with pk_test_ placeholder', () => {

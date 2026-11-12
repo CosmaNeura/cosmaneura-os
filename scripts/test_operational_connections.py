@@ -33,7 +33,7 @@ class OperationalConnections(unittest.TestCase):
         )
         self.identity = {
             "apiOrigin": "https://api.example.invalid",
-            "frontendOrigin": "https://identity.example.invalid",
+            "frontendOrigin": "https://clerk.cosmas.ai",
         }
         self.base = startup.compile_inputs(self.identity, self.bindings)
 

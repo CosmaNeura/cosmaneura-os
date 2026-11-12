@@ -7,7 +7,10 @@ import {tmpdir} from 'node:os';
 import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile,verifyStaticAssetInventory,validateSourceProvenance,desktopAuthSigningEntitlements,validateDesktopAuthSigningEntitlements,validateDesktopAuthProvisioningProfile} from './package-desktop-release.mjs';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {CAPTURE_HELPERS,verifyDesktopCapturePackage} from '../clients/desktop/native-capture-package.mjs';
-const tools=await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS);
+// Identity/fence tests must load without release tools (backend-4 NODE_SUITES).
+// ASAR packaging tests below skip when COSMAS_RELEASE_TOOLS is unset.
+const hasReleaseTools=Boolean(process.env.COSMAS_RELEASE_TOOLS);
+const tools=hasReleaseTools?await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS):null;
 
 test('desktop source-owner helper has only its macOS App ID, team and private Keychain group',()=>{
   const team='JVV65668U6',bundle='com.cosmasos.beta.desktop.auth';
@@ -138,7 +141,7 @@ test('renderer routing rejects missing entry points, wrong destinations and non-
 
 test('first-owner release preserves operational identity and refuses native capture or connector activation',()=>{
   const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
-    frontendOrigin:'https://identity.example.invalid',publishableKey:'pk_live_'+Buffer.from('identity.example.invalid$').toString('base64'),
+    frontendOrigin:'https://clerk.cosmas.ai',publishableKey:'pk_live_'+Buffer.from('clerk.cosmas.ai$').toString('base64'),
     organizationId:'org_fixture',audience:'cosmas-beta-api'};
   const profile=resolveBetaFeatureProfile({VITE_WORKSPACE_FEATURE_PROFILE:'first-owner-staging-v1',
     VITE_WORKSPACE_HOSTED_CLIENT:'desktop',VITE_WORKSPACE_DATA_MODE:'synthetic',VITE_WORKSPACE_HOSTED_API_ORIGIN:identity.apiOrigin,
@@ -155,7 +158,33 @@ test('first-owner release preserves operational identity and refuses native capt
     assert.throws(()=>validateOperationalReleaseProfile({...config,...change},profile,info));
 });
 
-for(const signed of [false,true]) test(`desktop recording helpers preserve ${signed?'signed':'unsigned'} manifests outside ASAR`,async t=>{
+test('shipped operational-beta-v1 on clerk.staging.cosmas.ai packages (CTO 12 Nov 10:12 ET)',()=>{
+  const identity={version:1,profile:'operational-beta-v1',client:'desktop',
+    apiOrigin:'https://api.staging.cosmas.ai',
+    frontendOrigin:'https://clerk.staging.cosmas.ai',
+    publishableKey:'pk_live_'+Buffer.from('clerk.staging.cosmas.ai$').toString('base64'),
+    organizationId:'org_invented_beta',audience:'cosmas-os-beta-api'};
+  const profile=resolveBetaFeatureProfile({VITE_WORKSPACE_FEATURE_PROFILE:'first-owner-staging-v1',
+    VITE_WORKSPACE_HOSTED_CLIENT:'desktop',VITE_WORKSPACE_DATA_MODE:'synthetic',
+    VITE_WORKSPACE_HOSTED_API_ORIGIN:identity.apiOrigin,VITE_API_BASE:'app://cosmas/api',
+    VITE_WORKSPACE_WEB_ORIGIN:'',VITE_COSMANEURA_WEB_ORIGIN:'',VITE_CAPTURE_UPLOAD_ORIGINS:'',
+    VITE_WORKSPACE_CAPTURE_MODE:'disabled'}).manifest;
+  const info={CFBundleIdentifier:'com.cosmasos.beta.desktop',CFBundleShortVersionString:'0.1.0',CFBundleVersion:'1120'};
+  const config={nativeIdentity:identity,mode:'hosted-beta-authenticated',dataMode:'synthetic',
+    apiOrigin:identity.apiOrigin,appVersion:info.CFBundleShortVersionString,buildNumber:info.CFBundleVersion,
+    installation:{bundleIdentifier:info.CFBundleIdentifier},nativeCaptureEnabled:false};
+  assert.deepEqual(validateOperationalReleaseProfile(config,profile,info),identity);
+  // clerk.beta is refused on operational-beta-v1 (production-only).
+  assert.throws(()=>validateOperationalReleaseProfile({
+    ...config,
+    nativeIdentity:{...identity,frontendOrigin:'https://clerk.beta.cosmas.ai',
+      publishableKey:'pk_live_'+Buffer.from('clerk.beta.cosmas.ai$').toString('base64'),
+      apiOrigin:'https://api.beta.cosmas.ai'},
+    apiOrigin:'https://api.beta.cosmas.ai',
+  },{...profile,apiOrigin:'https://api.beta.cosmas.ai'},info));
+});
+
+for(const signed of [false,true]) test(`desktop recording helpers preserve ${signed?'signed':'unsigned'} manifests outside ASAR`,{skip:!hasReleaseTools},async t=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-capture-asar-'))),source=join(root,'input');
   t.after(()=>rm(root,{recursive:true,force:true}));
   const files={};
@@ -195,7 +224,7 @@ for(const signed of [false,true]) test(`desktop recording helpers preserve ${sig
   }
 });
 
-test('real ASAR preserves executable custody and catches changed packed and unpacked bytes',async()=>{
+test('real ASAR preserves executable custody and catches changed packed and unpacked bytes',{skip:!hasReleaseTools},async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-real-asar-'))), source=join(root,'input');
   const native={'CosmasDesktopAuth.app/Contents/MacOS/CosmasDesktopAuth':'invented executable',
     'CosmasDesktopAuth.app/Contents/Info.plist':'invented config'};
@@ -217,7 +246,7 @@ test('real ASAR preserves executable custody and catches changed packed and unpa
   await writeFile(join(archive+'.unpacked','native-auth',manifest.executable),'changed executable');
   await assert.rejects(verifyArchive(tools.asar,archive,expected));
 });
-test('fuse adaptation keeps capability restrictions and selects the supplied V8 snapshot',()=>{
+test('fuse adaptation keeps capability restrictions and selects the supplied V8 snapshot',{skip:!hasReleaseTools},()=>{
   const f=fuseConfiguration(tools.fuses),o=tools.fuses.FuseV1Options;
   assert.equal(f.resetAdHocDarwinSignature,false);assert.equal(f.strictlyRequireAllFuses,true);
   assert.equal(f[o.RunAsNode],false);assert.equal(f[o.EnableNodeOptionsEnvironmentVariable],false);
@@ -226,7 +255,7 @@ test('fuse adaptation keeps capability restrictions and selects the supplied V8 
   assert.equal(f[o.LoadBrowserProcessSpecificV8Snapshot],false);
 });
 
-test('official default-app metadata must match its actual header before replacement',async()=>{
+test('official default-app metadata must match its actual header before replacement',{skip:!hasReleaseTools},async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-template-asar-'))),input=join(root,'source'),app=join(root,'Template.app');
   await mkdir(input);await writeFile(join(input,'main.js'),'invented template');
   const archive=join(app,'Contents/Resources/default_app.asar');

@@ -6,8 +6,8 @@ import {join} from 'node:path';
 import {workspaceIdentityInputs,prepareWorkspaceIdentity,identityDigest} from './prepare-workspace-identity.mjs';
 
 const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
-  publishableKey:'pk_live_'+Buffer.from('identity.example.invalid$').toString('base64'),
-  frontendOrigin:'https://identity.example.invalid',organizationId:'org_w75_invented',audience:'cosmas-beta-api'};
+  publishableKey:'pk_live_'+Buffer.from('clerk.cosmas.ai$').toString('base64'),
+  frontendOrigin:'https://clerk.cosmas.ai',organizationId:'org_w75_invented',audience:'cosmas-beta-api'};
 const options={webOrigin:'https://workspace.example.invalid',coreWebOrigin:'https://core.example.invalid',captureUploadOrigins:['https://uploads.example.invalid']};
 
 test('shared development identity produces all clients only with explicit synthetic data',()=>{

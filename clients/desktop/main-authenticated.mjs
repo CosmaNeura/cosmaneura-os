@@ -26,7 +26,7 @@ import {installDesktopCloseProtection, cleanupOnConfirmedQuit} from './close-pro
 import {createDesktopFailureHandler, destroyDesktopWorkspace, installDesktopLastWindowPolicy} from './startup-recovery.mjs';
 import {installDesktopWorkspaceLifecycle} from './workspace-lifecycle.mjs';
 import {preparePackagedDesktopCapture} from './native-capture-package.mjs';
-import {validateOperationalNativeIdentity} from './native-identity-config.mjs';
+import {loadOperationalNativeIdentity} from './native-identity-config.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 let window, auth, practice, captureHost, disposeIpc, disposePracticeIpc, disposeLifecycle, disposeNavigation, disposeSignInPresentation, failureClosing = false;
@@ -139,7 +139,8 @@ async function bootstrap() {
   }
   if(config.nativeCaptureEnabled===true){
     if(config.mode!=='hosted-beta-authenticated'||!['synthetic','authorized_beta'].includes(config.dataMode))throw new Error('Desktop recording unavailable');
-    validateOperationalNativeIdentity(config.nativeIdentity,'desktop',config.apiOrigin);
+    loadOperationalNativeIdentity(
+      config.nativeIdentity, 'desktop', config.apiOrigin, config.installation?.profile);
     const native=await preparePackagedDesktopCapture(root);
     const {installWorkspaceDesktopCapture}=await import('./workspace-native-capture.mjs');
     captureHost=installWorkspaceDesktopCapture({auth,ipc:ipcMain,renderer:window.webContents,directory:stateDirectory,

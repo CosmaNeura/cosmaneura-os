@@ -25,6 +25,13 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
     throw new Error('Microsoft standalone work requires its explicit independent beta profile');
   if(typeof coreCaptureEnabled!=='boolean'||coreCaptureEnabled&&featureProfile!==INDEPENDENT_BETA_FEATURE_PROFILE)
     throw new Error('Independent Core capture requires its explicit independent beta profile');
+  // Leave raw validateOperationalNativeIdentity (no installation-profile fence).
+  // Reason: this helper emits public desktop/apple identity JSON for later
+  // package/prepare loaders that know the closed installation profile. Fencing
+  // here would block owned iPhone production inputs before
+  // --installation-profile production is available. Desktop production is
+  // refused later at package-desktop-release / package-desktop-synthetic.
+  // Pinned by tests/unit/test_workspace_identity_raw_validate_choice.py.
   const desktop=validateOperationalNativeIdentity(candidate,'desktop',candidate?.apiOrigin);
   validateOperationalNativeDataMode(dataMode,desktop);
   const apple=validateOperationalNativeIdentity({...desktop,client:'apple'},'apple',desktop.apiOrigin);

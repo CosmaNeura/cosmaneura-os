@@ -7,7 +7,7 @@ import {validateOperationalNativeIdentity, validateOperationalNativeDataMode, op
 import {prepareDesktopState} from './installation-state.mjs';
 
 const identity = {version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
-  frontendOrigin:'https://clerk.example.invalid',publishableKey:'pk_live_'+btoa('clerk.example.invalid$'),
+  frontendOrigin:'https://clerk.cosmas.ai',publishableKey:'pk_live_'+btoa('clerk.cosmas.ai$'),
   organizationId:'org_invented_beta',audience:'cosmas-os-beta'};
 const config = {mode:'hosted-beta-authenticated',dataMode:'authorized_beta',apiOrigin:identity.apiOrigin,nativeIdentity:identity,
   installation:{version:1,profile:'beta',bundleIdentifier:'com.cosmasos.beta.desktop',storageGeneration:1,
@@ -29,7 +29,7 @@ test('explicit staging identity uses the development issuer without accepting it
     for (const changed of [{profile:'operational-beta-v1'}, {profile:'unknown'}, {audience:'other-api'}, {audience:null},
       {publishableKey:'pk_live_'+btoa('invented.clerk.accounts.dev$')},
       {frontendOrigin:'https://other.clerk.accounts.dev'},
-      {frontendOrigin:identity.frontendOrigin,publishableKey:'pk_test_'+btoa('clerk.example.invalid$')}])
+      {frontendOrigin:identity.frontendOrigin,publishableKey:'pk_test_'+btoa('clerk.cosmas.ai$')}])
       assert.throws(()=>validateOperationalNativeIdentity({...value,...changed},client,value.apiOrigin));
   }
 });
@@ -48,9 +48,9 @@ test('staging profile accepts its own Clerk instance and rejects other live host
     assert.throws(()=>validateOperationalNativeDataMode('authorized_beta',value));
     const otherAudience={...value,audience:'invented-staging-audience'};
     assert.deepEqual(validateOperationalNativeIdentity(otherAudience,client,otherAudience.apiOrigin),otherAudience);
-    const beta={...value,profile:'operational-beta-v1'};
-    assert.deepEqual(validateOperationalNativeIdentity(beta,client,beta.apiOrigin),beta);
-    assert.equal(validateOperationalNativeDataMode('authorized_beta',beta),'authorized_beta');
+    // CTO 12 Nov 10:12 ET: operational-beta-v1 also admits clerk.staging.cosmas.ai.
+    const betaOnStaging={...value,profile:'operational-beta-v1'};
+    assert.deepEqual(validateOperationalNativeIdentity(betaOnStaging,client,betaOnStaging.apiOrigin),betaOnStaging);
     for (const changed of [
       {frontendOrigin:'https://clerk.cosmaneura.com',publishableKey:productionClerkKey},
       {frontendOrigin:identity.frontendOrigin,publishableKey:identity.publishableKey},
@@ -65,10 +65,30 @@ test('staging profile accepts its own Clerk instance and rejects other live host
     ]) assert.throws(()=>validateOperationalNativeIdentity({...value,...changed},client,value.apiOrigin),
       /Operational native identity/,JSON.stringify(changed));
   }
-  const production={...identity,client:'apple',frontendOrigin:'https://clerk.cosmaneura.com',
-    publishableKey:productionClerkKey,audience:'cosmas-os-beta-api'};
-  assert.deepEqual(validateOperationalNativeIdentity(production,'apple',production.apiOrigin),production);
-  assert.throws(()=>validateOperationalNativeIdentity({...production,profile:'operational-staging-v1'},'apple',production.apiOrigin));
+  // clerk.cosmaneura.com / clerk.example.invalid / clerk.beta are not operational-beta-v1 hosts.
+  for (const bad of [
+    {...identity,client:'apple',frontendOrigin:'https://clerk.cosmaneura.com',
+      publishableKey:productionClerkKey,audience:'cosmas-os-beta-api'},
+    {...identity,client:'apple',frontendOrigin:'https://clerk.example.invalid',
+      publishableKey:liveKey('clerk.example.invalid'),audience:'cosmas-os-beta-api'},
+    {...identity,client:'apple',frontendOrigin:'https://clerk.beta.cosmas.ai',
+      publishableKey:liveKey('clerk.beta.cosmas.ai'),audience:'cosmas-os-beta-api'},
+  ]) assert.throws(()=>validateOperationalNativeIdentity(bad,'apple',bad.apiOrigin));
+  // Shipped beta-on-staging host is accepted for operational-beta-v1.
+  assert.deepEqual(validateOperationalNativeIdentity({
+    ...identity,client:'apple',frontendOrigin:'https://clerk.staging.cosmas.ai',
+    publishableKey:dedicatedStagingKey,audience:'cosmas-os-beta-api',
+  },'apple','https://api.example.invalid'),{
+    ...identity,client:'apple',frontendOrigin:'https://clerk.staging.cosmas.ai',
+    publishableKey:dedicatedStagingKey,audience:'cosmas-os-beta-api',
+  });
+  // Staging also refuses the former production/example hosts (not its dedicated allow-list).
+  for (const bad of [
+    {...identity,client:'apple',profile:'operational-staging-v1',frontendOrigin:'https://clerk.cosmaneura.com',
+      publishableKey:productionClerkKey,audience:'cosmas-os-beta-api'},
+    {...identity,client:'apple',profile:'operational-staging-v1',frontendOrigin:'https://clerk.example.invalid',
+      publishableKey:liveKey('clerk.example.invalid'),audience:'cosmas-os-beta-api'},
+  ]) assert.throws(()=>validateOperationalNativeIdentity(bad,'apple',bad.apiOrigin));
 });
 
 test('production profile pins clerk.beta.cosmas.ai and rejects staging or live Clerk hosts',()=>{
@@ -108,11 +128,20 @@ test('operational identity binds the decoded production frontend, client and API
   assert.equal(operationalNativeBundle('desktop'),'com.cosmasos.beta.desktop.auth');
   assert.equal(operationalNativeBundle('apple'),'com.cosmasos.beta.ios');
   assert.equal(operationalNativeAuthSettings(identity).enabled,true);
+  // Shipped staging Clerk host is admitted on operational-beta-v1 (CTO 10:12 ET).
+  assert.deepEqual(validateOperationalNativeIdentity({
+    ...identity,frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:dedicatedStagingKey,
+  },'desktop',identity.apiOrigin),{
+    ...identity,frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:dedicatedStagingKey,
+  });
   for (const changed of [
     {...identity,client:'apple'}, {...identity,apiOrigin:'https://other.example.invalid'},
-    {...identity,publishableKey:'pk_test_'+btoa('clerk.example.invalid$')},
+    {...identity,publishableKey:'pk_test_'+btoa('clerk.cosmas.ai$')},
     {...identity,frontendOrigin:'https://other.example.invalid'},
-    {...identity,frontendOrigin:'https://clerk.example.invalid:443'},
+    {...identity,frontendOrigin:'https://clerk.cosmas.ai:443'},
+    {...identity,frontendOrigin:'https://clerk.example.invalid',publishableKey:liveKey('clerk.example.invalid')},
+    {...identity,frontendOrigin:'https://clerk.beta.cosmas.ai',publishableKey:liveKey('clerk.beta.cosmas.ai')},
+    {...identity,frontendOrigin:'https://clerk.cosmaneura.com',publishableKey:productionClerkKey},
     {...identity,publishableKey:'pk_live_'+btoa('invented.clerk.accounts.dev$'),frontendOrigin:'https://invented.clerk.accounts.dev'},
     {...identity,publishableKey:identity.publishableKey+' '}, {...identity,audience:'with spaces'},
     {...identity,organizationId:''}, {...identity,secret:'forbidden'}, {...identity,version:true},
@@ -157,4 +186,44 @@ test('synthetic data with operational identity preserves custody and rejects mod
   ]) await assert.rejects(prepareDesktopState(changed,base,'43.4.1'));
   assert.equal(await readFile(join(directory,'cosmas-installation.json'),'utf8'),marker);
   assert.equal(await readFile(join(directory,'retained-draft'),'utf8'),'invented private draft');
+});
+
+test('desktop path refuses operational-production-v1 unless installation.profile is production', async t => {
+  const productionIdentity = {
+    version: 1, profile: 'operational-production-v1', client: 'desktop',
+    apiOrigin: 'https://api.beta.cosmas.ai',
+    frontendOrigin: 'https://clerk.beta.cosmas.ai',
+    publishableKey: liveKey('clerk.beta.cosmas.ai'),
+    organizationId: 'org_invented_beta', audience: 'cosmas-os-beta-api',
+  };
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'cosmas-prod-fence-desktop-')));
+  t.after(() => rm(base, {recursive: true, force: true}));
+  const betaInstallation = {
+    version: 1, profile: 'beta', bundleIdentifier: 'com.cosmasos.beta.desktop',
+    storageGeneration: 1, electronVersion: '43.4.1',
+    rendererPartition: 'persist:cosmasos-operational-beta',
+    authHelperBundleIdentifier: 'com.cosmasos.beta.desktop.auth',
+  };
+  await assert.rejects(prepareDesktopState({
+    mode: 'hosted-beta-authenticated', dataMode: 'authorized_beta',
+    apiOrigin: productionIdentity.apiOrigin, nativeIdentity: productionIdentity,
+    installation: betaInstallation,
+  }, base, '43.4.1'));
+  await assert.rejects(prepareDesktopState({
+    mode: 'hosted-beta-authenticated', dataMode: 'authorized_beta',
+    apiOrigin: productionIdentity.apiOrigin, nativeIdentity: productionIdentity,
+    installation: {...betaInstallation, profile: 'staging'},
+  }, join(base, 'staging'), '43.4.1'));
+  const ok = await prepareDesktopState({
+    mode: 'hosted-beta-authenticated', dataMode: 'authorized_beta',
+    apiOrigin: productionIdentity.apiOrigin, nativeIdentity: productionIdentity,
+    installation: {...betaInstallation, profile: 'production'},
+  }, join(base, 'production'), '43.4.1');
+  assert.ok(ok.includes('com.cosmasos.beta.desktop'));
+  // B11 note: prepareDesktopState always passing 'production' into
+  // loadOperationalNativeIdentity still fails the later
+  // requiredInstallationProfile check (production identity requires
+  // installation.profile === 'production'). Equivalent for these rejects;
+  // B6 (skip requireProductionInstallationProfile in the shared loader) is
+  // killed by the JS loader suite instead.
 });

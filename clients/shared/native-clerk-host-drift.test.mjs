@@ -7,25 +7,44 @@ import {dedicatedClerkHostsByProfile, OPERATIONAL_NATIVE_PROFILE, STAGING_NATIVE
 
 const SWIFT_PATH = fileURLToPath(new URL(
   '../apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift', import.meta.url));
+const PYTHON_AUTH_PATH = fileURLToPath(new URL(
+  '../../scripts/native_iphone_auth_profile.py', import.meta.url));
 
-/** Named Swift↔JS host-map differences. Staging behaviour is unchanged this PR. */
+/** Exact dual set for operational-beta-v1 (CTO DECISION_LOG 12 Nov 2026 10:12 ET). */
+export const OPERATIONAL_BETA_CLERK_HOSTS = Object.freeze(
+  ['clerk.cosmas.ai', 'clerk.staging.cosmas.ai']);
+
+/**
+ * Named Swift↔JS host-map differences. Staging behaviour is unchanged this PR.
+ *
+ * operational-beta-v1 is NOT listed: JS, Python, and Swift must all admit exactly
+ * OPERATIONAL_BETA_CLERK_HOSTS. PR #370 updates Swift to that set; its drift
+ * exception that claims "JS still has an empty dedicated allow-list" must be
+ * reworded or removed once both PRs land.
+ *
+ * What the staging exception allows (JS only):
+ * - operational-staging-v1 + dedicated host clerk.staging.cosmas.ai + pk_live_
+ *   encoding that host + non-empty audience.
+ * - operational-staging-v1 + strict *.clerk.accounts.dev host + pk_test_
+ *   encoding that host + empty audience.
+ *
+ * What it does not allow:
+ * - Production Clerk/API hosts (clerk.beta.cosmas.ai / api.beta.cosmas.ai) on staging.
+ * - Live clerk.cosmas.ai on staging.
+ * - Swift operationalStaging dedicated clerk.staging.cosmas.ai (Swift allow-list is
+ *   empty; Swift admits only the accounts.dev path for operationalStaging).
+ * - pk_test_ on the dedicated staging host, or pk_live_ on accounts.dev.
+ */
 export const INTENTIONAL_CLERK_HOST_DRIFT = Object.freeze([
   Object.freeze({
     profile: STAGING_NATIVE_PROFILE,
     swift: Object.freeze([]),
     js: Object.freeze(['clerk.staging.cosmas.ai']),
-    reason: 'JS operational-staging-v1 accepts dedicated clerk.staging.cosmas.ai with pk_live_; '
-      + 'Swift operationalStaging has an empty allow-list and refuses it. Unchanged this PR. '
-      + 'Named exception approved by CTO (decision B, 11 Nov 2026). Follow-up after #354: '
-      + 'invented-host-input.json beta identity becomes clerk.cosmas.ai, goldens regenerated, JS beta pinned.',
-  }),
-  Object.freeze({
-    profile: OPERATIONAL_NATIVE_PROFILE,
-    swift: Object.freeze(['clerk.cosmas.ai', 'clerk.staging.cosmas.ai']),
-    js: Object.freeze([]),
-    reason: 'Swift operational-beta-v1 admits clerk.cosmas.ai and clerk.staging.cosmas.ai; '
-      + 'JS still has an empty dedicated allow-list for that profile. Exact named exception; '
-      + 'JS side unchanged this PR.',
+    reason: 'JS operational-staging-v1 allows dedicated clerk.staging.cosmas.ai with '
+      + 'pk_live_ (and separately allows strict *.clerk.accounts.dev with pk_test_). '
+      + 'Swift operationalStaging has an empty dedicated allow-list and admits only the '
+      + 'accounts.dev path. Named filming-hold exception; owner decision pending. '
+      + 'Production-review hosts are not part of this exception.',
   }),
 ]);
 
@@ -53,6 +72,14 @@ export function extractSwiftAllowedClerkHosts(source) {
   return hostsByProfile;
 }
 
+/** Parse OPERATIONAL_BETA_CLERK_HOSTS from native_iphone_auth_profile.py. */
+export function extractPythonOperationalBetaClerkHosts(source) {
+  const match = source.match(
+    /OPERATIONAL_BETA_CLERK_HOSTS\s*=\s*frozenset\(\{([^}]*)\}\)/);
+  assert.ok(match, 'OPERATIONAL_BETA_CLERK_HOSTS missing');
+  return [...match[1].matchAll(/"([^"]+)"/g)].map(item => item[1]).sort();
+}
+
 export function assertSwiftJsClerkHostsAligned(swiftHosts, jsHosts, exceptions = INTENTIONAL_CLERK_HOST_DRIFT) {
   const shared = [OPERATIONAL_NATIVE_PROFILE, STAGING_NATIVE_PROFILE, PRODUCTION_NATIVE_PROFILE];
   const exceptionByProfile = Object.fromEntries(exceptions.map(item => [item.profile, item]));
@@ -71,9 +98,19 @@ export function assertSwiftJsClerkHostsAligned(swiftHosts, jsHosts, exceptions =
 
 test('shared profile Clerk hosts match Swift allow-list except named exceptions', () => {
   const source = readFileSync(SWIFT_PATH, 'utf8');
+  const pythonSource = readFileSync(PYTHON_AUTH_PATH, 'utf8');
   const swiftHosts = extractSwiftAllowedClerkHosts(source);
   const jsHosts = dedicatedClerkHostsByProfile();
+  const pythonHosts = extractPythonOperationalBetaClerkHosts(pythonSource);
   assertSwiftJsClerkHostsAligned(swiftHosts, jsHosts);
+  // Three-way parity for operational-beta-v1 (JS / Python / Swift).
+  assert.deepEqual(jsHosts[OPERATIONAL_NATIVE_PROFILE], [...OPERATIONAL_BETA_CLERK_HOSTS]);
+  assert.deepEqual(pythonHosts, [...OPERATIONAL_BETA_CLERK_HOSTS]);
+  assert.deepEqual(swiftHosts[OPERATIONAL_NATIVE_PROFILE], [...OPERATIONAL_BETA_CLERK_HOSTS]);
+  assert.equal(
+    INTENTIONAL_CLERK_HOST_DRIFT.some(item => item.profile === OPERATIONAL_NATIVE_PROFILE),
+    false,
+    'operational-beta-v1 must not be a named drift exception once JS admits both hosts');
   assert.deepEqual(swiftHosts[PRODUCTION_NATIVE_PROFILE], ['clerk.beta.cosmas.ai']);
   assert.deepEqual(jsHosts[PRODUCTION_NATIVE_PROFILE], ['clerk.beta.cosmas.ai']);
 });
@@ -88,6 +125,8 @@ test('Clerk host drift detector fails when either side is mutated', () => {
     swiftHosts, {...jsHosts, [PRODUCTION_NATIVE_PROFILE]: ['clerk.evil.example']}));
   assert.throws(() => assertSwiftJsClerkHostsAligned(
     {...swiftHosts, [OPERATIONAL_NATIVE_PROFILE]: ['clerk.evil.example']}, jsHosts));
-  // Clearing a named exception without updating either map must fail.
+  assert.throws(() => assertSwiftJsClerkHostsAligned(
+    swiftHosts, {...jsHosts, [OPERATIONAL_NATIVE_PROFILE]: []}));
+  // Clearing the staging exception without aligning either map must fail.
   assert.throws(() => assertSwiftJsClerkHostsAligned(swiftHosts, jsHosts, []));
 });

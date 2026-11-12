@@ -146,8 +146,10 @@ def test_python_production_clerk_host_matches_swift_operational_production_allow
     assert AUTH.PRODUCTION_ORIGINS["clerk"] == "https://clerk.beta.cosmas.ai"
     assert AUTH.SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST == "clerk.beta.cosmas.ai"
     assert AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST == "clerk.cosmas.ai"
-    assert _swift_allowed_hosts("operationalBeta") == {
-        "clerk.cosmas.ai", "clerk.staging.cosmas.ai"}
+    # JS/Python/Swift dual set (CTO 12 Nov 10:12 ET; Swift allow-list from #370).
+    assert AUTH.OPERATIONAL_BETA_CLERK_HOSTS == frozenset({
+        "clerk.cosmas.ai", "clerk.staging.cosmas.ai"})
+    assert _swift_allowed_hosts("operationalBeta") == AUTH.OPERATIONAL_BETA_CLERK_HOSTS
     assert _swift_allowed_hosts("operationalProduction") == {"clerk.beta.cosmas.ai"}
     # Removing either host from the Swift allow-list fails this agreement test.
     assert "https://" + next(iter(_swift_allowed_hosts("operationalProduction"))) == (
@@ -176,7 +178,7 @@ def test_production_stamp_enables_only_with_validated_key():
     assert stamped["CosmasNativeAuth"]["publishableKey"] == identity["auth"]["publishableKey"]
     assert AUTH.publishable_key_host(stamped["CosmasNativeAuth"]["publishableKey"]) == (
         AUTH.SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST)
-    with pytest.raises(ValueError, match="without a validated key"):
+    with pytest.raises(ValueError, match="without a (validated|pk_live_) key"):
         AUTH.production_native_auth_stamp(before, auth={
             "enabled": True,
             "profile": "operational-production-v1",
@@ -548,3 +550,207 @@ def test_composition_bindings_refuse_changed_derivation_or_auth_profile_hash(tmp
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="drifted from native_iphone_auth_profile"):
         OWNED.composition_bindings(ROOT, source, auth_out)
+
+
+def _test_key(host: str) -> str:
+    return "pk_test_" + base64.b64encode(f"{host}$".encode()).decode()
+
+
+@pytest.mark.parametrize("profile", [None, "beta"])
+def test_f5_operational_beta_pointed_at_clerk_beta_is_refused(profile):
+    """F5: operational-beta-v1 on clerk.beta.cosmas.ai requires --installation-profile production."""
+    identity = _live_beta_identity()
+    identity["identity"]["frontendOrigin"] = AUTH.PRODUCTION_ORIGINS["clerk"]
+    identity["identity"]["publishableKey"] = _live_key("clerk.beta.cosmas.ai")
+    identity["auth"]["frontendOrigin"] = AUTH.PRODUCTION_ORIGINS["clerk"]
+    identity["auth"]["publishableKey"] = identity["identity"]["publishableKey"]
+    before = plistlib.loads(APP_INFO.read_bytes())
+    configured = {
+        **copy.deepcopy(before),
+        "CosmasNativeIdentity": copy.deepcopy(identity["identity"]),
+        "CosmasNativeAuth": copy.deepcopy(identity["auth"]),
+    }
+    with pytest.raises(ValueError, match="--installation-profile production"):
+        AUTH.apply_installation_profile_to_configured_info(
+            configured, profile, identity=identity)
+
+
+def test_l1_production_auth_requires_pk_live_not_pk_test():
+    """L1: production check requires a pk_live_ key even when the host matches."""
+    identity = _production_identity()
+    pk_test = _test_key("clerk.beta.cosmas.ai")
+    assert AUTH.publishable_key_host(pk_test) == "clerk.beta.cosmas.ai"
+    bad = copy.deepcopy(identity["auth"])
+    bad["publishableKey"] = pk_test
+    with pytest.raises(ValueError, match="pk_live_"):
+        AUTH.require_validated_production_auth(bad)
+    assert AUTH.require_validated_production_auth(identity["auth"])["publishableKey"] == (
+        identity["auth"]["publishableKey"])
+
+
+@pytest.mark.parametrize("host", [
+    "notclerk.accounts.dev",
+    "evil.clerk.accounts.dev.example",
+    "clerk.accounts.dev",
+    ".clerk.accounts.dev",
+    "INVENTED.clerk.accounts.dev",
+    "invented.clerk.accounts.dev.",
+    "invented..clerk.accounts.dev",
+])
+def test_l2_accounts_dev_host_rejects_suffix_tricks(host):
+    """L2: strict *.clerk.accounts.dev match; lookalikes and suffix tricks fail."""
+    assert AUTH.is_accounts_dev_clerk_host(host) is False
+    assert AUTH.is_accounts_dev_clerk_host("invented.clerk.accounts.dev") is True
+    assert AUTH.is_accounts_dev_clerk_host("invented-own-practice.clerk.accounts.dev") is True
+    with pytest.raises(ValueError, match="Staging profile requires"):
+        AUTH.require_installation_profile_origins(
+            "staging",
+            frontend_origin="https://" + host,
+            api_origin=AUTH.STAGING_ORIGINS["api"],
+            web_origin=AUTH.STAGING_ORIGINS["web"],
+        )
+
+
+def test_f17_compose_main_installation_profile_stamps_production_infos(tmp_path):
+    """Compose main() end to end: production installation profile stamps Infos (not owned prepare)."""
+    default_out = tmp_path / "f17-default"
+    prod_out = tmp_path / "f17-production"
+    default = subprocess.run(
+        [sys.executable, str(COMPOSE), "--repository", str(ROOT), "--output", str(default_out)],
+        cwd=ROOT, capture_output=True, text=True, check=True)
+    assert "Prepared portable iPhone project inputs" in default.stdout
+    prod = subprocess.run(
+        [sys.executable, str(COMPOSE), "--repository", str(ROOT), "--output", str(prod_out),
+         "--installation-profile", "production"],
+        cwd=ROOT, capture_output=True, text=True, check=True)
+    assert "Prepared portable iPhone project inputs" in prod.stdout
+    default_info = plistlib.loads((default_out / "apps/capture/ios/App/App/Info.plist").read_bytes())
+    prod_info = plistlib.loads((prod_out / "apps/capture/ios/App/App/Info.plist").read_bytes())
+    assert default_info["CosmasNativeAuth"]["enabled"] is False
+    assert default_info["CosmasNativeAuth"]["frontendOrigin"] == ""
+    assert prod_info["CosmasNativeAuth"]["enabled"] is False
+    assert prod_info["CosmasNativeAuth"]["frontendOrigin"] == "https://clerk.beta.cosmas.ai"
+    assert prod_info["CosmasNativeAuth"]["profile"] == "operational-production-v1"
+    assert prod_info["CosmasNativeIdentity"]["apiOrigin"] == "https://api.beta.cosmas.ai"
+    manifest = json.loads((prod_out / "composition.json").read_text(encoding="utf-8"))
+    assert manifest["installation_profile"] == "production"
+
+
+def test_f17_owned_prepare_installation_profile_fence(tmp_path, monkeypatch):
+    """F17: owned prepare(args) with platform/sandbox and stage steps monkeypatched.
+
+    Early apply_installation_profile_to_configured_info runs beside the custody
+    check (before stages). JS load fences production first when the profile is
+    omitted/beta; apply still raises '--installation-profile production' when
+    that fence is skipped (F5) and when load succeeds with a mismatched Infos.
+    """
+    captured: list[list[str]] = []
+
+    def fake_stage(repository, output, name, command, env):
+        captured.append(list(command))
+        target = output / name
+        target.mkdir(parents=True, exist_ok=True)
+        return {"name": name, "command": list(command)}
+
+    real_is_file = OWNED.Path.is_file
+
+    def patched_is_file(self):
+        if str(self) == "/usr/bin/sandbox-exec":
+            return True
+        return real_is_file(self)
+
+    monkeypatch.setattr(OWNED.sys, "platform", "darwin")
+    monkeypatch.setattr(OWNED.Path, "is_file", patched_is_file)
+    monkeypatch.setattr(OWNED, "stage", fake_stage)
+    monkeypatch.setattr(OWNED.subprocess, "check_output", lambda *a, **k: "v24.0.0")
+    monkeypatch.setattr(OWNED, "source_snapshot", lambda repository: {
+        "commit": "invented", "dirty": False})
+    monkeypatch.setattr(OWNED, "public_json", lambda path, *a, **k: json.loads(path.read_text())
+                        if path.suffix == ".json" else {})
+    monkeypatch.setattr(OWNED, "regular", lambda path, *a, **k: path.resolve())
+    monkeypatch.setattr(OWNED, "output_path", lambda output, inputs: output.resolve())
+    monkeypatch.setattr(OWNED, "retained_info", lambda path, is_ipa: (
+        plistlib.loads(APP_INFO.read_bytes()), {"path": str(path)}))
+
+    production = _production_identity()
+    beta = _live_beta_identity()
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "apple-build-env.json").write_text("{}")
+    retained = tmp_path / "Info.plist"
+    retained.write_bytes(APP_INFO.read_bytes())
+
+    def args_for(profile, identity_doc, out_name):
+        (inputs / "apple-identity.json").write_text(json.dumps(identity_doc["identity"]))
+        argv = [
+            "--inputs", str(inputs),
+            "--retained-info", str(retained),
+            "--node", sys.executable,
+            "--output", str(tmp_path / out_name),
+        ]
+        if profile is not None:
+            argv.extend(["--installation-profile", profile])
+        return OWNED.arguments(argv)
+
+    # Production-review under omitted/beta: load fence (or apply) must refuse.
+    for profile in (None, "beta"):
+        with pytest.raises(
+            ValueError,
+            match=r"--installation-profile production|Native identity must match",
+        ):
+            OWNED.prepare(args_for(profile, production, f"prod-{profile}"))
+
+    # Bypass retained-bundle custody so prepare can reach renderer stages for
+    # F17 beta-under-production refusal and the B10 forwarding assertions.
+    def fake_configured(before, retained_info, identity, practice=None, validate_google=None):
+        return {
+            "CFBundleIdentifier": identity["bundle"],
+            "CosmasNativeIdentity": copy.deepcopy(identity["identity"]),
+            "CosmasNativeAuth": copy.deepcopy(identity["auth"]),
+        }
+
+    monkeypatch.setattr(OWNED, "configured_info", fake_configured)
+
+    # Beta identity under production installation profile is refused by apply /
+    # origin requirements after load succeeds.
+    with pytest.raises(ValueError):
+        OWNED.prepare(args_for("production", beta, "beta-under-production"))
+
+    # B10 killer: renderer argv must carry --installation-profile when set.
+    # Soft-skip when stages never run lets the mutant survive.
+    text = PREPARE.read_text(encoding="utf-8")
+    assert 'renderer_command.extend(["--installation-profile", args.installation_profile])' in text
+    # Dedicated staging host requires a non-empty audience for JS load.
+    staging = _staging_identity()
+    staging["identity"]["audience"] = "cosmas-os-staging"
+    staging["auth"]["audience"] = "cosmas-os-staging"
+    staging["identity"]["publishableKey"] = _live_key("clerk.staging.cosmas.ai")
+    staging["auth"]["publishableKey"] = staging["identity"]["publishableKey"]
+    for profile, identity_doc, out_name in (
+        ("production", production, "prod-forward"),
+        ("staging", staging, "staging-forward"),
+        ("beta", beta, "beta-forward"),
+    ):
+        assert OWNED.arguments([
+            "--inputs", str(inputs),
+            "--retained-info", str(retained),
+            "--node", sys.executable,
+            "--output", str(tmp_path / f"argv-{profile}"),
+            "--installation-profile", profile,
+        ]).installation_profile == profile
+        captured.clear()
+        try:
+            OWNED.prepare(args_for(profile, identity_doc, out_name))
+        except Exception:
+            # Later compose/bindings may fail after the renderer stage is queued.
+            pass
+        renderer_cmds = [
+            cmd for cmd in captured
+            if any("build-native-renderer.mjs" in part for part in cmd)
+        ]
+        assert renderer_cmds, (
+            f"B10: prepare must reach the renderer stage under --installation-profile {profile}"
+        )
+        assert any(
+            "--installation-profile" in cmd and profile in cmd for cmd in renderer_cmds
+        ), renderer_cmds

@@ -109,7 +109,7 @@ test('Microsoft account work requires explicit matching opt-in and preserves def
 
 test('public identity preparation keeps Core capture dark by default and carries it when opted in',()=>{
   const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.com',
-    publishableKey:'pk_live_'+Buffer.from('clerk.example.com$').toString('base64'),frontendOrigin:'https://clerk.example.com',
+    publishableKey:'pk_live_'+Buffer.from('clerk.cosmas.ai$').toString('base64'),frontendOrigin:'https://clerk.cosmas.ai',
     organizationId:'org_invented_beta',audience:'cosmas-os-beta-api'};
   const off=workspaceIdentityInputs(identity,{webOrigin:'https://workspace.example.com',
     coreWebOrigin:'',captureUploadOrigins:[],dataMode:'synthetic',featureProfile:INDEPENDENT_BETA_FEATURE_PROFILE});

@@ -12,8 +12,8 @@ import {resolveHostedWorkspace} from '../clients/shared/hosted-workspace-config.
 
 const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
   apiOrigin: 'https://api.example.invalid',
-  publishableKey: 'pk_live_' + Buffer.from('identity.example.invalid$').toString('base64'),
-  frontendOrigin: 'https://identity.example.invalid', organizationId: 'org_renderer_invented', audience: 'cosmas-beta-api'};
+  publishableKey: 'pk_live_' + Buffer.from('clerk.cosmas.ai$').toString('base64'),
+  frontendOrigin: 'https://clerk.cosmas.ai', organizationId: 'org_renderer_invented', audience: 'cosmas-beta-api'};
 const options = {webOrigin: 'https://workspace.example.invalid', coreWebOrigin: 'https://core.example.invalid',
   captureUploadOrigins: ['https://uploads.example.invalid']};
 
@@ -84,7 +84,7 @@ for(const client of ['desktop','apple'])test(`${client} retains exact optional p
 
 test('CLI requires explicit inputs, native client and output without duplicate arguments', () => {
   assert.deepEqual(nativeRendererArguments(['--inputs', '/retained/clients', '--client', 'apple', '--output', '/new/build']),
-    {inputs: '/retained/clients', client: 'apple', output: '/new/build'});
+    {inputs: '/retained/clients', client: 'apple', output: '/new/build', installationProfile: undefined});
   for (const args of [[], ['--inputs', '/retained/clients'], ['--client'],
     ['--client', 'desktop', '--client', 'apple'], ['--source', '/other/source'], ['--output', '--client']]) {
     assert.throws(() => nativeRendererArguments(args));
@@ -217,4 +217,71 @@ test('compiler failure keeps incomplete output and restores the caller environme
   await assert.rejects(access(join(f.output, 'native-renderer-build.json')), {code: 'ENOENT'});
   assert.equal(process.env.NODE_ENV, beforeNodeEnv);
   assert.equal(Object.keys(process.env).some(key => key.startsWith('VITE_')), false);
+});
+
+const productionIdentity = {
+  version: 1, profile: 'operational-production-v1', client: 'desktop',
+  apiOrigin: 'https://api.beta.cosmas.ai',
+  publishableKey: 'pk_live_' + Buffer.from('clerk.beta.cosmas.ai$').toString('base64'),
+  frontendOrigin: 'https://clerk.beta.cosmas.ai',
+  organizationId: 'org_renderer_production', audience: 'cosmas-os-beta-api',
+};
+
+async function productionFixture(t, client) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'cosmas-prod-fence-renderer-')));
+  t.after(() => rm(root, {recursive: true, force: true}));
+  const inputs = join(root, 'clients'), output = join(root, 'renderer');
+  await mkdir(inputs);
+  // workspaceIdentityInputs always validates the desktop candidate first, then
+  // emits both desktop and apple identity files.
+  const files = structuredClone(workspaceIdentityInputs(productionIdentity, {
+    webOrigin: 'https://workspace.example.invalid',
+    coreWebOrigin: 'https://core.example.invalid',
+    captureUploadOrigins: ['https://uploads.example.invalid'],
+    dataMode: 'authorized_beta',
+    nativeFeatureProfile: 'operational-beta-v1',
+  }));
+  for (const [name, value] of Object.entries(files)) {
+    await writeFile(join(inputs, name), JSON.stringify(value));
+  }
+  return {root, inputs, output, client, files};
+}
+
+for (const client of ['desktop', 'apple']) {
+  const pathLabel = client === 'desktop' ? 'renderer' : 'simulator';
+  test(`${pathLabel} path (${client}) refuses operational-production-v1 without --installation-profile production`, async t => {
+    const f = await productionFixture(t, client);
+    await assert.rejects(
+      buildNativeRenderer(f, {build: () => assert.fail('must not compile')}),
+      /incomplete or inconsistent/);
+    await assert.rejects(
+      buildNativeRenderer({...f, installationProfile: 'beta'}, {build: () => assert.fail('must not compile')}),
+      /incomplete or inconsistent/);
+    const env = f.files[client + '-build-env.json'];
+    const result = await buildNativeRenderer(
+      {...f, installationProfile: 'production', output: join(f.root, 'ok')},
+      {build: config => emit(config, env)});
+    assert.equal(result.client, client);
+    // Mutation note: removing requireProductionInstallationProfile from
+    // loadOperationalNativeIdentity lets the rejects above succeed and compile.
+  });
+}
+
+test('native renderer CLI accepts optional --installation-profile production', () => {
+  assert.deepEqual(
+    nativeRendererArguments([
+      '--inputs', '/retained/clients', '--client', 'apple',
+      '--output', '/new/build', '--installation-profile', 'production',
+    ]),
+    {inputs: '/retained/clients', client: 'apple', output: '/new/build',
+      installationProfile: 'production'});
+  assert.equal(
+    nativeRendererArguments([
+      '--inputs', '/retained/clients', '--client', 'desktop', '--output', '/new/build',
+    ]).installationProfile,
+    undefined);
+  assert.throws(() => nativeRendererArguments([
+    '--inputs', '/retained/clients', '--client', 'apple',
+    '--output', '/new/build', '--installation-profile', 'review',
+  ]));
 });

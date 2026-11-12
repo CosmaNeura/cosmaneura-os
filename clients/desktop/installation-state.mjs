@@ -3,7 +3,12 @@ import {createHash} from 'node:crypto';
 import {lstat, mkdir, open, readdir, realpath} from 'node:fs/promises';
 import {isAbsolute, join, resolve} from 'node:path';
 import {exactHostedApiOrigin} from './hosted-auth-http.mjs';
-import {validateOperationalNativeIdentity, validateOperationalNativeDataMode} from './native-identity-config.mjs';
+import {
+  PRODUCTION_NATIVE_PROFILE,
+  PRODUCTION_INSTALLATION_PROFILE,
+  loadOperationalNativeIdentity,
+  validateOperationalNativeDataMode,
+} from './native-identity-config.mjs';
 
 const unavailable = () => new Error('Saved workspace is incompatible or unavailable; local data was preserved');
 const markerName = 'cosmas-installation.json';
@@ -14,8 +19,11 @@ export async function prepareDesktopState(config, appData, electronVersion) {
   const operational = hosted && (config.dataMode === 'authorized_beta' || Object.hasOwn(config, 'nativeIdentity'));
   if (hosted && (!['synthetic','authorized_beta'].includes(config.dataMode) || !exactHostedApiOrigin(config.apiOrigin) || !config.installation)) throw unavailable();
   let identityBinding;
+  let publicIdentity;
   if (operational) {
-    const publicIdentity = validateOperationalNativeIdentity(config.nativeIdentity, 'desktop', config.apiOrigin);
+    // Desktop loader: operational-production-v1 requires installation.profile === 'production'.
+    publicIdentity = loadOperationalNativeIdentity(
+      config.nativeIdentity, 'desktop', config.apiOrigin, config.installation?.profile);
     validateOperationalNativeDataMode(config.dataMode, publicIdentity);
     identityBinding = createHash('sha256').update(JSON.stringify(publicIdentity, Object.keys(publicIdentity).sort())).digest('hex');
     if (config.installationRoot !== undefined) throw unavailable();
@@ -25,9 +33,12 @@ export async function prepareDesktopState(config, appData, electronVersion) {
     return config.stateDirectory; // Preserve the existing isolated W6/W9/W13 compositions.
   }
   const identity = config.installation;
+  const requiredInstallationProfile = publicIdentity?.profile === PRODUCTION_NATIVE_PROFILE
+    ? PRODUCTION_INSTALLATION_PROFILE
+    : 'beta';
   if (!identity || typeof identity !== 'object' || (!hosted && config.mode !== 'local-synthetic-authenticated') || config.stateDirectory !== undefined ||
       (Object.hasOwn(identity, 'storageScope') && (!operational || identity.storageScope !== 'identity-v1')) ||
-      identity.version !== 1 || (operational ? identity.profile !== 'beta' : !/^w[1-9][0-9]*[a-z]?$/.test(identity.profile)) ||
+      identity.version !== 1 || (operational ? identity.profile !== requiredInstallationProfile : !/^w[1-9][0-9]*[a-z]?$/.test(identity.profile)) ||
       identity.bundleIdentifier !== (operational ? 'com.cosmasos.beta.desktop' : `com.cosmasos.synthetic.desktop.${identity.profile}`) ||
       identity.storageGeneration !== 1 || identity.electronVersion !== '43.4.1' ||
       electronVersion !== identity.electronVersion ||

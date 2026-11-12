@@ -33,8 +33,8 @@ class IndependentDesktopProfile(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.identity = {"version": 1, "profile": "operational-beta-v1", "client": "desktop",
-                         "apiOrigin": "https://api.example.invalid", "frontendOrigin": "https://identity.example.invalid",
-                         "publishableKey": "pk_live_" + base64.b64encode(b"identity.example.invalid$").decode(),
+                         "apiOrigin": "https://api.example.invalid", "frontendOrigin": "https://clerk.cosmas.ai",
+                         "publishableKey": "pk_live_" + base64.b64encode(b"clerk.cosmas.ai$").decode(),
                          "organizationId": "org_invented_practice", "audience": "invented-cosmabot-api"}
         self.identity_path = self.root / "identity.json"
         self.identity_path.write_text(json.dumps(self.identity))

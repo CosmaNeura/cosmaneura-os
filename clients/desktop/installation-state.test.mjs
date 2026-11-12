@@ -123,8 +123,8 @@ async function operationalFixture(t) {
   const apiOrigin = 'https://api.example.invalid';
   const nativeIdentity = {
     version: 1, profile: 'operational-beta-v1', client: 'desktop', apiOrigin,
-    frontendOrigin: 'https://identity.example.invalid',
-    publishableKey: 'pk_live_' + Buffer.from('identity.example.invalid$').toString('base64'),
+    frontendOrigin: 'https://clerk.cosmas.ai',
+    publishableKey: 'pk_live_' + Buffer.from('clerk.cosmas.ai$').toString('base64'),
     organizationId: 'org_invented_practice', audience: 'invented-cosmabot-api',
   };
   const installation = {version: 1, profile: 'beta', bundleIdentifier: 'com.cosmasos.beta.desktop',
@@ -175,7 +175,6 @@ test('each exact native identity has separate state and an omitted scope cannot 
   await writeFile(join(path, 'retained-ciphertext'), 'invented encrypted bytes', {mode: 0o600});
   const changes = [
     {organizationId: 'org_invented_other'},
-    {frontendOrigin: 'https://other.example.invalid', publishableKey: 'pk_live_' + Buffer.from('other.example.invalid$').toString('base64')},
     {audience: 'invented-other-api'},
     {apiOrigin: 'https://other-api.example.invalid'},
   ];

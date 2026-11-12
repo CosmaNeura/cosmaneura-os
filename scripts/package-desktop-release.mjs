@@ -9,7 +9,7 @@ import {cp, lstat, mkdir, readFile, readdir, readlink, realpath, rm, writeFile} 
 import {basename, dirname, extname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {promisify} from 'node:util';
-import {validateOperationalNativeIdentity, validateOperationalNativeDataMode, operationalNativeAuthSettings} from '../clients/desktop/native-identity-config.mjs';
+import {PRODUCTION_NATIVE_PROFILE, loadOperationalNativeIdentity, validateOperationalNativeDataMode, operationalNativeAuthSettings} from '../clients/desktop/native-identity-config.mjs';
 import {INDEPENDENT_BETA_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE,REVIEWED_CORE_CAPTURE_ORIGIN,validateBetaFeatureManifest} from '../clients/shared/beta-feature-profile.mjs';
 import {verifyNativeHelper} from '../clients/desktop/spawn-auth-helper.mjs';
 import {verifyDesktopCapturePackage,CAPTURE_HELPERS} from '../clients/desktop/native-capture-package.mjs';
@@ -243,7 +243,16 @@ export async function verifyFuses(fuses, application) {
 
 /** The operational identity selects custody; the retained mode selects data scope. */
 export function validateOperationalReleaseProfile(config, manifest, info) {
-  const identity=validateOperationalNativeIdentity(config.nativeIdentity,'desktop',config.apiOrigin);
+  // Fence with the closed installation profile from the packaged config.
+  const identity=loadOperationalNativeIdentity(
+    config.nativeIdentity,'desktop',config.apiOrigin,config.installation?.profile);
+  // Desktop production-review identity is not a supported package (CTO DECISION_LOG 12 Nov 2026 10:05 ET).
+  if (identity.profile===PRODUCTION_NATIVE_PROFILE) {
+    throw new Error(
+      'Desktop production identity (operational-production-v1) is not supported; '
+      + 'use operational-beta-v1 on clerk.cosmas.ai or clerk.staging.cosmas.ai '
+      + '(CTO DECISION_LOG 12 Nov 2026 10:12 ET)');
+  }
   validateOperationalNativeDataMode(config.dataMode,identity);
   const profile=validateBetaFeatureManifest(manifest);
   const independent=profile.profile===INDEPENDENT_BETA_FEATURE_PROFILE;

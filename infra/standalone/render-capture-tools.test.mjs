@@ -88,8 +88,8 @@ function assertNoRealPatientOn(files){
 
 // Off-path must stay byte-identical to origin/main after #361 (eight Settings
 // bools rendered explicitly false). Values match render-goldens.test.mjs.
-const MAIN_DEDICATED_FINGERPRINT='3147f8057ec581a0b9fa0be0b67d8fa3cc5afb4d8c6577308032e98c6026974d';
-const MAIN_OWNED_STAGING_FINGERPRINT='5d6b26f717eca58011088027465a0599ed570b7619ad4e69105dbaccded86ca9';
+const MAIN_DEDICATED_FINGERPRINT='a8157eea72ab7be14aca790f5e4fa27a7f3ea839a4d34682dce2cb4c448f372f';
+const MAIN_OWNED_STAGING_FINGERPRINT='b0b47a2286076fd6dd61dd11e2b3c0d8b5da209e8ea9808ccd62559bde9c54fc';
 
 test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const baseline=render(structuredClone(sample));

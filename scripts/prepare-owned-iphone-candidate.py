@@ -319,10 +319,16 @@ def arguments(argv=None):
         "--installation-profile",
         choices=sorted(INSTALLATION_PROFILES),
         help=(
-            "Optional closed installation profile. production stamps production Clerk/API "
-            "origins and enables CosmasNativeAuth only with a validated publishable key; "
-            "staging refuses production origins; beta keeps the historical identity-driven "
-            "default."
+            "Optional closed installation profile. "
+            "'production' selects operational-production-v1 on clerk.beta.cosmas.ai / "
+            "api.beta.cosmas.ai, stamps those origins, and enables CosmasNativeAuth only "
+            "with a validated pk_live_ key encoding clerk.beta.cosmas.ai; it is not a "
+            "practice-account realm. "
+            "'staging' admits clerk.staging.cosmas.ai (pk_live_) or a strict "
+            "*.clerk.accounts.dev host (pk_test_) with api.staging.cosmas.ai and refuses "
+            "production origins. "
+            "'beta' (or omit) keeps the live operational-beta-v1 / clerk.cosmas.ai path "
+            "and refuses operational-production-v1 / clerk.beta.cosmas.ai."
         ),
     )
     parser.add_argument("--node", type=Path, required=True, help="Existing local Node 24 executable; no downloads")
@@ -366,18 +372,28 @@ def prepare(args):
     previous_path = os.environ.get("PATH")
     os.environ["PATH"] = str(node.parent) + os.pathsep + (previous_path or "")
     try:
-        identity = identity_module.load(inputs / "apple-identity.json", "apple")
+        # Installation-profile fence at load: omitted/beta refuse operational-production-v1.
+        identity = identity_module.load(
+            inputs / "apple-identity.json", "apple",
+            installation_profile=args.installation_profile)
         # Check retained custody before creating output or invoking a compiler.
         scaffold_info = plistlib.loads((repository / "apps/capture/ios/App/App/Info.plist").read_bytes())
-        configured_info(scaffold_info, old_info, identity, practice, navigation.validate_google)
+        custody = configured_info(scaffold_info, old_info, identity, practice, navigation.validate_google)
+        # Early Infos installation-profile fence (reachable before stages) so F17 /
+        # omitted-or-beta production-review refusal does not require a renderer build.
+        apply_installation_profile_to_configured_info(
+            copy.deepcopy(custody), args.installation_profile, identity=identity)
         output.mkdir(mode=0o700)
         (output / ".incomplete").write_text("Owned iPhone candidate preparation incomplete\n")
         env = dict(os.environ)
         stages = []
         for client in clients:
-            stages.append(stage(repository, output, client + "-renderer", [str(node),
+            renderer_command = [str(node),
                 str(repository / "scripts/build-native-renderer.mjs"), "--inputs", str(inputs),
-                "--client", client, "--output", str(output / (client + "-renderer"))], env))
+                "--client", client, "--output", str(output / (client + "-renderer"))]
+            if args.installation_profile:
+                renderer_command.extend(["--installation-profile", args.installation_profile])
+            stages.append(stage(repository, output, client + "-renderer", renderer_command, env))
         blueprint = output / "iphone-project"
         compose_command = [sys.executable,
             str(repository / "scripts/compose-portable-iphone.py"), "--repository", str(repository),

@@ -12,8 +12,8 @@
     "profile": "operational-beta-v1",
     "client": "desktop",
     "apiOrigin": "https://api.standalone.example.invalid",
-    "publishableKey": "pk_live_aWRlbnRpdHkuc3RhbmRhbG9uZS5leGFtcGxlLmNvbSQ=",
-    "frontendOrigin": "https://identity.standalone.example.com",
+    "publishableKey": "pk_live_Y2xlcmsuY29zbWFzLmFpJA==",
+    "frontendOrigin": "https://clerk.cosmas.ai",
     "organizationId": "org_invented_standalone_host",
     "audience": "invented-cosmabot-application-api"
   },
