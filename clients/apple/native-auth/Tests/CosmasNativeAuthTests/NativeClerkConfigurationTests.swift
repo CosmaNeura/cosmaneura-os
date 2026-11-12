@@ -110,7 +110,8 @@ private func configuration() throws -> NativeClerkConfiguration {
         // Byte-identical host policy for profiles that already shipped.
         #expect(NativeIdentityProfile.synthetic.allowedClerkHosts == [])
         #expect(NativeIdentityProfile.operationalStaging.allowedClerkHosts == [])
-        #expect(NativeIdentityProfile.operationalBeta.allowedClerkHosts == ["clerk.cosmas.ai"])
+        #expect(NativeIdentityProfile.operationalBeta.allowedClerkHosts == [
+            "clerk.cosmas.ai", "clerk.staging.cosmas.ai"])
         #expect(NativeIdentityProfile.simulatorStaging.allowedClerkHosts == ["clerk.staging.cosmas.ai"])
         #expect(NativeIdentityProfile.operationalProduction.allowedClerkHosts == ["clerk.beta.cosmas.ai"])
 
@@ -204,7 +205,7 @@ private func configuration() throws -> NativeClerkConfiguration {
         }
         let stagingHost = "clerk.staging.cosmas.ai"
         let stagingKey = "pk_live_" + Data((stagingHost + "$").utf8).base64EncodedString()
-        for profile in [NativeIdentityProfile.operationalBeta, .operationalProduction, .operationalStaging, .synthetic] {
+        for profile in [NativeIdentityProfile.operationalProduction, .operationalStaging, .synthetic] {
             let bundle = profile == .synthetic ? "com.cosmasos.synthetic" : "com.cosmasos.beta.ios"
             #expect(throws: NativeAuthError.unavailable) {
                 try NativeClerkConfiguration(publishableKey: stagingKey,
@@ -212,6 +213,13 @@ private func configuration() throws -> NativeClerkConfiguration {
                     bundleIdentifier: bundle, profile: profile)
             }
         }
+        // operationalBeta admits clerk.staging.cosmas.ai so rebuilds keep the
+        // identity already shipped to TestFlight / synthetic Mac users.
+        let betaStaging = try NativeClerkConfiguration(publishableKey: stagingKey,
+            frontendOrigin: "https://" + stagingHost, organizationID: "org_beta",
+            bundleIdentifier: "com.cosmasos.beta.ios", profile: .operationalBeta)
+        #expect(betaStaging.frontendOrigin == "https://clerk.staging.cosmas.ai")
+        #expect(betaStaging.profile == .operationalBeta)
     }
 
     @Test func productionAndLiveClerkKeychainServicesStayIsolated() throws {
@@ -254,7 +262,8 @@ private func configuration() throws -> NativeClerkConfiguration {
     @Test func allowListGuardsAcceptPinnedHostsAndRefuseCrossProfileAndUnlistedHosts() throws {
         // Removing a host from allowedClerkHosts, or dropping the contains(host)
         // guard in NativeClerkAccountConfiguration, fails these expectations.
-        #expect(NativeIdentityProfile.operationalBeta.allowedClerkHosts == ["clerk.cosmas.ai"])
+        #expect(NativeIdentityProfile.operationalBeta.allowedClerkHosts == [
+            "clerk.cosmas.ai", "clerk.staging.cosmas.ai"])
         #expect(NativeIdentityProfile.operationalProduction.allowedClerkHosts == ["clerk.beta.cosmas.ai"])
 
         let liveHost = "clerk.cosmas.ai"
@@ -289,6 +298,48 @@ private func configuration() throws -> NativeClerkConfiguration {
                 publishableKey: "pk_live_" + Data("clerk.example.invalid$".utf8).base64EncodedString(),
                 frontendOrigin: "https://clerk.example.invalid", organizationID: "org_beta",
                 bundleIdentifier: "com.cosmasos.beta.ios", profile: .operationalProduction)
+        }
+    }
+
+    @Test func operationalBetaAcceptsLiveAndStagingClerkHostsAndRefusesLookalikes() throws {
+        // Staging identity already shipped to TestFlight 1107/1110/1120 and
+        // synthetic Mac 1120: clerk.staging.cosmas.ai with api.staging.cosmas.ai,
+        // audience cosmas-os-beta-api, and a synthetic pk_live_ key.
+        #expect(NativeIdentityProfile.operationalBeta.allowedClerkHosts == [
+            "clerk.cosmas.ai", "clerk.staging.cosmas.ai"])
+
+        for host in ["clerk.cosmas.ai", "clerk.staging.cosmas.ai"] {
+            let key = "pk_live_" + Data((host + "$").utf8).base64EncodedString()
+            let config = try NativeClerkConfiguration(
+                publishableKey: key, frontendOrigin: "https://" + host,
+                organizationID: "org_beta", bundleIdentifier: "com.cosmasos.beta.ios",
+                profile: .operationalBeta)
+            #expect(config.frontendOrigin == "https://" + host)
+            #expect(config.profile == .operationalBeta)
+        }
+
+        for host in [
+            "clerk.beta.cosmas.ai",
+            "clerk.invented.example",
+            "clerk.staging-.cosmas.ai",
+            "clerk.staging.cosmas.ai.evil.example",
+        ] {
+            let key = "pk_live_" + Data((host + "$").utf8).base64EncodedString()
+            #expect(throws: NativeAuthError.unavailable) {
+                try NativeClerkConfiguration(
+                    publishableKey: key, frontendOrigin: "https://" + host,
+                    organizationID: "org_beta", bundleIdentifier: "com.cosmasos.beta.ios",
+                    profile: .operationalBeta)
+            }
+        }
+
+        let stagingHost = "clerk.staging.cosmas.ai"
+        let stagingKey = "pk_live_" + Data((stagingHost + "$").utf8).base64EncodedString()
+        #expect(throws: NativeAuthError.unavailable) {
+            try NativeClerkConfiguration(
+                publishableKey: stagingKey, frontendOrigin: "https://" + stagingHost,
+                organizationID: "org_beta", bundleIdentifier: "com.cosmasos.beta.ios",
+                profile: .operationalProduction)
         }
     }
 }
