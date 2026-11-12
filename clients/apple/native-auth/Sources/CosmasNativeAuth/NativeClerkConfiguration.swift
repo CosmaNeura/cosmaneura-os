@@ -16,7 +16,7 @@ public enum NativeIdentityProfile: String, Sendable {
     public var allowedClerkHosts: Set<String> {
         switch self {
         case .operationalBeta:
-            return ["clerk.cosmas.ai"]
+            return ["clerk.cosmas.ai", "clerk.staging.cosmas.ai"]
         case .operationalProduction:
             return ["clerk.beta.cosmas.ai"]
         case .simulatorStaging:
