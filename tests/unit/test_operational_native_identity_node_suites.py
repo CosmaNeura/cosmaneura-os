@@ -15,7 +15,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# Suites proving operational-beta-v1 dual-host set, PENDING_SWIFT_PR drift,
+# Suites proving operational-beta-v1 dual-host set (JS/Python/Swift parity),
 # desktop loader fence, and transition fixture on clerk.staging.cosmas.ai.
 NODE_SUITES = (
     "clients/shared/operational-native-identity.test.mjs",
@@ -48,14 +48,14 @@ def test_operational_native_identity_node_suite(relative: str) -> None:
     assert result.returncode == 0, f"{relative}\n{result.stdout}\n{result.stderr}"
 
 
-def test_node_suites_tuple_covers_shipped_beta_and_pending_swift() -> None:
+def test_node_suites_tuple_covers_shipped_beta_and_parity() -> None:
     """Source pin: CI must keep drift + transition suites in the wrapper list."""
     text = Path(__file__).read_text(encoding="utf-8")
     assert "native-clerk-host-drift.test.mjs" in text
     assert "transition-desktop-identity.test.mjs" in text
-    assert "PENDING_SWIFT_PR" in (
-        ROOT / "clients/shared/native-clerk-host-drift.test.mjs"
-    ).read_text(encoding="utf-8")
+    drift = (ROOT / "clients/shared/native-clerk-host-drift.test.mjs").read_text(encoding="utf-8")
+    assert "OPERATIONAL_BETA_CLERK_HOSTS" in drift
+    assert "must not be a named drift exception" in drift
     assert "clerk.staging.cosmas.ai" in (
         ROOT / "scripts/transition-desktop-identity.test.mjs"
     ).read_text(encoding="utf-8")

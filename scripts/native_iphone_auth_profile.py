@@ -43,9 +43,10 @@ STAGING_ORIGINS = {
     "api": "https://api.staging.cosmas.ai",
     "web": "https://staging.cosmas.ai",
 }
+# One admitted operational-beta-v1 host (also used as the historical Swift pin name).
 SWIFT_OPERATIONAL_BETA_CLERK_HOST = "clerk.cosmas.ai"
-# JS/Python beta set (CTO DECISION_LOG 12 Nov 2026 10:12 ET). Swift still
-# pins clerk.cosmas.ai only until a separate Swift PR.
+# Exact beta set shared by JS, Python, and Swift (CTO DECISION_LOG 12 Nov 2026
+# 10:12 ET). Swift allow-list lands in PR #370; do not edit Swift in this PR.
 OPERATIONAL_BETA_CLERK_HOSTS = frozenset({
     "clerk.cosmas.ai",
     "clerk.staging.cosmas.ai",
