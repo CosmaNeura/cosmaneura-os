@@ -163,7 +163,7 @@ def production_native_auth_stamp(info: dict, *, auth: dict | None = None) -> dic
     Does not enable CosmasNativeAuth unless a validated auth dictionary is
     supplied. Compose-only / identity-free paths therefore keep enabled=false.
     Does not stamp CosmaneuraWebOrigin (record-navigation policy stays unchanged).
-    Sets identity profile to operational-production-v1 when enabling auth.
+    Always sets CosmasNativeAuth/Identity profile to operational-production-v1.
     """
     if not isinstance(info, dict):
         raise ValueError("Info.plist must be a dictionary.")
@@ -202,6 +202,42 @@ def production_native_auth_stamp(info: dict, *, auth: dict | None = None) -> dic
     return result
 
 
+def _configured_identity_record(info: dict, identity: dict | None) -> dict:
+    record = identity.get("identity") if isinstance(identity, dict) else None
+    if isinstance(record, dict):
+        return record
+    existing = info.get("CosmasNativeIdentity")
+    return existing if isinstance(existing, dict) else {}
+
+
+def _configured_auth_record(info: dict, identity: dict | None) -> dict:
+    auth = identity.get("auth") if isinstance(identity, dict) else None
+    if isinstance(auth, dict):
+        return auth
+    existing = info.get("CosmasNativeAuth")
+    return existing if isinstance(existing, dict) else {}
+
+
+def _refuse_production_review_without_production_profile(
+    info: dict, identity: dict | None
+) -> None:
+    """Omitted/beta installation profiles cannot carry production-review Infos."""
+    record = _configured_identity_record(info, identity)
+    auth = _configured_auth_record(info, identity)
+    frontend = record.get("frontendOrigin")
+    auth_frontend = auth.get("frontendOrigin")
+    profiles = {record.get("profile"), auth.get("profile")}
+    if (
+        PRODUCTION_IDENTITY_PROFILE in profiles
+        or frontend == PRODUCTION_ORIGINS["clerk"]
+        or auth_frontend == PRODUCTION_ORIGINS["clerk"]
+    ):
+        raise ValueError(
+            "operational-production-v1 / clerk.beta.cosmas.ai requires "
+            "--installation-profile production."
+        )
+
+
 def apply_installation_profile_to_configured_info(
     info: dict,
     profile: str | None,
@@ -210,17 +246,18 @@ def apply_installation_profile_to_configured_info(
 ) -> dict:
     """Apply production stamping / origin refusal after owned candidate configuration.
 
-    beta and omitted profiles leave the configured Info unchanged. staging validates
-    Clerk/API origins (accounts.dev or dedicated staging) and ignores an empty web
-    origin. production stamps origins and enables auth only with a validated key.
+    beta and omitted profiles leave live/staging configured Infos unchanged but
+    refuse an operational-production-v1 / clerk.beta.cosmas.ai identity (that
+    requires --installation-profile production). staging validates Clerk/API
+    origins (accounts.dev or dedicated staging) and ignores an empty web origin.
+    production stamps origins and enables auth only with a validated key.
     """
     if profile is None or profile == BETA_INSTALLATION_PROFILE:
+        _refuse_production_review_without_production_profile(info, identity)
         return info
     if profile not in INSTALLATION_PROFILES:
         raise ValueError("Use the production, beta, or staging installation profile.")
-    record = identity.get("identity") if isinstance(identity, dict) else None
-    if not isinstance(record, dict):
-        record = info.get("CosmasNativeIdentity") if isinstance(info.get("CosmasNativeIdentity"), dict) else {}
+    record = _configured_identity_record(info, identity)
     frontend = record.get("frontendOrigin", "")
     api = record.get("apiOrigin", "")
     web = info.get("CosmaneuraWebOrigin")

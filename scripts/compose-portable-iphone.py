@@ -692,7 +692,8 @@ def compose(
             "files": placed,
         }
         if installation_profile == PRODUCTION_INSTALLATION_PROFILE:
-            # Keep default/beta/staging composition.json byte-compatible with main.
+            # Omit this key for default/beta/staging so those manifests stay
+            # free of a production-only field; production records it explicitly.
             manifest["installation_profile"] = installation_profile
         (output / "composition.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     except Exception:

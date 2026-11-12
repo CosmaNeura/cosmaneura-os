@@ -70,6 +70,30 @@ def _production_identity() -> dict:
     return {"identity": native, "auth": auth, "bundle": "com.cosmasos.beta.ios"}
 
 
+def _live_beta_identity() -> dict:
+    """Synthetic live operational-beta-v1 identity on clerk.cosmas.ai."""
+    host = AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST
+    native = {
+        "version": 1,
+        "profile": "operational-beta-v1",
+        "client": "apple",
+        "apiOrigin": "https://api.cosmas.ai",
+        "publishableKey": _live_key(host),
+        "frontendOrigin": "https://" + host,
+        "organizationId": "org_invented_live_beta",
+        "audience": "cosmas-os-beta",
+    }
+    auth = {
+        "enabled": True,
+        "profile": native["profile"],
+        "publishableKey": native["publishableKey"],
+        "frontendOrigin": native["frontendOrigin"],
+        "organizationId": native["organizationId"],
+        "audience": native["audience"],
+    }
+    return {"identity": native, "auth": auth, "bundle": "com.cosmasos.beta.ios"}
+
+
 def _staging_identity(*, accounts_dev: bool = False) -> dict:
     host = "invented-staging.clerk.accounts.dev" if accounts_dev else "clerk.staging.cosmas.ai"
     native = {
@@ -290,8 +314,14 @@ def test_owned_staging_profile_refuses_production_identity_origins():
             configured, "staging", identity=identity)
 
 
-def test_owned_beta_and_default_profiles_leave_configured_info_unchanged():
-    identity = _production_identity()
+def test_owned_beta_and_omitted_profiles_leave_live_beta_identity_unchanged():
+    # Live clerk.cosmas.ai identity must not be treated as production. If None
+    # were routed into the production stamp path, this would raise instead of
+    # returning the configured Info unchanged.
+    identity = _live_beta_identity()
+    assert identity["identity"]["profile"] == "operational-beta-v1"
+    assert identity["identity"]["frontendOrigin"] == "https://clerk.cosmas.ai"
+    assert AUTH.publishable_key_host(identity["auth"]["publishableKey"]) == "clerk.cosmas.ai"
     before = plistlib.loads(APP_INFO.read_bytes())
     configured = {
         **copy.deepcopy(before),
@@ -303,6 +333,56 @@ def test_owned_beta_and_default_profiles_leave_configured_info_unchanged():
         configured, "beta", identity=identity) == original
     assert AUTH.apply_installation_profile_to_configured_info(
         configured, None, identity=identity) == original
+    with pytest.raises(ValueError, match="requires clerk.beta"):
+        AUTH.apply_installation_profile_to_configured_info(
+            configured, "production", identity=identity)
+
+
+@pytest.mark.parametrize("profile", [None, "beta"])
+def test_owned_beta_and_omitted_profiles_refuse_production_review_identity(profile):
+    identity = _production_identity()
+    before = plistlib.loads(APP_INFO.read_bytes())
+    configured = {
+        **copy.deepcopy(before),
+        "CosmasNativeIdentity": copy.deepcopy(identity["identity"]),
+        "CosmasNativeAuth": copy.deepcopy(identity["auth"]),
+    }
+    with pytest.raises(ValueError, match="--installation-profile production"):
+        AUTH.apply_installation_profile_to_configured_info(
+            configured, profile, identity=identity)
+
+
+@pytest.mark.parametrize("profile", [None, "beta"])
+def test_owned_beta_and_omitted_profiles_leave_staging_identity_unchanged(profile):
+    identity = _staging_identity()
+    before = plistlib.loads(APP_INFO.read_bytes())
+    configured = {
+        **copy.deepcopy(before),
+        "CosmasNativeIdentity": copy.deepcopy(identity["identity"]),
+        "CosmasNativeAuth": copy.deepcopy(identity["auth"]),
+    }
+    original = copy.deepcopy(configured)
+    assert AUTH.apply_installation_profile_to_configured_info(
+        configured, profile, identity=identity) == original
+
+
+def test_apply_and_require_refuse_unknown_installation_profile():
+    identity = _live_beta_identity()
+    before = plistlib.loads(APP_INFO.read_bytes())
+    configured = {
+        **copy.deepcopy(before),
+        "CosmasNativeIdentity": copy.deepcopy(identity["identity"]),
+        "CosmasNativeAuth": copy.deepcopy(identity["auth"]),
+    }
+    with pytest.raises(ValueError, match="production, beta, or staging"):
+        AUTH.apply_installation_profile_to_configured_info(
+            configured, "review", identity=identity)
+    with pytest.raises(ValueError, match="production, beta, or staging"):
+        AUTH.require_installation_profile_origins(
+            "review",
+            frontend_origin=AUTH.PRODUCTION_ORIGINS["clerk"],
+            api_origin=AUTH.PRODUCTION_ORIGINS["api"],
+        )
 
 
 @pytest.mark.parametrize("profile", [None, "beta", "staging"])

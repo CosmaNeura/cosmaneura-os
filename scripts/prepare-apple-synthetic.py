@@ -62,11 +62,12 @@ STAGING_CLERK_HOST = "clerk.staging.cosmas.ai"
 STAGING_API_ORIGIN = "https://api.staging.cosmas.ai"
 # Web addresses the synthetic simulator may follow. Clerk and API hosts use the
 # same name with the clerk. and api. labels. Synthetic data mode stays required.
-# beta.cosmas.ai is also the production installation-profile Clerk/API web set
-# (CTO decision log, 11 Nov 2026). Distinction is not the hostname: simulator
-# composition stays on simulator-staging-v1 + synthetic data + synthetic
-# bundles; production device Infos use operational-beta-v1 + the production
-# installation profile. clerk.cosmas.ai stays reserved for later enrollment.
+# beta.cosmas.ai is also the production-review Clerk/API web set (CTO decision,
+# 11 Nov 2026 6:55pm ET). Distinction is not the hostname: simulator composition
+# stays on simulator-staging-v1 + synthetic data + synthetic bundles;
+# production-review device Infos use operational-production-v1 with the
+# production installation profile. Live Infos stay on operational-beta-v1 /
+# clerk.cosmas.ai, reserved for the later per-practice enrollment design.
 ALLOWED_SYNTHETIC_WEB_HOSTS = ("staging.cosmas.ai", "beta.cosmas.ai")
 FORBIDDEN_COSMA_HOSTS = frozenset({
     "cosmas.ai",

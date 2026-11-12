@@ -45,15 +45,21 @@ That file contains the exact Info dictionary: `enabled` boolean,
 `accountOrigin`, `realm`, `apiOrigins`, and optional `registeredPracticeOrigins`
 and `googleConnection`.
 The realm contains only `publishableKey`, `frontendOrigin`, `audience`, `profile`,
-and `keychainNamespace`. Choose exactly one closed environment:
+and `keychainNamespace`. Choose exactly one of these three closed environments:
 
 | Environment | `profile` | Clerk key / frontend | `audience` | `accountOrigin` | `registeredPracticeOrigins` |
 | --- | --- | --- | --- | --- | --- |
 | Synthetic staging | `operational-staging-v1` | `pk_test_` encoding its `.clerk.accounts.dev` frontend | empty | `https://enrollment-api.staging.cosmas.ai` | `exact` or `synthetic-practice-uuid-staging-v1` |
 | Real-data production | `operational-beta-v1` | `pk_live_` encoding `clerk.cosmas.ai` | non-empty Clerk session `aud` (same value as production `CLERK_AUDIENCE`) | `https://enrollment-api.cosmas.ai` | `practice-uuid-production-v1` |
+| Production review / App Store candidate | `operational-production-v1` | `pk_live_` encoding `clerk.beta.cosmas.ai` (API `https://api.beta.cosmas.ai`; host-qualified Clerk keychain service) | non-empty Clerk session `aud` | `https://enrollment-api.cosmas.ai` | `practice-uuid-production-v1` |
+
+CTO decision, 11 Nov 2026 6:55pm ET: production-review Infos use
+`operational-production-v1` on `clerk.beta.cosmas.ai`. `clerk.cosmas.ai` /
+`operational-beta-v1` remains the live profile and is reserved for the later
+per-practice enrollment design.
 
 The reviewed stable `keychainNamespace` is 64 lowercase hexadecimal characters in
-either environment. No credential or server secret belongs in this file.
+each environment. No credential or server secret belongs in this file.
 Callbacks and the native request origin derive from the unchanged bundle.
 Staging and production fields cannot be mixed: a production profile with a
 staging policy, empty audience, Development Clerk host, or non-enrollment
