@@ -6,6 +6,8 @@ clients/apple and clients/capture. This entry does not read an external
 snapshot, modify the scaffold, sign, or compile.
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import importlib.util
