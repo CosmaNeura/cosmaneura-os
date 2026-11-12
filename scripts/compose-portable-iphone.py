@@ -48,7 +48,10 @@ CAPACITOR_LOCALIZATION_TARGETS = (
 )
 # The frozen 1107 manifest cannot name later owned implementations. Place only
 # these reviewed additions; never glob an SDK, external checkout or generated app.
+# ClerkKeychainCredentials.swift is required by the owned ClerkKitWorkspaceDriver
+# overlay (clearStoredCredentials) but is absent from the frozen 1107 provenance.
 NATIVE_PRACTICE_ADDITIONS = (
+    "Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift",
     "Sources/CosmasNativeAuth/NativePracticeProfile.swift",
     "Sources/CosmasNativeAuth/NativePracticeActivationOwner.swift",
     "Sources/CosmasNativeAuth/NativePracticeConnectionContracts.swift",
@@ -57,6 +60,7 @@ NATIVE_PRACTICE_ADDITIONS = (
     "Sources/CosmasNativeAuth/NativePracticeSelectionStore.swift",
     "Bridge/CosmasNativePracticeConnectionPlugin.swift",
     "Bridge/NativePracticeConnectionController.swift",
+    "Tests/CosmasNativeAuthTests/ClerkKeychainCredentialsTests.swift",
     "Tests/CosmasNativeAuthTests/NativePracticeProfileTests.swift",
     "Tests/CosmasNativeAuthTests/NativePracticeBootstrapTests.swift",
     "Tests/CosmasNativeAuthTests/NativePracticeConnectionContractTests.swift",

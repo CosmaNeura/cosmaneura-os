@@ -111,8 +111,8 @@ FROZEN_CAPTURE_PROVENANCE_SHA256 = "f1d73c9e7fd9515d7dd16b676f78d1cacd420a63d9f7
 # exact current bytes supplement, never rewrite, frozen 1107 provenance. Every
 # unlisted counterpart retains its original recorded SHA assertion below.
 REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
-    "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "5067448784d2410cd38798a516eb2bca0667442c0e776f2eb1d71f6f197cafe1",
-    "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "2533a5c011d12173635937a607b46a1f827c3d015fab5862261f49da31214492",
+    "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "43529246e2049613e96162591dfa9aef10652957f7c987d29db0f416343fb385",
+    "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "3ed5a94c6ccfc309ee60b49c1e46aebf07b603a3168fc80583a5811bae19fe65",
     "clients/apple/startup-recovery/WorkspaceRecoveryState.swift": "c07f68af3d311b75890108c4fc5c04b5e38eeeda11cb0047f25424a04531cfd1",
     "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift": "8132283f189b8cd0497957326fbcc020efc44e7c4b9fe2327ce0248b44d9494f",
     "clients/apple/native-auth/Bridge/NativeProviderConnection.swift": "61b1c30c279a940f3ffab824a74fe21aba01cdc053d63ed59530b9d12bde2ce9",
@@ -143,6 +143,14 @@ REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256 = {
     "clients/capture/native-configured/secure-queue/Package.swift": "b47bd6945b0f2d12908fa4a6f32bdff36b8345bdcd7860ff4a689520863a3e23",
 }
 
+# Reviewed owned IOSPCM plugin evolution (DEBUG synthetic XCUITest start path).
+# Supplements frozen 1107 provenance; does not rewrite apps/capture copies.
+REVIEWED_OWNED_IOSPCM_PLUGIN_SHA256 = {
+    "clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift": (
+        "444387e76a6e5099766f70cf3ff79c28b01bb4204f6a49016e38ef40914f3db9"
+    ),
+}
+
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -166,6 +174,7 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
     differed = []
     reviewed_current = set()
     reviewed_capacitor = set()
+    reviewed_iospcm = set()
     for item in record["files"]:
         recovered = ROOT / "apps/capture" / item["path"]
         assert _sha256(recovered) == item["repository_sha256"]
@@ -190,7 +199,10 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
             expected = REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256.get(
                 equivalent["path"],
                 REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256.get(
-                    equivalent["path"], equivalent["sha256"]
+                    equivalent["path"],
+                    REVIEWED_OWNED_IOSPCM_PLUGIN_SHA256.get(
+                        equivalent["path"], equivalent["sha256"]
+                    ),
                 ),
             )
             assert _sha256(live) == expected
@@ -200,6 +212,9 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
             if equivalent["path"] in REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256:
                 assert expected != equivalent["sha256"]
                 reviewed_capacitor.add(equivalent["path"])
+            if equivalent["path"] in REVIEWED_OWNED_IOSPCM_PLUGIN_SHA256:
+                assert expected != equivalent["sha256"]
+                reviewed_iospcm.add(equivalent["path"])
         same = equivalent["sha256"] == item["repository_sha256"]
         if equivalent["status"] == "byte-identical":
             assert same
@@ -210,6 +225,7 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
             raise AssertionError(equivalent["status"])
     assert reviewed_current == set(REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256)
     assert reviewed_capacitor == set(REVIEWED_OWNED_CAPACITOR_COUNTERPART_SHA256)
+    assert reviewed_iospcm == set(REVIEWED_OWNED_IOSPCM_PLUGIN_SHA256)
     assert differed == [
         "native-plugins/cosmas-native-auth/Package.swift",
         "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
@@ -255,6 +271,26 @@ def test_reviewed_owned_capacitor_package_pins_retire_remote_binary_urls():
         assert "https://github.com/ionic-team/capacitor-swift-pm.git" not in text
         assert "clients/apple/vendor/capacitor-swift-pm-8.5.0" in text or \
             "../../../apple/vendor/capacitor-swift-pm-8.5.0" in text
+
+
+def test_reviewed_owned_iospcm_plugin_pin_covers_synthetic_uitest_start_path():
+    record = json.loads(PROVENANCE.read_text(encoding="utf-8"))
+    counterparts = [item["tracked_equivalent"] for item in record["files"]
+                    if item["tracked_equivalent"] is not None]
+    for name, digest in REVIEWED_OWNED_IOSPCM_PLUGIN_SHA256.items():
+        assert name.startswith(
+            "clients/capture/native-configured/ios-pcm-capacitor/Sources/"
+        )
+        assert name.endswith("IOSPCMCapacitorPlugin.swift")
+        assert re.fullmatch(r"[0-9a-f]{64}", digest)
+        historical = [item for item in counterparts if item["path"] == name]
+        assert len(historical) == 1
+        assert historical[0]["sha256"] != digest
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert _sha256(ROOT / name) == digest
+        assert "uiTestStartRecordingThroughLoadedPlugin" in text
+        assert "#if DEBUG" in text
+        assert "-COSMAS_UI_TEST_START_CAPTURE" in text
 
 
 def test_new_account_org_activation_uses_public_sdk_refresh_before_membership_and_fences_each_await():
@@ -339,7 +375,13 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     assert manifest["generated_web_assets"] == "absent"
     assert not (output / "apps/capture/ios/App/App/public").exists()
     frozen_count = json.loads(PROVENANCE.read_text(encoding="utf-8"))["native_source_file_count"]
+    # Explicit literal: must stay in lockstep with compose-portable-iphone.py.
+    # ClerkKeychainCredentials.swift (+ tests) are required by the owned
+    # ClerkKitWorkspaceDriver overlay (clearStoredCredentials) and are absent
+    # from the frozen 1107 provenance; every composed iPhone app — including
+    # prepare-owned-iphone-candidate.py — receives them via NATIVE_PRACTICE_ADDITIONS.
     additions = (
+        "Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift",
         "Sources/CosmasNativeAuth/NativePracticeProfile.swift",
         "Sources/CosmasNativeAuth/NativePracticeActivationOwner.swift",
         "Sources/CosmasNativeAuth/NativePracticeConnectionContracts.swift",
@@ -348,12 +390,14 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
         "Sources/CosmasNativeAuth/NativePracticeSelectionStore.swift",
         "Bridge/CosmasNativePracticeConnectionPlugin.swift",
         "Bridge/NativePracticeConnectionController.swift",
+        "Tests/CosmasNativeAuthTests/ClerkKeychainCredentialsTests.swift",
         "Tests/CosmasNativeAuthTests/NativePracticeProfileTests.swift",
         "Tests/CosmasNativeAuthTests/NativePracticeBootstrapTests.swift",
         "Tests/CosmasNativeAuthTests/NativePracticeConnectionContractTests.swift",
         "Tests/CosmasNativeAuthTests/NativePracticeOriginAndSelectionTests.swift",
         "Tests/CosmasNativeAuthTests/NativePracticeProductionTests.swift",
     )
+    assert module.NATIVE_PRACTICE_ADDITIONS == additions
     assert tuple(manifest["native_practice_additions"]) == additions
     vendor_files = [
         item for item in manifest["files"]
