@@ -17,6 +17,28 @@ Key absent is the live-compatible path. Explicit
 `syntheticBetaCaptureAndTools: false` matches absent for every rendered file
 except the echoed `host-input.json` value.
 
+## Explicit-false backend switches
+
+`test_settings_contract.py` requires every `Settings` bool to appear in the
+rendered public environment for both `audience` and `shared_staging` policies.
+These eight backend switches default to `False` in
+`src/cosmas_os/config.py` when unset. The renderer emits them as `'false'` by
+default so prepared hosts match code defaults (Fable hole 2a / PR #361):
+
+- `WORKSPACE_CAPTURE_PROXY_ENABLED`
+- `GOOGLE_CONNECTION_BROKER_ENABLED`
+- `WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED`
+- `WORKSPACE_ENROLLMENT_MANAGED`
+- `COSMAS_EHR_REAL_DATA_ENABLED`
+- `WORKSPACE_RX_SANDBOX_ENABLED`
+- `REAL_PATIENT_RECORDING_ENABLED`
+- `WORKSPACE_EFAX_SANDBOX_ENABLED`
+
+Only the synthetic beta capture + tools opt-in below may set
+`WORKSPACE_CAPTURE_PROXY_ENABLED=true` (with `WORKSPACE_CAPTURE_PROXY_ORIGIN`).
+The other seven stay `'false'` even when that opt-in is on.
+`REAL_PATIENT_RECORDING_ENABLED` is never rendered `'true'`.
+
 ## Synthetic beta capture + tools opt-in (default off)
 
 For the synthetic CosmaBot staging/beta owned VM only, set:
@@ -77,32 +99,34 @@ Rules:
 
 ## Checks
 
-synth-ci does **not** run the standalone Node render suites or
-`test_settings_contract.py` today (no `.github/workflows` edits in this ticket).
-Enrollment Node tests under `infra/enrollment/` are CI-guarded; these standalone
-files are local-only until a separate CI-list ticket lands.
+synth-ci beta-infra-static runs `render.test.mjs` and `render-beta.test.mjs`
+(PR #360). It does not run `render-goldens.test.mjs`,
+`render-capture-tools.test.mjs`, or `test_settings_contract.py` (no
+`.github/workflows` edits in this ticket). Fable hole 2a moved to the render
+ticket (#361), which landed the eight explicit-false switches; the full
+settings-contract module is expected green after that merge.
 
-`test_settings_contract.py` is red on main (and on this branch) at the
-`booleans - set(public) == set()` assertion: eight Settings booleans stay
-unrendered and default False. A separate ticket will render those switches
-explicitly false. Do not treat a full-module unittest of that file as green
-until that lands. The opt-in on-state method below is independent of that
-assertion and is expected to pass.
-
-Local commands that must pass:
+Local commands that must pass for this directory:
 
 ```bash
 node --test infra/standalone/render.test.mjs \
   infra/standalone/render-beta.test.mjs \
+  infra/standalone/render-goldens.test.mjs \
   infra/standalone/render-capture-tools.test.mjs
-uv run python -m unittest \
-  infra.standalone.test_settings_contract.HostSettingsContract.test_synthetic_beta_capture_tools_opt_in_matches_runtime_and_keeps_real_patient_off -v
+uv run python -m unittest infra.standalone.test_settings_contract -v
 ```
 
 | File | CI today | Local |
 | --- | --- | --- |
-| `render.test.mjs` | not run by synth-ci | `node --test …` above |
-| `render-beta.test.mjs` | not run by synth-ci | `node --test …` above |
+| `render.test.mjs` | beta-infra-static (PR #360) | `node --test …` above |
+| `render-beta.test.mjs` | beta-infra-static (PR #360) | `node --test …` above |
+| `render-goldens.test.mjs` | not run by synth-ci | `node --test …` above |
 | `render-capture-tools.test.mjs` | not run by synth-ci | `node --test …` above |
-| `test_settings_contract.py` (full module) | not run by synth-ci; red on main pending separate ticket that renders eight bool switches false | do not require full-module green |
-| on-state opt-in method in `test_settings_contract.py` | not run by synth-ci | `uv run python -m unittest …` above |
+| `test_settings_contract.py` | not run by synth-ci | `uv run python -m unittest …` above |
+
+`render-goldens.test.mjs` locks SHA-256 fingerprints of `JSON.stringify(render(...))`
+for invented audience, shared_staging, and owned-staging inputs (regenerated
+with #361's eight `"false"` switches and `schema_revision` `a46f2c09d853`).
+Off-state opt-in-absent output must stay byte-identical to those main goldens.
+`render-capture-tools.test.mjs` reuses the same dedicated and owned-staging
+fingerprints as `MAIN_*_FINGERPRINT`.

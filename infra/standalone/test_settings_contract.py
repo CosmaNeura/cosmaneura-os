@@ -164,7 +164,17 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
         self.assertEqual(public["WORKSPACE_CAPTURE_PROXY_ORIGIN"], "https://api.staging.cosmas.ai")
         self.assertEqual(public["CORE_CAPTURE_ORIGIN"], "https://staging-app.cosmaneura.com")
         self.assertEqual(public["CORE_WEB_ORIGIN"], "https://staging-app.cosmaneura.com")
-        self.assertNotIn("REAL_PATIENT_RECORDING_ENABLED", public)
+        # #361 renders REAL_PATIENT_RECORDING_ENABLED explicitly false; opt-in never flips it.
+        self.assertEqual(public["REAL_PATIENT_RECORDING_ENABLED"], "false")
+        for flag in (
+            "GOOGLE_CONNECTION_BROKER_ENABLED",
+            "WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED",
+            "WORKSPACE_ENROLLMENT_MANAGED",
+            "COSMAS_EHR_REAL_DATA_ENABLED",
+            "WORKSPACE_RX_SANDBOX_ENABLED",
+            "WORKSPACE_EFAX_SANDBOX_ENABLED",
+        ):
+            self.assertEqual(public[flag], "false", flag)
         self.assertFalse(contract["optional_runtime_features"]["real_patient_recording_process_switch"])
         self.assertTrue(contract["optional_runtime_features"]["capture_and_agent_tools"])
         self.assertEqual(
@@ -233,8 +243,14 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
             "actual consenting account content; never relabelled as invented",
         )
         # Process guard still refuses turning real-patient recording on via env.
+        # #361 already renders REAL_PATIENT_RECORDING_ENABLED=false in public; drop it
+        # before forcing True so ExplicitSettings does not see duplicate kwargs.
         refused = ExplicitSettings(
-            **{key.lower(): value for key, value in public.items()},
+            **{
+                key.lower(): value
+                for key, value in public.items()
+                if key != "REAL_PATIENT_RECORDING_ENABLED"
+            },
             **private,
             real_patient_recording_enabled=True,
         )

@@ -54,39 +54,42 @@ function assertRefused(fn,code){
   });
 }
 
-function assertNoRealPatientKey(value,path='root'){
+function assertRealPatientStaysOff(value,path='root'){
   if(Array.isArray(value)){
-    value.forEach((item,index)=>assertNoRealPatientKey(item,`${path}[${index}]`));
+    value.forEach((item,index)=>assertRealPatientStaysOff(item,`${path}[${index}]`));
     return;
   }
   if(!value||typeof value!=='object')return;
   for(const [key,child] of Object.entries(value)){
-    assert.notEqual(key,'REAL_PATIENT_RECORDING_ENABLED',path);
-    assertNoRealPatientKey(child,`${path}.${key}`);
+    // #361 renders REAL_PATIENT_RECORDING_ENABLED explicitly false; never true.
+    if(key==='REAL_PATIENT_RECORDING_ENABLED')assert.equal(child,'false',path);
+    else if(key==='real_patient_recording_enabled'||key==='real_patient_recording_process_switch')
+      assert.equal(child,false,path);
+    else assertRealPatientStaysOff(child,`${path}.${key}`);
   }
 }
 
 function assertNoRealPatientOn(files){
-  assert.equal(Object.hasOwn(files['api-public.json'],'REAL_PATIENT_RECORDING_ENABLED'),false);
+  assert.equal(files['api-public.json'].REAL_PATIENT_RECORDING_ENABLED,'false');
   for(const line of files['api-public.env'].split('\n')){
     if(!line)continue;
     const eq=line.indexOf('=');
     const key=eq===-1?line:line.slice(0,eq);
-    assert.notEqual(key,'REAL_PATIENT_RECORDING_ENABLED');
-    assert.equal(/REAL_PATIENT_RECORDING_ENABLED/i.test(key),false);
+    const raw=eq===-1?'':line.slice(eq+1);
+    // api-public.env JSON-encodes string flags, so the parsed value is 'false'.
+    if(key==='REAL_PATIENT_RECORDING_ENABLED')assert.equal(JSON.parse(raw),'false');
   }
   for(const [name,value] of Object.entries(files)){
     if(typeof value!=='object'||value===null)continue;
-    assertNoRealPatientKey(value,name);
+    assertRealPatientStaysOff(value,name);
   }
   assert.equal(files['host-preparation.json'].optional_runtime_features.real_patient_recording_process_switch,false);
 }
 
-// Golden SHA-256 of JSON.stringify(render(...)) from origin/main render.mjs on
-// the current invented-host-input (schema_revision a46f2c09d853). Off-path must
-// stay byte-identical to that main renderer for the same inputs.
-const MAIN_DEDICATED_FINGERPRINT='149934eed7b64b97fa41e0f2327465ff943e57a959157e2bf9f593f64843996c';
-const MAIN_OWNED_STAGING_FINGERPRINT='1619b2ea8d3ba56913ed6d73f9e77d5a901068c2e0172edbc29e4c213ab59f3d';
+// Off-path must stay byte-identical to origin/main after #361 (eight Settings
+// bools rendered explicitly false). Values match render-goldens.test.mjs.
+const MAIN_DEDICATED_FINGERPRINT='3147f8057ec581a0b9fa0be0b67d8fa3cc5afb4d8c6577308032e98c6026974d';
+const MAIN_OWNED_STAGING_FINGERPRINT='5d6b26f717eca58011088027465a0599ed570b7619ad4e69105dbaccded86ca9';
 
 test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const baseline=render(structuredClone(sample));
@@ -97,13 +100,14 @@ test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   assert.equal(env.WORKSPACE_AGENT_TOOLS_ENABLED,'false');
   assert.equal(env.WORKSPACE_CAPTURE_BACKEND,'disabled');
   assert.equal(env.WORKSPACE_CAPTURE_NOTES_ENABLED,'false');
-  assert.equal(Object.hasOwn(env,'WORKSPACE_CAPTURE_PROXY_ENABLED'),false);
+  // #361: proxy switch is present as explicit false when opt-in is absent.
+  assert.equal(env.WORKSPACE_CAPTURE_PROXY_ENABLED,'false');
   assert.equal(Object.hasOwn(env,'WORKSPACE_CAPTURE_PROXY_ORIGIN'),false);
   assert.equal(env.CORE_CAPTURE_ORIGIN,'');
   assert.equal(env.CORE_WEB_ORIGIN,'');
   assert.equal(env.CORE_CAPTURE_SCOPE,'');
   assert.equal(env.CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID,'');
-  assert.equal(Object.hasOwn(env,'REAL_PATIENT_RECORDING_ENABLED'),false);
+  assert.equal(env.REAL_PATIENT_RECORDING_ENABLED,'false');
   assert.equal(baseline['clients/web-build-env.json'].VITE_WORKSPACE_CAPTURE_ENABLED,'false');
   assert.equal(baseline['clients/standalone-profile.json'].clients.web.captureMode,'disabled');
   assert.deepEqual(baseline['host-preparation.json'].platform_connections,[]);
@@ -114,7 +118,8 @@ test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const ownedEnv=owned['api-public.json'];
   assert.equal(ownedEnv.WORKSPACE_AGENT_TOOLS_ENABLED,'false');
   assert.equal(ownedEnv.WORKSPACE_CAPTURE_BACKEND,'disabled');
-  assert.equal(Object.hasOwn(ownedEnv,'WORKSPACE_CAPTURE_PROXY_ENABLED'),false);
+  assert.equal(ownedEnv.WORKSPACE_CAPTURE_PROXY_ENABLED,'false');
+  assert.equal(ownedEnv.REAL_PATIENT_RECORDING_ENABLED,'false');
   assert.equal(owned['clients/web-build-env.json'].VITE_WORKSPACE_CAPTURE_ENABLED,'false');
   assert.equal(Object.hasOwn(owned['host-preparation.json'].optional_runtime_features,'capture_and_agent_tools'),false);
   assert.deepEqual(owned['host-preparation.json'].platform_connections,[]);
@@ -149,6 +154,11 @@ test('opt-in on renders exact capture and agent-tools keys for synthetic staging
     'WORKSPACE_ATHENA_CONNECTION_ENABLED','WORKSPACE_CORE_CONNECTION_ENABLED',
     'WORKSPACE_CORE_RECORD_ENABLED','WORKSPACE_SESSION_PREP_ENABLED',
     'WORKSPACE_PREP_ENABLED','WORKSPACE_ROUTINES_ENABLED',
+    // #361 switches stay false under capture/tools opt-in except proxy (true above).
+    'GOOGLE_CONNECTION_BROKER_ENABLED','WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED',
+    'WORKSPACE_ENROLLMENT_MANAGED','COSMAS_EHR_REAL_DATA_ENABLED',
+    'WORKSPACE_RX_SANDBOX_ENABLED','REAL_PATIENT_RECORDING_ENABLED',
+    'WORKSPACE_EFAX_SANDBOX_ENABLED',
   ])assert.equal(env[flag],'false',flag);
   assert.match(files['api-public.env'],/^WORKSPACE_AGENT_TOOLS_ENABLED="true"$/m);
   assert.match(files['api-public.env'],/^WORKSPACE_CAPTURE_BACKEND="core"$/m);
