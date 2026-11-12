@@ -139,6 +139,36 @@ public protocol AppleAudioSystem: Sendable {
   func deactivate() throws
 }
 
+/// Defers engine construction until capture start. Construction does not invoke
+/// the factory; `resolve()` creates at most one instance until `clear()`.
+/// Used by the live iOS adapter so plugin load never touches AVAudioEngine.
+public final class LazyAppleAudioEngine<Engine: AnyObject>: @unchecked Sendable {
+  public typealias Factory = @Sendable () -> Engine
+
+  private let lock = NSLock()
+  private let factory: Factory
+  private var engine: Engine?
+
+  public init(factory: @escaping Factory) {
+    self.factory = factory
+  }
+
+  public var isResolved: Bool { lock.withLock { engine != nil } }
+
+  public func resolve() -> Engine {
+    lock.withLock {
+      if let engine { return engine }
+      let created = factory()
+      engine = created
+      return created
+    }
+  }
+
+  public func current() -> Engine? { lock.withLock { engine } }
+
+  public func clear() { lock.withLock { engine = nil } }
+}
+
 public enum AVFoundationDriverError: Error, Sendable {
   case operationFailed
 }

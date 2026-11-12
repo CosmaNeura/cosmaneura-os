@@ -1,16 +1,23 @@
 import XCTest
 
-/// Documents the launch-time microphone TCC probe for capture-off CosmaBot builds.
+/// Documents capture-off CosmaBot launch behaviour for the microphone path.
+///
+/// T-REL-7b (clients/capture): `LiveAppleAudioSystem` defers `AVAudioEngine`
+/// construction until capture start (install/start). Plugin load /
+/// `LiveAppleAudioSystem.init` must not create an engine, so a capture-off
+/// launch should not trigger an engine-backed microphone TCC preflight from
+/// that path. Behavioural proof lives in `ios-lazy-mic-tests` (`#if os(iOS)`
+/// live-adapter idle lifecycle) plus owed Mac/simulator runs on the PR.
 ///
 /// Caller (outside this package, in the bundled PCM Capacitor plugin):
 /// `clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift`
 /// `load()` constructs `IOSPCMBridgeCore` → `LiveAppleAudioSystem`.
 /// That path does **not** call `requestRecordPermission` (no prompt) at load.
 ///
-/// CosmaBot-side mitigation (clients/apple):
-/// Debug `com.cosmasos.synthetic` presents `CosmasSyntheticDemoSurface` and
-/// returns before `openWorkspace()` / `CosmasBridgeViewController`, so Capacitor
-/// never loads `IOSPCMCapacitorPlugin` on that default configuration — no mic touch.
+/// CosmaBot Debug `com.cosmasos.synthetic` still presents
+/// `CosmasSyntheticDemoSurface` and returns before `openWorkspace()` /
+/// `CosmasBridgeViewController`, so Capacitor never loads
+/// `IOSPCMCapacitorPlugin` on that default configuration — no mic touch.
 ///
 /// `-COSMAS_SKIP_SYNTHETIC_DEMO` opens the real bridge/plugin path for the
 /// automatic mic-permission XCUITest. Start-recording requests permission only
