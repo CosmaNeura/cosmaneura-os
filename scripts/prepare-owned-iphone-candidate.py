@@ -242,13 +242,35 @@ def composition_bindings(repository, source, blueprint):
                     raise ValueError("Localized Capacitor Package.swift differs from the owned rewrite.")
             if "https://github.com/ionic-team/capacitor-swift-pm.git" in destination.read_text(encoding="utf-8"):
                 raise ValueError("Localized Capacitor inputs still name the remote package URL.")
-        else:
-            counterpart = ("apps/capture/" + item["path"]
-                           if item["role"] in {"app-scaffold", "scaffold-package-wiring"}
-                           else item["authoritative_counterpart"])
+        elif item["role"] == "derived-usage-description":
+            counterpart = "apps/capture/" + item["path"]
+            original = git(repository, "show", source["commit"] + ":" + counterpart)
+            if hashlib.sha256(original).hexdigest() != item["scaffold_input_sha256"]:
+                raise ValueError("Derived usage description lost its frozen scaffold Info.plist input.")
+            if digest(repository / item["derivation_source"]) != item["derivation_source_sha256"]:
+                raise ValueError("Derived usage description drifted from the committed composer.")
+            compose = load_module(repository, "compose-portable-iphone")
+            expected = plistlib.loads(original)
+            expected["NSMicrophoneUsageDescription"] = compose.REVIEWED_MICROPHONE_USAGE
+            expected["NSSpeechRecognitionUsageDescription"] = compose.REVIEWED_SPEECH_USAGE
+            if plistlib.loads(destination.read_bytes()) != expected:
+                raise ValueError(
+                    "Derived usage description differs from the reviewed microphone and speech rewrite."
+                )
+        elif item["role"] in {"app-scaffold", "scaffold-package-wiring"}:
+            counterpart = "apps/capture/" + item["path"]
             original = git(repository, "show", source["commit"] + ":" + counterpart)
             if hashlib.sha256(original).hexdigest() != item["sha256"]:
                 raise ValueError("Owned composition is not bound to the selected Git commit.")
+        elif item["role"] in {"implementation", "supporting-client"}:
+            counterpart = item["authoritative_counterpart"]
+            if not isinstance(counterpart, str) or counterpart == "":
+                raise ValueError("Owned composition lost its authoritative counterpart.")
+            original = git(repository, "show", source["commit"] + ":" + counterpart)
+            if hashlib.sha256(original).hexdigest() != item["sha256"]:
+                raise ValueError("Owned composition is not bound to the selected Git commit.")
+        else:
+            raise ValueError(f"Unknown composition role: {item['role']!r}")
         bindings.append({"destination": item["path"], "role": item["role"],
                          "source": counterpart, "source_sha256": hashlib.sha256(original).hexdigest(),
                          "destination_sha256": item["sha256"]})
