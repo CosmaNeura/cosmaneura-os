@@ -68,7 +68,9 @@ final class MicrophoneLaunchPreflightTests: XCTestCase {
             workspace.contains("#if DEBUG\n        // Synthetic Simulator XCUITest: skip practice-host boot"),
             "Workspace skip-demo path must be #if DEBUG"
         )
-        let clients = root.deletingLastPathComponent()
+        let clients = root
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
         let plugin = try String(
             contentsOf: clients
                 .appendingPathComponent("capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift"),
