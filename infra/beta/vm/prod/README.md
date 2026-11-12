@@ -217,8 +217,9 @@ rmdir "$TMP"
 ```
 
 Names-only mapping (Key Vault name → host file → services). Install onto the
-host as 0400 files per `infra/beta/vm/runtime/README.md` (vault-to-0400-host-file);
-do not invent a different procedure.
+host as 0400 files per the protected secret-file contract in
+`infra/beta/vm/runtime/README.md` (mode-0400 single-link files under
+`/etc/cosmabot/runtime/<release_id>`); do not invent a different procedure.
 
 | Key Vault secret name | Host file name | Service directories | Source account |
 | --- | --- | --- | --- |
