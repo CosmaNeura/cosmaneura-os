@@ -29,7 +29,7 @@ All 2a globs match case-insensitively against the full path, folders included. 2
 | Notes (src and clients only) | under `src/**` or `clients/**` only: `**/*note*` |
 
 ### 2b. Hard: any one of these
-1. **Deps or lockfiles:** any change to `**/package.json`, `**/pnpm-lock.yaml`, `**/package-lock.json`, `**/uv.lock`, `**/pyproject.toml`, `**/Cargo.toml`, `**/Cargo.lock`, `**/Package.swift`, `**/Package.resolved`, `**/Podfile`, `**/Podfile.lock`.
+1. **2 or more red CI runs on the same failure:** the same check or test fails at two different heads.
 2. **Very large:** more than **1,500 changed lines** (additions + deletions) or more than **25 files**. For reference, the 30-day p90 was 2,658 changed lines (PRs created 15 Oct–12 Nov 2026).
 3. The author disputes a High or Blocking finding.
 
