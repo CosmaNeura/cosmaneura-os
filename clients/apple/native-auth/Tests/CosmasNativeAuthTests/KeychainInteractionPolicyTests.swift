@@ -29,6 +29,17 @@ import Testing
         #expect(block.operationQuery()[kSecUseAuthenticationUI] == nil)
     }
 
+    @Test func productionLogoutFenceDoesNotShareLiveWorkspaceAuthService() throws {
+        let live = try KeychainAccessBlock(bundleIdentifier: "com.cosmasos.beta.ios", profile: .operationalBeta)
+        let production = try KeychainAccessBlock(bundleIdentifier: "com.cosmasos.beta.ios",
+            profile: .operationalProduction)
+        let liveService = live.operationQuery()[kSecAttrService] as? String
+        let productionService = production.operationQuery()[kSecAttrService] as? String
+        #expect(liveService == "com.cosmasos.beta.ios.workspace-auth")
+        #expect(productionService == "com.cosmasos.beta.ios.workspace-auth.clerk.beta.cosmas.ai")
+        #expect(liveService != productionService)
+    }
+
     @Test func diagnosticClassifiesOnlyClosedSecurityStatuses() {
         #expect(KeychainAccessBlock.availability(for: errSecSuccess) == .available)
         #expect(KeychainAccessBlock.availability(for: errSecItemNotFound) == .available)
