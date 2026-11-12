@@ -3094,7 +3094,7 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/capture/native-configured/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift",
-        "sha256": "8c98dece16b8702a12cd05a4fd655cb37029bf4cf258384e1d90576f2cd03eb0",
+        "sha256": "be0ec5f1a91eaee29c328ba827fa0e74ad32b5ed331a79c97dacaafaca1e56a7",
         "status": "differs"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"

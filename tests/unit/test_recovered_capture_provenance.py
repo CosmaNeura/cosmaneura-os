@@ -14,7 +14,7 @@ PROVENANCE = ROOT / "apps/capture/SOURCE_PROVENANCE.json"
 APPLE_PREPARE = ROOT / "scripts/prepare-apple-synthetic.py"
 PORTABLE_COMPOSE = ROOT / "scripts/compose-portable-iphone.py"
 EXTERNAL_CAPTURE_SNAPSHOT = "ea7f99d0278a05706531ffb1288cb1df7acf507b"
-FROZEN_CAPTURE_PROVENANCE_SHA256 = "f2ab81010c8c1d4645f55a666bcf26f96231524798384a5f3100fae3ee733918"
+FROZEN_CAPTURE_PROVENANCE_SHA256 = "7b036ef60bf1141b575dad0f8c46dc4cdc1dfa01b7b4ac7e3276ff06b0e17c54"
 
 # Reviewed owned-source evolution for the native practice connection. These
 # exact current bytes supplement, never rewrite, frozen 1107 provenance. Every
