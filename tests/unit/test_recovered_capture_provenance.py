@@ -105,7 +105,7 @@ SYNTHETIC_MICROPHONE_USAGE = (
     "invented encounter audio."
 )
 EXTERNAL_CAPTURE_SNAPSHOT = "ea7f99d0278a05706531ffb1288cb1df7acf507b"
-FROZEN_CAPTURE_PROVENANCE_SHA256 = "f1d73c9e7fd9515d7dd16b676f78d1cacd420a63d9f7524fe9444525c9bdf2a3"
+FROZEN_CAPTURE_PROVENANCE_SHA256 = "7b036ef60bf1141b575dad0f8c46dc4cdc1dfa01b7b4ac7e3276ff06b0e17c54"
 
 # Reviewed owned-source evolution for the native practice connection. These
 # exact current bytes supplement, never rewrite, frozen 1107 provenance. Every
@@ -229,6 +229,8 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
     assert differed == [
         "native-plugins/cosmas-native-auth/Package.swift",
         "native-plugins/cosmas-native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift",
+        "native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift",
+        "native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift",
         "native-plugins/native-recording-pcm/Package.swift",
     ]
 
