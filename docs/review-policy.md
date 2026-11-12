@@ -38,7 +38,7 @@ These skip Fable even if a glob in 2a matches, unless a 2b rule fires. John's 11
 |---|---|---|
 | N1 | Test-only PRs: only `tests/**` or `*.test.*`, with synthetic fixtures | it changes a test that protects a 2a category **and** removes or weakens an assertion |
 | N2 | Docs and comments only | the docs are sign-in, release, realm or retention contracts (`docs/NATIVE_SIGNIN*`, `docs/operational-*`, `docs/RETENTION.md`), or the change is `docs/review-policy.md` or the "Coding rules from review findings" section of `AGENTS.md` |
-| N5 | Test-only simulator tooling: files that are never compiled into or run by a Release build | it touches Release config, Clerk or keychain, or anything reachable in a Release build |
+| N5 | Simulator and dev-only tooling paths only: `clients/apple/ui-tests/**`, `clients/capture/native-configured/ios-*-tests/**`, `scripts/configure-synthetic-iphone-simulator.py`, `scripts/run-iphone-sim-record-test*`, `scripts/prepare-synthetic-iphone-web-bundle*` | any 2a required-category glob match (infra, workflows, secrets, sign-in/Clerk, App Store or release, DB, logging/redaction, patient data or deletes, live-user access) always overrides N5 and section 3, so Fable is required |
 
 What we accept by narrowing: less depth on test-only and simulator-tooling changes, and rare doc and code mismatches. The hard rules (2b) are the backstop.
 
