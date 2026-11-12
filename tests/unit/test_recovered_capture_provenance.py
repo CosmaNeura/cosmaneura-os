@@ -375,8 +375,29 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     assert manifest["generated_web_assets"] == "absent"
     assert not (output / "apps/capture/ios/App/App/public").exists()
     frozen_count = json.loads(PROVENANCE.read_text(encoding="utf-8"))["native_source_file_count"]
-    additions = module.NATIVE_PRACTICE_ADDITIONS
-    assert "Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift" in additions
+    # Explicit literal: must stay in lockstep with compose-portable-iphone.py.
+    # ClerkKeychainCredentials.swift (+ tests) are required by the owned
+    # ClerkKitWorkspaceDriver overlay (clearStoredCredentials) and are absent
+    # from the frozen 1107 provenance; every composed iPhone app — including
+    # prepare-owned-iphone-candidate.py — receives them via NATIVE_PRACTICE_ADDITIONS.
+    additions = (
+        "Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift",
+        "Sources/CosmasNativeAuth/NativePracticeProfile.swift",
+        "Sources/CosmasNativeAuth/NativePracticeActivationOwner.swift",
+        "Sources/CosmasNativeAuth/NativePracticeConnectionContracts.swift",
+        "Sources/CosmasNativeAuth/NativePracticeWorkspaceBootstrap.swift",
+        "Sources/CosmasNativeAuth/NativePracticeAccountTransport.swift",
+        "Sources/CosmasNativeAuth/NativePracticeSelectionStore.swift",
+        "Bridge/CosmasNativePracticeConnectionPlugin.swift",
+        "Bridge/NativePracticeConnectionController.swift",
+        "Tests/CosmasNativeAuthTests/ClerkKeychainCredentialsTests.swift",
+        "Tests/CosmasNativeAuthTests/NativePracticeProfileTests.swift",
+        "Tests/CosmasNativeAuthTests/NativePracticeBootstrapTests.swift",
+        "Tests/CosmasNativeAuthTests/NativePracticeConnectionContractTests.swift",
+        "Tests/CosmasNativeAuthTests/NativePracticeOriginAndSelectionTests.swift",
+        "Tests/CosmasNativeAuthTests/NativePracticeProductionTests.swift",
+    )
+    assert module.NATIVE_PRACTICE_ADDITIONS == additions
     assert tuple(manifest["native_practice_additions"]) == additions
     vendor_files = [
         item for item in manifest["files"]

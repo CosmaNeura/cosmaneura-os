@@ -21,7 +21,7 @@ database; otherwise pass a full 40-character SHA or a PR number.
 ```sh
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer   # when needed
 ./scripts/run-iphone-sim-record-test.sh 349
-./scripts/run-iphone-sim-record-test.sh 179e739f0278a05706531ffb1288cb1df7acf507b
+./scripts/run-iphone-sim-record-test.sh 179e739f0278a05706531ffb1288cb1df7acf507
 ```
 
 That clones into a fresh temp directory (never `~/Desktop/cosmaneura-os`),

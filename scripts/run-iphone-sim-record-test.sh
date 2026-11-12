@@ -8,10 +8,10 @@
 # Mac exact command (from a checkout that contains this script, typically this PR):
 #
 #   ./scripts/run-iphone-sim-record-test.sh 349
-#   ./scripts/run-iphone-sim-record-test.sh 179e739f0278a05706531ffb1288cb1df7acf507b
+#   ./scripts/run-iphone-sim-record-test.sh 179e739f0278a05706531ffb1288cb1df7acf507
 #
 # Abbreviated SHAs are resolved only when already present in the runner
-# checkout's object database; otherwise pass a full SHA or PR number.
+# checkout's object database; otherwise pass a full 40-character SHA or PR number.
 # The checked-out tip is tested exactly — no overlays of identity, auth,
 # native, Swift, or tooling files into the target tree.
 #
@@ -156,17 +156,9 @@ if [[ "${1:-}" == "--select-runtime-and-iphone" ]]; then
   exit 0
 fi
 
-# Linux CI helper: assert required runner paths exist under ROOT (no overlays).
-if [[ "${1:-}" == "--verify-required-paths" ]]; then
-  root="${2:?repository root}"
-  missing=0
-  while IFS= read -r rel; do
-    [[ -z "$rel" ]] && continue
-    if [[ ! -e "${root}/${rel}" ]]; then
-      echo "missing required path: ${rel}" >&2
-      missing=1
-    fi
-  done <<'PATHS'
+# Shared required-path list for --verify-required-paths and the in-run check.
+list_required_target_paths() {
+  cat <<'PATHS'
 scripts/compose-portable-iphone.py
 scripts/prepare-synthetic-iphone-web-bundle.mjs
 scripts/configure-synthetic-iphone-simulator.py
@@ -180,6 +172,19 @@ clients/apple/startup-recovery/CosmasBridgeViewController.swift
 clients/apple/startup-recovery/CosmasWorkspaceViewController.swift
 clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
 PATHS
+}
+
+# Linux CI helper: assert required runner paths exist under ROOT (no overlays).
+if [[ "${1:-}" == "--verify-required-paths" ]]; then
+  root="${2:?repository root}"
+  missing=0
+  while IFS= read -r rel; do
+    [[ -z "$rel" ]] && continue
+    if [[ ! -e "${root}/${rel}" ]]; then
+      echo "missing required path: ${rel}" >&2
+      missing=1
+    fi
+  done < <(list_required_target_paths)
   if [[ "$missing" -ne 0 ]]; then
     echo "Target is missing required paths; runner will not overlay files." >&2
     exit 1
@@ -290,28 +295,8 @@ cleanup() {
     xcrun simctl privacy "${REUSED_SIM_UDID}" reset microphone com.cosmasos.synthetic >/dev/null 2>&1 || true
     xcrun simctl uninstall "${REUSED_SIM_UDID}" com.cosmasos.synthetic >/dev/null 2>&1 || true
   fi
-  # Sweep stale throwaway devices from interrupted prior runs.
-  if command -v python3 >/dev/null 2>&1; then
-    local sweep_json
-    sweep_json="$(mktemp)"
-    if xcrun simctl list devices -j >"${sweep_json}" 2>/dev/null; then
-      python3 - "${sweep_json}" <<'PY' || true
-import json, subprocess, sys
-try:
-    data = json.load(open(sys.argv[1]))
-except Exception:
-    raise SystemExit(0)
-for _runtime, devices in (data.get("devices") or {}).items():
-    for device in devices or []:
-        name = str(device.get("name") or "")
-        udid = device.get("udid")
-        if udid and name.startswith("cosmas-mic-uitest-"):
-            subprocess.run(["xcrun", "simctl", "shutdown", udid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["xcrun", "simctl", "delete", udid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-PY
-    fi
-    rm -f "${sweep_json}"
-  fi
+  # Delete only the simulator this run created (CREATED_SIM_UDID). Do not sweep
+  # other cosmas-mic-uitest-* devices that may belong to concurrent runs.
   if [[ -n "${WORK}" && -d "${WORK}" ]]; then
     rm -rf "${WORK}"
   fi
@@ -512,21 +497,24 @@ require_target_path() {
 }
 
 echo "==> Verifying required target paths (no overlays)"
-require_target_path scripts/compose-portable-iphone.py
-require_target_path scripts/prepare-synthetic-iphone-web-bundle.mjs
-require_target_path scripts/configure-synthetic-iphone-simulator.py
-require_target_path scripts/install-client-deps.sh
-require_target_path clients/shared/operational-native-identity.mjs
-require_target_path clients/apple/ui-tests
-require_target_path clients/apple/ui-tests/generate-uitest-project.py
-require_target_path clients/apple/ui-tests/CosmasSyntheticUITests/MicrophonePermissionUITests.swift
-require_target_path clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift
-require_target_path clients/apple/startup-recovery/CosmasBridgeViewController.swift
-require_target_path clients/apple/startup-recovery/CosmasWorkspaceViewController.swift
-require_target_path clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
+while IFS= read -r rel; do
+  [[ -z "$rel" ]] && continue
+  require_target_path "$rel"
+done < <(list_required_target_paths)
+
+measure_target_unmodified() {
+  local status
+  status="$(git -C "$SRC" status --porcelain)"
+  if [[ -z "${status}" ]]; then
+    printf 'yes'
+  else
+    printf 'no'
+  fi
+}
 
 TARGET_STATUS="$(git -C "$SRC" status --porcelain)"
-if [[ -z "${TARGET_STATUS}" ]]; then
+TARGET_UNMODIFIED="$(measure_target_unmodified)"
+if [[ "${TARGET_UNMODIFIED}" == "yes" ]]; then
   echo "==> Target tree unmodified after checkout (${HEAD_SHA})"
 else
   echo "Target tree is dirty after checkout; refusing to continue:" >&2
@@ -536,7 +524,7 @@ fi
 
 {
   echo "target_sha=${HEAD_SHA}"
-  echo "target_unmodified=yes"
+  echo "target_unmodified=${TARGET_UNMODIFIED}"
   echo "native_overlay=no"
 } | tee "$ARTIFACTS/target-receipt.txt"
 printf '%s\n' "$HEAD_SHA" > "$ARTIFACTS/tested-sha.txt"
@@ -569,6 +557,15 @@ if [[ "${REUSE_EXISTING_SIM}" -eq 0 ]]; then
   CREATED_SIM_UDID="${SIM_UDID}"
   echo "==> Created simulator ${SIM_NAME} (${SIM_UDID})"
 fi
+
+TARGET_STATUS="$(git -C "$SRC" status --porcelain)"
+TARGET_UNMODIFIED="$(measure_target_unmodified)"
+if [[ "${TARGET_UNMODIFIED}" != "yes" ]]; then
+  echo "Target tree became dirty before xcodebuild; refusing to continue:" >&2
+  printf '%s\n' "${TARGET_STATUS}" >&2
+  exit 1
+fi
+echo "==> Target tree still unmodified before xcodebuild (${HEAD_SHA})"
 
 echo "==> xcodebuild Debug iphonesimulator CODE_SIGNING_ALLOWED=NO"
 xcodebuild \
@@ -634,12 +631,14 @@ extract_screenshots() {
 }
 
 extract_screenshots
+TARGET_STATUS="$(git -C "$SRC" status --porcelain)"
+TARGET_UNMODIFIED="$(measure_target_unmodified)"
 {
   echo "target_sha=${HEAD_SHA}"
   echo "test_status=${TEST_STATUS}"
   echo "simulator=${SIM_NAME} (${SIM_UDID})"
   echo "native_overlay=no"
-  echo "target_unmodified=yes"
+  echo "target_unmodified=${TARGET_UNMODIFIED}"
 } | tee "$ARTIFACTS/result.txt"
 printf '%s\n' "$HEAD_SHA" > "$ARTIFACTS/tested-sha.txt"
 

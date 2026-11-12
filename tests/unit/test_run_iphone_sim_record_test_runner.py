@@ -151,12 +151,18 @@ def test_runner_has_no_overlay_mechanism() -> None:
     assert "overlay-receipt.txt" not in text
     assert "will not overlay" in text or "will not overlay files" in text
     assert "require_target_path" in text
+    assert "list_required_target_paths" in text
+    assert "measure_target_unmodified" in text
+    assert "target_unmodified=${TARGET_UNMODIFIED}" in text
     assert "tested-sha.txt" in text
     assert "target-receipt.txt" in text
     assert "native_overlay=no" in text
     assert "xcresulttool export attachments" in text
     assert "com.cosmasos.synthetic" in text
     assert "cosmas-mic-uitest-" in text
+    # Cleanup deletes only CREATED_SIM_UDID; no sweep of other throwaways.
+    assert "Deleting throwaway simulator" in text
+    assert "name.startswith(\"cosmas-mic-uitest-\")" not in text
     # Must not copy runner/native sources into the target tree.
     assert "cp -R \"$RUNNER_ROOT" not in text
     assert "cp -R \"$TOOLING_ROOT" not in text
