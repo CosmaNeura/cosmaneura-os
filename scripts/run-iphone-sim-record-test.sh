@@ -502,18 +502,13 @@ while IFS= read -r rel; do
   require_target_path "$rel"
 done < <(list_required_target_paths)
 
-measure_target_unmodified() {
-  local status
-  status="$(git -C "$SRC" status --porcelain)"
-  if [[ -z "${status}" ]]; then
-    printf 'yes'
-  else
-    printf 'no'
-  fi
-}
-
+# One git-status call per checkpoint; derive yes/no from that single measurement.
 TARGET_STATUS="$(git -C "$SRC" status --porcelain)"
-TARGET_UNMODIFIED="$(measure_target_unmodified)"
+if [[ -z "${TARGET_STATUS}" ]]; then
+  TARGET_UNMODIFIED=yes
+else
+  TARGET_UNMODIFIED=no
+fi
 if [[ "${TARGET_UNMODIFIED}" == "yes" ]]; then
   echo "==> Target tree unmodified after checkout (${HEAD_SHA})"
 else
@@ -559,7 +554,11 @@ if [[ "${REUSE_EXISTING_SIM}" -eq 0 ]]; then
 fi
 
 TARGET_STATUS="$(git -C "$SRC" status --porcelain)"
-TARGET_UNMODIFIED="$(measure_target_unmodified)"
+if [[ -z "${TARGET_STATUS}" ]]; then
+  TARGET_UNMODIFIED=yes
+else
+  TARGET_UNMODIFIED=no
+fi
 if [[ "${TARGET_UNMODIFIED}" != "yes" ]]; then
   echo "Target tree became dirty before xcodebuild; refusing to continue:" >&2
   printf '%s\n' "${TARGET_STATUS}" >&2
@@ -632,7 +631,11 @@ extract_screenshots() {
 
 extract_screenshots
 TARGET_STATUS="$(git -C "$SRC" status --porcelain)"
-TARGET_UNMODIFIED="$(measure_target_unmodified)"
+if [[ -z "${TARGET_STATUS}" ]]; then
+  TARGET_UNMODIFIED=yes
+else
+  TARGET_UNMODIFIED=no
+fi
 {
   echo "target_sha=${HEAD_SHA}"
   echo "test_status=${TEST_STATUS}"

@@ -235,19 +235,67 @@ import CosmasNativeAuth
     }
 
     #if DEBUG
+    /// Hosted on the superview/window (outside the WKWebView subtree) so XCUITest
+    /// `otherElements` can see them. CAPBridgeViewController.view is the WebView.
+    private var uiTestLoadedMarkerView: UIView?
+    private var uiTestMicPermissionMarkerView: UIView?
+
     private func exposeUiTestPluginLoadedMarker() {
         guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic" else { return }
-        view.accessibilityIdentifier = "cosmas.uiTest.iospcm.loaded"
+        scheduleUiTestMarkerInstall(identifier: "cosmas.uiTest.iospcm.loaded", micPermission: false)
     }
 
     private func exposeUiTestMicPermissionMarker(_ token: String) {
         guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic" else { return }
-        let marker = UIView()
+        scheduleUiTestMarkerInstall(
+            identifier: "cosmas.uiTest.micPermission.\(token)",
+            micPermission: true
+        )
+    }
+
+    /// Non-zero-frame accessibility element outside the WKWebView. XCUITest does
+    /// not expose zero-frame subviews of WKWebView, and WebView-typed elements
+    /// are not matched by `app.otherElements[…]`.
+    private func scheduleUiTestMarkerInstall(identifier: String, micPermission: Bool) {
+        let install: () -> Void = { [weak self] in
+            self?.installUiTestMarker(identifier: identifier, micPermission: micPermission, attemptsLeft: 20)
+        }
+        if view.superview != nil || view.window != nil {
+            install()
+        } else {
+            DispatchQueue.main.async(execute: install)
+        }
+    }
+
+    private func installUiTestMarker(identifier: String, micPermission: Bool, attemptsLeft: Int) {
+        guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic" else { return }
+        guard let host = view.superview ?? view.window else {
+            guard attemptsLeft > 0 else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.installUiTestMarker(
+                    identifier: identifier,
+                    micPermission: micPermission,
+                    attemptsLeft: attemptsLeft - 1
+                )
+            }
+            return
+        }
+        if micPermission {
+            uiTestMicPermissionMarkerView?.removeFromSuperview()
+        } else {
+            uiTestLoadedMarkerView?.removeFromSuperview()
+        }
+        let marker = UIView(frame: CGRect(x: 0, y: 0, width: 2, height: 2))
         marker.isAccessibilityElement = true
-        marker.accessibilityIdentifier = "cosmas.uiTest.micPermission.\(token)"
-        marker.frame = .zero
+        marker.accessibilityIdentifier = identifier
         marker.isUserInteractionEnabled = false
-        view.addSubview(marker)
+        marker.backgroundColor = .clear
+        host.addSubview(marker)
+        if micPermission {
+            uiTestMicPermissionMarkerView = marker
+        } else {
+            uiTestLoadedMarkerView = marker
+        }
     }
 
     private func currentRecordPermissionMarker() -> String {

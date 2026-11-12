@@ -152,8 +152,8 @@ def test_runner_has_no_overlay_mechanism() -> None:
     assert "will not overlay" in text or "will not overlay files" in text
     assert "require_target_path" in text
     assert "list_required_target_paths" in text
-    assert "measure_target_unmodified" in text
     assert "target_unmodified=${TARGET_UNMODIFIED}" in text
+    assert 'echo "target_unmodified=yes"' not in text
     assert "tested-sha.txt" in text
     assert "target-receipt.txt" in text
     assert "native_overlay=no" in text
@@ -166,6 +166,45 @@ def test_runner_has_no_overlay_mechanism() -> None:
     # Must not copy runner/native sources into the target tree.
     assert "cp -R \"$RUNNER_ROOT" not in text
     assert "cp -R \"$TOOLING_ROOT" not in text
+
+
+def test_runner_required_paths_list_is_shared_and_complete() -> None:
+    text = RUNNER.read_text(encoding="utf-8")
+    assert "list_required_target_paths()" in text
+    # In-run check and --verify-required-paths both consume the shared list.
+    assert "done < <(list_required_target_paths)" in text
+    assert text.count("done < <(list_required_target_paths)") >= 2
+    required = [
+        "scripts/compose-portable-iphone.py",
+        "scripts/prepare-synthetic-iphone-web-bundle.mjs",
+        "scripts/configure-synthetic-iphone-simulator.py",
+        "scripts/install-client-deps.sh",
+        "clients/shared/operational-native-identity.mjs",
+        "clients/apple/ui-tests",
+        "clients/apple/ui-tests/generate-uitest-project.py",
+        "clients/apple/ui-tests/CosmasSyntheticUITests/MicrophonePermissionUITests.swift",
+        "clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift",
+        "clients/apple/startup-recovery/CosmasBridgeViewController.swift",
+        "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift",
+        "clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift",
+    ]
+    start = text.index("list_required_target_paths() {")
+    end = text.index("\n}\n", start)
+    body = text[start:end]
+    for rel in required:
+        assert rel in body, rel
+
+
+def test_runner_pre_xcodebuild_dirty_recheck_and_measured_result() -> None:
+    text = RUNNER.read_text(encoding="utf-8")
+    assert "Target tree became dirty before xcodebuild" in text
+    assert "Target tree still unmodified before xcodebuild" in text
+    # result.txt must write the measured value, never a hard-coded yes.
+    assert "target_unmodified=${TARGET_UNMODIFIED}" in text
+    assert 'echo "target_unmodified=yes"' not in text
+    # One git-status measurement per checkpoint (no helper that re-calls status).
+    assert "measure_target_unmodified" not in text
+    assert text.count('git -C "$SRC" status --porcelain') >= 3
 
 
 def test_verify_required_paths_ok_on_current_tree() -> None:

@@ -36,26 +36,38 @@ SOURCE_IDS = (
 )
 
 
+def _zip_equal(left, right):
+    """Python 3.9-safe zip that refuses length mismatch (Mac /usr/bin/python3)."""
+    if len(left) != len(right):
+        raise ValueError(
+            f"length mismatch: left={len(left)} right={len(right)}"
+        )
+    return zip(left, right)  # noqa: B905 — length checked above; Mac stock Python is 3.9
+
+
 def main() -> None:
-    assert len(SOURCES) == len(SOURCE_IDS)
+    if len(SOURCES) != len(SOURCE_IDS):
+        raise ValueError(
+            f"SOURCES ({len(SOURCES)}) and SOURCE_IDS ({len(SOURCE_IDS)}) length mismatch"
+        )
     for name in SOURCES:
         assert (TESTS / name).is_file(), name
 
     build_files = "\n".join(
         f"\t\t{build} /* {name} in Sources */ = {{isa = PBXBuildFile; fileRef = {ref} /* {name} */; }};"
-        for (ref, build), name in zip(SOURCE_IDS, SOURCES, strict=True)
+        for (ref, build), name in _zip_equal(SOURCE_IDS, SOURCES)
     )
     file_refs = "\n".join(
         f'\t\t{ref} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = "<group>"; }};'
-        for (ref, _), name in zip(SOURCE_IDS, SOURCES, strict=True)
+        for (ref, _), name in _zip_equal(SOURCE_IDS, SOURCES)
     )
     group_children = "\n".join(
         f"\t\t\t\t{ref} /* {name} */,"
-        for (ref, _), name in zip(SOURCE_IDS, SOURCES, strict=True)
+        for (ref, _), name in _zip_equal(SOURCE_IDS, SOURCES)
     )
     sources_phase_files = "\n".join(
         f"\t\t\t\t{build} /* {name} in Sources */,"
-        for (_, build), name in zip(SOURCE_IDS, SOURCES, strict=True)
+        for (_, build), name in _zip_equal(SOURCE_IDS, SOURCES)
     )
 
     pbx = f"""// !$*UTF8*$!

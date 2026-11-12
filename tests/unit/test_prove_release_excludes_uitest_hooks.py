@@ -86,6 +86,7 @@ def test_prove_release_excludes_demo_and_uitest_hooks() -> None:
     blob = completed.stdout + completed.stderr
     assert "PASS: synthetic demo fixture" in blob
     assert "PASS: SyntheticDemoFixtureGate shouldPresent Release body is exactly false" in blob
+    assert "PASS: SyntheticDemoFixtureGate isCompiledIntoThisBinary Release body is exactly false" in blob
     assert "PASS: Release views of Bridge/Workspace/Gate/Plugin exclude XCUITest markers" in blob
 
 
@@ -185,8 +186,83 @@ def test_negative_gate_else_not_constant_false(tmp_path: Path) -> None:
     assert "shouldPresent Release body must be exactly 'false'" in (completed.stdout + completed.stderr)
 
 
+def test_negative_debug_or_true_on_bridge_uitest_block(tmp_path: Path) -> None:
+    """`#if DEBUG || true` must fail closed (not treated as exact DEBUG)."""
+    workspace, bridge, gate, plugin = _copy_sources(tmp_path)
+    text = bridge.read_text(encoding="utf-8")
+    match = _BRIDGE_UITEST_BLOCK.search(text)
+    assert match is not None
+    mutated = text[: match.start()] + match.group(0).replace(
+        "#if DEBUG\n",
+        "#if DEBUG || true\n",
+        1,
+    ) + text[match.end() :]
+    assert "#if DEBUG || true" in mutated
+    bridge.write_text(mutated, encoding="utf-8")
+    completed = _run_prove(workspace=workspace, bridge=bridge, gate=gate, plugin=plugin)
+    assert completed.returncode != 0, completed.stdout + completed.stderr
+    assert "ambiguous DEBUG condition" in (completed.stdout + completed.stderr)
+
+
+def test_negative_forbidden_marker_in_canimport_else_arm(tmp_path: Path) -> None:
+    """Non-DEBUG `#else` arms stay in the Release view; a marker there must fail."""
+    workspace, bridge, gate, plugin = _copy_sources(tmp_path)
+    text = bridge.read_text(encoding="utf-8")
+    # Inject a forbidden marker into the existing #else of canImport in stopForPracticeConnection.
+    else_arm = (
+        "        #else\n"
+        "        return false\n"
+        "        #endif\n"
+        "    }\n"
+        "\n"
+        "    /// Retains both old plugins until physical and configured-owner closure finish.\n"
+    )
+    leaked_else = (
+        "        #else\n"
+        '        let uiTestLeak = "cosmas.uiTest.hidden"\n'
+        "        return false\n"
+        "        #endif\n"
+        "    }\n"
+        "\n"
+        "    /// Retains both old plugins until physical and configured-owner closure finish.\n"
+    )
+    assert else_arm in text
+    bridge.write_text(text.replace(else_arm, leaked_else, 1), encoding="utf-8")
+    completed = _run_prove(workspace=workspace, bridge=bridge, gate=gate, plugin=plugin)
+    assert completed.returncode != 0, completed.stdout + completed.stderr
+    assert "still contains" in (completed.stdout + completed.stderr)
+
+
+def test_negative_gate_compiled_into_binary_else_not_constant_false(tmp_path: Path) -> None:
+    workspace, bridge, gate, plugin = _copy_sources(tmp_path)
+    text = gate.read_text(encoding="utf-8")
+    mutated = text.replace(
+        "    public static var isCompiledIntoThisBinary: Bool {\n"
+        "        #if DEBUG\n"
+        "        true\n"
+        "        #else\n"
+        "        false\n"
+        "        #endif\n"
+        "    }",
+        "    public static var isCompiledIntoThisBinary: Bool {\n"
+        "        #if DEBUG\n"
+        "        true\n"
+        "        #else\n"
+        "        Bundle.main.bundleIdentifier != nil\n"
+        "        #endif\n"
+        "    }",
+        1,
+    )
+    assert mutated != text
+    gate.write_text(mutated, encoding="utf-8")
+    completed = _run_prove(workspace=workspace, bridge=bridge, gate=gate, plugin=plugin)
+    assert completed.returncode != 0, completed.stdout + completed.stderr
+    assert "isCompiledIntoThisBinary Release body must be exactly 'false'" in (
+        completed.stdout + completed.stderr
+    )
+
+
 def test_swift_release_view_handles_nested_if() -> None:
-    # Import after path setup so pytest collects even if script moves.
     sys.path.insert(0, str(SCRIPT.parent))
     from prove_release_excludes_demo_fixture import swift_release_view
 
@@ -210,3 +286,15 @@ def test_swift_release_view_handles_nested_if() -> None:
     assert "skipLaunchArgument" not in view
     assert "let releaseOnly = true" in view
     assert "let always = 0" in view
+
+    # Non-DEBUG conditionals keep every arm (else is scanned).
+    scan_all = (
+        "#if canImport(Foo)\n"
+        "let keepTrue = 1\n"
+        "#else\n"
+        "let keepElse = 2\n"
+        "#endif\n"
+    )
+    both = swift_release_view(scan_all)
+    assert "let keepTrue = 1" in both
+    assert "let keepElse = 2" in both
