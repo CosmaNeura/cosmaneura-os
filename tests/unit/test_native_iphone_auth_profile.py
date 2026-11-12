@@ -23,7 +23,7 @@ APP_INFO = ROOT / "apps/capture/ios/App/App/Info.plist"
 SWIFT_CONFIG = (
     ROOT / "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift"
 )
-EXPECTED_COMPOSITION_FILES = 513
+EXPECTED_COMPOSITION_FILES = 515
 
 
 def _load(path: Path, name: str):
@@ -175,7 +175,7 @@ def test_production_stamp_enables_only_with_validated_key():
     assert stamped["CosmasNativeAuth"]["publishableKey"] == identity["auth"]["publishableKey"]
     assert AUTH.publishable_key_host(stamped["CosmasNativeAuth"]["publishableKey"]) == (
         AUTH.SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST)
-    with pytest.raises(ValueError, match="without a validated key"):
+    with pytest.raises(ValueError, match="without a (validated|pk_live_) key"):
         AUTH.production_native_auth_stamp(before, auth={
             "enabled": True,
             "profile": "operational-production-v1",
@@ -547,3 +547,106 @@ def test_composition_bindings_refuse_changed_derivation_or_auth_profile_hash(tmp
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="drifted from native_iphone_auth_profile"):
         OWNED.composition_bindings(ROOT, source, auth_out)
+
+
+def _test_key(host: str) -> str:
+    return "pk_test_" + base64.b64encode(f"{host}$".encode()).decode()
+
+
+@pytest.mark.parametrize("profile", [None, "beta"])
+def test_f5_operational_beta_pointed_at_clerk_beta_is_refused(profile):
+    """F5: operational-beta-v1 on clerk.beta.cosmas.ai requires --installation-profile production."""
+    identity = _live_beta_identity()
+    identity["identity"]["frontendOrigin"] = AUTH.PRODUCTION_ORIGINS["clerk"]
+    identity["identity"]["publishableKey"] = _live_key("clerk.beta.cosmas.ai")
+    identity["auth"]["frontendOrigin"] = AUTH.PRODUCTION_ORIGINS["clerk"]
+    identity["auth"]["publishableKey"] = identity["identity"]["publishableKey"]
+    before = plistlib.loads(APP_INFO.read_bytes())
+    configured = {
+        **copy.deepcopy(before),
+        "CosmasNativeIdentity": copy.deepcopy(identity["identity"]),
+        "CosmasNativeAuth": copy.deepcopy(identity["auth"]),
+    }
+    with pytest.raises(ValueError, match="--installation-profile production"):
+        AUTH.apply_installation_profile_to_configured_info(
+            configured, profile, identity=identity)
+
+
+def test_l1_production_auth_requires_pk_live_not_pk_test():
+    """L1: production check requires a pk_live_ key even when the host matches."""
+    identity = _production_identity()
+    pk_test = _test_key("clerk.beta.cosmas.ai")
+    assert AUTH.publishable_key_host(pk_test) == "clerk.beta.cosmas.ai"
+    bad = copy.deepcopy(identity["auth"])
+    bad["publishableKey"] = pk_test
+    with pytest.raises(ValueError, match="pk_live_"):
+        AUTH.require_validated_production_auth(bad)
+    assert AUTH.require_validated_production_auth(identity["auth"])["publishableKey"] == (
+        identity["auth"]["publishableKey"])
+
+
+@pytest.mark.parametrize("host", [
+    "notclerk.accounts.dev",
+    "evil.clerk.accounts.dev.example",
+    "clerk.accounts.dev",
+    ".clerk.accounts.dev",
+    "INVENTED.clerk.accounts.dev",
+    "invented.clerk.accounts.dev.",
+    "invented..clerk.accounts.dev",
+])
+def test_l2_accounts_dev_host_rejects_suffix_tricks(host):
+    """L2: strict *.clerk.accounts.dev match; lookalikes and suffix tricks fail."""
+    assert AUTH.is_accounts_dev_clerk_host(host) is False
+    assert AUTH.is_accounts_dev_clerk_host("invented.clerk.accounts.dev") is True
+    assert AUTH.is_accounts_dev_clerk_host("invented-own-practice.clerk.accounts.dev") is True
+    with pytest.raises(ValueError, match="Staging profile requires"):
+        AUTH.require_installation_profile_origins(
+            "staging",
+            frontend_origin="https://" + host,
+            api_origin=AUTH.STAGING_ORIGINS["api"],
+            web_origin=AUTH.STAGING_ORIGINS["web"],
+        )
+
+
+def test_f17_compose_prepare_main_installation_profile_end_to_end(tmp_path):
+    """F17: drive compose prepare main() end to end with --installation-profile production."""
+    default_out = tmp_path / "f17-default"
+    prod_out = tmp_path / "f17-production"
+    default = subprocess.run(
+        [sys.executable, str(COMPOSE), "--repository", str(ROOT), "--output", str(default_out)],
+        cwd=ROOT, capture_output=True, text=True, check=True)
+    assert "Prepared portable iPhone project inputs" in default.stdout
+    prod = subprocess.run(
+        [sys.executable, str(COMPOSE), "--repository", str(ROOT), "--output", str(prod_out),
+         "--installation-profile", "production"],
+        cwd=ROOT, capture_output=True, text=True, check=True)
+    assert "Prepared portable iPhone project inputs" in prod.stdout
+    default_info = plistlib.loads((default_out / "apps/capture/ios/App/App/Info.plist").read_bytes())
+    prod_info = plistlib.loads((prod_out / "apps/capture/ios/App/App/Info.plist").read_bytes())
+    assert default_info["CosmasNativeAuth"]["enabled"] is False
+    assert default_info["CosmasNativeAuth"]["frontendOrigin"] == ""
+    assert prod_info["CosmasNativeAuth"]["enabled"] is False
+    assert prod_info["CosmasNativeAuth"]["frontendOrigin"] == "https://clerk.beta.cosmas.ai"
+    assert prod_info["CosmasNativeAuth"]["profile"] == "operational-production-v1"
+    assert prod_info["CosmasNativeIdentity"]["apiOrigin"] == "https://api.beta.cosmas.ai"
+    manifest = json.loads((prod_out / "composition.json").read_text(encoding="utf-8"))
+    assert manifest["installation_profile"] == "production"
+    # Owned prepare main() is Darwin-only; prove the Linux-visible refusal and argv path.
+    owned_main = subprocess.run(
+        [sys.executable, str(PREPARE),
+         "--inputs", str(tmp_path / "missing-inputs"),
+         "--retained-info", str(APP_INFO),
+         "--node", sys.executable,
+         "--output", str(tmp_path / "owned-out"),
+         "--installation-profile", "production"],
+        cwd=ROOT, capture_output=True, text=True)
+    assert owned_main.returncode == 1
+    assert "Mac" in owned_main.stderr or "sandbox" in owned_main.stderr
+    args = OWNED.arguments([
+        "--inputs", "/invented/public",
+        "--retained-info", "/invented/Info.plist",
+        "--node", "/invented/node",
+        "--output", "/invented/new",
+        "--installation-profile", "production",
+    ])
+    assert args.installation_profile == "production"

@@ -125,8 +125,22 @@ uv run python -m unittest infra.standalone.test_settings_contract -v
 | `test_settings_contract.py` | not run by synth-ci | `uv run python -m unittest …` above |
 
 `render-goldens.test.mjs` locks SHA-256 fingerprints of `JSON.stringify(render(...))`
-for invented audience, shared_staging, and owned-staging inputs (regenerated
-with #361's eight `"false"` switches and `schema_revision` `a46f2c09d853`).
-Off-state opt-in-absent output must stay byte-identical to those main goldens.
-`render-capture-tools.test.mjs` reuses the same dedicated and owned-staging
-fingerprints as `MAIN_*_FINGERPRINT`.
+for invented audience, shared_staging, and owned-staging inputs. Regenerated in
+the post-#354 Clerk follow-up when `invented-host-input.json` moved the beta
+identity to `clerk.cosmas.ai` (shared_staging fingerprint unchanged because that
+case overrides identity). Off-state opt-in-absent output must stay byte-identical
+to those goldens. `render-capture-tools.test.mjs` reuses the same dedicated and
+owned-staging fingerprints as `MAIN_*_FINGERPRINT`.
+
+Regen (repo root; print audience fingerprint of the committed sample):
+
+```bash
+node --input-type=module -e "
+import {readFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {render} from './infra/standalone/render.mjs';
+const sample=JSON.parse(await readFile('./infra/standalone/invented-host-input.json','utf8'));
+const fp=f=>createHash('sha256').update(JSON.stringify(f)).digest('hex');
+console.log(fp(render(structuredClone(sample))));
+"
+```

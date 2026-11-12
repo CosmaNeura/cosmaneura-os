@@ -715,7 +715,11 @@ def main() -> None:
         choices=sorted(INSTALLATION_PROFILES),
         help=(
             "Optional closed installation profile. Only 'production' stamps "
-            "CosmasNativeAuth Clerk/API origins onto the owned Info.plist derivation."
+            "CosmasNativeAuth with clerk.beta.cosmas.ai / api.beta.cosmas.ai "
+            "(operational-production-v1) for App Store / production-review; "
+            "that is not the live clerk.cosmas.ai beta path and is not a "
+            "practice-account realm. Omit, 'beta', or 'staging' keep auth "
+            "disabled on compose."
         ),
     )
     args = parser.parse_args()

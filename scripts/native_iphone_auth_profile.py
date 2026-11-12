@@ -17,7 +17,6 @@ from __future__ import annotations
 import base64
 import copy
 import re
-from urllib.parse import urlparse
 
 PRODUCTION_INSTALLATION_PROFILE = "production"
 STAGING_INSTALLATION_PROFILE = "staging"
@@ -66,13 +65,13 @@ def _absent_web_origin(value: object) -> bool:
 
 
 def _clerk_host(frontend_origin: str) -> str:
-    """Return the URL hostname; refuse non-https or malformed origins as empty."""
-    if not isinstance(frontend_origin, str):
+    """Return the exact https host label; preserve case and refuse path/port/userinfo."""
+    if not isinstance(frontend_origin, str) or not frontend_origin.startswith("https://"):
         return ""
-    parsed = urlparse(frontend_origin)
-    if parsed.scheme != "https" or parsed.hostname is None or parsed.port is not None:
-        return frontend_origin.removeprefix("https://")
-    return parsed.hostname
+    host = frontend_origin[len("https://"):]
+    if not host or any(separator in host for separator in "/:?#@"):
+        return ""
+    return host
 
 
 def is_accounts_dev_clerk_host(host: str) -> bool:

@@ -173,3 +173,39 @@ test('synthetic data with operational identity preserves custody and rejects mod
   assert.equal(await readFile(join(directory,'cosmas-installation.json'),'utf8'),marker);
   assert.equal(await readFile(join(directory,'retained-draft'),'utf8'),'invented private draft');
 });
+
+test('desktop path refuses operational-production-v1 unless installation.profile is production', async t => {
+  const productionIdentity = {
+    version: 1, profile: 'operational-production-v1', client: 'desktop',
+    apiOrigin: 'https://api.beta.cosmas.ai',
+    frontendOrigin: 'https://clerk.beta.cosmas.ai',
+    publishableKey: liveKey('clerk.beta.cosmas.ai'),
+    organizationId: 'org_invented_beta', audience: 'cosmas-os-beta-api',
+  };
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'cosmas-prod-fence-desktop-')));
+  t.after(() => rm(base, {recursive: true, force: true}));
+  const betaInstallation = {
+    version: 1, profile: 'beta', bundleIdentifier: 'com.cosmasos.beta.desktop',
+    storageGeneration: 1, electronVersion: '43.4.1',
+    rendererPartition: 'persist:cosmasos-operational-beta',
+    authHelperBundleIdentifier: 'com.cosmasos.beta.desktop.auth',
+  };
+  await assert.rejects(prepareDesktopState({
+    mode: 'hosted-beta-authenticated', dataMode: 'authorized_beta',
+    apiOrigin: productionIdentity.apiOrigin, nativeIdentity: productionIdentity,
+    installation: betaInstallation,
+  }, base, '43.4.1'));
+  await assert.rejects(prepareDesktopState({
+    mode: 'hosted-beta-authenticated', dataMode: 'authorized_beta',
+    apiOrigin: productionIdentity.apiOrigin, nativeIdentity: productionIdentity,
+    installation: {...betaInstallation, profile: 'staging'},
+  }, join(base, 'staging'), '43.4.1'));
+  const ok = await prepareDesktopState({
+    mode: 'hosted-beta-authenticated', dataMode: 'authorized_beta',
+    apiOrigin: productionIdentity.apiOrigin, nativeIdentity: productionIdentity,
+    installation: {...betaInstallation, profile: 'production'},
+  }, join(base, 'production'), '43.4.1');
+  assert.ok(ok.includes('com.cosmasos.beta.desktop'));
+  // Mutation note: dropping loadOperationalNativeIdentity's production-profile
+  // refusal in installation-state.mjs lets the beta/staging rejects above succeed.
+});

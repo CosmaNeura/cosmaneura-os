@@ -95,3 +95,58 @@ test('production profile accepts only clerk.beta.cosmas.ai and staging rejects p
     ]) assert.throws(()=>shared.validateOperationalNativeIdentity({...beta,...changed},client,beta.apiOrigin));
   }
 });
+
+const liveKey = host => 'pk_live_' + Buffer.from(host + '$').toString('base64');
+
+test('L2 accounts.dev host match rejects suffix tricks', () => {
+  assert.equal(shared.isAccountsDevClerkHost('invented.clerk.accounts.dev'), true);
+  assert.equal(shared.isAccountsDevClerkHost('invented-own-practice.clerk.accounts.dev'), true);
+  for (const host of [
+    'notclerk.accounts.dev',
+    'evil.clerk.accounts.dev.example',
+    'clerk.accounts.dev',
+    '.clerk.accounts.dev',
+    'INVENTED.clerk.accounts.dev',
+    'invented.clerk.accounts.dev.',
+    'invented..clerk.accounts.dev',
+  ]) assert.equal(shared.isAccountsDevClerkHost(host), false, host);
+
+  const staging = {
+    version: 1, profile: shared.STAGING_NATIVE_PROFILE, client: 'apple',
+    apiOrigin: 'https://api.staging.cosmas.ai',
+    frontendOrigin: 'https://invented.clerk.accounts.dev',
+    publishableKey: 'pk_test_' + Buffer.from('invented.clerk.accounts.dev$').toString('base64'),
+    organizationId: 'org_invented_beta', audience: '',
+  };
+  assert.deepEqual(shared.validateOperationalNativeIdentity(staging, 'apple', staging.apiOrigin), staging);
+  assert.throws(() => shared.validateOperationalNativeIdentity({
+    ...staging,
+    frontendOrigin: 'https://notclerk.accounts.dev',
+    publishableKey: 'pk_test_' + Buffer.from('notclerk.accounts.dev$').toString('base64'),
+  }, 'apple', staging.apiOrigin));
+});
+
+test('JS loaders refuse operational-production-v1 without production installation profile', () => {
+  const production = {
+    version: 1, profile: shared.PRODUCTION_NATIVE_PROFILE, client: 'desktop',
+    apiOrigin: shared.PRODUCTION_API_ORIGIN,
+    frontendOrigin: 'https://clerk.beta.cosmas.ai',
+    publishableKey: liveKey('clerk.beta.cosmas.ai'),
+    organizationId: 'org_invented_beta', audience: 'cosmas-os-beta-api',
+  };
+  assert.deepEqual(
+    shared.loadOperationalNativeIdentity(
+      production, 'desktop', production.apiOrigin, shared.PRODUCTION_INSTALLATION_PROFILE),
+    production);
+  for (const profile of [undefined, null, '', 'beta', 'staging']) {
+    assert.throws(() => shared.loadOperationalNativeIdentity(
+      production, 'desktop', production.apiOrigin, profile));
+  }
+  // Mutation note: removing requireProductionInstallationProfile from
+  // loadOperationalNativeIdentity makes the throws above pass incorrectly.
+  assert.equal(typeof shared.requireProductionInstallationProfile, 'function');
+  assert.throws(() => shared.requireProductionInstallationProfile(production, 'beta'));
+  assert.equal(
+    shared.requireProductionInstallationProfile(production, shared.PRODUCTION_INSTALLATION_PROFILE),
+    shared.PRODUCTION_INSTALLATION_PROFILE);
+});
