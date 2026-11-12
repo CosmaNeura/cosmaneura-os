@@ -3,9 +3,10 @@
 Proposed 12 Nov 2026. Takes effect when John merges this PR. Changing this file needs John's yes.
 
 ## 1. Every PR, every pushed head
-- No default model reviewer is live today.
+- No default model reviewer is live today. No default reviewer applies to PRs outside sections 2a and 2b.
 - Required CI plus the Beta Tester's pass/fail apply to every PR.
-- **Fable** (Fable 5.2 Oracle, read-only, medium effort) is the reviewer of record for everything in sections 2a and 2b.
+- **Fable** (Fable 5.2 Oracle, read-only, medium effort) is the reviewer of record for everything in sections 2a and 2b. Fable stays the reviewer of record and the gate.
+- **Opus 5.5** reads alongside Fable only on PRs that meet section 2a or 2b. It reviews code only, never PHI, and its review is advisory. The CTO runs it from the CTO box. It is paid from the Team monthly API credits. If those run out, it stops and asks John; it never uses paid credits.
 - A future default reviewer can be added only by a later PR with John's yes.
 
 ## 2. When Fable is also required
