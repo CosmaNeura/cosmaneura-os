@@ -128,6 +128,7 @@ def _guard(s, runtime, manifest):
         "core_capture_origin", "core_capture_scope",
         "core_capture_managed_identity_client_id", "core_web_origin",
         "workspace_capture_proxy_enabled", "workspace_capture_proxy_origin",
+        "core_capture_upload_host",
     }
     for name, value in runtime.model_dump().items():
         if name in allowed_core_capture:

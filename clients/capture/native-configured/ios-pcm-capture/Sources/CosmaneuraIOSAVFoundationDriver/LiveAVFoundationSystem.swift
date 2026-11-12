@@ -52,39 +52,51 @@
 
   /// Owns one AVAudioEngine at a time. All control methods are serialized by
   /// `AVFoundationPCMDriver`; only notification and tap callbacks are concurrent.
+  /// The engine is created only when capture starts (install/start), never at
+  /// construction / plugin load.
   public final class LiveAppleAudioSystem: AppleAudioSystem, @unchecked Sendable {
+    public typealias EngineFactory = LazyAppleAudioEngine<AVAudioEngine>.Factory
+
     private let lock = NSLock()
     private let notificationCenter: NotificationCenter
     private let audioSession: AVAudioSession
     private let signalMonitor: PCMSignalMonitor?
     private let microphoneInput: AppleMicrophoneInputPreference
     private let inputRouteEvents = AppleInputRouteEvents()
+    private let engines: LazyAppleAudioEngine<AVAudioEngine>
     private var selectedInputUID: String?
-    private var engine = AVAudioEngine()
     private var tapInstalled = false
     private var activationAttempted = false
     private var eventHandler: (@Sendable (AppleAudioSystemEvent) -> Void)?
     private var observers: [NSObjectProtocol] = []
+    private var engineObserver: NSObjectProtocol?
 
     public init(
       notificationCenter: NotificationCenter = .default,
       audioSession: AVAudioSession = .sharedInstance(),
       signalMonitor: PCMSignalMonitor? = nil,
-      microphoneInput: AppleMicrophoneInputPreference = AppleMicrophoneInputPreference()
+      microphoneInput: AppleMicrophoneInputPreference = AppleMicrophoneInputPreference(),
+      engineFactory: @escaping EngineFactory = { AVAudioEngine() }
     ) {
       self.notificationCenter = notificationCenter
       self.audioSession = audioSession
       self.signalMonitor = signalMonitor
       self.microphoneInput = microphoneInput
+      self.engines = LazyAppleAudioEngine(factory: engineFactory)
     }
 
     deinit { clearEventHandler() }
+
+    /// True only after capture start has resolved the injectable engine factory.
+    public var hasResolvedEngine: Bool { engines.isResolved }
 
     public func setEventHandler(
       _ handler: @escaping @Sendable (AppleAudioSystemEvent) -> Void
     ) {
       clearEventHandler()
       lock.withLock { eventHandler = handler }
+      // Session/app observers only. Engine configuration observer attaches when
+      // the lazy engine is first resolved during install/start — never here.
       let tokens = [
         notificationCenter.addObserver(
           forName: AVAudioSession.interruptionNotification,
@@ -131,14 +143,6 @@
           queue: nil
         ) { [weak self] _ in self?.emit(.mediaServicesReset) },
         notificationCenter.addObserver(
-          forName: .AVAudioEngineConfigurationChange,
-          object: engine,
-          queue: nil
-        ) { [weak self] _ in
-          PCMStartupDiagnostics.shared.record(.engineConfigurationChanged)
-          self?.emit(.captureFailed)
-        },
-        notificationCenter.addObserver(
           forName: UIApplication.willResignActiveNotification,
           object: nil,
           queue: nil
@@ -155,13 +159,21 @@
         ) { [weak self] _ in self?.checkPermission() },
       ]
       lock.withLock { observers = tokens }
+      if let existing = engines.current() {
+        attachEngineObserver(to: existing)
+      }
     }
 
     public func clearEventHandler() {
       let old = lock.withLock { () -> [NSObjectProtocol] in
         eventHandler = nil
-        defer { observers.removeAll(keepingCapacity: false) }
-        return observers
+        var removed = observers
+        observers.removeAll(keepingCapacity: false)
+        if let engineObserver {
+          removed.append(engineObserver)
+          self.engineObserver = nil
+        }
+        return removed
       }
       for observer in old { notificationCenter.removeObserver(observer) }
     }
@@ -230,6 +242,7 @@
         !lock.withLock({ tapInstalled }), hasSelectedInput()
       else { throw AVFoundationDriverError.operationFailed }
 
+      let engine = requireEngine()
       let input = engine.inputNode
       // The tap observes the input node's output bus; preserve that bus's exact
       // format rather than synthesizing a format at this boundary.
@@ -260,6 +273,7 @@
     public func startEngine() throws {
       do {
         guard hasSelectedInput() else { throw AVFoundationDriverError.operationFailed }
+        let engine = requireEngine()
         engine.prepare()
         try engine.start()
         guard hasSelectedInput() else { throw AVFoundationDriverError.operationFailed }
@@ -273,6 +287,8 @@
         defer { tapInstalled = false }
         return tapInstalled
       }
+      // Stop/teardown must tolerate capture never having created an engine.
+      guard let engine = engines.current() else { return }
       if removeTap { engine.inputNode.removeTap(onBus: 0) }
       engine.stop()
     }
@@ -290,8 +306,44 @@
         activationAttempted = false
         selectedInputUID = nil
       }
-      engine.reset()
-      engine = AVAudioEngine()
+      if let engine = engines.current() {
+        engine.reset()
+      }
+      detachEngineObserver()
+      engines.clear()
+    }
+
+    private func requireEngine() -> AVAudioEngine {
+      if let existing = engines.current() { return existing }
+      let created = engines.resolve()
+      attachEngineObserver(to: created)
+      return created
+    }
+
+    private func attachEngineObserver(to engine: AVAudioEngine) {
+      // Check-and-set under the same lock so a concurrent attach cannot
+      // dual-register. Control-path callers are also serialized by
+      // AVFoundationPCMDriver; this closes the remaining race window.
+      lock.lock()
+      defer { lock.unlock() }
+      guard engineObserver == nil, eventHandler != nil else { return }
+      let token = notificationCenter.addObserver(
+        forName: .AVAudioEngineConfigurationChange,
+        object: engine,
+        queue: nil
+      ) { [weak self] _ in
+        PCMStartupDiagnostics.shared.record(.engineConfigurationChanged)
+        self?.emit(.captureFailed)
+      }
+      engineObserver = token
+    }
+
+    private func detachEngineObserver() {
+      let token = lock.withLock { () -> NSObjectProtocol? in
+        defer { engineObserver = nil }
+        return engineObserver
+      }
+      if let token { notificationCenter.removeObserver(token) }
     }
 
     private func hasSelectedInput() -> Bool {

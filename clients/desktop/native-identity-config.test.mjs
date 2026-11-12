@@ -71,6 +71,23 @@ test('staging profile accepts its own Clerk instance and rejects other live host
   assert.throws(()=>validateOperationalNativeIdentity({...production,profile:'operational-staging-v1'},'apple',production.apiOrigin));
 });
 
+test('production profile pins clerk.beta.cosmas.ai and rejects staging or live Clerk hosts',()=>{
+  for (const client of ['apple','desktop']) {
+    const value={version:1,profile:'operational-production-v1',client,apiOrigin:'https://api.beta.cosmas.ai',
+      frontendOrigin:'https://clerk.beta.cosmas.ai',publishableKey:liveKey('clerk.beta.cosmas.ai'),
+      organizationId:'org_invented_beta',audience:'cosmas-os-beta-api'};
+    assert.deepEqual(validateOperationalNativeIdentity(value,client,value.apiOrigin),value);
+    assert.equal(operationalNativeAuthSettings(value).profile,'operational-production-v1');
+    for (const changed of [
+      {frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:dedicatedStagingKey},
+      {frontendOrigin:'https://clerk.cosmas.ai',publishableKey:liveKey('clerk.cosmas.ai')},
+      {frontendOrigin:'https://clerk.example.invalid',publishableKey:liveKey('clerk.example.invalid')},
+      {frontendOrigin:'https://invented.clerk.accounts.dev',publishableKey:'pk_test_'+btoa('invented.clerk.accounts.dev$')},
+      {audience:''},
+    ]) assert.throws(()=>validateOperationalNativeIdentity({...value,...changed},client,value.apiOrigin));
+  }
+});
+
 test('staging launch cannot authorize real data or silently replace an installed identity',async t=>{
   const base=await realpath(await mkdtemp(join(tmpdir(),'cosmas-shared-staging-')));
   t.after(()=>rm(base,{recursive:true,force:true}));

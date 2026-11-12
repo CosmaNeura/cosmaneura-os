@@ -49,6 +49,35 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
+Portable compose path (owned clients + frozen scaffold), synthetic web bundle,
+and automatic mic-permission Simulator test — one Mac command against any PR
+head in a throwaway temp folder (never an existing Desktop checkout). Requires
+full Xcode (not CLT alone) and Node.js 24 on PATH. Synthetic inputs only
+(`synthetic-iphone-sim-v1` + `pk_test_` + `*.synthetic.example`):
+
+```sh
+# If xcode-select points at Command Line Tools only:
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+# Optional Node 24 pin when PATH is wrong:
+# export COSMAS_NODE_BIN=/opt/homebrew/opt/node@24/bin/node
+./scripts/run-iphone-sim-record-test.sh 349
+./scripts/run-iphone-sim-record-test.sh 179e739f0278a05706531ffb1288cb1df7acf507
+# Abbreviated SHAs only when already in this tooling checkout; otherwise full 40-character SHA or PR.
+```
+
+Synthetic web bundle only (`pk_test_` + `*.synthetic.example`, no secrets):
+
+```sh
+node scripts/prepare-synthetic-iphone-web-bundle.mjs \
+  --output /absolute/path/to/fresh-synthetic-apple-renderer
+```
+
+Release-excludes proof (Linux-safe source check; also run on Mac before a Release archive):
+
+```sh
+python3 clients/apple/ui-tests/prove_release_excludes_demo_fixture.py
+```
+
 Owned iPhone builds use Capacitor 8.5.0 from
 `clients/apple/vendor/capacitor-swift-pm-8.5.0` (local path binary targets;
 release-asset SHA-256 recorded in that directory's SOURCE_MANIFEST.json).

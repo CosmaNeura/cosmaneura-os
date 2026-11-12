@@ -16,16 +16,36 @@ from cosmas_os.config import STANDALONE_ENVS, Settings
 from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 
+def _capture_tools_opt_in(runtime: Settings) -> bool:
+    """True only for the synthetic beta capture + agent-tools package opt-in."""
+    return (
+        runtime.workspace_capture_backend == "core"
+        and runtime.workspace_capture_proxy_enabled
+        and runtime.workspace_capture_notes_enabled
+        and runtime.workspace_agent_tools_enabled
+    )
+
+
 def standalone_request_allowed(method: str, path: str, runtime: Settings | None = None) -> bool:
     """Local state plus explicitly configured, bounded real-account features."""
     if method in {"GET", "HEAD", "OPTIONS"}:
         return True
+    identifier = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    # Capture routes + PUT stay refused unless the capture-tools opt-in is on.
+    if runtime is not None and runtime.cosmas_env == "standalone_clerk_synthetic" and _capture_tools_opt_in(runtime):
+        if method == "PUT" and re.fullmatch(
+                r"/workspaces/" + identifier + r"/capture/ciphertexts/" + identifier, path):
+            return True
+        if method == "POST" and re.fullmatch(
+                r"/workspaces/" + identifier
+                + r"/capture/(?:admission|existing|notes|note-links|operations|source-packets)",
+                path):
+            return True
     if method != "POST":
         return False
     if path in {"/practice-access/setup/complete", "/provider-team", "/workspaces",
                 "/workspaces/private-drafts", "/workspaces/private-drafts/resolve"}:
         return True
-    identifier = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
     if runtime is not None and runtime.cosmas_env == "standalone_clerk_synthetic":
         if re.fullmatch(r"/workspaces/" + identifier + r"/conversation/resolve", path):
             return True  # Read exact saved/uncertain outcomes even after model disablement.
