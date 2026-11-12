@@ -23,7 +23,7 @@ APP_INFO = ROOT / "apps/capture/ios/App/App/Info.plist"
 SWIFT_CONFIG = (
     ROOT / "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift"
 )
-EXPECTED_COMPOSITION_FILES = 513
+EXPECTED_COMPOSITION_FILES = 515
 
 
 def _load(path: Path, name: str):
