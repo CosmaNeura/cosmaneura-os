@@ -130,7 +130,7 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/DesktopAuthProtocolTests.swift": "2833750395acfdd6d0becc3779322538aa375a1e2fe79ff27d04c82b6b820d81",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/GoogleConnectionNavigationTests.swift": "7f25b506b325cfbf76e7fc4ad1082c2406ca238f5ef054793de8213dda3c8eba",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/KeychainInteractionPolicyTests.swift": "56391c581b190e2e7a1176a874925219d41ae99a8c494028830a5eeaa6b58af4",
-    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeClerkConfigurationTests.swift": "55a57ec480e82913989275888dcfbf5a6f2c95b5784f03637c6bd03e6d0c9e07",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeClerkConfigurationTests.swift": "2f73afb1229e55dad9b29845a1721fecb444647aeae211c5f0ae3c009861c597",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativePrivateRecordingGateTests.swift": "64f3e14a85b5ea321acedb01526ef6aa1f253dfe43266c349fec58ef2473b984",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift": "dda52ed7cbf2976050d93be2a97de0f4474ba7ea348e1bb967cf94603f62c83a",
 }
