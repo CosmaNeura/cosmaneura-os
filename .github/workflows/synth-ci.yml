@@ -7,11 +7,12 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_dispatch:
 
 concurrency:
-  group: synth-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -22,6 +23,22 @@ env:
   NODE_VERSION: "24"
 
 jobs:
+  ci-mode:
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.decide.outputs.full }}
+    steps:
+      - id: decide
+        env:
+          LIGHT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true && !contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+        run: |
+          set -euo pipefail
+          if [ "${LIGHT}" = "true" ]; then
+            echo "full=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          fi
+
   python-quality:
     name: python-lint-type
     runs-on: ubuntu-latest
@@ -39,6 +56,8 @@ jobs:
 
   python-tests:
     name: python-tests-migrate (${{ matrix.suite }})
+    needs: [ci-mode]
+    if: needs.ci-mode.outputs.full != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -476,7 +495,7 @@ jobs:
     name: synth-ci-gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey]
+    needs: [ci-mode, python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey]
     steps:
       - name: Require every needed job succeeded
         env:
@@ -499,6 +518,11 @@ jobs:
               print(
                   "Gate failed because needed jobs were not all success: "
                   + ", ".join(failed),
+                  file=sys.stderr,
+              )
+              print(
+                  "A light draft run is red by design: add label ci:full "
+                  "or mark the pull request ready for review for a full run.",
                   file=sys.stderr,
               )
               sys.exit(1)
