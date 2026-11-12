@@ -75,7 +75,11 @@ public struct NativeClerkAccountConfiguration: Sendable, Equatable {
     // are isolated; public SDK reconfiguration still requires fresh sign-in.
     public var keychainService: String {
         let base = bundleIdentifier + ".clerk"
-        let realm = profile == .operationalStaging ? base + "." + String(frontendOrigin.dropFirst(8)) : base
+        // Staging and production-review qualify by exact Clerk host so sibling
+        // instances never share credentials. Live operationalBeta keeps the
+        // unqualified legacy service name byte-identical.
+        let qualifiesOrigin = profile == .operationalStaging || profile == .operationalProduction
+        let realm = qualifiesOrigin ? base + "." + String(frontendOrigin.dropFirst(8)) : base
         return storageNamespace.map { realm + "." + $0 } ?? realm
     }
 

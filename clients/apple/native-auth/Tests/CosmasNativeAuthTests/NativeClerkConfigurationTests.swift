@@ -213,4 +213,41 @@ private func configuration() throws -> NativeClerkConfiguration {
             }
         }
     }
+
+    @Test func productionAndLiveClerkKeychainServicesStayIsolated() throws {
+        let liveHost = "clerk.cosmas.ai"
+        let live = try NativeClerkAccountConfiguration(
+            publishableKey: "pk_live_" + Data((liveHost + "$").utf8).base64EncodedString(),
+            frontendOrigin: "https://" + liveHost, bundleIdentifier: "com.cosmasos.beta.ios",
+            profile: .operationalBeta)
+        #expect(live.keychainService == "com.cosmasos.beta.ios.clerk")
+
+        let productionHost = "clerk.beta.cosmas.ai"
+        let production = try NativeClerkAccountConfiguration(
+            publishableKey: "pk_live_" + Data((productionHost + "$").utf8).base64EncodedString(),
+            frontendOrigin: "https://" + productionHost, bundleIdentifier: "com.cosmasos.beta.ios",
+            profile: .operationalProduction)
+        #expect(production.keychainService == "com.cosmasos.beta.ios.clerk.clerk.beta.cosmas.ai")
+        #expect(production.keychainService != live.keychainService)
+    }
+
+    @Test(arguments: [
+        "https://CLERK.BETA.COSMAS.AI",
+        "https://clerk.beta.cosmas.ai.",
+        "https://clerk.beta.cosmas.ai:443",
+        "https://user@clerk.beta.cosmas.ai",
+        "https://clerk.beta.cosmas.ai.evil.com",
+        "https://xn--clerk-beta-cosmas-ai",
+        "https://clerk.beta.cosmas.ai/v1",
+        "https://clerk.beta.cosmas.ai?x=1",
+    ])
+    func productionProfileRejectsBypassFrontendShapes(_ origin: String) throws {
+        let host = "clerk.beta.cosmas.ai"
+        let key = "pk_live_" + Data((host + "$").utf8).base64EncodedString()
+        #expect(throws: NativeAuthError.unavailable) {
+            try NativeClerkConfiguration(publishableKey: key, frontendOrigin: origin,
+                organizationID: "org_beta", bundleIdentifier: "com.cosmasos.beta.ios",
+                profile: .operationalProduction)
+        }
+    }
 }

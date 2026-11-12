@@ -7,7 +7,9 @@ export const PRODUCTION_NATIVE_PROFILE = 'operational-production-v1';
 /**
  * Exact Clerk hosts pinned per dedicated profile. No wildcards.
  * Staging may also use `.clerk.accounts.dev` with pk_test_ (handled separately).
- * operational-beta-v1 keeps its prior rule (any non-accounts.dev host).
+ * operational-beta-v1 is intentionally absent: the validator still uses the prior
+ * non-accounts.dev rule until a checked-in identity on a non-clerk.cosmas.ai host
+ * (infra/standalone/invented-host-input.json) is retired by CTO decision.
  */
 const DEDICATED_CLERK_HOSTS_BY_PROFILE = Object.freeze({
   [STAGING_NATIVE_PROFILE]: Object.freeze(new Set(['clerk.staging.cosmas.ai'])),
@@ -18,6 +20,15 @@ const ALLOWED_PROFILES = Object.freeze([
 ]);
 const fields = ['version', 'profile', 'client', 'apiOrigin', 'publishableKey', 'frontendOrigin', 'organizationId', 'audience'];
 const unavailable = () => { throw new Error('Operational native identity configuration is incomplete or inconsistent'); };
+
+/** Sorted exact hosts for each dedicated profile entry (empty array when absent). */
+export function dedicatedClerkHostsByProfile() {
+  return Object.freeze(Object.fromEntries(
+    ALLOWED_PROFILES.map(profile => {
+      const hosts = DEDICATED_CLERK_HOSTS_BY_PROFILE[profile];
+      return [profile, Object.freeze(hosts instanceof Set ? [...hosts].sort() : [])];
+    })));
+}
 
 /** Authentication and data authorization are separate, explicit build inputs. */
 export function validateOperationalNativeDataMode(value, identity) {
