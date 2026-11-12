@@ -146,11 +146,10 @@ def test_python_production_clerk_host_matches_swift_operational_production_allow
     assert AUTH.PRODUCTION_ORIGINS["clerk"] == "https://clerk.beta.cosmas.ai"
     assert AUTH.SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST == "clerk.beta.cosmas.ai"
     assert AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST == "clerk.cosmas.ai"
-    # JS/Python dual set (CTO 12 Nov 10:12 ET). Three-way Swift parity is asserted
-    # in clients/shared/native-clerk-host-drift.test.mjs (requires PR #370 allow-list).
+    # JS/Python/Swift dual set (CTO 12 Nov 10:12 ET; Swift allow-list from #370).
     assert AUTH.OPERATIONAL_BETA_CLERK_HOSTS == frozenset({
         "clerk.cosmas.ai", "clerk.staging.cosmas.ai"})
-    assert AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST in AUTH.OPERATIONAL_BETA_CLERK_HOSTS
+    assert _swift_allowed_hosts("operationalBeta") == AUTH.OPERATIONAL_BETA_CLERK_HOSTS
     assert _swift_allowed_hosts("operationalProduction") == {"clerk.beta.cosmas.ai"}
     # Removing either host from the Swift allow-list fails this agreement test.
     assert "https://" + next(iter(_swift_allowed_hosts("operationalProduction"))) == (

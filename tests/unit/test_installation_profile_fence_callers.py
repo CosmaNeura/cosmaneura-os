@@ -171,9 +171,8 @@ def test_swift_python_clerk_beta_parity_for_production_only():
     assert "clerk.beta.cosmas.ai" not in sim_block
     beta_block = text.split("case .operationalBeta:")[1].split("case ")[0]
     assert "clerk.cosmas.ai" in beta_block
+    assert "clerk.staging.cosmas.ai" in beta_block
     assert "clerk.beta.cosmas.ai" not in beta_block
-    # Python dual set (this PR). Swift staging host lands in #370; drift test
-    # requires three-way parity once that allow-list is present.
     assert AUTH.OPERATIONAL_BETA_CLERK_HOSTS == frozenset({
         "clerk.cosmas.ai", "clerk.staging.cosmas.ai"})
     # Python authorize admits beta pair only for operational-production-v1.
