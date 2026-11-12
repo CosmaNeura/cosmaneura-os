@@ -24,7 +24,8 @@ const CAPTURE_TOOLS_CORE_KEYS=['core_capture_origin','core_web_origin','core_cap
 const IMDS_TOKEN_HOST='169.254.169.254';
 const IMDS_TOKEN_PATH='/metadata/identity/oauth2/token';
 // Exact Core-issued blob host for CosmaBot API→blob PUT
-// (capture_upload_proxy.py:261-274). Runtime does not pin this host.
+// (capture_upload_proxy.py:295-311). Runtime pins this exact host,
+// https and port 443, both when the URL is issued and again at PUT.
 const CORE_CAPTURE_UPLOAD_HOST=/^[a-z0-9]{3,24}\.blob\.core\.windows\.net$/;
 const publicUuid=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 // Synthetic web addresses, and the matching api.<host> names. Every other
@@ -297,7 +298,7 @@ export function render(input){
       upload_host:value.core_capture_upload_host,
       upload_host_control:'Runtime pins CORE_CAPTURE_UPLOAD_HOST exactly (https:443 only); host egress is defense in depth',
       adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174',
-      upload_adapter:'src/cosmas_os/application/capture_upload_proxy.py:261-274',
+      upload_adapter:'src/cosmas_os/application/capture_upload_proxy.py:295-311',
       content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
       real_patient_recording_process_switch:false}];
   }
@@ -339,7 +340,7 @@ export function render(input){
     // Core HTTPS origin from settings.core_capture_origin (core_capture_connection.py:174).
     // IMDS token path from ManagedIdentityCredential.get_token (same lines) via
     // BoundedIdentityTransport (core_record_connection.py:195-214).
-    // Blob PUT host from Core-issued upload URL (capture_upload_proxy.py:261-274);
+    // Blob PUT host from Core-issued upload URL (capture_upload_proxy.py:295-311);
     // runtime pins CORE_CAPTURE_UPLOAD_HOST exactly; host egress is defense in depth.
     coreHost=new URL(value.core_capture_origin).hostname;
     const uploadHost=value.core_capture_upload_host;
@@ -348,7 +349,7 @@ export function render(input){
     firewall.api_egress.push({protocol:'http',hostname:IMDS_TOKEN_HOST,tcp_port:80,path:IMDS_TOKEN_PATH,
       redirects_allowed:false,adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174'});
     firewall.api_egress.push({protocol:'https',hostname:uploadHost,tcp_port:443,method:'PUT',
-      redirects_allowed:false,adapter:'src/cosmas_os/application/capture_upload_proxy.py:261-274'});
+      redirects_allowed:false,adapter:'src/cosmas_os/application/capture_upload_proxy.py:295-311'});
     firewall.deny=firewall.deny.map(item=>{
       if(item==='169.254.0.0/16 metadata and link-local')
         return `169.254.0.0/16 metadata and link-local except ${IMDS_TOKEN_HOST}${IMDS_TOKEN_PATH}`;

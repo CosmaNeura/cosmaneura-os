@@ -194,7 +194,7 @@ test('opt-in on declares Core capture egress, IMDS token path, platform connecti
   assert.deepEqual(imdsEgress,{protocol:'http',hostname:IMDS_HOST,tcp_port:80,path:IMDS_PATH,
     redirects_allowed:false,adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174'});
   assert.deepEqual(uploadEgress,{protocol:'https',hostname:CORE_UPLOAD_HOST,tcp_port:443,method:'PUT',
-    redirects_allowed:false,adapter:'src/cosmas_os/application/capture_upload_proxy.py:261-274'});
+    redirects_allowed:false,adapter:'src/cosmas_os/application/capture_upload_proxy.py:295-311'});
   assert.equal(network.deny.includes('*.cosmaneura.com'),false);
   assert.ok(network.deny.includes('*.cosmaneura.com except staging-app.cosmaneura.com Core capture origin'));
   assert.equal(network.deny.includes('169.254.0.0/16 metadata and link-local'),false);
@@ -214,7 +214,7 @@ test('opt-in on declares Core capture egress, IMDS token path, platform connecti
     upload_host:CORE_UPLOAD_HOST,
     upload_host_control:'Runtime pins CORE_CAPTURE_UPLOAD_HOST exactly (https:443 only); host egress is defense in depth',
     adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174',
-    upload_adapter:'src/cosmas_os/application/capture_upload_proxy.py:261-274',
+    upload_adapter:'src/cosmas_os/application/capture_upload_proxy.py:295-311',
     content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
     real_patient_recording_process_switch:false}]);
 });
