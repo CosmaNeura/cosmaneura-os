@@ -76,7 +76,7 @@ test('dedicated host preparation binds every client, database, service, TLS and 
   }
   const network=files['network-requirements.json'];
   assert.equal(network.configuration_is_not_a_firewall,true);assert.equal(network.default_policy,'deny');
-  assert.equal(network.api_egress.length,1);assert.equal(network.api_egress[0].hostname,'identity.standalone.example.com');
+  assert.equal(network.api_egress.length,1);assert.equal(network.api_egress[0].hostname,'clerk.cosmas.ai');
   assert.equal(network.api_egress[0].redirects_allowed,false);assert.ok(network.deny.includes('*.cosmaneura.com'));
   assert.match(files['https.review.conf'],/microphone=\(\)/);assert.match(files['https.review.conf'],/default_server/);
   assert.match(files['postgresql.review.conf'],/listen_addresses = '127\.0\.0\.1'/);

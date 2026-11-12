@@ -54,6 +54,18 @@ test('production profile accepts only clerk.beta.cosmas.ai and staging rejects p
       {audience:''},{profile:'unknown-profile-v1'},
     ]) assert.throws(()=>shared.validateOperationalNativeIdentity({...production,...changed},client,production.apiOrigin));
 
+    // I1: production-review accepts only api.beta.cosmas.ai; invented/wrong API origins fail.
+    for (const wrongApi of [
+      'https://api.example.invalid',
+      'https://api.cosmas.ai',
+      'https://api.staging.cosmas.ai',
+      'https://enrollment-api.cosmas.ai',
+    ]) {
+      const bad={...production,apiOrigin:wrongApi};
+      assert.throws(()=>shared.validateOperationalNativeIdentity(bad,client,wrongApi));
+      assert.throws(()=>shared.validateOperationalNativeIdentity(production,client,wrongApi));
+    }
+
     const staging={
       version:1,profile:shared.STAGING_NATIVE_PROFILE,client,
       apiOrigin:'https://api.staging.cosmas.ai',
@@ -66,5 +78,20 @@ test('production profile accepts only clerk.beta.cosmas.ai and staging rejects p
       {frontendOrigin:'https://clerk.beta.cosmas.ai',publishableKey:liveKey('clerk.beta.cosmas.ai')},
       {frontendOrigin:'https://clerk.cosmas.ai',publishableKey:liveKey('clerk.cosmas.ai')},
     ]) assert.throws(()=>shared.validateOperationalNativeIdentity({...staging,...changed},client,staging.apiOrigin));
+
+    const beta={
+      version:1,profile:shared.OPERATIONAL_NATIVE_PROFILE,client,
+      apiOrigin:'https://api.example.invalid',
+      frontendOrigin:'https://clerk.cosmas.ai',
+      publishableKey:liveKey('clerk.cosmas.ai'),
+      organizationId:'org_invented_beta',audience:'cosmas-os-beta-api',
+    };
+    assert.deepEqual(shared.validateOperationalNativeIdentity(beta,client,beta.apiOrigin),beta);
+    for (const changed of [
+      {frontendOrigin:'https://clerk.beta.cosmas.ai',publishableKey:liveKey('clerk.beta.cosmas.ai')},
+      {frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:liveKey('clerk.staging.cosmas.ai')},
+      {frontendOrigin:'https://clerk.example.invalid',publishableKey:liveKey('clerk.example.invalid')},
+      {frontendOrigin:'https://clerk.cosmaneura.com',publishableKey:liveKey('clerk.cosmaneura.com')},
+    ]) assert.throws(()=>shared.validateOperationalNativeIdentity({...beta,...changed},client,beta.apiOrigin));
   }
 });

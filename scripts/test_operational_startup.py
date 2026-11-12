@@ -19,7 +19,7 @@ class OperationalStartup(unittest.TestCase):
             ).read_text()
         )
         self.identity = {
-            "frontendOrigin": "https://identity.example.invalid",
+            "frontendOrigin": "https://clerk.cosmas.ai",
             "apiOrigin": "https://api.example.invalid",
         }
 

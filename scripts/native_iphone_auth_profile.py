@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import copy
 import re
+from urllib.parse import urlparse
 
 PRODUCTION_INSTALLATION_PROFILE = "production"
 STAGING_INSTALLATION_PROFILE = "staging"
@@ -45,6 +46,10 @@ STAGING_ORIGINS = {
 }
 SWIFT_OPERATIONAL_BETA_CLERK_HOST = "clerk.cosmas.ai"
 SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST = "clerk.beta.cosmas.ai"
+# Strict *.clerk.accounts.dev host (no suffix tricks / lookalikes).
+ACCOUNTS_DEV_HOST = re.compile(
+    r"^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.clerk\.accounts\.dev$"
+)
 ACCOUNTS_DEV_SUFFIX = ".clerk.accounts.dev"
 
 
@@ -61,12 +66,23 @@ def _absent_web_origin(value: object) -> bool:
 
 
 def _clerk_host(frontend_origin: str) -> str:
-    return frontend_origin.removeprefix("https://")
+    """Return the URL hostname; refuse non-https or malformed origins as empty."""
+    if not isinstance(frontend_origin, str):
+        return ""
+    parsed = urlparse(frontend_origin)
+    if parsed.scheme != "https" or parsed.hostname is None or parsed.port is not None:
+        return frontend_origin.removeprefix("https://")
+    return parsed.hostname
+
+
+def is_accounts_dev_clerk_host(host: str) -> bool:
+    """Strict match for development Clerk hosts (L2: no suffix tricks)."""
+    return isinstance(host, str) and ACCOUNTS_DEV_HOST.fullmatch(host) is not None
 
 
 def _is_staging_clerk_frontend(frontend_origin: str) -> bool:
     host = _clerk_host(frontend_origin)
-    return host == _clerk_host(STAGING_ORIGINS["clerk"]) or host.endswith(ACCOUNTS_DEV_SUFFIX)
+    return host == _clerk_host(STAGING_ORIGINS["clerk"]) or is_accounts_dev_clerk_host(host)
 
 
 def publishable_key_host(key: object) -> str | None:
@@ -89,14 +105,27 @@ def publishable_key_host(key: object) -> str | None:
     return None
 
 
+def publishable_key_prefix(key: object) -> str | None:
+    if not isinstance(key, str):
+        return None
+    for prefix in ("pk_live_", "pk_test_"):
+        if key.startswith(prefix):
+            return prefix
+    return None
+
+
 def require_validated_production_auth(auth: object) -> dict:
-    """Require enabled production auth whose publishable key encodes the pinned Clerk host."""
+    """Require enabled production auth whose pk_live_ key encodes the pinned Clerk host."""
     if not isinstance(auth, dict) or auth.get("enabled") is not True:
         raise ValueError("Production profile refuses to enable CosmasNativeAuth without a validated key.")
     frontend = _exact_https_origin(auth.get("frontendOrigin"), "Clerk frontend")
     if frontend != PRODUCTION_ORIGINS["clerk"]:
         raise ValueError("Production profile requires clerk.beta.cosmas.ai origins.")
     key = auth.get("publishableKey")
+    if publishable_key_prefix(key) != "pk_live_":
+        raise ValueError(
+            "Production profile refuses to enable CosmasNativeAuth without a pk_live_ key "
+            "whose publishable-key host equals clerk.beta.cosmas.ai.")
     host = publishable_key_host(key)
     if host != SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST:
         raise ValueError(
@@ -131,7 +160,7 @@ def require_installation_profile_origins(
     if profile == PRODUCTION_INSTALLATION_PROFILE:
         if (frontend == STAGING_ORIGINS["clerk"] or api == STAGING_ORIGINS["api"]
                 or (web is not None and web == STAGING_ORIGINS["web"])
-                or _clerk_host(frontend).endswith(ACCOUNTS_DEV_SUFFIX)):
+                or is_accounts_dev_clerk_host(_clerk_host(frontend))):
             raise ValueError("Production profile refuses staging origins.")
         if frontend != PRODUCTION_ORIGINS["clerk"] or api != PRODUCTION_ORIGINS["api"]:
             raise ValueError(

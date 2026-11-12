@@ -95,7 +95,9 @@ PRODUCTION_SIGN_IN_REFUSAL = (
 SYNTHETIC_DATA_REFUSAL = "Simulator staging native auth requires synthetic data mode."
 SIMULATOR_STAGING_REFUSAL = (
     "Simulator staging native auth requires hosted services, "
-    "frontend origin and publishable-key host clerk.staging.cosmas.ai or clerk.beta.cosmas.ai, "
+    "frontend origin and publishable-key host clerk.staging.cosmas.ai "
+    "(shared staging) or clerk.beta.cosmas.ai (simulator filming host only; "
+    "not --installation-profile production / operational-production-v1), "
     "and API origin https://api.staging.cosmas.ai or https://api.beta.cosmas.ai."
 )
 RECOVERY_UI = Path(__file__).parents[1] / "clients/apple/startup-recovery"
@@ -781,8 +783,15 @@ def main() -> None:
     parser.add_argument("--native-identity-config", type=Path, help="Explicit public operational identity; stages a device-only project")
     parser.add_argument("--native-source-access-group", help="Exact signing-team private bundle Keychain group for builds compiled without provisioning")
     parser.add_argument("--data-mode", choices=("synthetic", "authorized_beta"), help="Explicit hosted data classification; synthetic for staging with a real identity")
-    parser.add_argument("--allow-simulator-staging-native-auth", action="store_true",
-                        help="Enable native sign-in on the synthetic simulator variant for clerk.staging.cosmas.ai or clerk.beta.cosmas.ai and synthetic data only")
+    parser.add_argument(
+        "--allow-simulator-staging-native-auth", action="store_true",
+        help=(
+            "Enable native sign-in on the synthetic simulator variant for "
+            "clerk.staging.cosmas.ai (shared staging) or clerk.beta.cosmas.ai "
+            "(simulator filming host only; not App Store / "
+            "--installation-profile production) with synthetic data only"
+        ),
+    )
     args = parser.parse_args()
     try:
         project = prepare(args.scribe_source, args.web_dist, args.output, args.verification_variant,

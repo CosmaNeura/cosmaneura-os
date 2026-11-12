@@ -8,23 +8,32 @@ import {dedicatedClerkHostsByProfile, OPERATIONAL_NATIVE_PROFILE, STAGING_NATIVE
 const SWIFT_PATH = fileURLToPath(new URL(
   '../apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift', import.meta.url));
 
-/** Named Swift↔JS host-map differences. Staging behaviour is unchanged this PR. */
+/**
+ * Named Swift↔JS host-map differences. Staging behaviour is unchanged this PR.
+ *
+ * What the staging exception allows (JS only):
+ * - operational-staging-v1 + dedicated host clerk.staging.cosmas.ai + pk_live_
+ *   encoding that host + non-empty audience.
+ * - operational-staging-v1 + strict *.clerk.accounts.dev host + pk_test_
+ *   encoding that host + empty audience.
+ *
+ * What it does not allow:
+ * - Production Clerk/API hosts (clerk.beta.cosmas.ai / api.beta.cosmas.ai) on staging.
+ * - Live clerk.cosmas.ai on staging.
+ * - Swift operationalStaging dedicated clerk.staging.cosmas.ai (Swift allow-list is
+ *   empty; Swift admits only the accounts.dev path for operationalStaging).
+ * - pk_test_ on the dedicated staging host, or pk_live_ on accounts.dev.
+ */
 export const INTENTIONAL_CLERK_HOST_DRIFT = Object.freeze([
   Object.freeze({
     profile: STAGING_NATIVE_PROFILE,
     swift: Object.freeze([]),
     js: Object.freeze(['clerk.staging.cosmas.ai']),
-    reason: 'JS operational-staging-v1 accepts dedicated clerk.staging.cosmas.ai with pk_live_; '
-      + 'Swift operationalStaging has an empty allow-list and refuses it. Unchanged this PR. '
-      + 'Named exception approved by CTO (decision B, 11 Nov 2026). Follow-up after #354: '
-      + 'invented-host-input.json beta identity becomes clerk.cosmas.ai, goldens regenerated, JS beta pinned.',
-  }),
-  Object.freeze({
-    profile: OPERATIONAL_NATIVE_PROFILE,
-    swift: Object.freeze(['clerk.cosmas.ai']),
-    js: Object.freeze([]),
-    reason: 'Named exception approved by CTO (decision B, 11 Nov 2026). Follow-up after #354: '
-      + 'invented-host-input.json beta identity becomes clerk.cosmas.ai, goldens regenerated, JS beta pinned.',
+    reason: 'JS operational-staging-v1 allows dedicated clerk.staging.cosmas.ai with '
+      + 'pk_live_ (and separately allows strict *.clerk.accounts.dev with pk_test_). '
+      + 'Swift operationalStaging has an empty dedicated allow-list and admits only the '
+      + 'accounts.dev path. Named filming-hold exception; owner decision pending. '
+      + 'Live operational-beta-v1 and production-review hosts are not part of this exception.',
   }),
 ]);
 
@@ -68,13 +77,16 @@ export function assertSwiftJsClerkHostsAligned(swiftHosts, jsHosts, exceptions =
   }
 }
 
-test('shared profile Clerk hosts match Swift allow-list except named exceptions', () => {
+test('shared profile Clerk hosts match Swift allow-list except named staging exception', () => {
   const source = readFileSync(SWIFT_PATH, 'utf8');
   const swiftHosts = extractSwiftAllowedClerkHosts(source);
   const jsHosts = dedicatedClerkHostsByProfile();
   assertSwiftJsClerkHostsAligned(swiftHosts, jsHosts);
+  assert.deepEqual(swiftHosts[OPERATIONAL_NATIVE_PROFILE], ['clerk.cosmas.ai']);
+  assert.deepEqual(jsHosts[OPERATIONAL_NATIVE_PROFILE], ['clerk.cosmas.ai']);
   assert.deepEqual(swiftHosts[PRODUCTION_NATIVE_PROFILE], ['clerk.beta.cosmas.ai']);
   assert.deepEqual(jsHosts[PRODUCTION_NATIVE_PROFILE], ['clerk.beta.cosmas.ai']);
+  assert.equal(INTENTIONAL_CLERK_HOST_DRIFT.some(item => item.profile === OPERATIONAL_NATIVE_PROFILE), false);
 });
 
 test('Clerk host drift detector fails when either side is mutated', () => {
@@ -87,6 +99,8 @@ test('Clerk host drift detector fails when either side is mutated', () => {
     swiftHosts, {...jsHosts, [PRODUCTION_NATIVE_PROFILE]: ['clerk.evil.example']}));
   assert.throws(() => assertSwiftJsClerkHostsAligned(
     {...swiftHosts, [OPERATIONAL_NATIVE_PROFILE]: ['clerk.evil.example']}, jsHosts));
-  // Clearing a named exception without updating either map must fail.
+  assert.throws(() => assertSwiftJsClerkHostsAligned(
+    swiftHosts, {...jsHosts, [OPERATIONAL_NATIVE_PROFILE]: []}));
+  // Clearing the staging exception without aligning either map must fail.
   assert.throws(() => assertSwiftJsClerkHostsAligned(swiftHosts, jsHosts, []));
 });

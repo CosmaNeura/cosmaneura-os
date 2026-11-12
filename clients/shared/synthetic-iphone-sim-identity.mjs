@@ -3,7 +3,8 @@
  *
  * Separate from the three operational profiles in
  * operational-native-identity.mjs (operational-beta-v1,
- * operational-staging-v1, operational-production-v1). Those stay unchanged.
+ * operational-staging-v1, operational-production-v1). Post-#354,
+ * operational-beta-v1 is pinned to clerk.cosmas.ai only.
  *
  * Accepts only *.synthetic.example origins with a pk_test_ placeholder that
  * encodes the invented host. No real Clerk keys, no live hosts.
@@ -85,9 +86,9 @@ export function validateSyntheticIphoneSimIdentity(value, client, apiOrigin) {
 
 /**
  * Prove the operational validator never accepts the synthetic-iphone-sim-v1
- * profile name, and that dedicated staging/production allow-lists refuse
- * *.synthetic.example. operational-beta-v1 keeps its prior open non-accounts.dev
- * host rule byte-identical (it is not the synthetic profile).
+ * profile name, and that dedicated beta/staging/production allow-lists refuse
+ * *.synthetic.example. Post-#354 operational-beta-v1 is pinned to
+ * clerk.cosmas.ai only (no open non-accounts.dev host rule).
  */
 export function assertSyntheticProfileRefusedByLiveValidators({
   client = 'apple',
@@ -116,7 +117,9 @@ export function assertSyntheticProfileRefusedByLiveValidators({
     if (!/incomplete or inconsistent/.test(String(error?.message || error))) throw error;
   }
 
-  for (const profile of [STAGING_NATIVE_PROFILE, PRODUCTION_NATIVE_PROFILE]) {
+  for (const profile of [
+    OPERATIONAL_NATIVE_PROFILE, STAGING_NATIVE_PROFILE, PRODUCTION_NATIVE_PROFILE,
+  ]) {
     const publishableKey = profile === STAGING_NATIVE_PROFILE ? pkTest : pkLive;
     const audience = profile === STAGING_NATIVE_PROFILE ? '' : 'cosmas-os-beta-api';
     try {
@@ -136,8 +139,7 @@ export function assertSyntheticProfileRefusedByLiveValidators({
     }
   }
 
-  // Beta open-host rule is unchanged: it still rejects the synthetic PROFILE
-  // name (above) and never selects synthetic-iphone-sim-v1 for Release.
+  // Live beta is pinned to clerk.cosmas.ai and never selects synthetic-iphone-sim-v1.
   if (!LIVE_PROFILES.includes(OPERATIONAL_NATIVE_PROFILE)) {
     throw new Error('operational-beta-v1 missing from live profile set');
   }

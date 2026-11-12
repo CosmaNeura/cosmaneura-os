@@ -165,8 +165,8 @@ def test_operational_helper_keeps_auth_and_explicitly_controls_capture(tmp_path,
     qualified, output, receipt = compile_fixture(tmp_path, compiler)
     identity = tmp_path / "identity.json"
     identity.write_text(json.dumps({"version": 1, "profile": "operational-beta-v1", "client": "desktop",
-        "apiOrigin": "https://api.example.invalid", "frontendOrigin": "https://identity.example.invalid",
-        "publishableKey": "pk_live_" + base64.b64encode(b"identity.example.invalid$").decode(),
+        "apiOrigin": "https://api.example.invalid", "frontendOrigin": "https://clerk.cosmas.ai",
+        "publishableKey": "pk_live_" + base64.b64encode(b"clerk.cosmas.ai$").decode(),
         "organizationId": "org_fixture", "audience": "cosmas-beta-api"}))
     app = tmp_path / "Operational.app"
     monkeypatch.setattr(sys, "argv", ["package-desktop-auth-helper.py", "--qualification", str(qualified),
@@ -202,8 +202,8 @@ def test_operational_helper_embeds_reviewed_practice_connection_infos(tmp_path, 
     qualified, output, receipt = compile_fixture(tmp_path, compiler)
     identity = tmp_path / "identity.json"
     identity.write_text(json.dumps({"version": 1, "profile": "operational-beta-v1", "client": "desktop",
-        "apiOrigin": "https://api.example.invalid", "frontendOrigin": "https://identity.example.invalid",
-        "publishableKey": "pk_live_" + base64.b64encode(b"identity.example.invalid$").decode(),
+        "apiOrigin": "https://api.example.invalid", "frontendOrigin": "https://clerk.cosmas.ai",
+        "publishableKey": "pk_live_" + base64.b64encode(b"clerk.cosmas.ai$").decode(),
         "organizationId": "org_fixture", "audience": "cosmas-beta-api"}))
     practice = _production_practice_json(tmp_path / "native-practice.json")
     app = tmp_path / "Practice.app"

@@ -5,7 +5,7 @@ import {validateOperationalReleaseProfile} from './package-desktop-release.mjs';
 
 test('standalone release permits independent account configuration while refusing native capture or Core navigation',()=>{
   const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
-    frontendOrigin:'https://identity.example.invalid',publishableKey:'pk_live_'+Buffer.from('identity.example.invalid$').toString('base64'),
+    frontendOrigin:'https://clerk.cosmas.ai',publishableKey:'pk_live_'+Buffer.from('clerk.cosmas.ai$').toString('base64'),
     organizationId:'org_invented_standalone',audience:'cosmabot-standalone-api'};
   const files=workspaceIdentityInputs(identity,{webOrigin:'https://workspace.example.invalid',coreWebOrigin:'',captureUploadOrigins:[],
     dataMode:'synthetic',featureProfile:'standalone-practice-v1'});

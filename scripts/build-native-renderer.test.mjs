@@ -12,8 +12,8 @@ import {resolveHostedWorkspace} from '../clients/shared/hosted-workspace-config.
 
 const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
   apiOrigin: 'https://api.example.invalid',
-  publishableKey: 'pk_live_' + Buffer.from('identity.example.invalid$').toString('base64'),
-  frontendOrigin: 'https://identity.example.invalid', organizationId: 'org_renderer_invented', audience: 'cosmas-beta-api'};
+  publishableKey: 'pk_live_' + Buffer.from('clerk.cosmas.ai$').toString('base64'),
+  frontendOrigin: 'https://clerk.cosmas.ai', organizationId: 'org_renderer_invented', audience: 'cosmas-beta-api'};
 const options = {webOrigin: 'https://workspace.example.invalid', coreWebOrigin: 'https://core.example.invalid',
   captureUploadOrigins: ['https://uploads.example.invalid']};
 
@@ -84,7 +84,7 @@ for(const client of ['desktop','apple'])test(`${client} retains exact optional p
 
 test('CLI requires explicit inputs, native client and output without duplicate arguments', () => {
   assert.deepEqual(nativeRendererArguments(['--inputs', '/retained/clients', '--client', 'apple', '--output', '/new/build']),
-    {inputs: '/retained/clients', client: 'apple', output: '/new/build'});
+    {inputs: '/retained/clients', client: 'apple', output: '/new/build', installationProfile: undefined});
   for (const args of [[], ['--inputs', '/retained/clients'], ['--client'],
     ['--client', 'desktop', '--client', 'apple'], ['--source', '/other/source'], ['--output', '--client']]) {
     assert.throws(() => nativeRendererArguments(args));

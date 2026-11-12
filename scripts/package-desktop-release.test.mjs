@@ -138,7 +138,7 @@ test('renderer routing rejects missing entry points, wrong destinations and non-
 
 test('first-owner release preserves operational identity and refuses native capture or connector activation',()=>{
   const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
-    frontendOrigin:'https://identity.example.invalid',publishableKey:'pk_live_'+Buffer.from('identity.example.invalid$').toString('base64'),
+    frontendOrigin:'https://clerk.cosmas.ai',publishableKey:'pk_live_'+Buffer.from('clerk.cosmas.ai$').toString('base64'),
     organizationId:'org_fixture',audience:'cosmas-beta-api'};
   const profile=resolveBetaFeatureProfile({VITE_WORKSPACE_FEATURE_PROFILE:'first-owner-staging-v1',
     VITE_WORKSPACE_HOSTED_CLIENT:'desktop',VITE_WORKSPACE_DATA_MODE:'synthetic',VITE_WORKSPACE_HOSTED_API_ORIGIN:identity.apiOrigin,
