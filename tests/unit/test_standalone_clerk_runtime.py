@@ -83,6 +83,18 @@ def test_explicit_clerk_profile_keeps_owned_resources_and_external_work_disabled
     assert c.offline.workspace_available
 
 
+def test_clerk_standalone_accepts_enrollment_managed_false_and_refuses_true(clerk_standalone):
+    runtime = clerk_standalone.runtime
+    assert runtime.workspace_enrollment_managed is False
+    runtime.validate_runtime_configuration()
+    refused = runtime.model_copy(update={"workspace_enrollment_managed": True})
+    errors = refused.runtime_configuration_errors()
+    assert any(
+        "WORKSPACE_ENROLLMENT_MANAGED must remain false" in item for item in errors
+    ), errors
+    assert not refused.workspace_available
+
+
 @pytest.mark.parametrize("change", [
     {"standalone_clerk_issuer_allowlist": ""},
     {"standalone_clerk_issuer_allowlist": "https://other.clerk.accounts.dev"},
