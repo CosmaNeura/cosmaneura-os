@@ -322,7 +322,9 @@ def test_missing_receipt_and_mixed_identity_profiles_remain_blocked(tmp_path, co
     with pytest.raises(ValueError):
         package(monkeypatch, qualified, output, output / "missing.json", app)
     assert not app.exists()
-    monkeypatch.setattr(packager._identity, "load", lambda *_: {"bundle": "com.example.invalid.auth"})
+    monkeypatch.setattr(
+        packager._identity, "load",
+        lambda *_, **__: {"bundle": "com.example.invalid.auth"})
     with pytest.raises(SystemExit):
         package(monkeypatch, qualified, output, receipt, app)
     assert not app.exists()  # Operational identity cannot use a synthetic variant.
