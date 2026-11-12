@@ -336,7 +336,7 @@ def test_composition_bindings_accepts_derived_usage_description_and_rejects_thir
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     composition, bindings = PREPARE.composition_bindings(ROOT, {"commit": commit}, output)
     assert len(bindings) == len(composition["files"])
-    usage = [item for item in bindings if item["role"] == "derived-usage-description"]
+    usage = [item for item in bindings if item["role"] == "derived-owned-info-plist"]
     assert len(usage) == 1
     assert usage[0]["destination"] == "ios/App/App/Info.plist"
     assert usage[0]["source"] == "apps/capture/ios/App/App/Info.plist"
@@ -369,5 +369,5 @@ def test_composition_bindings_accepts_derived_usage_description_and_rejects_thir
         if item["path"] == "ios/App/App/Info.plist":
             item["sha256"] = hashlib.sha256(raw).hexdigest()
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="Derived usage description differs"):
+    with pytest.raises(ValueError, match="Owned Info.plist derivation differs"):
         PREPARE.composition_bindings(ROOT, {"commit": commit}, tampered_root)

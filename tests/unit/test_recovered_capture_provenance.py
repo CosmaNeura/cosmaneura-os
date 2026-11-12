@@ -568,12 +568,13 @@ def test_compose_refuses_non_true_export_compliance_key(tmp_path, monkeypatch):
     module = _portable()
     original_apply = module._derive_owned_info_plist
 
-    def inject_false_then_apply(repository, output, placed):
+    def inject_false_then_apply(repository, output, placed, *, installation_profile=None):
         destination = output / module.APP_SCAFFOLD / "ios/App/App/Info.plist"
         info = plistlib.loads(destination.read_bytes())
         info["ITSAppUsesNonExemptEncryption"] = False
         destination.write_bytes(plistlib.dumps(info, sort_keys=False))
-        return original_apply(repository, output, placed)
+        return original_apply(
+            repository, output, placed, installation_profile=installation_profile)
 
     monkeypatch.setattr(module, "_derive_owned_info_plist", inject_false_then_apply)
     output = tmp_path / "refused-export"
