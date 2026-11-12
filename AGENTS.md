@@ -194,3 +194,51 @@ Tests. Repeat the backend command once for each suite: `backend-1`,
 uv run python scripts/check-backend-local.py --suite backend-1 --postgres-bin "$(pg_config --bindir)" --pytest-timeout 3600 --stack-dump-after 300
 cd web && corepack pnpm test
 ```
+
+## Coding rules from review findings (Fable, 12 Nov 2026)
+These come from Fable's most common review holes. Breaking one is a HOLE in review. The full review policy is in docs/review-policy.md.
+
+### 1. Tests must kill mutations (most common hole)
+- DO: for every guard, fence, refusal or validator you add or change, write a test that FAILS if
+  the condition is inverted, the branch is deleted, the early return is removed, or the constant changes.
+- DO: list the mutations you tried and the test that caught each one in the PR body.
+- DON'T: rely on string checks that a file "contains" a guard. Test the behaviour.
+- DON'T: wrap test helpers in broad `except`/`BaseException` blocks that swallow assertion errors.
+
+### 2. Every proving test must run in CI
+- DO: make sure every test the PR relies on as proof is collected by a CI workflow or wrapper
+  at the PR's head (pytest paths, node `*.test.mjs`, Swift tests). Name the job that runs it.
+- DO: if CI can't run it (Mac or Simulator only), say so in the PR body and attach the run log.
+- DON'T: add a test file that no workflow runs and count it as proof.
+
+### 3. Keep validators in parity
+- DO: when the same rule lives in more than one place (Python, JS/Node, Swift, Terraform, shell),
+  change all of them in the same PR, and keep a parity test that parses each copy and fails on drift
+  (hosts, allow-lists, profile names, counts).
+- DON'T: update one language's validator and leave another for later.
+
+### 4. No raw paths around profile-aware loaders
+- DO: read profiles, settings and identities only through the profile-aware loader.
+- DON'T: call a raw validator, read the file directly, match by substring, or add an exemption
+  list that skips the guard or scan. If you need an exception, it needs its own test and a line in the PR body.
+
+### 5. Test every fence on both sides
+- DO: test both the allowed path and the refused path of every fence, flag and refusal,
+  including the unknown or omitted profile case.
+- DO: make fail-closed paths actually closed: no silent fallback, no swallowed error,
+  no `continue-on-error`.
+
+### 6. Match identities against what actually shipped
+- DO: check bundle IDs, Clerk hosts, keychain names, profile names, file counts and hashes
+  against the built artifact (composed Info.plist, composition.json, rendered env), not only the source.
+- DO: when a count or hash pin changes, explain exactly which files caused it.
+- DON'T: change a shipped identity for existing live users unless John named that change.
+
+### 7. Docs, citations and scope
+- DO: update comments, docs and file:line citations in the same PR as the code they describe.
+- DO: list every changed file outside the ticket's stated scope in the PR body, with a reason.
+
+### 8. Before you push
+- Run the relevant tests in your agent first, and push once per round.
+- Synthetic data only, never PHI. No new secrets, no model changes, no CI or ruleset weakening.
+- On high-risk tickets (docs/review-policy.md section 2a), wait for Fable's plan PASS before the first push.
