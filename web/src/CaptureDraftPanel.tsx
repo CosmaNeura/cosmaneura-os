@@ -6,8 +6,10 @@ import { CaptureGapNotice } from "./CaptureGapNotice";
 import type { SavedScratchpad } from "./notebook-source";
 import { EditorRecoveryContext } from "./editor-recovery";
 import { editorAddress, type EditorDraft } from "./draft-journal";
+import { CopyToEhrMount } from "./CopyToEhrMount";
 
-export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, onDraftLock, onReviewDraft, onCurrentDraft, reviewLocked, sourceLocked = false, scratchpad, notebookDirty = false, onNotebook, taskBot, simpleFlow=false }: {
+export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, onDraftLock, onReviewDraft, onCurrentDraft, reviewLocked, sourceLocked = false, scratchpad, notebookDirty = false, onNotebook, taskBot, simpleFlow=false,
+  copyToEhrEnabled=false, copyToEhrFallbackOffer=false, copyToEhrProfileId='atlas_md', copyToEhrHighlightedKey=null }: {
   workspaceId: string; sessionId: string; sourceId: string; identity: AuthenticatedWorkspaceIdentity;
   onDraftLock?: (locked: boolean) => void;
   onReviewDraft?: (draft: CaptureDraft) => void; reviewLocked?: boolean;
@@ -16,6 +18,12 @@ export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, 
   scratchpad?: SavedScratchpad; notebookDirty?: boolean; onNotebook?: () => void;
   taskBot?: CaptureTaskBot;
   simpleFlow?: boolean;
+  /** copy_to_ehr_enabled — defaults false so live users see no change. */
+  copyToEhrEnabled?: boolean;
+  /** Visit connector-failure offer. Shows that the note was not sent. */
+  copyToEhrFallbackOffer?: boolean;
+  copyToEhrProfileId?: string;
+  copyToEhrHighlightedKey?: string | null;
 }) {
   const [templates, setTemplates] = useState<CaptureNoteTemplate[] | null>(null);
   const [selected, setSelected] = useState("");
@@ -84,6 +92,10 @@ export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, 
     {draft && (draft.status === "draft" || storedEditor) && <CaptureDraftEditor key={selected} initial={draft}
       workspaceId={workspaceId} identity={identity} onLock={setEditorLocked} onReviewDraft={onReviewDraft} onCurrentDraft={onCurrentDraft}
       onReloadSource={() => void loadDraft("read")} reviewLocked={reviewLocked || notebookChanged || notebookDirty} sourceLocked={sourceLocked} simpleFlow={simpleFlow} />}
+    {draft?.status === "draft" && draft.note_ref && (copyToEhrEnabled || copyToEhrFallbackOffer) &&
+      <CopyToEhrMount enabled={copyToEhrEnabled} fallbackOffer={copyToEhrFallbackOffer} identity={identity}
+        draftId={draft.note_ref} profileId={copyToEhrProfileId}
+        locked={editorLocked || sourceLocked || !!busy} highlightedKey={copyToEhrHighlightedKey} />}
     {notebookChanged && <p role="status">Saved scratch notes changed. The earlier draft is retained; prepare a new version before review.</p>}
     {sourceLocked && <p className="team-fine">Finish checking or saving the transcript before preparing or changing its note.</p>}
   </section>;
