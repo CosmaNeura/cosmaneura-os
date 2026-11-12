@@ -661,10 +661,11 @@ BEGIN
     END LOOP;
   END;
 
-  -- Refuse planned PKs that collide with box, recording, workspace, upload, or
-  -- principal ids. Own-table rows may keep their natural PK (a workspace id in
-  -- encounter_workspaces is fine); a bait ticket/row that reuses another
-  -- table's id is not. Recording rows whose id equals a box id also refuse.
+  -- Refuse planned PKs that collide with box, recording, workspace, upload,
+  -- vendor_artifacts, or principal ids. Own-table rows may keep their natural
+  -- PK (a workspace id in encounter_workspaces is fine); a bait ticket/row
+  -- that reuses another table's id is not. Recording rows whose id equals a
+  -- box id also refuse.
   DECLARE
     v_collide boolean;
   BEGIN
@@ -684,6 +685,12 @@ BEGIN
             OR (
               v_table IS DISTINCT FROM 'artifacts'
               AND EXISTS (SELECT 1 FROM public.artifacts a WHERE a.id::text = t.id)
+            )
+            OR (
+              v_table IS DISTINCT FROM 'vendor_artifacts'
+              AND EXISTS (
+                SELECT 1 FROM public.vendor_artifacts va WHERE va.artifact_id::text = t.id
+              )
             )
             OR EXISTS (SELECT 1 FROM public.principals p WHERE p.id::text = t.id)
       ) INTO v_collide;
@@ -1196,22 +1203,64 @@ BEGIN
           WHEN v_col IN ('export_key', 'export_path') THEN 'exports'
           ELSE 'uploads'
         END;
-        v_sql := format(
-          'SELECT t.%I::text, %s FROM public.%I t WHERE %s = ANY ($1) AND t.%I IS NOT NULL',
-          v_col, v_pk_expr, v_table, v_pk_expr, v_col
-        );
-        FOR v_path, v_rowpk IN EXECUTE v_sql USING v_values LOOP
+        -- Exact recorded keys only: accept the stored key when it matches the
+        -- canonical layout for this row (box + pk in the expected position).
+        -- Never trust a loose "pk appears somewhere in the path" heuristic —
+        -- that let an artifacts.blob_key equal to another patient's vendor PDF
+        -- pass when the artifact id matched the vendor artifact id filename.
+        SELECT EXISTS (
+                 SELECT 1 FROM pg_catalog.pg_attribute a
+                   JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+                   JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                  WHERE n.nspname = 'public' AND c.relname = v_table
+                    AND NOT a.attisdropped AND a.attnum > 0 AND a.attname = 'box_id'
+               )
+          INTO v_has_box;
+        IF v_has_box THEN
+          v_sql := format(
+            'SELECT t.%I::text, %s, t.box_id::text
+               FROM public.%I t WHERE %s = ANY ($1) AND t.%I IS NOT NULL',
+            v_col, v_pk_expr, v_table, v_pk_expr, v_col
+          );
+        ELSE
+          v_sql := format(
+            'SELECT t.%I::text, %s, NULL::text
+               FROM public.%I t WHERE %s = ANY ($1) AND t.%I IS NOT NULL',
+            v_col, v_pk_expr, v_table, v_pk_expr, v_col
+          );
+        END IF;
+        FOR v_path, v_rowpk, v_box IN EXECUTE v_sql USING v_values LOOP
           IF v_path IS NULL OR v_path = '' OR position('/' in v_path) = 1
              OR position('..' in v_path) > 0 THEN
             CONTINUE;
           END IF;
-          -- Key columns are runtime-writable: only trust a key that names its own
-          -- row ({box}/{id}/... or {box}/.../{id}.ext) inside the caller's practice.
-          IF NOT (v_rowpk = ANY (string_to_array(regexp_replace(v_path, '\.[^/]*$', ''), '/'))) THEN
-            CONTINUE;
-          END IF;
           IF v_caller_box IS NOT NULL
              AND split_part(v_path, '/', 1) IS DISTINCT FROM v_caller_box::text THEN
+            CONTINUE;
+          END IF;
+          IF v_kind = 'uploads' THEN
+            IF v_box IS NULL
+               OR NOT (
+                 v_path LIKE (v_box || '/' || v_rowpk || '/%')
+                 OR v_path LIKE (v_box || '/uploads/' || v_rowpk || '/%')
+               ) THEN
+              CONTINUE;
+            END IF;
+          ELSIF v_kind = 'audio' THEN
+            IF NOT (
+                 (v_box IS NOT NULL AND v_path LIKE (v_box || '/' || v_rowpk || '/audio/%'))
+                 OR v_path LIKE (v_rowpk || '/audio/%')
+               ) THEN
+              CONTINUE;
+            END IF;
+          ELSIF v_kind = 'exports' THEN
+            IF NOT (
+                 (v_box IS NOT NULL AND v_path LIKE (v_box || '/' || v_rowpk || '/exports/%'))
+                 OR v_path LIKE (v_rowpk || '/exports/%')
+               ) THEN
+              CONTINUE;
+            END IF;
+          ELSE
             CONTINUE;
           END IF;
           v_out := v_out || jsonb_build_array(

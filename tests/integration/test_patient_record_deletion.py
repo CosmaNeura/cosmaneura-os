@@ -4063,3 +4063,136 @@ def test_recording_id_equal_to_box_id_is_refused(practice) -> None:
         _calls(session, owner, patient_a, blob, confirm=False)
     session.rollback()
     assert session.get(PatientLink, patient_a) is not None
+
+
+def test_bait_artifact_cannot_delete_same_practice_vendor_pdf(practice) -> None:
+    """Round 8: artifacts.id = B vendor id + blob_key = B PDF must not delete B."""
+
+    session = practice["session"]
+    blob = practice["blob"]
+    owner = str(practice["owner_id"])
+    casey = practice["casey"]
+    morgan = practice["morgan"]
+    assert (
+        isinstance(casey, dict) and isinstance(morgan, dict) and isinstance(blob, LocalBlobAdapter)
+    )
+    patient_a = str(casey["patient_id"])
+    patient_b = str(morgan["patient_id"])
+    box_1 = str(practice["box_id"])
+    ticket_a = str(casey["ticket_id"])
+
+    planted_b = _plant_vendor_pdf(
+        session,
+        blob,
+        box=box_1,
+        owner=owner,
+        workspace_id=str(morgan["workspace_id"]),
+        label="bait-b",
+    )
+    b_rel = str(planted_b["relative"])
+    b_path = planted_b["path"]
+    assert isinstance(b_path, Path) and b_path.is_file()
+    b_vendor_id = str(planted_b["artifact_id"])
+
+    baseline = delete_patient_records(
+        session,
+        actor_principal_id=owner,
+        patient_link_id=patient_a,
+        confirm=False,
+        blob=blob,
+        file_roots=storage_roots(blob),
+    )
+    baseline_files = dict(baseline["files"])
+    # B's vendor PDF must not inflate A's dry-run exports.
+    assert str(b_rel) not in {
+        item.relative_path
+        for item in patient_deletion_mod._collect_files_for_plan(
+            session,
+            patient_deletion_mod._plan(session, patient_a),
+            storage_roots(blob),
+            box_id=box_1,
+        )
+        if item.relative_path is not None
+    }
+
+    # Runtime bait: artifacts row id = B's vendor artifact id, blob_key = B's PDF.
+    session.add(
+        Artifact(
+            id=b_vendor_id,
+            box_id=box_1,
+            ticket_id=ticket_a,
+            side="front",
+            classification="insurance_working_copy",
+            blob_key=b_rel,
+        )
+    )
+    session.commit()
+
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        delete_patient_records(
+            session,
+            actor_principal_id=owner,
+            patient_link_id=patient_a,
+            confirm=False,
+            blob=blob,
+            file_roots=storage_roots(blob),
+        )
+    session.rollback()
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        delete_patient_records(
+            session,
+            actor_principal_id=owner,
+            patient_link_id=patient_a,
+            confirm=True,
+            blob=blob,
+            file_roots=storage_roots(blob),
+        )
+    session.rollback()
+    assert b_path.is_file()
+    assert session.get(PatientLink, patient_a) is not None
+    assert session.get(PatientLink, patient_b) is not None
+
+    # Rootless / Azure-style path: same bait must refuse and leave B's key untouched.
+    with pytest.raises(AuthorizationError, match="admin authority required"):
+        delete_patient_records(
+            session,
+            actor_principal_id=owner,
+            patient_link_id=patient_a,
+            confirm=True,
+            blob=blob,
+            file_roots=[],
+        )
+    session.rollback()
+    assert b_path.is_file()
+
+    # Direct collector: even with the bait pk in hand, do not emit B's vendor key.
+    bait_keys = session.scalar(
+        text("SELECT public.patient_deletion_collect_file_keys(CAST(:pks AS jsonb))"),
+        {"pks": json.dumps({"artifacts": [b_vendor_id]})},
+    )
+    bait_paths = {
+        str(item.get("path"))
+        for item in (bait_keys if isinstance(bait_keys, list) else json.loads(bait_keys or "[]"))
+        if isinstance(item, dict)
+    }
+    assert b_rel not in bait_paths
+
+    session.execute(
+        text("DELETE FROM public.artifacts WHERE id = CAST(:id AS uuid)"),
+        {"id": b_vendor_id},
+    )
+    session.commit()
+    after = delete_patient_records(
+        session,
+        actor_principal_id=owner,
+        patient_link_id=patient_a,
+        confirm=False,
+        blob=blob,
+        file_roots=storage_roots(blob),
+    )
+    assert after["files"] == baseline_files
+    deleted = _calls(session, owner, patient_a, blob, confirm=True)
+    assert deleted["files"] == baseline_files
+    assert b_path.is_file()
+    assert session.get(PatientLink, patient_a) is None
+    assert session.get(PatientLink, patient_b) is not None
