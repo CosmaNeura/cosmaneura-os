@@ -336,7 +336,7 @@ jobs:
           bash infra/beta/tests/deployment-guards.sh
       - name: Enrollment configuration contract
         run: |
-          node --test infra/enrollment/render.test.mjs infra/enrollment/verify-staging-hosts.test.mjs web/scripts/enrollment-hosting.test.mjs infra/enrollment/workspaces/render.test.mjs
+          node --test infra/enrollment/render.test.mjs infra/enrollment/verify-staging-hosts.test.mjs web/scripts/enrollment-hosting.test.mjs infra/enrollment/workspaces/render.test.mjs clients/shared/native-clerk-host-drift.test.mjs
           python3 -m unittest discover -s infra/enrollment/runtime/tests -p test_dns.py -v
       - name: Standalone host render node tests
         run: node --test infra/standalone/render.test.mjs infra/standalone/render-beta.test.mjs
