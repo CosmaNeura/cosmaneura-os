@@ -321,8 +321,12 @@
     }
 
     private func attachEngineObserver(to engine: AVAudioEngine) {
-      let alreadyAttached = lock.withLock { engineObserver != nil || eventHandler == nil }
-      guard !alreadyAttached else { return }
+      // Check-and-set under the same lock so a concurrent attach cannot
+      // dual-register. Control-path callers are also serialized by
+      // AVFoundationPCMDriver; this closes the remaining race window.
+      lock.lock()
+      defer { lock.unlock() }
+      guard engineObserver == nil, eventHandler != nil else { return }
       let token = notificationCenter.addObserver(
         forName: .AVAudioEngineConfigurationChange,
         object: engine,
@@ -331,7 +335,7 @@
         PCMStartupDiagnostics.shared.record(.engineConfigurationChanged)
         self?.emit(.captureFailed)
       }
-      lock.withLock { engineObserver = token }
+      engineObserver = token
     }
 
     private func detachEngineObserver() {

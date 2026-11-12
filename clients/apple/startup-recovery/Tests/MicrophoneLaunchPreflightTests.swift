@@ -1,25 +1,18 @@
 import XCTest
 
-/// Documents the launch-time microphone TCC probe for capture-off CosmaBot builds.
+/// Documents capture-off CosmaBot launch behaviour for the microphone path.
 ///
-/// Caller (outside this package, in the bundled PCM Capacitor plugin):
-/// `clients/capture/native-configured/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift`
-/// `load()` at lines 41–54 constructs `IOSPCMBridgeCore` → `LiveAppleAudioSystem`,
-/// which creates `AVAudioEngine()` at
-/// `clients/capture/native-configured/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift:63`
-/// during Capacitor plugin registration. That path does **not** call
-/// `requestRecordPermission` (no prompt) but still touches `AVAudioSession` /
-/// `AVAudioEngine`, which surfaces as a silent `kTCCServiceMicrophone` preflight.
+/// T-REL-7b (clients/capture): `LiveAppleAudioSystem` defers `AVAudioEngine`
+/// construction until capture start (install/start). Plugin load /
+/// `LiveAppleAudioSystem.init` must not create an engine, so a capture-off
+/// launch should not trigger an engine-backed microphone TCC preflight from
+/// that path. Behavioural proof lives in `ios-lazy-mic-tests` (`#if os(iOS)`
+/// live-adapter idle lifecycle) plus owed Mac/simulator runs on the PR.
 ///
-/// CosmaBot-side mitigation in this PR (clients/apple only):
-/// Debug `com.cosmasos.synthetic` presents `CosmasSyntheticDemoSurface` and
-/// returns before `openWorkspace()` / `CosmasBridgeViewController`, so Capacitor
-/// never loads `IOSPCMCapacitorPlugin` on that configuration — no mic touch.
-///
-/// Residual: Release/TestFlight capture-off builds that open the WebView still
-/// register the plugin. Deferring live AVFoundation until an explicit start
-/// requires editing `IOSPCMCapacitorPlugin.load()` (clients/capture), which is
-/// outside this PR's clients/apple-only scope.
+/// CosmaBot Debug `com.cosmasos.synthetic` still presents
+/// `CosmasSyntheticDemoSurface` and returns before `openWorkspace()` /
+/// `CosmasBridgeViewController`, so Capacitor never loads
+/// `IOSPCMCapacitorPlugin` on that configuration.
 final class MicrophoneLaunchPreflightTests: XCTestCase {
     func testDebugSyntheticDemoReturnsBeforeWorkspaceBridge() throws {
         let root = URL(fileURLWithPath: #filePath)

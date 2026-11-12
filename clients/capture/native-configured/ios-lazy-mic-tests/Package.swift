@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
   name: "CosmaneuraLazyMicEngineTests",
-  platforms: [.macOS(.v13)],
+  platforms: [.macOS(.v13), .iOS(.v17)],
   dependencies: [
     .package(path: "../ios-pcm-capture")
   ],

@@ -4,14 +4,20 @@ import Testing
 @testable import CosmaneuraIOSAVFoundationDriver
 @testable import CosmaneuraIOSPCMCore
 
+#if os(iOS)
+  @preconcurrency import AVFoundation
+#endif
+
 /// T-REL-7b: with capture off, plugin load must not create AVAudioEngine or
 /// query record permission. Engine creation is deferred until capture start.
 struct LazyMicEngineTests {
   @Test func captureOffLoadCreatesNoEngineAndQueriesNoPermission() {
     let factory = CountingEngineFactory()
     let permission = CountingPermissionProvider()
-    // Mirrors IOSPCMCapacitorPlugin.load() → bridge convenience composition:
-    // construct the injectable seams without starting capture.
+    // Seam-level unit check only: constructs LazyAppleAudioEngine and the
+    // permission adapter without starting capture. This does not invoke
+    // IOSPCMCapacitorPlugin.load() or LiveAppleAudioSystem; the #if os(iOS)
+    // live-adapter tests below cover that constructor path.
     let engines = LazyAppleAudioEngine(factory: factory.make)
     _ = AVFoundationMicrophonePermissionAdapter(provider: permission)
 
@@ -54,9 +60,8 @@ struct LazyMicEngineTests {
   }
 
   @Test func liveAdapterSourceDefersEngineUntilStart() throws {
-    // Source contract: construction must not assign `engine = AVAudioEngine()`,
-    // and must route creation through LazyAppleAudioEngine / engineFactory.
-    // Tests/.../LazyMicEngineTests.swift → ios-lazy-mic-tests → native-configured
+    // Secondary source-string guard only. Prefer the #if os(iOS) live
+    // adapter tests for behavioural proof that init does not create an engine.
     let configuredRoot = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent()
       .deletingLastPathComponent()
@@ -74,6 +79,34 @@ struct LazyMicEngineTests {
     #expect(source.contains("engineFactory"))
     #expect(source.contains("engines.clear()"))
   }
+
+  #if os(iOS)
+    @Test func liveAdapterIdleLifecycleCreatesNoEngine() throws {
+      let factory = CountingAVAudioEngineFactory()
+      let system = LiveAppleAudioSystem(
+        notificationCenter: NotificationCenter(),
+        engineFactory: factory.make
+      )
+      #expect(factory.creations == 0)
+      #expect(!system.hasResolvedEngine)
+
+      system.setEventHandler { _ in }
+      #expect(factory.creations == 0)
+      #expect(!system.hasResolvedEngine)
+
+      system.clearEventHandler()
+      #expect(factory.creations == 0)
+      #expect(!system.hasResolvedEngine)
+
+      try system.freezeInput()
+      #expect(factory.creations == 0)
+      #expect(!system.hasResolvedEngine)
+
+      try system.deactivate()
+      #expect(factory.creations == 0)
+      #expect(!system.hasResolvedEngine)
+    }
+  #endif
 }
 
 private final class CountingEngineFactory: @unchecked Sendable {
@@ -88,6 +121,19 @@ private final class CountingEngineFactory: @unchecked Sendable {
 }
 
 private final class EngineMarker: NSObject {}
+
+#if os(iOS)
+  private final class CountingAVAudioEngineFactory: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var creations: Int { lock.withLock { count } }
+
+    func make() -> AVAudioEngine {
+      lock.withLock { count += 1 }
+      return AVAudioEngine()
+    }
+  }
+#endif
 
 private final class CountingPermissionProvider: AppleMicrophonePermissionProviding,
   @unchecked Sendable
