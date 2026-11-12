@@ -51,7 +51,7 @@ def _production_identity() -> dict:
     host = "clerk.beta.cosmas.ai"
     native = {
         "version": 1,
-        "profile": "operational-beta-v1",
+        "profile": AUTH.PRODUCTION_IDENTITY_PROFILE,
         "client": "apple",
         "apiOrigin": AUTH.PRODUCTION_ORIGINS["api"],
         "publishableKey": _live_key(host),
@@ -99,6 +99,16 @@ def _composition_source() -> dict:
     return {"commit": commit}
 
 
+def _swift_allowed_hosts(profile_case: str) -> set[str]:
+    text = SWIFT_CONFIG.read_text(encoding="utf-8")
+    match = re.search(
+        rf"case \.{profile_case}:\s*return \[([^\]]*)\]",
+        text,
+    )
+    assert match is not None, profile_case
+    return set(re.findall(r'"([^"]+)"', match.group(1)))
+
+
 def test_frozen_info_plist_keeps_auth_disabled_with_empty_origins():
     info = plistlib.loads(APP_INFO.read_bytes())
     assert info["CosmasNativeAuth"]["enabled"] is False
@@ -108,30 +118,26 @@ def test_frozen_info_plist_keeps_auth_disabled_with_empty_origins():
     assert info.get("CosmaneuraWebOrigin", "") == ""
 
 
-def test_python_production_clerk_host_matches_swift_operational_beta_pin():
-    swift = SWIFT_CONFIG.read_text(encoding="utf-8")
+def test_python_production_clerk_host_matches_swift_operational_production_allowlist():
     assert AUTH.PRODUCTION_ORIGINS["clerk"] == "https://clerk.beta.cosmas.ai"
-    assert AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST == "clerk.beta.cosmas.ai"
-    assert 'guard host == "clerk.beta.cosmas.ai"' in swift
-    assert 'guard host == "clerk.cosmas.ai"' not in swift
-    # Fail loudly if Python and Swift diverge again.
-    match = re.search(
-        r"profile == \.operationalBeta \{.*?guard host == \"([^\"]+)\"",
-        swift,
-        flags=re.DOTALL,
-    )
-    assert match is not None
-    assert match.group(1) == AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST
-    assert "https://" + match.group(1) == AUTH.PRODUCTION_ORIGINS["clerk"]
+    assert AUTH.SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST == "clerk.beta.cosmas.ai"
+    assert AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST == "clerk.cosmas.ai"
+    assert _swift_allowed_hosts("operationalBeta") == {"clerk.cosmas.ai"}
+    assert _swift_allowed_hosts("operationalProduction") == {"clerk.beta.cosmas.ai"}
+    # Removing either host from the Swift allow-list fails this agreement test.
+    assert "https://" + next(iter(_swift_allowed_hosts("operationalProduction"))) == (
+        AUTH.PRODUCTION_ORIGINS["clerk"])
 
 
 def test_production_stamp_sets_origins_without_enabling_or_web_origin():
     before = plistlib.loads(APP_INFO.read_bytes())
     stamped = AUTH.production_native_auth_stamp(before)
     assert stamped["CosmasNativeAuth"]["enabled"] is False
+    assert stamped["CosmasNativeAuth"]["profile"] == "operational-production-v1"
     assert stamped["CosmasNativeAuth"]["frontendOrigin"] == "https://clerk.beta.cosmas.ai"
     assert stamped["CosmasNativeIdentity"]["frontendOrigin"] == "https://clerk.beta.cosmas.ai"
     assert stamped["CosmasNativeIdentity"]["apiOrigin"] == "https://api.beta.cosmas.ai"
+    assert stamped["CosmasNativeIdentity"]["profile"] == "operational-production-v1"
     assert stamped.get("CosmaneuraWebOrigin", "") == before.get("CosmaneuraWebOrigin", "")
     assert plistlib.loads(APP_INFO.read_bytes()) == before
 
@@ -141,22 +147,23 @@ def test_production_stamp_enables_only_with_validated_key():
     identity = _production_identity()
     stamped = AUTH.production_native_auth_stamp(before, auth=identity["auth"])
     assert stamped["CosmasNativeAuth"]["enabled"] is True
+    assert stamped["CosmasNativeAuth"]["profile"] == "operational-production-v1"
     assert stamped["CosmasNativeAuth"]["publishableKey"] == identity["auth"]["publishableKey"]
     assert AUTH.publishable_key_host(stamped["CosmasNativeAuth"]["publishableKey"]) == (
-        AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST)
+        AUTH.SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST)
     with pytest.raises(ValueError, match="without a validated key"):
         AUTH.production_native_auth_stamp(before, auth={
             "enabled": True,
-            "profile": "operational-beta-v1",
+            "profile": "operational-production-v1",
             "publishableKey": "",
             "frontendOrigin": AUTH.PRODUCTION_ORIGINS["clerk"],
             "organizationId": "org_invented_production",
             "audience": "cosmas-os-beta",
         })
-    with pytest.raises(ValueError, match="without a validated key"):
+    with pytest.raises(ValueError, match="operational-production-v1"):
         AUTH.production_native_auth_stamp(before, auth={
             **identity["auth"],
-            "enabled": False,
+            "profile": "operational-beta-v1",
         })
 
 
@@ -215,11 +222,12 @@ def test_owned_production_profile_stamps_auth_and_keeps_reviewed_credentials():
     result = AUTH.apply_installation_profile_to_configured_info(
         configured, "production", identity=identity)
     assert result["CosmasNativeAuth"]["enabled"] is True
+    assert result["CosmasNativeAuth"]["profile"] == "operational-production-v1"
     assert result["CosmasNativeAuth"]["frontendOrigin"] == AUTH.PRODUCTION_ORIGINS["clerk"]
     assert result["CosmasNativeAuth"]["publishableKey"] == identity["auth"]["publishableKey"]
     assert AUTH.publishable_key_host(result["CosmasNativeAuth"]["publishableKey"]) == (
         "clerk.beta.cosmas.ai")
-    assert result["CosmasNativeAuth"]["organizationId"] == identity["auth"]["organizationId"]
+    assert result["CosmasNativeIdentity"]["profile"] == "operational-production-v1"
     assert result["CosmasNativeIdentity"]["apiOrigin"] == AUTH.PRODUCTION_ORIGINS["api"]
     assert result.get("CosmaneuraWebOrigin", "") == before.get("CosmaneuraWebOrigin", "")
 
@@ -298,43 +306,49 @@ def test_owned_beta_and_default_profiles_leave_configured_info_unchanged():
 
 
 @pytest.mark.parametrize("profile", [None, "beta", "staging"])
-def test_compose_default_beta_staging_info_plist_matches_frozen_scaffold(tmp_path, profile):
+def test_compose_default_beta_staging_keeps_auth_disabled_and_single_info_derivation(tmp_path, profile):
     output = tmp_path / f"compose-{profile or 'default'}"
     project = COMPOSE_MODULE.compose(ROOT, output, installation_profile=profile)
     assert project.is_dir()
     composed = output / "apps/capture/ios/App/App/Info.plist"
-    assert composed.read_bytes() == APP_INFO.read_bytes()
+    # Usage descriptions are derived; CosmasNativeAuth stays fail-closed.
+    assert composed.read_bytes() != APP_INFO.read_bytes()
     info = plistlib.loads(composed.read_bytes())
     assert info["CosmasNativeAuth"]["enabled"] is False
     assert info["CosmasNativeAuth"]["frontendOrigin"] == ""
-    manifest = (output / "composition.json").read_text(encoding="utf-8")
+    assert info["NSMicrophoneUsageDescription"] == COMPOSE_MODULE.REVIEWED_MICROPHONE_USAGE
+    manifest = json.loads((output / "composition.json").read_text(encoding="utf-8"))
     assert "installation_profile" not in manifest
-    assert "derived-production-native-auth" not in manifest
-    files = json.loads(manifest)["files"]
-    assert len(files) == EXPECTED_COMPOSITION_FILES
+    owned = [item for item in manifest["files"] if item["role"] == "derived-owned-info-plist"]
+    assert len(owned) == 1
+    assert owned[0].get("production_native_auth") is False
+    assert "derived-production-native-auth" not in json.dumps(manifest)
+    assert "derived-usage-description" not in json.dumps(manifest)
+    assert len(manifest["files"]) == EXPECTED_COMPOSITION_FILES
 
 
 def test_compose_production_profile_stamps_exact_auth_keys(tmp_path):
     output = tmp_path / "compose-production"
     COMPOSE_MODULE.compose(ROOT, output, installation_profile="production")
     composed = output / "apps/capture/ios/App/App/Info.plist"
-    assert composed.read_bytes() != APP_INFO.read_bytes()
     info = plistlib.loads(composed.read_bytes())
     assert info["CosmasNativeAuth"]["enabled"] is False
+    assert info["CosmasNativeAuth"]["profile"] == "operational-production-v1"
     assert info["CosmasNativeAuth"]["frontendOrigin"] == "https://clerk.beta.cosmas.ai"
     assert info["CosmasNativeIdentity"]["apiOrigin"] == "https://api.beta.cosmas.ai"
     assert info["CosmasNativeIdentity"]["frontendOrigin"] == "https://clerk.beta.cosmas.ai"
+    assert info["CosmasNativeIdentity"]["profile"] == "operational-production-v1"
+    assert info["NSMicrophoneUsageDescription"] == COMPOSE_MODULE.REVIEWED_MICROPHONE_USAGE
     assert info.get("CosmaneuraWebOrigin", "") == ""
     frozen = plistlib.loads(APP_INFO.read_bytes())
     assert frozen["CosmasNativeAuth"]["enabled"] is False
-    assert _sha256(APP_INFO) == hashlib.sha256(
-        (ROOT / "apps/capture/ios/App/App/Info.plist").read_bytes()).hexdigest()
     manifest = json.loads((output / "composition.json").read_text(encoding="utf-8"))
     assert manifest["installation_profile"] == "production"
     assert len(manifest["files"]) == EXPECTED_COMPOSITION_FILES
     stamped = [item for item in manifest["files"] if item["path"] == "ios/App/App/Info.plist"]
     assert len(stamped) == 1
-    assert stamped[0]["role"] == "derived-production-native-auth"
+    assert stamped[0]["role"] == "derived-owned-info-plist"
+    assert stamped[0]["production_native_auth"] is True
     assert stamped[0]["scaffold_input_sha256"] == _sha256(APP_INFO)
     assert stamped[0]["auth_profile_source"] == "scripts/native_iphone_auth_profile.py"
     assert stamped[0]["auth_profile_source_sha256"] == _sha256(PROFILE)
@@ -351,10 +365,13 @@ def test_compose_cli_production_and_default_match_module(tmp_path):
         [sys.executable, str(COMPOSE), "--repository", str(ROOT), "--output", str(prod_out),
          "--installation-profile", "production"],
         check=True, cwd=ROOT, capture_output=True)
-    assert (default_out / "apps/capture/ios/App/App/Info.plist").read_bytes() == APP_INFO.read_bytes()
+    default = plistlib.loads((default_out / "apps/capture/ios/App/App/Info.plist").read_bytes())
+    assert default["CosmasNativeAuth"]["enabled"] is False
+    assert default["CosmasNativeAuth"]["frontendOrigin"] == ""
     prod = plistlib.loads((prod_out / "apps/capture/ios/App/App/Info.plist").read_bytes())
     assert prod["CosmasNativeAuth"]["enabled"] is False
     assert prod["CosmasNativeAuth"]["frontendOrigin"] == "https://clerk.beta.cosmas.ai"
+    assert prod["CosmasNativeAuth"]["profile"] == "operational-production-v1"
     assert prod.get("CosmaneuraWebOrigin", "") == ""
 
 
@@ -393,12 +410,13 @@ def test_composition_bindings_accept_default_and_production_compositions(tmp_pat
     assert len(default_bindings) == EXPECTED_COMPOSITION_FILES
     assert len(prod_composition["files"]) == EXPECTED_COMPOSITION_FILES
     assert len(prod_bindings) == EXPECTED_COMPOSITION_FILES
-    assert all(item["role"] != "derived-production-native-auth"
-               for item in default_composition["files"])
-    stamped = [item for item in prod_composition["files"]
-               if item["role"] == "derived-production-native-auth"]
-    assert len(stamped) == 1
-    assert stamped[0]["auth_profile_source_sha256"] == _sha256(PROFILE)
+    default_owned = [item for item in default_composition["files"]
+                     if item["role"] == "derived-owned-info-plist"]
+    prod_owned = [item for item in prod_composition["files"]
+                  if item["role"] == "derived-owned-info-plist"]
+    assert len(default_owned) == 1 and default_owned[0]["production_native_auth"] is False
+    assert len(prod_owned) == 1 and prod_owned[0]["production_native_auth"] is True
+    assert prod_owned[0]["auth_profile_source_sha256"] == _sha256(PROFILE)
 
 
 def test_composition_bindings_refuse_tampered_production_stamp(tmp_path):
@@ -409,7 +427,7 @@ def test_composition_bindings_refuse_tampered_production_stamp(tmp_path):
     info = plistlib.loads(info_path.read_bytes())
     info["CosmasNativeAuth"]["frontendOrigin"] = "https://clerk.cosmas.ai"
     info_path.write_bytes(plistlib.dumps(info, sort_keys=False))
-    with pytest.raises(ValueError, match="Composed bytes differ|does not match the reviewed"):
+    with pytest.raises(ValueError, match="Composed bytes differ|differs from the reviewed"):
         OWNED.composition_bindings(ROOT, source, output)
 
 
@@ -420,10 +438,10 @@ def test_composition_bindings_refuse_wrong_scaffold_input_hash(tmp_path):
     manifest_path = output / "composition.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for item in manifest["files"]:
-        if item["role"] == "derived-production-native-auth":
+        if item["role"] == "derived-owned-info-plist":
             item["scaffold_input_sha256"] = "0" * 64
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="drifted from the frozen Info.plist"):
+    with pytest.raises(ValueError, match="lost its frozen scaffold Info.plist input"):
         OWNED.composition_bindings(ROOT, source, output)
 
 
@@ -434,18 +452,18 @@ def test_composition_bindings_refuse_changed_derivation_or_auth_profile_hash(tmp
     manifest_path = output / "composition.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for item in manifest["files"]:
-        if item["role"] == "derived-production-native-auth":
+        if item["role"] == "derived-owned-info-plist":
             item["derivation_source_sha256"] = "1" * 64
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="drifted from the frozen Info.plist"):
+    with pytest.raises(ValueError, match="drifted from the committed composer"):
         OWNED.composition_bindings(ROOT, source, output)
     COMPOSE_MODULE.compose(ROOT, tmp_path / "bindings-auth-hash", installation_profile="production")
     auth_out = tmp_path / "bindings-auth-hash"
     manifest_path = auth_out / "composition.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     for item in manifest["files"]:
-        if item["role"] == "derived-production-native-auth":
+        if item["role"] == "derived-owned-info-plist":
             item["auth_profile_source_sha256"] = "2" * 64
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="drifted from the frozen Info.plist"):
+    with pytest.raises(ValueError, match="drifted from native_iphone_auth_profile"):
         OWNED.composition_bindings(ROOT, source, auth_out)

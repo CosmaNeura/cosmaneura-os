@@ -5,6 +5,8 @@ import importlib.util
 import json
 import plistlib
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,95 @@ ROOT = Path(__file__).resolve().parents[2]
 PROVENANCE = ROOT / "apps/capture/SOURCE_PROVENANCE.json"
 APPLE_PREPARE = ROOT / "scripts/prepare-apple-synthetic.py"
 PORTABLE_COMPOSE = ROOT / "scripts/compose-portable-iphone.py"
+APP_INFO = ROOT / "apps/capture/ios/App/App/Info.plist"
+OWNED_PRIVACY = ROOT / "clients/apple/startup-recovery/PrivacyInfo.xcprivacy"
+RECORDING_ENCRYPTION = (
+    ROOT
+    / "clients/capture/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingEncryption.swift"
+)
+SECURE_QUEUE = (
+    ROOT
+    / "clients/capture/native-configured/secure-queue/ios/Sources/CosmaneuraSecureQueue/SecureQueueStore.swift"
+)
+SPEECH_PLUGIN = ROOT / "clients/apple/native-auth/Bridge/CosmasPrivateSpeechPlugin.swift"
+MICROPHONE_USAGE = (
+    "CosmaBot uses the microphone to record visits you choose to capture so it can draft your notes."
+)
+SPEECH_USAGE = (
+    "CosmaBot uses on-device speech recognition to transcribe recordings you choose to "
+    "transcribe so it can draft your notes."
+)
+EXPECTED_APP_PRIVACY = {
+    "NSPrivacyTracking": False,
+    "NSPrivacyCollectedDataTypes": [
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeAudioData",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeUserID",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeEmailAddress",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeName",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeHealth",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeOtherUserContent",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeDeviceID",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+    ],
+    "NSPrivacyAccessedAPITypes": [
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
+        }
+    ],
+}
+SYNTHETIC_MICROPHONE_USAGE = (
+    "CosmaBot uses the microphone only after you start a synthetic capture test with "
+    "invented encounter audio."
+)
 EXTERNAL_CAPTURE_SNAPSHOT = "ea7f99d0278a05706531ffb1288cb1df7acf507b"
 FROZEN_CAPTURE_PROVENANCE_SHA256 = "f1d73c9e7fd9515d7dd16b676f78d1cacd420a63d9f7524fe9444525c9bdf2a3"
 
@@ -30,16 +121,16 @@ REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
     "clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift": "7713db8afa3959ac9c936a4008aecb2144d4d62dedc9649fd21490fbdbcb88af",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/DesktopAuthProtocol.swift": "4a870405efcc894c7e1769c4a04c6a238ef3389767aa3c630ac24bc7cf0cca22",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/GoogleConnectionNavigation.swift": "f5e7b2606ed7972d9f96ea1cb8631c0fed84e902477d34f0946e13d639f4bdb5",
-    "clients/apple/native-auth/Sources/CosmasNativeAuth/KeychainAccessBlock.swift": "9985767055e2e36e208dd7b2696029ac5d88f34257fa4fa44df6fe3d3502403c",
+    "clients/apple/native-auth/Sources/CosmasNativeAuth/KeychainAccessBlock.swift": "9c0db1b40bba34d2be169f0dff57bfd9a59ae3f3115a98b25153e9636429a6b3",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/MicrosoftConnectionNavigation.swift": "aecc572273fd6a83ba2f328273389c91f74368d781c31f7be8eb435e0d9a49b0",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeAuthAwait.swift": "48f59a9ade9ceca9e30c82c13c4bccbea0c69a45d26c9fefa2d4eaabc9a8501d",
-    "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift": "b7b05d190ce61307a51d9a22d28e79d8ca6bcdc53aa3f7e56b528e9fcb737d15",
+    "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift": "3743919ca70157daf8e2a695f27218d7720395f3b142d1ea39c623ed6109a638",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeTokenPolicy.swift": "f951145dbfabb7bc7244633b60267ddd65ba31ff378613f1fb75360f9a890298",
     "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeWorkspaceAuth.swift": "c777eeac82ccc9cc54e9b400ee2eefd1761dca74ca156355dc64da041699b717",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/DesktopAuthProtocolTests.swift": "2833750395acfdd6d0becc3779322538aa375a1e2fe79ff27d04c82b6b820d81",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/GoogleConnectionNavigationTests.swift": "7f25b506b325cfbf76e7fc4ad1082c2406ca238f5ef054793de8213dda3c8eba",
-    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/KeychainInteractionPolicyTests.swift": "b2359790209bf6b8ce23a6af205d068274bfbf9fe59bbfff65e9fb22882e255d",
-    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeClerkConfigurationTests.swift": "a3147839d1bb49bc9816797e93831d249633e6d3b70bd5f7409635f004d0f8b0",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/KeychainInteractionPolicyTests.swift": "56391c581b190e2e7a1176a874925219d41ae99a8c494028830a5eeaa6b58af4",
+    "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeClerkConfigurationTests.swift": "55a57ec480e82913989275888dcfbf5a6f2c95b5784f03637c6bd03e6d0c9e07",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativePrivateRecordingGateTests.swift": "64f3e14a85b5ea321acedb01526ef6aa1f253dfe43266c349fec58ef2473b984",
     "clients/apple/native-auth/Tests/CosmasNativeAuthTests/NativeWorkspaceAuthTests.swift": "dda52ed7cbf2976050d93be2a97de0f4474ba7ea348e1bb967cf94603f62c83a",
 }
@@ -295,21 +386,29 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     assert privacy[0]["role"] == "implementation"
     assert privacy[0]["owner"] == "clients/apple"
     assert privacy[0]["authoritative_counterpart"] == "clients/apple/startup-recovery/PrivacyInfo.xcprivacy"
-    assert plistlib.loads((output / "apps/capture/ios/App/App/PrivacyInfo.xcprivacy").read_bytes()) == {
-        "NSPrivacyAccessedAPITypes": [{
-            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
-            "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
-        }],
-    }
-    assert (output / "apps/capture/ios/App/App/Info.plist").read_bytes() == (
-        ROOT / "apps/capture/ios/App/App/Info.plist"
-    ).read_bytes()
+    assert plistlib.loads((output / "apps/capture/ios/App/App/PrivacyInfo.xcprivacy").read_bytes()) == (
+        EXPECTED_APP_PRIVACY
+    )
     default_info = plistlib.loads((output / "apps/capture/ios/App/App/Info.plist").read_bytes())
     assert default_info["CosmasNativeAuth"]["enabled"] is False
     assert default_info["CosmasConfiguredCapture"]["enabled"] is False
+    assert default_info["NSMicrophoneUsageDescription"] == MICROPHONE_USAGE
+    assert default_info["NSSpeechRecognitionUsageDescription"] == SPEECH_USAGE
+    assert "ITSAppUsesNonExemptEncryption" not in default_info
     derived = [item for item in manifest["files"] if item["role"] == "derived-app-resource-wiring"]
     assert len(derived) == 1
     assert derived[0]["path"] == "ios/App/App.xcodeproj/project.pbxproj"
+    usage = [item for item in manifest["files"] if item["role"] == "derived-owned-info-plist"]
+    assert len(usage) == 1
+    assert usage[0]["path"] == "ios/App/App/Info.plist"
+    assert usage[0]["scaffold_input_sha256"] == _sha256(ROOT / "apps/capture/ios/App/App/Info.plist")
+    assert usage[0]["derivation_source"] == "scripts/compose-portable-iphone.py"
+    assert usage[0]["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)
+    assert usage[0]["auth_profile_source"] == "scripts/native_iphone_auth_profile.py"
+    assert usage[0].get("production_native_auth") is False
+    assert (output / "apps/capture/ios/App/App/Info.plist").read_bytes() != (
+        ROOT / "apps/capture/ios/App/App/Info.plist"
+    ).read_bytes()
 
     owners = set()
     for item in manifest["files"]:
@@ -341,6 +440,25 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
             privacy_lines = [line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" in line]
             assert len(privacy_lines) == 4
             assert "".join(line for line in text.splitlines(keepends=True) if "PrivacyInfo.xcprivacy" not in line) == original.read_text(encoding="utf-8")
+        elif item["role"] == "derived-owned-info-plist":
+            assert item["owner"] == "apps/capture"
+            assert item["path"] == "ios/App/App/Info.plist"
+            original = ROOT / "apps/capture" / item["path"]
+            assert item["scaffold_input_sha256"] == _sha256(original)
+            assert item["derivation_source"] == "scripts/compose-portable-iphone.py"
+            assert item["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)
+            assert item["auth_profile_source"] == "scripts/native_iphone_auth_profile.py"
+            assert item["auth_profile_source_sha256"] == _sha256(
+                ROOT / "scripts/native_iphone_auth_profile.py")
+            assert item.get("production_native_auth") is False
+            info = plistlib.loads(placed.read_bytes())
+            scaffold = plistlib.loads(original.read_bytes())
+            assert info["NSMicrophoneUsageDescription"] != scaffold["NSMicrophoneUsageDescription"]
+            assert info["NSSpeechRecognitionUsageDescription"] != scaffold["NSSpeechRecognitionUsageDescription"]
+            assert info["CosmasNativeAuth"]["enabled"] is False
+            assert info["CosmasNativeAuth"]["frontendOrigin"] == ""
+            assert "ITSAppUsesNonExemptEncryption" not in info
+            assert "ITSAppUsesNonExemptEncryption" not in scaffold
         elif item["role"] == "derived-capacitor-localization":
             assert item["derivation_source"] == "scripts/compose-portable-iphone.py"
             assert item["derivation_source_sha256"] == _sha256(PORTABLE_COMPOSE)
@@ -393,3 +511,121 @@ def test_portable_iphone_requires_every_reviewed_native_practice_addition_before
     with pytest.raises(ValueError, match="not a regular file"):
         module.compose(ROOT, output)
     assert not output.exists()
+
+
+def test_owned_privacy_manifest_declares_reviewed_coverage():
+    assert plistlib.loads(OWNED_PRIVACY.read_bytes()) == EXPECTED_APP_PRIVACY
+
+
+def test_scaffold_info_plist_stays_frozen_export_key_left_for_owner_decision():
+    info = plistlib.loads(APP_INFO.read_bytes())
+    # Frozen 1107 scaffold keeps historical copy; composer derives reviewed wording.
+    assert info["NSMicrophoneUsageDescription"] == (
+        "Cosmas records visit audio after you confirm consent and choose Start recording."
+    )
+    assert info["NSSpeechRecognitionUsageDescription"] == (
+        "Transcribe your saved recording on this iPhone only when you choose Transcribe. "
+        "Your audio is not sent to a speech server."
+    )
+    assert info.get("ITSAppUsesNonExemptEncryption") is not False
+    assert "ITSAppUsesNonExemptEncryption" not in info
+
+
+def test_recording_path_retains_native_crypto_and_speech_symbols():
+    recording = RECORDING_ENCRYPTION.read_text(encoding="utf-8")
+    queue = SECURE_QUEUE.read_text(encoding="utf-8")
+    assert "AES.GCM" in recording and "rsaEncryptionOAEPSHA256" in recording
+    assert "SecKeyCreateEncryptedData" in recording
+    assert "AES.GCM" in queue
+    assert SPEECH_PLUGIN.is_file()
+    speech = SPEECH_PLUGIN.read_text(encoding="utf-8")
+    assert "SFSpeechRecognizer" in speech
+
+
+def test_composed_project_includes_privacy_manifest_and_usage_strings(tmp_path):
+    output = tmp_path / "composed"
+    subprocess.run(
+        [sys.executable, str(PORTABLE_COMPOSE), "--repository", str(ROOT), "--output", str(output)],
+        check=True,
+        cwd=ROOT,
+    )
+    app = output / "apps/capture/ios/App/App"
+    privacy = app / "PrivacyInfo.xcprivacy"
+    info = plistlib.loads((app / "Info.plist").read_bytes())
+    project = (output / "apps/capture/ios/App/App.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+
+    assert privacy.is_file()
+    assert plistlib.loads(privacy.read_bytes()) == EXPECTED_APP_PRIVACY
+    assert project.count("PrivacyInfo.xcprivacy in Resources") == 2
+    assert "path = PrivacyInfo.xcprivacy" in project
+    assert info["NSMicrophoneUsageDescription"] == MICROPHONE_USAGE
+    assert info["NSSpeechRecognitionUsageDescription"] == SPEECH_USAGE
+    assert info.get("ITSAppUsesNonExemptEncryption") is not False
+    assert "ITSAppUsesNonExemptEncryption" not in info
+
+
+def test_compose_refuses_non_true_export_compliance_key(tmp_path, monkeypatch):
+    module = _portable()
+    original_apply = module._derive_owned_info_plist
+
+    def inject_false_then_apply(repository, output, placed):
+        destination = output / module.APP_SCAFFOLD / "ios/App/App/Info.plist"
+        info = plistlib.loads(destination.read_bytes())
+        info["ITSAppUsesNonExemptEncryption"] = False
+        destination.write_bytes(plistlib.dumps(info, sort_keys=False))
+        return original_apply(repository, output, placed)
+
+    monkeypatch.setattr(module, "_derive_owned_info_plist", inject_false_then_apply)
+    output = tmp_path / "refused-export"
+    with pytest.raises(ValueError, match="Refusing"):
+        module.compose(ROOT, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("value", [False, 0, "NO", "false", "YES", 1])
+def test_refuse_non_true_export_compliance_rejects_non_true_values(value):
+    module = _portable()
+    with pytest.raises(ValueError, match="Refusing"):
+        module.refuse_non_true_export_compliance({"ITSAppUsesNonExemptEncryption": value})
+
+
+def test_refuse_non_true_export_compliance_allows_absent_or_true():
+    module = _portable()
+    module.refuse_non_true_export_compliance({})
+    module.refuse_non_true_export_compliance({"ITSAppUsesNonExemptEncryption": True})
+
+
+def test_apply_reviewed_apple_info_usage_covers_operational_and_synthetic_paths():
+    spec = importlib.util.spec_from_file_location("prepare_apple_synthetic", APPLE_PREPARE)
+    assert spec is not None and spec.loader is not None
+    prepare = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(prepare)
+
+    operational = prepare.apply_reviewed_apple_info_usage(
+        {}, operational=True, simulator_staging_auth=False
+    )
+    assert operational["NSMicrophoneUsageDescription"] == MICROPHONE_USAGE
+    assert operational["NSSpeechRecognitionUsageDescription"] == SPEECH_USAGE
+    assert "ITSAppUsesNonExemptEncryption" not in operational
+
+    synthetic = prepare.apply_reviewed_apple_info_usage(
+        {}, operational=False, simulator_staging_auth=False
+    )
+    assert synthetic["NSMicrophoneUsageDescription"] == SYNTHETIC_MICROPHONE_USAGE
+    assert synthetic["NSSpeechRecognitionUsageDescription"] == SPEECH_USAGE
+
+    simulator = prepare.apply_reviewed_apple_info_usage(
+        {}, operational=True, simulator_staging_auth=True
+    )
+    assert simulator["NSMicrophoneUsageDescription"] == SYNTHETIC_MICROPHONE_USAGE
+
+    with pytest.raises(ValueError, match="Refusing"):
+        prepare.apply_reviewed_apple_info_usage(
+            {"ITSAppUsesNonExemptEncryption": False},
+            operational=True,
+            simulator_staging_auth=False,
+        )
+    absent = prepare.apply_reviewed_apple_info_usage(
+        {}, operational=True, simulator_staging_auth=False
+    )
+    assert "ITSAppUsesNonExemptEncryption" not in absent

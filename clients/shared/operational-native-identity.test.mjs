@@ -31,3 +31,40 @@ test('registered profile and shared identity bundle for an actual browser withou
   assert.ok(Object.keys(result.metafile.inputs).every(path=>!path.includes('clients/desktop/')));
   assert.ok(Object.values(result.metafile.inputs).every(input=>input.imports.every(item=>!item.path.startsWith('node:'))));
 });
+
+test('production profile accepts only clerk.beta.cosmas.ai and staging rejects production hosts',()=>{
+  const liveKey=host=>'pk_live_'+Buffer.from(host+'$').toString('base64');
+  for (const client of ['apple','desktop']) {
+    const production={
+      version:1,profile:shared.PRODUCTION_NATIVE_PROFILE,client,
+      apiOrigin:'https://api.beta.cosmas.ai',
+      frontendOrigin:'https://clerk.beta.cosmas.ai',
+      publishableKey:liveKey('clerk.beta.cosmas.ai'),
+      organizationId:'org_invented_beta',audience:'cosmas-os-beta-api',
+    };
+    assert.deepEqual(shared.validateOperationalNativeIdentity(production,client,production.apiOrigin),production);
+    assert.equal(shared.operationalNativeAuthSettings(production).frontendOrigin,'https://clerk.beta.cosmas.ai');
+    assert.equal(shared.validateOperationalNativeDataMode('authorized_beta',production),'authorized_beta');
+    for (const changed of [
+      {frontendOrigin:'https://clerk.cosmas.ai',publishableKey:liveKey('clerk.cosmas.ai')},
+      {frontendOrigin:'https://clerk.staging.cosmas.ai',publishableKey:liveKey('clerk.staging.cosmas.ai')},
+      {frontendOrigin:'https://invented.clerk.accounts.dev',publishableKey:'pk_test_'+Buffer.from('invented.clerk.accounts.dev$').toString('base64')},
+      {frontendOrigin:'https://preview.clerk.beta.cosmas.ai',publishableKey:liveKey('preview.clerk.beta.cosmas.ai')},
+      {frontendOrigin:'https://clerk.example.invalid',publishableKey:liveKey('clerk.example.invalid')},
+      {audience:''},{profile:'unknown-profile-v1'},
+    ]) assert.throws(()=>shared.validateOperationalNativeIdentity({...production,...changed},client,production.apiOrigin));
+
+    const staging={
+      version:1,profile:shared.STAGING_NATIVE_PROFILE,client,
+      apiOrigin:'https://api.staging.cosmas.ai',
+      frontendOrigin:'https://clerk.staging.cosmas.ai',
+      publishableKey:liveKey('clerk.staging.cosmas.ai'),
+      organizationId:'org_invented_beta',audience:'cosmas-os-beta-api',
+    };
+    assert.deepEqual(shared.validateOperationalNativeIdentity(staging,client,staging.apiOrigin),staging);
+    for (const changed of [
+      {frontendOrigin:'https://clerk.beta.cosmas.ai',publishableKey:liveKey('clerk.beta.cosmas.ai')},
+      {frontendOrigin:'https://clerk.cosmas.ai',publishableKey:liveKey('clerk.cosmas.ai')},
+    ]) assert.throws(()=>shared.validateOperationalNativeIdentity({...staging,...changed},client,staging.apiOrigin));
+  }
+});

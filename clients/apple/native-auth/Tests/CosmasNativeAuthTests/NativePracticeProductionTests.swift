@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import CosmasNativeAuth
 
-private let productionHost = "clerk.beta.cosmas.ai"
+private let productionHost = "clerk.cosmas.ai"
 private func productionRealm(bundle: String = "com.cosmasos.beta.ios",
                              origin: NativeWorkspaceOrigin = .appleWebView) throws -> NativeClerkAccountConfiguration {
     try NativeClerkAccountConfiguration(publishableKey: "pk_live_" + Data((productionHost + "$").utf8).base64EncodedString(),

@@ -29,7 +29,7 @@ paired production practice identity.
 | Mode | Enrollment `data_mode` | Profile `data_mode` | Identity profile | Clerk frontend | Practice web host | Practice API host |
 | --- | --- | --- | --- | --- | --- | --- |
 | Synthetic staging | `synthetic` | `synthetic` | `operational-staging-v1` | `*.clerk.accounts.dev` (or dedicated staging Clerk) | `https://<practice_uuid>.staging.cosmas.ai/chief` | `https://api.<practice_uuid>.staging.cosmas.ai` |
-| Production / authorized beta | `production` | `authorized_beta` | `operational-beta-v1` | `https://clerk.beta.cosmas.ai` | `https://<practice_uuid>.workspace.cosmas.ai/chief` | `https://api.<practice_uuid>.workspace.cosmas.ai` |
+| Production / authorized beta | `production` | `authorized_beta` | `operational-beta-v1` | `https://clerk.cosmas.ai` | `https://<practice_uuid>.workspace.cosmas.ai/chief` | `https://api.<practice_uuid>.workspace.cosmas.ai` |
 
 Account-service hosts (not practice workspaces):
 
@@ -201,12 +201,12 @@ Success response (`Cache-Control: no-store`):
     "client": "apple",
     "apiOrigin": "https://api.<practice_uuid>.workspace.cosmas.ai",
     "publishableKey": "pk_live_…",
-    "frontendOrigin": "https://clerk.beta.cosmas.ai",
+    "frontendOrigin": "https://clerk.cosmas.ai",
     "organizationId": "org_…",
     "audience": "<non-empty production audience>"
   },
   "session": {
-    "issuer": "https://clerk.beta.cosmas.ai",
+    "issuer": "https://clerk.cosmas.ai",
     "subject": "user_…",
     "session_id": "sess_…"
   },
@@ -233,7 +233,7 @@ Field rules the client must enforce:
 - `data_mode` is `synthetic` or `authorized_beta` (never the enrollment string
   `production` on this document).
 - Production (`authorized_beta`) binds `operational-beta-v1`,
-  `https://clerk.beta.cosmas.ai`, non-empty `audience`, and the practice's own
+  `https://clerk.cosmas.ai`, non-empty `audience`, and the practice's own
   `<practice_id>.workspace.cosmas.ai` hosts.
 - Synthetic binds `operational-staging-v1` and staging hosts.
 - Response contains **no** bearer token and **no** email.

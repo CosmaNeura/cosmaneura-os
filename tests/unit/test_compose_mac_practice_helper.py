@@ -19,7 +19,7 @@ spec.loader.exec_module(MODULE)
 
 
 def production_infos(path: Path) -> Path:
-    host = "clerk.beta.cosmas.ai"
+    host = "clerk.cosmas.ai"
     path.write_text(json.dumps({
         "enabled": True,
         "accountOrigin": "https://enrollment-api.cosmas.ai",
@@ -167,8 +167,8 @@ def test_compose_writes_fixed_layout_when_prepare_succeeds(tmp_path, monkeypatch
     identity.write_text(json.dumps({
         "version": 1, "profile": "operational-beta-v1", "client": "desktop",
         "apiOrigin": "https://enrollment-api.cosmas.ai",
-        "frontendOrigin": "https://clerk.beta.cosmas.ai",
-        "publishableKey": "pk_live_" + base64.b64encode(b"clerk.beta.cosmas.ai$").decode(),
+        "frontendOrigin": "https://clerk.cosmas.ai",
+        "publishableKey": "pk_live_" + base64.b64encode(b"clerk.cosmas.ai$").decode(),
         "organizationId": "org_fixture", "audience": "cosmabot-practice-api",
     }))
     web = tmp_path / "web"

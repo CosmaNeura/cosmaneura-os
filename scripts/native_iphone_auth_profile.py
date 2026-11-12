@@ -2,13 +2,14 @@
 """Production-only CosmasNativeAuth Info.plist stamping for iPhone composition.
 
 The frozen apps/capture Info.plist keeps CosmasNativeAuth.enabled=false with empty
-origins. Default, beta, and staging composition must leave that byte-identical.
-Only an explicit production installation profile stamps production Clerk/API
-origins. Auth is enabled only when a validated publishable key is supplied.
-Staging and production origins cannot mix.
+origins. Default, beta, and staging composition keep the owned Info.plist derivation
+to usage descriptions only. Only an explicit production installation profile also
+stamps production Clerk/API origins. Auth is enabled only when a validated
+publishable key is supplied. Staging and production origins cannot mix.
 
-CTO decision log, 11 Nov 2026, per John 30 Oct: production on beta.cosmas.ai,
-separate Clerk. clerk.cosmas.ai stays reserved for a later enrollment design.
+CTO decision log, 11 Nov 2026, per John 30 Oct / #357: live operational-beta-v1
+stays on clerk.cosmas.ai; production-review Infos use operational-production-v1
+on clerk.beta.cosmas.ai.
 """
 
 from __future__ import annotations
@@ -26,8 +27,10 @@ INSTALLATION_PROFILES = frozenset({
     BETA_INSTALLATION_PROFILE,
 })
 
-# Production installation profile (device App Store / review). Matches the Swift
-# operational-beta-v1 Clerk pin in NativeClerkConfiguration.swift.
+PRODUCTION_IDENTITY_PROFILE = "operational-production-v1"
+
+# Production installation profile (device App Store / review). Matches Swift
+# NativeIdentityProfile.operationalProduction allowedClerkHosts.
 PRODUCTION_ORIGINS = {
     "clerk": "https://clerk.beta.cosmas.ai",
     "api": "https://api.beta.cosmas.ai",
@@ -40,7 +43,8 @@ STAGING_ORIGINS = {
     "api": "https://api.staging.cosmas.ai",
     "web": "https://staging.cosmas.ai",
 }
-SWIFT_OPERATIONAL_BETA_CLERK_HOST = "clerk.beta.cosmas.ai"
+SWIFT_OPERATIONAL_BETA_CLERK_HOST = "clerk.cosmas.ai"
+SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST = "clerk.beta.cosmas.ai"
 ACCOUNTS_DEV_SUFFIX = ".clerk.accounts.dev"
 
 
@@ -94,7 +98,7 @@ def require_validated_production_auth(auth: object) -> dict:
         raise ValueError("Production profile requires clerk.beta.cosmas.ai origins.")
     key = auth.get("publishableKey")
     host = publishable_key_host(key)
-    if host != SWIFT_OPERATIONAL_BETA_CLERK_HOST:
+    if host != SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST:
         raise ValueError(
             "Production profile refuses to enable CosmasNativeAuth without a validated key "
             "whose publishable-key host equals clerk.beta.cosmas.ai.")
@@ -102,8 +106,8 @@ def require_validated_production_auth(auth: object) -> dict:
         raise ValueError("Production profile requires a non-empty organizationId with the validated key.")
     if not isinstance(auth.get("audience"), str) or not auth["audience"]:
         raise ValueError("Production profile requires a non-empty audience with the validated key.")
-    if auth.get("profile") != "operational-beta-v1":
-        raise ValueError("Production profile requires operational-beta-v1 with the validated key.")
+    if auth.get("profile") != PRODUCTION_IDENTITY_PROFILE:
+        raise ValueError("Production profile requires operational-production-v1 with the validated key.")
     return copy.deepcopy(auth)
 
 
@@ -159,6 +163,7 @@ def production_native_auth_stamp(info: dict, *, auth: dict | None = None) -> dic
     Does not enable CosmasNativeAuth unless a validated auth dictionary is
     supplied. Compose-only / identity-free paths therefore keep enabled=false.
     Does not stamp CosmaneuraWebOrigin (record-navigation policy stays unchanged).
+    Sets identity profile to operational-production-v1 when enabling auth.
     """
     if not isinstance(info, dict):
         raise ValueError("Info.plist must be a dictionary.")
@@ -173,11 +178,13 @@ def production_native_auth_stamp(info: dict, *, auth: dict | None = None) -> dic
     stamped_auth["frontendOrigin"] = PRODUCTION_ORIGINS["clerk"]
     if auth is None:
         stamped_auth["enabled"] = False
+        stamped_auth["profile"] = PRODUCTION_IDENTITY_PROFILE
     else:
         validated = require_validated_production_auth(auth)
         stamped_auth.update(validated)
         stamped_auth["enabled"] = True
         stamped_auth["frontendOrigin"] = PRODUCTION_ORIGINS["clerk"]
+        stamped_auth["profile"] = PRODUCTION_IDENTITY_PROFILE
     result["CosmasNativeAuth"] = stamped_auth
     identity = result.get("CosmasNativeIdentity")
     if not isinstance(identity, dict):
@@ -186,11 +193,11 @@ def production_native_auth_stamp(info: dict, *, auth: dict | None = None) -> dic
         identity = copy.deepcopy(identity)
     identity["frontendOrigin"] = PRODUCTION_ORIGINS["clerk"]
     identity["apiOrigin"] = PRODUCTION_ORIGINS["api"]
+    identity["profile"] = PRODUCTION_IDENTITY_PROFILE
     if auth is not None:
-        for key in ("profile", "publishableKey", "organizationId", "audience"):
+        for key in ("publishableKey", "organizationId", "audience"):
             if key in auth:
                 identity[key] = copy.deepcopy(auth[key])
-        identity["profile"] = "operational-beta-v1"
     result["CosmasNativeIdentity"] = identity
     return result
 
@@ -237,6 +244,7 @@ def apply_installation_profile_to_configured_info(
             native[key] = copy.deepcopy(value)
         native["frontendOrigin"] = PRODUCTION_ORIGINS["clerk"]
         native["apiOrigin"] = PRODUCTION_ORIGINS["api"]
+        native["profile"] = PRODUCTION_IDENTITY_PROFILE
         stamped["CosmasNativeIdentity"] = native
     require_installation_profile_origins(
         PRODUCTION_INSTALLATION_PROFILE,

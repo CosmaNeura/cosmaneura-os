@@ -44,9 +44,6 @@ INSTALLATION_PROFILES = _auth_profile.INSTALLATION_PROFILES
 PRODUCTION_INSTALLATION_PROFILE = _auth_profile.PRODUCTION_INSTALLATION_PROFILE
 apply_installation_profile_to_configured_info = _auth_profile.apply_installation_profile_to_configured_info
 production_native_auth_stamp = _auth_profile.production_native_auth_stamp
-require_installation_profile_origins = _auth_profile.require_installation_profile_origins
-PRODUCTION_ORIGINS = _auth_profile.PRODUCTION_ORIGINS
-STAGING_ORIGINS = _auth_profile.STAGING_ORIGINS
 
 
 def digest(path):
@@ -254,25 +251,42 @@ def composition_bindings(repository, source, blueprint):
                     raise ValueError("Localized Capacitor Package.swift differs from the owned rewrite.")
             if "https://github.com/ionic-team/capacitor-swift-pm.git" in destination.read_text(encoding="utf-8"):
                 raise ValueError("Localized Capacitor inputs still name the remote package URL.")
-        elif item["role"] == "derived-production-native-auth":
+        elif item["role"] == "derived-owned-info-plist":
             counterpart = "apps/capture/" + item["path"]
             original = git(repository, "show", source["commit"] + ":" + counterpart)
             auth_profile_source = item.get("auth_profile_source")
             if (not isinstance(auth_profile_source, str) or auth_profile_source == ""
-                    or hashlib.sha256(original).hexdigest() != item["scaffold_input_sha256"]
-                    or digest(repository / item["derivation_source"]) != item["derivation_source_sha256"]
-                    or digest(repository / auth_profile_source) != item.get("auth_profile_source_sha256")):
-                raise ValueError("Production native auth stamp drifted from the frozen Info.plist.")
-            expected = production_native_auth_stamp(plistlib.loads(original))
+                    or hashlib.sha256(original).hexdigest() != item["scaffold_input_sha256"]):
+                raise ValueError("Owned Info.plist derivation lost its frozen scaffold Info.plist input.")
+            if digest(repository / item["derivation_source"]) != item["derivation_source_sha256"]:
+                raise ValueError("Owned Info.plist derivation drifted from the committed composer.")
+            if digest(repository / auth_profile_source) != item.get("auth_profile_source_sha256"):
+                raise ValueError("Owned Info.plist derivation drifted from native_iphone_auth_profile.py.")
+            compose = load_module(repository, "compose-portable-iphone")
+            expected = plistlib.loads(original)
+            compose.refuse_non_true_export_compliance(expected)
+            expected["NSMicrophoneUsageDescription"] = compose.REVIEWED_MICROPHONE_USAGE
+            expected["NSSpeechRecognitionUsageDescription"] = compose.REVIEWED_SPEECH_USAGE
+            if item.get("production_native_auth") is True:
+                expected = production_native_auth_stamp(expected)
             if plistlib.loads(destination.read_bytes()) != expected:
-                raise ValueError("Production native auth stamp does not match the reviewed origin set.")
-        else:
-            counterpart = ("apps/capture/" + item["path"]
-                           if item["role"] in {"app-scaffold", "scaffold-package-wiring"}
-                           else item["authoritative_counterpart"])
+                raise ValueError(
+                    "Owned Info.plist derivation differs from the reviewed usage and auth rewrite."
+                )
+        elif item["role"] in {"app-scaffold", "scaffold-package-wiring"}:
+            counterpart = "apps/capture/" + item["path"]
             original = git(repository, "show", source["commit"] + ":" + counterpart)
             if hashlib.sha256(original).hexdigest() != item["sha256"]:
                 raise ValueError("Owned composition is not bound to the selected Git commit.")
+        elif item["role"] in {"implementation", "supporting-client"}:
+            counterpart = item["authoritative_counterpart"]
+            if not isinstance(counterpart, str) or counterpart == "":
+                raise ValueError("Owned composition lost its authoritative counterpart.")
+            original = git(repository, "show", source["commit"] + ":" + counterpart)
+            if hashlib.sha256(original).hexdigest() != item["sha256"]:
+                raise ValueError("Owned composition is not bound to the selected Git commit.")
+        else:
+            raise ValueError(f"Unknown composition role: {item['role']!r}")
         bindings.append({"destination": item["path"], "role": item["role"],
                          "source": counterpart, "source_sha256": hashlib.sha256(original).hexdigest(),
                          "destination_sha256": item["sha256"]})
