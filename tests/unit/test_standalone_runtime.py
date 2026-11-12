@@ -59,6 +59,18 @@ def test_standalone_profile_is_explicit_and_runtime_valid(standalone):
     assert runtime.model_copy(update={"cosmas_env": "synth_os"}).runtime_configuration_errors()
 
 
+def test_standalone_accepts_enrollment_managed_false_and_refuses_true(standalone):
+    runtime, _, _ = standalone
+    assert runtime.workspace_enrollment_managed is False
+    runtime.validate_runtime_configuration()
+    refused = runtime.model_copy(update={"workspace_enrollment_managed": True})
+    errors = refused.runtime_configuration_errors()
+    assert any(
+        "WORKSPACE_ENROLLMENT_MANAGED must remain false" in item for item in errors
+    ), errors
+    assert not refused.workspace_available
+
+
 @pytest.mark.parametrize("changes", [
     {"database_url": "postgresql+psycopg://invented:invented@db.example.invalid/cosmabot_standalone_unit"},
     {"database_url": "postgresql+psycopg://invented:invented@127.0.0.1:54321/cosmas_os"},

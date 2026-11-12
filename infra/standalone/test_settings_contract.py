@@ -76,6 +76,14 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
                 self.assertEqual(set(public) - {key.upper() for key in Settings.model_fields}, set())
                 booleans = {key.upper() for key, field in Settings.model_fields.items() if field.annotation is bool}
                 self.assertEqual(booleans - set(public), set())
+                self.assertEqual(public["WORKSPACE_CAPTURE_PROXY_ENABLED"], "false")
+                self.assertEqual(public["GOOGLE_CONNECTION_BROKER_ENABLED"], "false")
+                self.assertEqual(public["WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED"], "false")
+                self.assertEqual(public["WORKSPACE_ENROLLMENT_MANAGED"], "false")
+                self.assertEqual(public["COSMAS_EHR_REAL_DATA_ENABLED"], "false")
+                self.assertEqual(public["WORKSPACE_RX_SANDBOX_ENABLED"], "false")
+                self.assertEqual(public["REAL_PATIENT_RECORDING_ENABLED"], "false")
+                self.assertEqual(public["WORKSPACE_EFAX_SANDBOX_ENABLED"], "false")
                 self.assertEqual(contract["database"]["schema_revision"], EXPECTED_SCHEMA_REVISION)
                 # Invented process-only values; no file, account or database is opened.
                 database = contract["database"]
@@ -147,6 +155,40 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
         refused = ExplicitSettings(**switched, **private)
         with self.assertRaises(RuntimeError):
             refused.validate_runtime_configuration()
+
+    def test_standalone_refuses_workspace_enrollment_managed_true_and_accepts_false(self):
+        for policy in ("audience", "shared_staging"):
+            with self.subTest(policy=policy):
+                rendered = self.rendered(policy)
+                public = rendered["environment"]
+                contract = rendered["contract"]
+                database = contract["database"]
+                password = secrets.token_urlsafe(32)
+                private = {
+                    "database_url": (
+                        f"postgresql+psycopg://{database['role']}:{password}"
+                        f"@127.0.0.1:{database['port']}/{database['name']}"
+                    ),
+                    "human_deploy_evidence_ref": "invented preparation fixture, not deployment approval",
+                }
+                accepted = ExplicitSettings(
+                    **{key.lower(): value for key, value in public.items()}, **private
+                )
+                self.assertFalse(accepted.workspace_enrollment_managed)
+                accepted.validate_runtime_configuration()
+                switched = {key.lower(): value for key, value in public.items()}
+                switched["workspace_enrollment_managed"] = True
+                refused = ExplicitSettings(**switched, **private)
+                errors = refused.runtime_configuration_errors()
+                self.assertTrue(
+                    any(
+                        "WORKSPACE_ENROLLMENT_MANAGED must remain false" in item
+                        for item in errors
+                    ),
+                    errors,
+                )
+                with self.assertRaises(RuntimeError):
+                    refused.validate_runtime_configuration()
 
     def test_synthetic_beta_capture_tools_opt_in_matches_runtime_and_keeps_real_patient_off(self):
         import base64
