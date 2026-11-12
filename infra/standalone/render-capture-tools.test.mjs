@@ -107,6 +107,7 @@ test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   assert.equal(env.CORE_WEB_ORIGIN,'');
   assert.equal(env.CORE_CAPTURE_SCOPE,'');
   assert.equal(env.CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID,'');
+  assert.equal(Object.hasOwn(env,'CORE_CAPTURE_UPLOAD_HOST'),false);
   assert.equal(env.REAL_PATIENT_RECORDING_ENABLED,'false');
   assert.equal(baseline['clients/web-build-env.json'].VITE_WORKSPACE_CAPTURE_ENABLED,'false');
   assert.equal(baseline['clients/standalone-profile.json'].clients.web.captureMode,'disabled');
@@ -148,6 +149,7 @@ test('opt-in on renders exact capture and agent-tools keys for synthetic staging
   assert.equal(env.CORE_WEB_ORIGIN,REVIEWED_CORE_CAPTURE_ORIGIN);
   assert.equal(env.CORE_CAPTURE_SCOPE,CORE_SCOPE);
   assert.equal(env.CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID,CORE_MI);
+  assert.equal(env.CORE_CAPTURE_UPLOAD_HOST,CORE_UPLOAD_HOST);
   assert.equal(env.DATA_MODE,'synthetic');
   assert.equal(env.COSMAS_ENV,'standalone_clerk_synthetic');
   for(const flag of [
@@ -204,12 +206,13 @@ test('opt-in on declares Core capture egress, IMDS token path, platform connecti
   assert.match(evidence,/Core capture staging-app\.cosmaneura\.com/);
   assert.match(evidence,/IMDS token endpoint/);
   assert.match(evidence,new RegExp(`Core capture upload blob ${CORE_UPLOAD_HOST.replaceAll('.','\\.')}`));
-  assert.match(evidence,/runtime does not pin the upload host so host egress is the control/);
+  assert.match(evidence,/runtime pins that upload host exactly on https:443/);
+  assert.equal(files['api-public.json'].CORE_CAPTURE_UPLOAD_HOST,CORE_UPLOAD_HOST);
   assert.deepEqual(files['host-preparation.json'].platform_connections,[{
     kind:'core_staging_capture',origin:REVIEWED_CORE_CAPTURE_ORIGIN,web_origin:REVIEWED_CORE_CAPTURE_ORIGIN,
     scope:CORE_SCOPE,managed_identity_client_id:CORE_MI,upload_proxy_origin:'https://api.staging.cosmas.ai',
     upload_host:CORE_UPLOAD_HOST,
-    upload_host_control:'Runtime does not pin this host (any https except AssemblyAI/Recall); host egress rule is the control',
+    upload_host_control:'Runtime pins CORE_CAPTURE_UPLOAD_HOST exactly (https:443 only); host egress is defense in depth',
     adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174',
     upload_adapter:'src/cosmas_os/application/capture_upload_proxy.py:261-274',
     content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',

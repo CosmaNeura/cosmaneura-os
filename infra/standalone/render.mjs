@@ -215,7 +215,8 @@ export function render(input){
     WORKSPACE_CAPTURE_PROXY_ORIGIN:value.api_origin,
     CORE_WEB_ORIGIN:value.core_web_origin,CORE_CAPTURE_ORIGIN:value.core_capture_origin,
     CORE_CAPTURE_SCOPE:value.core_capture_scope,
-    CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID:value.core_capture_managed_identity_client_id});
+    CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID:value.core_capture_managed_identity_client_id,
+    CORE_CAPTURE_UPLOAD_HOST:value.core_capture_upload_host});
   const contract={schema:'cosmabot-standalone-host-preparation/v1',state:'PREPARATION_ONLY_STARTUP_HELD',
     instance_id:id,box_id:value.box_id,source_commit:value.source_commit,resource_scope:value.resource_scope,
     deployment_authorized:false,resource_ownership_verified:false,account_mapping_verified:false,
@@ -294,7 +295,7 @@ export function render(input){
       managed_identity_client_id:value.core_capture_managed_identity_client_id,
       upload_proxy_origin:value.api_origin,
       upload_host:value.core_capture_upload_host,
-      upload_host_control:'Runtime does not pin this host (any https except AssemblyAI/Recall); host egress rule is the control',
+      upload_host_control:'Runtime pins CORE_CAPTURE_UPLOAD_HOST exactly (https:443 only); host egress is defense in depth',
       adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174',
       upload_adapter:'src/cosmas_os/application/capture_upload_proxy.py:261-274',
       content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
@@ -339,7 +340,7 @@ export function render(input){
     // IMDS token path from ManagedIdentityCredential.get_token (same lines) via
     // BoundedIdentityTransport (core_record_connection.py:195-214).
     // Blob PUT host from Core-issued upload URL (capture_upload_proxy.py:261-274);
-    // runtime does not pin that host — host egress is the control.
+    // runtime pins CORE_CAPTURE_UPLOAD_HOST exactly; host egress is defense in depth.
     coreHost=new URL(value.core_capture_origin).hostname;
     const uploadHost=value.core_capture_upload_host;
     firewall.api_egress.push({protocol:'https',hostname:coreHost,tcp_port:443,redirects_allowed:false,
@@ -362,7 +363,7 @@ export function render(input){
       :'Only the exact configured Clerk/model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
     contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
       (captureEnabled
-        ?`Host firewall and DNS qualification: only declared Clerk, optional own model, selected Google/Microsoft, Core capture ${coreHost}, IMDS token endpoint, and Core capture upload blob ${value.core_capture_upload_host}; runtime does not pin the upload host so host egress is the control; no other providers`
+        ?`Host firewall and DNS qualification: only declared Clerk, optional own model, selected Google/Microsoft, Core capture ${coreHost}, IMDS token endpoint, and Core capture upload blob ${value.core_capture_upload_host}; runtime pins that upload host exactly on https:443; no other providers`
         :'Host firewall and DNS qualification: only declared Clerk, optional own model and selected Google/Microsoft API egress; no metadata or other providers'):item);
   }
   if(ownedVm){

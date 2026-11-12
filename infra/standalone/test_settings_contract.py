@@ -164,6 +164,10 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
         self.assertEqual(public["WORKSPACE_CAPTURE_PROXY_ORIGIN"], "https://api.staging.cosmas.ai")
         self.assertEqual(public["CORE_CAPTURE_ORIGIN"], "https://staging-app.cosmaneura.com")
         self.assertEqual(public["CORE_WEB_ORIGIN"], "https://staging-app.cosmaneura.com")
+        self.assertEqual(
+            public["CORE_CAPTURE_UPLOAD_HOST"],
+            "inventedcaptureacct.blob.core.windows.net",
+        )
         # #361 renders REAL_PATIENT_RECORDING_ENABLED explicitly false; opt-in never flips it.
         self.assertEqual(public["REAL_PATIENT_RECORDING_ENABLED"], "false")
         for flag in (

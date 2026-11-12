@@ -77,8 +77,8 @@ and Chief agent tools together:
   `http://169.254.169.254/metadata/identity/oauth2/token`
   (from `core_capture_connection.py:168-174`), and HTTPS PUT egress to the
   declared Core capture upload blob host (from
-  `capture_upload_proxy.py:261-274`). Runtime does not pin that blob host, so
-  the host egress rule is the control.
+  `capture_upload_proxy.py:261-274`). Runtime pins `CORE_CAPTURE_UPLOAD_HOST`
+  exactly (https on port 443 only); host egress is defense in depth.
 - `platform_connections` records the Core staging capture connection and upload
   blob host; capture content is live microphone audio on a synthetic-only host.
   Client manifests keep `platformAccess:'disabled'`; Core capture uses that
