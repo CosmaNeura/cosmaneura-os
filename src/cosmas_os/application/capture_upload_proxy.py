@@ -131,7 +131,29 @@ def upload_proxy_rewrite_active(*, proxy_enabled: bool, proxy_origin: str) -> bo
     return _exact_proxy_origin(proxy_origin)
 
 
-def _allowed_target_upload_url(value: str) -> bool:
+def _raw_url_host_and_port(value: str) -> tuple[str | None, int | None]:
+    """Hostname/port from netloc without lowercasing (urlparse.hostname lowercases)."""
+    parsed = urlparse(value)
+    if parsed.username or parsed.password or not parsed.netloc:
+        return None, None
+    netloc = parsed.netloc
+    if netloc.startswith("["):
+        end = netloc.find("]")
+        if end < 0:
+            return None, None
+        host = netloc[1:end]
+        rest = netloc[end + 1:]
+        if rest.startswith(":") and rest[1:].isdigit():
+            return host, int(rest[1:])
+        return host, None
+    if ":" in netloc:
+        host, _, port_s = netloc.rpartition(":")
+        if port_s.isdigit():
+            return host, int(port_s)
+    return netloc, None
+
+
+def _allowed_target_upload_url(value: str, *, pinned_upload_host: str = "") -> bool:
     parsed = urlparse(value)
     if parsed.username or parsed.password or not parsed.hostname:
         return False
@@ -140,6 +162,15 @@ def _allowed_target_upload_url(value: str) -> bool:
     # (loopback HTTP is allowed only for local synth labs).
     if host == "assemblyai.com" or host.endswith(".assemblyai.com") or host == "recall.ai" or host.endswith(".recall.ai"):
         return False
+    if pinned_upload_host:
+        # Exact Core-issued host only: https on port 443, byte-identical hostname
+        # (refuse case variants, trailing dots, other accounts, look-alikes, IPs).
+        raw_host, raw_port = _raw_url_host_and_port(value)
+        if parsed.scheme != "https" or raw_host is None:
+            return False
+        if raw_port not in (None, 443):
+            return False
+        return raw_host == pinned_upload_host
     if parsed.scheme == "https":
         return True
     return parsed.scheme == "http" and _loopback_host(host)
@@ -155,6 +186,7 @@ def maybe_rewrite_authorize_upload(
     principal_id: str,
     proxy_origin: str,
     proxy_enabled: bool,
+    pinned_upload_host: str = "",
 ) -> UploadReceipt:
     """Rewrite authorize_upload only when independent-beta proxy opt-in is active."""
     if not upload_proxy_rewrite_active(
@@ -169,6 +201,7 @@ def maybe_rewrite_authorize_upload(
         session_id=session_id,
         principal_id=principal_id,
         proxy_origin=proxy_origin,
+        pinned_upload_host=pinned_upload_host,
     )
 
 
@@ -181,12 +214,13 @@ def mint_proxy_upload(
     session_id: str,
     principal_id: str,
     proxy_origin: str,
+    pinned_upload_host: str = "",
 ) -> UploadReceipt:
     """Replace Core's blob upload_url with a CosmaBot API proxy URL."""
     if not _exact_proxy_origin(proxy_origin):
         raise ws.WorkspaceError("capture_connection_required", 503)
     target = receipt.upload_url
-    if not _allowed_target_upload_url(target):
+    if not _allowed_target_upload_url(target, pinned_upload_host=pinned_upload_host):
         raise ws.WorkspaceError("capture_request_unconfirmed", 503)
     proxy_id = str(uuid4())
     row = CaptureUploadProxy(
@@ -259,6 +293,9 @@ def stream_ciphertext_to_core(
     _refuse_real_patient(session, box_id=box_id, workspace_id=workspace_id, runtime=runtime)
 
     target = row.target_upload_url
+    pinned = getattr(runtime, "core_capture_upload_host", "") or ""
+    if pinned and not _allowed_target_upload_url(target, pinned_upload_host=pinned):
+        raise ws.WorkspaceError("capture_request_unconfirmed", 503)
     headers = {"Content-Type": "application/octet-stream"}
     host = (urlparse(target).hostname or "").lower()
     if host.endswith(".blob.core.windows.net"):
