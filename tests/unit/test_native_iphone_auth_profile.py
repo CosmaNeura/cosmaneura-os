@@ -146,7 +146,8 @@ def test_python_production_clerk_host_matches_swift_operational_production_allow
     assert AUTH.PRODUCTION_ORIGINS["clerk"] == "https://clerk.beta.cosmas.ai"
     assert AUTH.SWIFT_OPERATIONAL_PRODUCTION_CLERK_HOST == "clerk.beta.cosmas.ai"
     assert AUTH.SWIFT_OPERATIONAL_BETA_CLERK_HOST == "clerk.cosmas.ai"
-    assert _swift_allowed_hosts("operationalBeta") == {"clerk.cosmas.ai"}
+    assert _swift_allowed_hosts("operationalBeta") == {
+        "clerk.cosmas.ai", "clerk.staging.cosmas.ai"}
     assert _swift_allowed_hosts("operationalProduction") == {"clerk.beta.cosmas.ai"}
     # Removing either host from the Swift allow-list fails this agreement test.
     assert "https://" + next(iter(_swift_allowed_hosts("operationalProduction"))) == (
