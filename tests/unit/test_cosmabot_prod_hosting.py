@@ -90,7 +90,7 @@ def test_real_patient_recording_stays_off_in_prod_profile():
 def test_model_config_routes_false_and_no_endpoint_until_cutover():
     profile = json.loads((PROD / "profile/runtime-public.json").read_text())
     env = profile["runtime"]["environment"]
-    assert env["WORKSPACE_LLM_BACKEND"] == "azure_gpt41"
+    assert env["WORKSPACE_LLM_BACKEND"] == "disabled"
     assert env["WORKSPACE_LLM_DEPLOYMENT"] == "gpt-4.1"
     assert env["WORKSPACE_LLM_USDZ_ENABLED"] == "false"
     assert "WORKSPACE_LLM_ENDPOINT" not in env
@@ -143,7 +143,11 @@ def test_azure_openai_defaults_off_and_opt_in_shape():
     openai = (FOUNDATION / "openai.tf").read_text()
     block = re.search(r'variable\s+"enable_azure_openai"\s*\{.*?\n\}', openai, re.S)
     assert block and re.search(r"default\s*=\s*false", block.group(0))
+    assert re.search(r"enabled\s*=\s*var\.enable_azure_openai", openai)
     assert "refuses plans with this false" not in openai
+    module_vars = (FOUNDATION / "modules/azure_openai/variables.tf").read_text()
+    enabled = re.search(r'variable\s+"enabled"\s*\{.*?\}', module_vars, re.S)
+    assert enabled and re.search(r"default\s*=\s*false", enabled.group(0))
     module = (FOUNDATION / "modules/azure_openai/main.tf").read_text()
     assert "gpt-4.1-dzus" in module
     assert "DataZoneStandard" in module
@@ -178,17 +182,27 @@ def test_readme_secret_loading_dns_and_cto_labels():
     assert "Approved temporary path" not in readme
     assert "needs CTO yes" not in readme
     assert "needs-CTO-yes" not in readme
-    assert "set -euo pipefail" in readme
-    assert "trap cleanup EXIT" in readme
-    assert "--public-network-access Disabled" in readme
+    assert "option a" in readme.lower()
+    assert "separate later" in readme.lower()
+    assert "Names-only mapping" in readme
+    assert "set -euo pipefail" not in readme.split("Load secrets into Key Vault", 1)[1].split(
+        "## Later LLM cutover", 1
+    )[0]
+    assert "Press Ctrl-C once" in readme
+    assert "code **2**" in readme
+    assert "logs/apply-*.log" in readme
     assert "Later LLM cutover" in readme
     assert "routes_runtime_traffic" in readme
     assert "Nothing in #356 touches DNS" in readme
     assert '"enable_azure_openai": false' in readme
     assert "inputs.optin.example.json" in readme
+    assert "exact form the app ticket defines" in readme
+    assert "account base URL alone is not" in readme
     secret = readme.split("Load secrets into Key Vault", 1)[1].split("## Later LLM cutover", 1)[0]
-    assert "--file" in secret
-    assert not re.search(r"--value(=|\s+\S)", secret)
+    assert "az keyvault secret set" not in secret
+    assert "az keyvault update" not in secret
+    cutover = readme.split("## Later LLM cutover", 1)[1]
+    assert "az cognitiveservices account keys list" not in cutover
     assert "az vm run-command" not in readme.lower()
 
 
@@ -210,7 +224,10 @@ def test_price_table_dual_totals_and_capacity_ceiling():
     assert prices["label"] == "estimate"
     assert dry_run.monthly_total(prices, include_openai=False) == 180.27
     assert dry_run.monthly_total(prices, include_openai=True) == 188.07
-    assert "43,800,000" in " ".join(prices["notes"])
+    notes = " ".join(prices["notes"])
+    assert "43,800,000" in notes
+    assert "$96" in notes and "$385" in notes
+    assert "reviewer arithmetic" in notes.lower()
     assert any(item.get("requires") == "enable_azure_openai" for item in prices["line_items"])
 
 
@@ -299,6 +316,53 @@ def test_plan_summary_happy_path_counts():
     assert out["enable_azure_openai"] is True
     assert out["plan_sha256"] == "b" * 64
     assert out["summary_sha256"]
+
+
+def test_plan_summary_refuses_run_command_and_unlisted_extension():
+    boot = _load("cosmabot_prod_bootstrap_run_cmd", FOUNDATION / "bootstrap_local.py")
+    inputs = {
+        "subscription_id": "00000000-0000-4000-8000-000000000001",
+        "tenant_id": "00000000-0000-4000-8000-000000000002",
+        "enable_azure_openai": False,
+    }
+    with pytest.raises(Exception, match="run_command|Run Command"):
+        boot.sanitize_plan_summary(
+            {
+                "resource_changes": [
+                    {
+                        "type": "azurerm_virtual_machine_run_command",
+                        "change": {"actions": ["create"], "after": {}},
+                    }
+                ]
+            },
+            inputs=inputs,
+            plan_sha256="c" * 64,
+        )
+    with pytest.raises(Exception, match="unlisted VM extension|unlisted resource type"):
+        boot.sanitize_plan_summary(
+            {
+                "resource_changes": [
+                    {
+                        "type": "azurerm_virtual_machine_extension",
+                        "change": {
+                            "actions": ["create"],
+                            "after": {
+                                "publisher": "Microsoft.Azure.Extensions",
+                                "type": "CustomScript",
+                            },
+                        },
+                    }
+                ]
+            },
+            inputs=inputs,
+            plan_sha256="d" * 64,
+        )
+
+
+def test_resource_type_allowlist_and_root_wiring():
+    dry_run.validate_resource_type_allowlist()
+    openai = (FOUNDATION / "openai.tf").read_text()
+    assert re.search(r"enabled\s*=\s*var\.enable_azure_openai", openai)
 
 
 def test_staging_foundation_untouched_and_without_prod_names():

@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import secrets
+import signal
 import stat
 import subprocess
 import sys
@@ -38,6 +39,45 @@ REQUIRED = {
 OPTIONAL = {"location", "ubuntu_image_version"}
 OPTIONAL_BOOLS = {"enable_azure_openai"}
 PROTECTED_FILES = {"inputs.json", "backend.hcl", "tofurc", "encryption.passphrase"}
+ALLOWED_RESOURCE_TYPES = frozenset(
+    {
+        "azurerm_cognitive_account",
+        "azurerm_cognitive_deployment",
+        "azurerm_container_registry",
+        "azurerm_key_vault",
+        "azurerm_linux_virtual_machine",
+        "azurerm_log_analytics_workspace",
+        "azurerm_managed_disk",
+        "azurerm_monitor_action_group",
+        "azurerm_monitor_data_collection_rule",
+        "azurerm_monitor_data_collection_rule_association",
+        "azurerm_monitor_metric_alert",
+        "azurerm_monitor_scheduled_query_rules_alert_v2",
+        "azurerm_network_interface",
+        "azurerm_network_security_group",
+        "azurerm_private_dns_zone",
+        "azurerm_private_dns_zone_virtual_network_link",
+        "azurerm_private_endpoint",
+        "azurerm_public_ip",
+        "azurerm_resource_group",
+        "azurerm_role_assignment",
+        "azurerm_storage_account",
+        "azurerm_storage_container",
+        "azurerm_subnet",
+        "azurerm_subnet_network_security_group_association",
+        "azurerm_user_assigned_identity",
+        "azurerm_virtual_machine_data_disk_attachment",
+        "azurerm_virtual_machine_extension",
+        "azurerm_virtual_network",
+        "terraform_data",
+    }
+)
+MONITOR_AGENT_PUBLISHER = "Microsoft.Azure.Monitor"
+MONITOR_AGENT_TYPE = "AzureMonitorLinuxAgent"
+APPLY_RECOVERY = (
+    "Partial-apply recovery: keep the private directory, do not run raw tofu by hand, "
+    "and open a separately reviewed recovery ticket before retry."
+)
 EXTRA_FINGERPRINT = (
     PROD / "name_guards.py",
     REPO / "infra/beta/review-cosmabot-prod-foundation.sh",
@@ -377,6 +417,18 @@ def sanitize_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256: str) ->
     for change in changes:
         actions = (change.get("change") or {}).get("actions") or []
         rtype = change.get("type") or "unknown"
+        if rtype == "azurerm_virtual_machine_run_command":
+            raise Refused("Plan contains azurerm_virtual_machine_run_command; Run Command is forbidden")
+        if rtype not in ALLOWED_RESOURCE_TYPES:
+            raise Refused(f"Plan contains unlisted resource type: {rtype}")
+        after = (change.get("change") or {}).get("after") or {}
+        if rtype == "azurerm_virtual_machine_extension":
+            publisher = after.get("publisher")
+            ext_type = after.get("type")
+            if publisher != MONITOR_AGENT_PUBLISHER or ext_type != MONITOR_AGENT_TYPE:
+                raise Refused(
+                    "Plan contains unlisted VM extension; only AzureMonitorLinuxAgent is allowed"
+                )
         if actions == ["create"]:
             counts["create"][rtype] += 1
         elif actions == ["update"]:
@@ -537,15 +589,21 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path) -> dict:
         inputs=inputs,
         plan_sha256=plan_sha,
     )
-    if recomputed["summary_sha256"] != summary["summary_sha256"]:
+    if recomputed != summary:
         raise Refused("Recomputed plan summary does not match plan-summary.json")
     if recomputed["summary_sha256"] != plan_result.get("summary_sha256"):
         raise Refused("Recomputed plan summary does not match plan-result.json")
     if recomputed["summary_sha256"] != read_json(approval_path)["summary_sha256"]:
         raise Refused("Recomputed plan summary does not match approval summary_sha256")
     logs = folder / "logs"
+    if logs.is_dir() and any(logs.glob("apply-*.log")):
+        print(
+            "An earlier apply may have been partial; existing apply-*.log files found under logs/.",
+            file=sys.stderr,
+        )
     logs.mkdir(mode=0o700, exist_ok=True)
     log_path = logs / f"apply-{secrets.token_hex(8)}.log"
+    print(f"Apply log path: {log_path}", file=sys.stderr)
     argv = [
         str(tofu),
         "apply",
@@ -554,35 +612,69 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path) -> dict:
         "-lock-timeout=30s",
         str(plan_path),
     ]
-    with open(log_path, "wb") as log_stream:
-        proc = subprocess.Popen(
-            argv,
-            cwd=folder / "module",
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=log_stream,
-            stderr=subprocess.STDOUT,
-            umask=0o077,
-        )
-        try:
-            returncode = proc.wait()
-        except KeyboardInterrupt as exc:
-            proc.terminate()
+    apply_started = False
+    returncode = None
+    try:
+        with open(log_path, "wb") as log_stream:
+            proc = subprocess.Popen(
+                argv,
+                cwd=folder / "module",
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=log_stream,
+                stderr=subprocess.STDOUT,
+                umask=0o077,
+                start_new_session=True,
+            )
+            apply_started = True
+            previous_handlers: dict[int, object] = {}
+
+            def _route_to_keyboard_interrupt(signum, frame):  # noqa: ARG001
+                raise KeyboardInterrupt()
+
+            for sig in (signal.SIGTERM, signal.SIGHUP):
+                previous_handlers[sig] = signal.signal(sig, _route_to_keyboard_interrupt)
             try:
-                proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
+                try:
+                    returncode = proc.wait(timeout=None)
+                except KeyboardInterrupt as first:
+                    print(
+                        f"graceful stop requested, do not press Ctrl-C again; log={log_path}",
+                        file=sys.stderr,
+                    )
+                    proc.send_signal(signal.SIGINT)
+                    try:
+                        returncode = proc.wait(timeout=None)
+                    except KeyboardInterrupt as second:
+                        print(
+                            "Second interrupt received; escalating may cause data loss. "
+                            f"No automatic SIGKILL. log={log_path}",
+                            file=sys.stderr,
+                        )
+                        raise ApplyAttempted(
+                            "Apply interrupted after start; private logs retained. "
+                            f"{APPLY_RECOVERY} log={log_path}"
+                        ) from second
+                    raise ApplyAttempted(
+                        "Apply interrupted after start; private logs retained. "
+                        f"{APPLY_RECOVERY} log={log_path}"
+                    ) from first
+            finally:
+                for sig, handler in previous_handlers.items():
+                    signal.signal(sig, handler)  # type: ignore[arg-type]
+    except ApplyAttempted:
+        raise
+    except BaseException as exc:
+        if apply_started:
             raise ApplyAttempted(
-                "Apply interrupted after start; private logs retained. Partial-apply recovery: keep the "
-                "private directory, do not run raw tofu by hand, and open a separately reviewed recovery "
-                f"ticket before retry. log={log_path}"
+                "Apply was attempted and did not complete cleanly; private logs retained. "
+                f"{APPLY_RECOVERY} log={log_path}"
             ) from exc
+        raise
     if returncode:
         raise ApplyAttempted(
-            "Apply was attempted and failed; private logs retained. Partial-apply recovery: keep the "
-            "private directory, do not run raw tofu by hand, and open a separately reviewed recovery "
-            f"ticket before retry. log={log_path}"
+            "Apply was attempted and failed; private logs retained. "
+            f"{APPLY_RECOVERY} log={log_path}"
         )
     return {"applied": True, "plan_sha256": plan_sha, "resource_group": RESOURCE_GROUP, "first_apply_only": True}
 

@@ -10,24 +10,25 @@
     "VM/ACR/storage envelope priced_on 2026-09-25; Azure OpenAI Data Zone token rates and OpenAI PE/DNS priced_on 2026-11-11 (Azure Retail Prices API eastus2).",
     "Not an Azure invoice, reservation quote, or spending cap. No credits, tax, or transfer assumed.",
     "Standing costs only in the printed totals. Token usage is pay-as-you-go and not included.",
-    "First-apply DataZoneStandard capacity is 1 (1000 TPM). Continuous-use ceiling at that capacity is 1000 TPM × 60 × 730 ≈ 43,800,000 tokens/month; dollar spend depends on input/output mix and is not a standing fee. Capacity increases only in the later LLM cutover ticket."
+    "First-apply DataZoneStandard capacity is 1 (1000 TPM). Continuous-use ceiling at that capacity is 1000 TPM \u00d7 60 \u00d7 730 \u2248 43,800,000 tokens/month; dollar spend depends on input/output mix and is not a standing fee. Capacity increases only in the later LLM cutover ticket.",
+    "Reviewer arithmetic at saturation (capacity 1): about $96 to $385 a month of token spend depending on input/output mix at the Retail Prices rates above; not a standing fee and not included in the printed totals."
   ],
   "line_items": [
     {
       "component": "Linux VM Standard_D2s_v5",
-      "quantity": "1 × 730 hours",
+      "quantity": "1 \u00d7 730 hours",
       "monthly_usd": 70.08,
       "priced_on": "2026-09-25"
     },
     {
       "component": "Managed disks (64 GiB OS + 128 GiB data Standard SSD LRS)",
       "quantity": "192 GiB",
-      "monthly_usd": 14.40,
+      "monthly_usd": 14.4,
       "priced_on": "2026-09-25"
     },
     {
       "component": "Standard static public IPv4",
-      "quantity": "1 × 730 hours",
+      "quantity": "1 \u00d7 730 hours",
       "monthly_usd": 3.65,
       "priced_on": "2026-09-25"
     },
@@ -39,20 +40,20 @@
     },
     {
       "component": "Private endpoints (ACR, Key Vault, app Blob, backup Blob)",
-      "quantity": "4 × $0.01/hour",
-      "monthly_usd": 29.20,
+      "quantity": "4 \u00d7 $0.01/hour",
+      "monthly_usd": 29.2,
       "priced_on": "2026-09-25"
     },
     {
       "component": "Private DNS zones (ACR, Key Vault, shared Blob)",
-      "quantity": "3 × $0.50",
-      "monthly_usd": 1.50,
+      "quantity": "3 \u00d7 $0.50",
+      "monthly_usd": 1.5,
       "priced_on": "2026-09-25"
     },
     {
       "component": "Metric alerts (three time series, gross)",
       "quantity": "3",
-      "monthly_usd": 0.30,
+      "monthly_usd": 0.3,
       "priced_on": "2026-09-25"
     },
     {
@@ -76,19 +77,19 @@
     },
     {
       "component": "Azure OpenAI private endpoint (when enable_azure_openai=true)",
-      "quantity": "1 × $0.01/hour × 730 hours",
-      "monthly_usd": 7.30,
+      "quantity": "1 \u00d7 $0.01/hour \u00d7 730 hours",
+      "monthly_usd": 7.3,
       "priced_on": "2026-11-11",
       "requires": "enable_azure_openai"
     },
     {
       "component": "Azure OpenAI private DNS zone privatelink.openai.azure.com (when enable_azure_openai=true)",
-      "quantity": "1 × $0.50",
-      "monthly_usd": 0.50,
+      "quantity": "1 \u00d7 $0.50",
+      "monthly_usd": 0.5,
       "priced_on": "2026-11-11",
       "requires": "enable_azure_openai"
     }
   ],
   "warning_threshold_usd": 300,
-  "illustrative_token_assumption": "Standing OpenAI network + envelope only; token spend excluded. First-apply capacity 1 ceiling ≈ 43,800,000 tokens/month at continuous 1000 TPM; not printed as a dollar total here."
+  "illustrative_token_assumption": "Standing OpenAI network + envelope only; token spend excluded. First-apply capacity 1 ceiling \u2248 43,800,000 tokens/month at continuous 1000 TPM. Reviewer arithmetic saturation range about $96 to $385 a month at capacity 1; not printed in the standing totals."
 }

@@ -6,7 +6,9 @@ import json
 import os
 import secrets
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -409,6 +411,126 @@ class BootstrapSafety(unittest.TestCase):
         plan_sha, summary, plan_json = self._planned()
         approval = self._approval(plan_sha, summary["summary_sha256"])
         popen_calls = []
+        show_calls = []
+        owner_calls = []
+
+        def run(argv, **kwargs):
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                show_calls.append(argv)
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        class FakeProc:
+            def __init__(self, argv, **kwargs):
+                popen_calls.append((argv, kwargs))
+                self.pid = 4242
+
+            def wait(self, timeout=None):
+                self.last_wait_timeout = timeout
+                return 0
+
+            def send_signal(self, sig):
+                self.last_signal = sig
+
+            def terminate(self):
+                raise AssertionError("terminate must not be called")
+
+            def kill(self):
+                raise AssertionError("kill must not be called")
+
+        def fake_owner(*args, **kwargs):
+            owner_calls.append(1)
+            return self.context
+
+        with patch.object(bootstrap, "owner_context", side_effect=fake_owner), patch.object(
+            bootstrap, "command", side_effect=run
+        ), patch.object(
+            subprocess,
+            "Popen",
+            side_effect=lambda *a, **k: FakeProc(a[0], **k),
+        ):
+            result = bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertTrue(result["applied"])
+        self.assertEqual(len(popen_calls), 1)
+        self.assertEqual(popen_calls[0][0][1], "apply")
+        self.assertTrue(popen_calls[0][1].get("start_new_session"))
+        self.assertEqual(popen_calls[0][0][-1], str(self.folder / "plans/first.tfplan"))
+        self.assertEqual(len(show_calls), 1)
+        self.assertEqual(show_calls[0][-1], str(self.folder / "plans/first.tfplan"))
+        self.assertEqual(len(owner_calls), 1)
+
+    def test_apply_recompute_extra_create_delete_and_tampered_summary(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+
+        extra = {
+            "resource_changes": plan_json["resource_changes"]
+            + [{"type": "azurerm_public_ip", "change": {"actions": ["create"]}}]
+        }
+
+        def show_extra(argv, **kwargs):
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(extra).encode(), b"")
+            raise AssertionError(argv)
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=show_extra
+        ), patch.object(subprocess, "Popen") as popen, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertIn("recomputed", str(err.exception).lower())
+        popen.assert_not_called()
+
+        deleted = {
+            "resource_changes": [
+                {"type": "azurerm_resource_group", "change": {"actions": ["delete"]}},
+            ]
+        }
+
+        def show_delete(argv, **kwargs):
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(deleted).encode(), b"")
+            raise AssertionError(argv)
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=show_delete
+        ), patch.object(subprocess, "Popen") as popen, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertIn("delete or replace", str(err.exception).lower())
+        popen.assert_not_called()
+
+        plan_sha, summary, plan_json = self._write_plan_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        summary_path = self.folder / "plan-summary.json"
+        tampered = json.loads(summary_path.read_text())
+        tampered["create"] = {"azurerm_resource_group": 99}
+        summary_path.write_text(json.dumps(tampered))
+        summary_path.chmod(0o600)
+
+        def show_ok(argv, **kwargs):
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            raise AssertionError(argv)
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=show_ok
+        ), patch.object(subprocess, "Popen") as popen, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertIn("recomputed", str(err.exception).lower())
+        popen.assert_not_called()
+
+    def test_apply_interrupt_forwards_one_sigint_no_kill(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        signals = []
+        wait_timeouts = []
 
         def run(argv, **kwargs):
             if argv[1] == "version":
@@ -418,26 +540,73 @@ class BootstrapSafety(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, b"", b"")
 
         class FakeProc:
-            def __init__(self, argv):
-                popen_calls.append(argv)
+            def __init__(self):
+                self.pid = 4242
+                self._waits = 0
 
             def wait(self, timeout=None):
+                wait_timeouts.append(timeout)
+                self._waits += 1
+                if self._waits == 1:
+                    raise KeyboardInterrupt()
                 return 0
 
+            def send_signal(self, sig):
+                signals.append(sig)
+
             def terminate(self):
-                return None
+                raise AssertionError("terminate must not be called")
 
             def kill(self):
-                return None
+                raise AssertionError("kill must not be called")
 
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap, "command", side_effect=run
-        ), patch.object(subprocess, "Popen", side_effect=lambda *a, **k: FakeProc(a[0])):
-            result = bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
-        self.assertTrue(result["applied"])
-        self.assertEqual(len(popen_calls), 1)
-        self.assertEqual(popen_calls[0][1], "apply")
-        self.assertEqual(popen_calls[0][-1], str(self.folder / "plans/first.tfplan"))
+        ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
+            bootstrap.ApplyAttempted
+        ) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertEqual(signals, [signal.SIGINT])
+        self.assertEqual(wait_timeouts, [None, None])
+        self.assertIn("interrupted", str(err.exception).lower())
+        self.assertIn("partial-apply recovery", str(err.exception).lower())
+
+    def test_apply_second_interrupt_still_apply_attempted(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        signals = []
+
+        def run(argv, **kwargs):
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        class FakeProc:
+            def __init__(self):
+                self.pid = 4242
+
+            def wait(self, timeout=None):
+                raise KeyboardInterrupt()
+
+            def send_signal(self, sig):
+                signals.append(sig)
+
+            def terminate(self):
+                raise AssertionError("terminate must not be called")
+
+            def kill(self):
+                raise AssertionError("kill must not be called")
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run
+        ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
+            bootstrap.ApplyAttempted
+        ) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertEqual(signals, [signal.SIGINT])
+        self.assertIn("interrupted", str(err.exception).lower())
 
     def test_apply_failure_reports_attempted(self):
         plan_sha, summary, plan_json = self._planned()
@@ -454,11 +623,14 @@ class BootstrapSafety(unittest.TestCase):
             def wait(self, timeout=None):
                 return 1
 
-            def terminate(self):
+            def send_signal(self, sig):
                 return None
 
+            def terminate(self):
+                raise AssertionError("terminate must not be called")
+
             def kill(self):
-                return None
+                raise AssertionError("kill must not be called")
 
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap, "command", side_effect=run
@@ -468,6 +640,53 @@ class BootstrapSafety(unittest.TestCase):
             bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
         self.assertIn("attempted", str(err.exception).lower())
         self.assertNotIn("No apply was attempted", str(err.exception))
+
+    def test_main_failing_apply_exits_2_with_recovery(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+
+        def run(argv, **kwargs):
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        class FakeProc:
+            def wait(self, timeout=None):
+                return 1
+
+            def send_signal(self, sig):
+                return None
+
+            def terminate(self):
+                raise AssertionError("terminate must not be called")
+
+            def kill(self):
+                raise AssertionError("kill must not be called")
+
+        argv = [
+            "bootstrap_local.py",
+            "apply",
+            "--private-dir",
+            str(self.folder),
+            "--confirm-apply",
+            "--approval",
+            str(approval),
+        ]
+        from io import StringIO
+
+        err_buf = StringIO()
+        with patch.object(sys, "argv", argv), patch.object(
+            bootstrap, "owner_context", return_value=self.context
+        ), patch.object(bootstrap, "command", side_effect=run), patch.object(
+            subprocess, "Popen", return_value=FakeProc()
+        ), patch.object(sys, "stderr", err_buf), self.assertRaises(SystemExit) as err:
+            bootstrap.main()
+        self.assertEqual(err.exception.code, 2)
+        stderr = err_buf.getvalue()
+        self.assertIn("Partial-apply recovery", stderr)
+        self.assertNotIn("No apply was attempted", stderr)
 
 
 class EncryptionProof(unittest.TestCase):

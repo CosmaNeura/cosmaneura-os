@@ -8,7 +8,7 @@
       "DATA_MODE": "synthetic",
       "AUTH_MODE": "clerk_jwt",
       "BLOB_BACKEND": "azure",
-      "WORKSPACE_LLM_BACKEND": "azure_gpt41",
+      "WORKSPACE_LLM_BACKEND": "disabled",
       "WORKSPACE_LLM_DEPLOYMENT": "gpt-4.1",
       "WORKSPACE_LLM_USDZ_ENABLED": "false",
       "REAL_PATIENT_RECORDING_ENABLED": "false"
@@ -23,6 +23,7 @@
     ],
     "notes": [
       "Values live in Key Vault. Installing secrets onto the host as 0400 files is a separate later ticket; this PR creates infrastructure only and the prod VM holds no secrets until a release ticket.",
+      "WORKSPACE_LLM_BACKEND is disabled for first apply. The later cutover ticket sets azure_gpt41.",
       "routes_runtime_traffic is false: enable_azure_openai creates resources only and routes no runtime traffic. Prod has no LLM traffic until a separate later cutover.",
       "The shared model account key must never be loaded into prod. WORKSPACE_LLM_API_KEY is declared only at the later LLM cutover, not in this first-apply profile.",
       "Module output azure_openai_endpoint is the Cognitive account base URL, not the app WORKSPACE_LLM_ENDPOINT setting form until the app cutover ticket.",

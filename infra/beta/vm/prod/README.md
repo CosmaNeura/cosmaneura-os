@@ -150,162 +150,37 @@ bash infra/beta/apply-cosmabot-prod-foundation.sh \
 Both `--confirm-apply` and `--approval` are required. Coding agents must not run
 apply.
 
-## Load secrets into Key Vault (release operator, after apply)
+Press Ctrl-C once for a graceful stop of a running apply; do not press it again
+unless you accept possible data loss. Apply failures and interrupts exit with
+code **2** and point at a uniquely named `logs/apply-*.log` under the private
+directory. Partial-apply recovery: keep that private directory and open a
+separately reviewed recovery ticket before retry.
 
-John runs these himself. Secrets never go in the inputs JSON, the private plan
-directory, or an `azurerm_key_vault_secret` resource. The recorded versioned
-secret id (`--query id --output tsv`) is the custody evidence.
+## Load secrets into Key Vault (separate later secrets ticket)
 
-**Installing those values onto the host as 0400 files is a separate later
-ticket.** #356 creates infrastructure only; the prod VM holds no secrets until
-a release ticket. See `infra/beta/vm/runtime/README.md` for the eventual
-mode-0400 host-file contract (`server.key`, `users.acl`, TLS public certs).
-`allow_extension_operations` stays **true** so the Azure Monitor agent
-extension can install (**CTO decision, 11 Nov 2026**). **Run Command must never
-carry secret values** and must never be used for secret install (**CTO
-decision, 11 Nov 2026**). Do not add Bastion, VPN, or jump-host resources.
+**Loading secrets into Key Vault and installing them onto the host as 0400 files
+is a separate later secrets ticket.** #356 creates infrastructure only; the prod
+VM holds no secrets until a release ticket. Secrets never go in the inputs JSON,
+the private plan directory, or an `azurerm_key_vault_secret` resource. See
+`infra/beta/vm/runtime/README.md` for the eventual mode-0400 host-file contract
+(`server.key`, `users.acl`, TLS public certs). `allow_extension_operations`
+stays **true** so the Azure Monitor agent extension can install (**CTO
+decision, 11 Nov 2026**). **Run Command must never carry secret values** and
+must never be used for secret install (**CTO decision, 11 Nov 2026**). Do not
+add Bastion, VPN, or jump-host resources.
 
 ### Key Vault network path (**CTO decision, 11 Nov 2026**)
 
 Vault IaC keeps `public_network_access_enabled = false` with ACL default Deny.
 `publicNetworkAccess Disabled` overrides firewall allow rules, so an own-IP
 rule alone does not work while public access stays Disabled. John's temporary
-path (option a): from John's workstation, briefly set public network access
-Enabled with default Deny plus a single `/32` for John's own public IPv4, load
-secrets with `--file`, then the trap/remove path sets public access Disabled
-again, removes the `/32`, and verifies `publicNetworkAccess == Disabled` and an
-empty `ipRules` list (print the whole list). No Bastion and no in-VNet path.
-
-Value files: Linux prefers `/dev/shm`; macOS uses a RAM disk recipe below.
-Every set uses `--file`, `--encoding utf-8`, and `--query id --output tsv`.
-Never use `--value`, never echo secret bytes, no `set -x`, no `--debug`.
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-umask 077
-
-: "${OPERATOR_IP:?set OPERATOR_IP to John's current public IPv4}"
-: "${RESOURCE_NAME_SUFFIX:?set RESOURCE_NAME_SUFFIX from the applied foundation}"
-VAULT_NAME="kv-cbot-prd-${RESOURCE_NAME_SUFFIX}"
-RG="rg-cosmabot-prod-eus2-01"
-
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  # macOS RAM disk (~32 MiB) for value files.
-  RAMDEV="$(hdiutil attach -nomount ram://65536)"
-  diskutil erasevolume HFS+ 'cosmabotkv' "$RAMDEV"
-  TMP="/Volumes/cosmabotkv/cosmabot-kv-$$$$"
-  mkdir -p -m 700 "$TMP"
-else
-  TMP="$(mktemp -d /dev/shm/cosmabot-kv-XXXXXX)"
-fi
-
-cleanup() {
-  # Revert the time-boxed public-access window even on failure.
-  az keyvault update \
-    --name "$VAULT_NAME" \
-    --resource-group "$RG" \
-    --public-network-access Disabled \
-    --only-show-errors >/dev/null 2>&1 || true
-  az keyvault network-rule remove \
-    --name "$VAULT_NAME" \
-    --resource-group "$RG" \
-    --ip-address "${OPERATOR_IP}/32" \
-    --only-show-errors >/dev/null 2>&1 || true
-  if [[ -n "${TMP:-}" && -d "${TMP}" ]]; then
-    shred -u "${TMP}"/* 2>/dev/null || rm -f "${TMP}"/*
-    rmdir "${TMP}" 2>/dev/null || true
-  fi
-  if [[ "$(uname -s)" == "Darwin" && -d /Volumes/cosmabotkv ]]; then
-    diskutil eject /Volumes/cosmabotkv >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT
-
-az keyvault update \
-  --name "$VAULT_NAME" \
-  --resource-group "$RG" \
-  --public-network-access Enabled \
-  --only-show-errors
-az keyvault network-rule add \
-  --name "$VAULT_NAME" \
-  --resource-group "$RG" \
-  --ip-address "${OPERATOR_IP}/32" \
-  --only-show-errors
-
-# Generate distinct URL-safe 32–128 character passwords (runtime README rule).
-openssl rand -base64 48 | tr -d '\n' | tr '+/' '-_' >"$TMP/database_password"
-openssl rand -base64 48 | tr -d '\n' | tr '+/' '-_' >"$TMP/postgres_password"
-openssl rand -base64 48 | tr -d '\n' | tr '+/' '-_' >"$TMP/redis_password"
-# Clerk and deploy-evidence value files: John writes them into TMP himself.
-# Paths are placeholders only; no secret bytes in this repository.
-
-az keyvault secret set \
-  --vault-name "$VAULT_NAME" \
-  --name CLERK-SECRET-KEY \
-  --file "$TMP/clerk_secret_key" \
-  --encoding utf-8 \
-  --query id --output tsv
-
-az keyvault secret set \
-  --vault-name "$VAULT_NAME" \
-  --name CLERK-ACCOUNT-DELETION-SECRET \
-  --file "$TMP/clerk_account_deletion_secret" \
-  --encoding utf-8 \
-  --query id --output tsv
-
-az keyvault secret set \
-  --vault-name "$VAULT_NAME" \
-  --name DATABASE-PASSWORD \
-  --file "$TMP/database_password" \
-  --encoding utf-8 \
-  --query id --output tsv
-
-az keyvault secret set \
-  --vault-name "$VAULT_NAME" \
-  --name POSTGRES-PASSWORD \
-  --file "$TMP/postgres_password" \
-  --encoding utf-8 \
-  --query id --output tsv
-
-az keyvault secret set \
-  --vault-name "$VAULT_NAME" \
-  --name REDIS-PASSWORD \
-  --file "$TMP/redis_password" \
-  --encoding utf-8 \
-  --query id --output tsv
-
-az keyvault secret set \
-  --vault-name "$VAULT_NAME" \
-  --name HUMAN-DEPLOY-EVIDENCE-REF \
-  --file "$TMP/human_deploy_evidence_ref" \
-  --encoding utf-8 \
-  --query id --output tsv
-
-# Explicit revert + verify (also covered by trap).
-az keyvault update \
-  --name "$VAULT_NAME" \
-  --resource-group "$RG" \
-  --public-network-access Disabled \
-  --only-show-errors
-az keyvault network-rule remove \
-  --name "$VAULT_NAME" \
-  --resource-group "$RG" \
-  --ip-address "${OPERATOR_IP}/32" \
-  --only-show-errors
-
-az keyvault show \
-  --name "$VAULT_NAME" \
-  --resource-group "$RG" \
-  --query properties.publicNetworkAccess -o tsv
-# Expect: Disabled
-
-az keyvault network-rule list \
-  --name "$VAULT_NAME" \
-  --resource-group "$RG" \
-  -o json
-# Expect: empty ipRules list (print the whole list).
-```
+path (option a), for the later secrets ticket: from John's workstation, briefly
+set public network access Enabled with default Deny plus a single `/32` for
+John's own public IPv4, load secrets with `--file`, then the trap/remove path
+sets public access Disabled again, removes the `/32`, and verifies
+`publicNetworkAccess == Disabled` and an empty `ipRules` list (print the whole
+list). No Bastion and no in-VNet path. No runnable load script is checked in on
+this PR; the full load/verify/cleanup script belongs in the secrets ticket.
 
 Names-only mapping (Key Vault name → host file → services). Host install of these
 files is the later release ticket; do not invent a transport here.
@@ -319,39 +194,26 @@ files is the later release ticket; do not invent a transport here.
 | `REDIS-PASSWORD` | `REDIS_PASSWORD` | `api`, `worker`, `redis` | John-generated (distinct) |
 | `HUMAN-DEPLOY-EVIDENCE-REF` | `HUMAN_DEPLOY_EVIDENCE_REF` | `api`, `worker` | John-generated deploy evidence |
 
-`WORKSPACE_LLM_API_KEY` is **not** declared in the first-apply profile and is
-**not** loaded here. It belongs only to the later LLM cutover (below).
+`WORKSPACE_LLM_API_KEY` is **not** declared in the first-apply profile. It
+belongs only to the later LLM cutover (below).
 
 ## Later LLM cutover (separate tickets; not #356)
 
-Opt-in in this PR creates resources only (`routes_runtime_traffic: false`). A
-later, separately approved cutover must include, in order:
+Opt-in in this PR creates resources only (`routes_runtime_traffic: false`). The
+first-apply profile sets `WORKSPACE_LLM_BACKEND` to `disabled`. A later,
+separately approved cutover must include, in order:
 
 1. An **app** change to accept the prod OpenAI endpoint (separate app ticket
    after filming; not this PR).
-2. Set `WORKSPACE_LLM_ENDPOINT` to the account base URL from module output
-   `azure_openai_endpoint` (account base URL, not the chat-completions path).
-3. Set `WORKSPACE_LLM_USDZ_ENABLED=true`.
+2. Set `WORKSPACE_LLM_ENDPOINT` to the value derived from module output
+   `azure_openai_endpoint` in the **exact form the app ticket defines**. The
+   account base URL alone is not a valid app setting.
+3. Set `WORKSPACE_LLM_BACKEND` to `azure_gpt41` and `WORKSPACE_LLM_USDZ_ENABLED=true`.
 4. Remove the deployment pin or set it to `gpt-4.1-dzus`.
 5. Load the **new prod account's** key into Key Vault and onto the host; the
    shared model account's key must never be loaded into prod.
 6. Raise DataZoneStandard capacity only in that cutover ticket (first-apply
    capacity stays 1).
-
-OpenAI key load at cutover only (placeholder paths; John writes the value file):
-
-```bash
-az cognitiveservices account keys list \
-  --name "oai-cbot-prd-${RESOURCE_NAME_SUFFIX}" \
-  --resource-group "$RG" \
-  --query key1 -o tsv >"$TMP/workspace_llm_api_key"
-az keyvault secret set \
-  --vault-name "$VAULT_NAME" \
-  --name WORKSPACE-LLM-API-KEY \
-  --file "$TMP/workspace_llm_api_key" \
-  --encoding utf-8 \
-  --query id --output tsv
-```
 
 ## DNS
 

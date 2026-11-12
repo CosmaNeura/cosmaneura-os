@@ -41,12 +41,22 @@ fi
 grep -F "refusing apply without --confirm-apply" "$tmp_root/apply.err" >/dev/null
 [[ ! -s "$COSMABOT_STUB_MARKER" ]] || { echo "stub az/tofu was invoked" >&2; exit 1; }
 
+# Review script must never print or contain an apply confirm line.
+if grep -F -- "--confirm-apply" "$beta_dir/review-cosmabot-prod-foundation.sh" >/dev/null; then
+  echo "review script must not contain --confirm-apply" >&2
+  exit 1
+fi
+
 # Cost-only review is offline and must not call stubs.
 bash "$beta_dir/review-cosmabot-prod-foundation.sh" --cost-only >"$tmp_root/review.out"
 grep -F "DEFAULT PLAN (enable_azure_openai=false): \$180.27" "$tmp_root/review.out" >/dev/null
 grep -F "WITH AZURE OPENAI OPT-IN: \$188.07 (+\$7.80 standing, token usage excluded)" "$tmp_root/review.out" >/dev/null
 grep -F "price_date:" "$tmp_root/review.out" >/dev/null
 grep -F "Name guards:" "$tmp_root/review.out" >/dev/null
+if grep -F -- "--confirm-apply" "$tmp_root/review.out" >/dev/null; then
+  echo "cost-only review output must not contain --confirm-apply" >&2
+  exit 1
+fi
 [[ ! -s "$COSMABOT_STUB_MARKER" ]] || { echo "stub az/tofu was invoked during cost-only" >&2; exit 1; }
 
 # Offline dry-run (real interpreter PATH; stubs stay unused).

@@ -124,8 +124,8 @@ def validate_rendered(bundle: dict) -> None:
         validate_openai_opt_in_source()
     else:
         raise DryRunError("azure_openai_flag_must_be_bool")
-    if params["workspace_llm_backend"] != "azure_gpt41":
-        raise DryRunError("model_backend_must_match_staging")
+    if params["workspace_llm_backend"] != "disabled":
+        raise DryRunError("workspace_llm_backend_must_be_disabled_until_cutover")
     if params["workspace_llm_deployment"] != "gpt-4.1":
         raise DryRunError("model_deployment_must_stay_gpt41")
     if "WORKSPACE_LLM_ENDPOINT" in profile["runtime"]["environment"]:
@@ -160,10 +160,11 @@ def validate_rendered(bundle: dict) -> None:
         raise DryRunError("clerk_secret_values_forbidden")
     if prices["label"] != "estimate" or not prices.get("price_date"):
         raise DryRunError("price_table_must_be_labeled_estimate_with_date")
-    if "43,800,000" not in " ".join(prices.get("notes", [])) and "43800000" not in json.dumps(
-        prices
-    ):
+    notes_blob = " ".join(prices.get("notes", []))
+    if "43,800,000" not in notes_blob and "43800000" not in json.dumps(prices):
         raise DryRunError("price_notes_must_state_capacity_1_token_ceiling")
+    if "$96" not in notes_blob or "$385" not in notes_blob or "reviewer arithmetic" not in notes_blob.lower():
+        raise DryRunError("price_notes_must_state_saturation_dollar_range")
     default_total = monthly_total(prices, include_openai=False)
     optin_total = monthly_total(prices, include_openai=True)
     if default_total <= 0 or optin_total <= 0:
@@ -238,7 +239,7 @@ class _expect:
 
 
 def validate_secret_name_alignment(readme: str) -> None:
-    """Table rows, set --name values, and profile secret_names must match 1:1."""
+    """Table rows and profile secret_names must match 1:1 (no runnable set block in #356)."""
     profile = load_json(ROOT / "profile" / "runtime-public.json")
     secret_names = set(profile["runtime"]["secret_names"])
     table = readme.split("Names-only mapping", 1)[1].split("## ", 1)[0]
@@ -255,46 +256,110 @@ def validate_secret_name_alignment(readme: str) -> None:
             continue
         kv_from_table.add(kv_name.replace("-", "_"))
         host_files.add(host_name)
-    set_names = set(
-        re.findall(
-            r"--name\s+([A-Z][A-Z0-9-]+)",
-            readme.split("Load secrets into Key Vault", 1)[1].split("## Later LLM cutover", 1)[0],
-        )
-    )
-    from_kv = {name.replace("-", "_") for name in set_names}
+    secret_section = readme.split("Load secrets into Key Vault", 1)[1].split("## Later LLM cutover", 1)[0]
+    if re.search(r"```(?:bash|sh)?\s*\n", secret_section) and re.search(
+        r"az\s+keyvault\s+secret\s+set", secret_section
+    ):
+        raise DryRunError("readme_must_not_contain_runnable_key_vault_load_block")
+    if "az keyvault secret set" in secret_section or "az keyvault update" in secret_section:
+        raise DryRunError("readme_must_not_contain_runnable_key_vault_load_block")
     if host_files != secret_names:
         raise DryRunError(f"secret_table_host_files_mismatch:{sorted(host_files ^ secret_names)}")
     if kv_from_table != secret_names:
         raise DryRunError(f"secret_table_kv_mismatch:{sorted(kv_from_table ^ secret_names)}")
-    if from_kv != secret_names:
-        raise DryRunError(f"secret_set_commands_mismatch:{sorted(from_kv ^ secret_names)}")
+
+
+ALLOWED_RESOURCE_TYPES = frozenset(
+    {
+        "azurerm_cognitive_account",
+        "azurerm_cognitive_deployment",
+        "azurerm_container_registry",
+        "azurerm_key_vault",
+        "azurerm_linux_virtual_machine",
+        "azurerm_log_analytics_workspace",
+        "azurerm_managed_disk",
+        "azurerm_monitor_action_group",
+        "azurerm_monitor_data_collection_rule",
+        "azurerm_monitor_data_collection_rule_association",
+        "azurerm_monitor_metric_alert",
+        "azurerm_monitor_scheduled_query_rules_alert_v2",
+        "azurerm_network_interface",
+        "azurerm_network_security_group",
+        "azurerm_private_dns_zone",
+        "azurerm_private_dns_zone_virtual_network_link",
+        "azurerm_private_endpoint",
+        "azurerm_public_ip",
+        "azurerm_resource_group",
+        "azurerm_role_assignment",
+        "azurerm_storage_account",
+        "azurerm_storage_container",
+        "azurerm_subnet",
+        "azurerm_subnet_network_security_group_association",
+        "azurerm_user_assigned_identity",
+        "azurerm_virtual_machine_data_disk_attachment",
+        "azurerm_virtual_machine_extension",
+        "azurerm_virtual_network",
+        "terraform_data",
+    }
+)
+
+
+def validate_resource_type_allowlist() -> None:
+    """Pin foundation/*.tf and modules/** resource TYPE set to an exact allowlist."""
+    found: set[str] = set()
+    for path in sorted(FOUNDATION.rglob("*.tf")):
+        if "tests" in path.parts:
+            continue
+        for match in re.finditer(r'^resource\s+"([^"]+)"\s+"', path.read_text(), re.M):
+            found.add(match.group(1))
+    if found != ALLOWED_RESOURCE_TYPES:
+        raise DryRunError(
+            f"resource_type_allowlist_mismatch:extra={sorted(found - ALLOWED_RESOURCE_TYPES)};"
+            f"missing={sorted(ALLOWED_RESOURCE_TYPES - found)}"
+        )
+    extension = (FOUNDATION / "runtime_monitoring.tf").read_text()
+    if 'publisher                  = "Microsoft.Azure.Monitor"' not in extension:
+        raise DryRunError("vm_extension_must_use_azure_monitor_publisher")
+    if 'type                       = "AzureMonitorLinuxAgent"' not in extension:
+        raise DryRunError("vm_extension_must_be_azure_monitor_linux_agent")
 
 
 def validate_no_run_command() -> None:
-    """Forbid Run Command transports in prod IaC/docs/scripts (item 9b)."""
+    """Forbid Run Command transports; allow only forbid-sentences in README/profile."""
     paths = [
-        ROOT / "README.md",
+        *ROOT.rglob("*.tf"),
+        *ROOT.rglob("*.py"),
+        *ROOT.rglob("*.sh"),
+        *ROOT.rglob("*.md"),
+        *ROOT.rglob("*.json"),
         REPO / "infra/beta/review-cosmabot-prod-foundation.sh",
         REPO / "infra/beta/apply-cosmabot-prod-foundation.sh",
-        ROOT / "name_guards.py",
-        FOUNDATION / "bootstrap_local.py",
-        *FOUNDATION.rglob("*.tf"),
     ]
-    forbidden = (
-        r"az\s+vm\s+run-command",
-        r"run-command\s+invoke",
-        r"runcommand",
-        r"invoke[^\n]*--scripts",
-        r"--scripts[^\n]*install-secrets",
-        r'control_path\s*=\s*"[^"]*run-command',
-    )
+    pattern = re.compile(r"run[-_ ]?command", re.I)
     for path in paths:
         if not path.is_file() or "tests" in path.parts:
             continue
-        text = path.read_text()
-        for pattern in forbidden:
-            if re.search(pattern, text, re.I):
-                raise DryRunError(f"run_command_forbidden:{path}:{pattern}")
+        if path.name in {"dry_run.py", "bootstrap_local.py", "name_guards.py"}:
+            text_body = path.read_text()
+            if path.name == "bootstrap_local.py":
+                if re.search(r"az\s+vm\s+run[-_ ]?command", text_body, re.I):
+                    raise DryRunError(f"run_command_forbidden:{path}")
+            continue
+        for line_no, line in enumerate(path.read_text().splitlines(), 1):
+            if not pattern.search(line):
+                continue
+            lowered = line.lower()
+            allowed = (
+                "must never" in lowered
+                or "never be used" in lowered
+                or "forbid" in lowered
+                or "forbidden" in lowered
+                or "not run command" in lowered
+                or "no run command" in lowered
+            )
+            if path.name in {"README.md", "runtime-public.json"} and allowed:
+                continue
+            raise DryRunError(f"run_command_forbidden:{path}:{line_no}:{line.strip()[:120]}")
 
 
 def validate_foundation_source() -> None:
@@ -340,8 +405,15 @@ def validate_foundation_source() -> None:
         raise DryRunError("openai_must_not_refuse_default_false_plan")
     if 'module "azure_openai"' not in openai:
         raise DryRunError("openai_must_be_separate_module")
+    if not re.search(r"enabled\s*=\s*var\.enable_azure_openai", openai):
+        raise DryRunError("openai_module_call_must_pass_enabled_var")
+    module_vars = (FOUNDATION / "modules/azure_openai/variables.tf").read_text()
+    enabled_var = re.search(r'variable\s+"enabled"\s*\{.*?\}', module_vars, re.S)
+    if not enabled_var or not re.search(r"default\s*=\s*false", enabled_var.group(0)):
+        raise DryRunError("openai_module_enabled_default_must_be_false")
     # Opt-in resources exist behind count; default plan still creates none.
     validate_openai_opt_in_source()
+    validate_resource_type_allowlist()
     for path in ROOT.rglob("*.tf"):
         if "azurerm_key_vault_secret" in path.read_text():
             raise DryRunError(f"key_vault_secret_resource_forbidden:{path}")
@@ -355,26 +427,29 @@ def validate_foundation_source() -> None:
     if "needs CTO yes" in readme or "needs-CTO-yes" in readme:
         raise DryRunError("readme_must_not_use_needs_cto_yes_label")
     secret = readme.split("Load secrets into Key Vault", 1)[1].split("## Later LLM cutover", 1)[0]
-    if "--file" not in secret:
-        raise DryRunError("readme_secret_loading_must_use_file_not_value")
-    if re.search(r"--value(=|\s+\S)", secret):
-        raise DryRunError("readme_secret_loading_must_use_file_not_value")
-    if "set -euo pipefail" not in secret:
-        raise DryRunError("readme_secret_block_must_use_strict_shell")
-    if "trap cleanup EXIT" not in secret:
-        raise DryRunError("readme_secret_block_must_trap_cleanup")
-    if "--public-network-access Disabled" not in secret:
-        raise DryRunError("readme_secret_block_must_revert_public_access")
-    if "network-rule list" not in secret or "publicNetworkAccess" not in secret:
-        raise DryRunError("readme_secret_block_must_verify_revert")
-    if "POSTGRES-PASSWORD" not in secret or "REDIS-PASSWORD" not in secret:
-        raise DryRunError("readme_secret_block_must_set_postgres_and_redis")
-    if "separate later ticket" not in secret.lower() and "separate later ticket" not in readme.lower():
+    if "option a" not in secret.lower() and "(option a)" not in secret.lower():
+        raise DryRunError("readme_must_keep_option_a_description")
+    if "separate later" not in secret.lower() and "separate later ticket" not in readme.lower():
         raise DryRunError("readme_must_state_host_install_is_later_ticket")
+    if "Names-only mapping" not in secret and "Names-only mapping" not in readme:
+        raise DryRunError("readme_must_keep_secret_names_table")
+    if "POSTGRES-PASSWORD" not in secret or "REDIS-PASSWORD" not in secret:
+        raise DryRunError("readme_secret_table_must_list_postgres_and_redis")
+    if "Press Ctrl-C once" not in readme:
+        raise DryRunError("readme_apply_must_document_ctrl_c_and_logs")
+    if "logs/apply-*.log" not in readme:
+        raise DryRunError("readme_apply_must_document_apply_log_path")
+    if "code **2**" not in readme and "code 2" not in readme.lower():
+        raise DryRunError("readme_apply_must_document_exit_code_2")
     if "routes_runtime_traffic" not in readme or "false" not in readme:
         raise DryRunError("readme_must_state_routes_runtime_traffic_false")
     if "Later LLM cutover" not in readme:
         raise DryRunError("readme_must_document_llm_cutover_list")
+    cutover = readme.split("## Later LLM cutover", 1)[1]
+    if "az cognitiveservices account keys list" in cutover or "az keyvault secret set" in cutover:
+        raise DryRunError("readme_cutover_must_not_contain_key_command_block")
+    if "account base URL alone is not" not in cutover and "exact form the app ticket defines" not in cutover:
+        raise DryRunError("readme_cutover_step2_must_require_app_ticket_form")
     validate_secret_name_alignment(readme)
     if "cosmas" + "code" in readme.lower() and "never be loaded" not in readme.lower():
         raise DryRunError("prod_readme_must_not_reference_shared_model_account")
