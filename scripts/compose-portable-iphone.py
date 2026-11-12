@@ -118,21 +118,153 @@ def _regular_file(repository: Path, path: Path) -> Path:
     return resolved
 
 
+REVIEWED_MICROPHONE_USAGE = (
+    "CosmaBot uses the microphone to record visits you choose to capture so it can draft your notes."
+)
+REVIEWED_SPEECH_USAGE = (
+    "CosmaBot uses on-device speech recognition to transcribe recordings you choose to "
+    "transcribe so it can draft your notes."
+)
+REVIEWED_SYNTHETIC_MICROPHONE_USAGE = (
+    "CosmaBot uses the microphone only after you start a synthetic capture test with "
+    "invented encounter audio."
+)
+REVIEWED_APP_PRIVACY = {
+    "NSPrivacyTracking": False,
+    "NSPrivacyCollectedDataTypes": [
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeAudioData",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeUserID",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeEmailAddress",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeName",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeHealth",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeOtherUserContent",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+        {
+            "NSPrivacyCollectedDataType": "NSPrivacyCollectedDataTypeDeviceID",
+            "NSPrivacyCollectedDataTypeLinked": True,
+            "NSPrivacyCollectedDataTypeTracking": False,
+            "NSPrivacyCollectedDataTypePurposes": [
+                "NSPrivacyCollectedDataTypePurposeAppFunctionality",
+            ],
+        },
+    ],
+    "NSPrivacyAccessedAPITypes": [
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
+            "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
+        }
+    ],
+}
+
+
+def refuse_non_true_export_compliance(info: dict) -> None:
+    """Refuse any present export-compliance value that is not boolean True.
+
+    A pre-existing boolean true is preserved. The key is never written. The
+    YES/NO answer and questionnaire remain an owner decision outside composition.
+    """
+    if "ITSAppUsesNonExemptEncryption" not in info:
+        return
+    if info["ITSAppUsesNonExemptEncryption"] is True:
+        return
+    raise ValueError(
+        "Refusing ITSAppUsesNonExemptEncryption value that is not boolean true; "
+        "export-compliance key is owner-controlled."
+    )
+
+
+def _apply_owned_usage_descriptions(
+    repository: Path, output: Path, placed: list[dict[str, object]]
+) -> None:
+    """Derive reviewed permission copy without changing the frozen scaffold Info.plist."""
+    info_path = "ios/App/App/Info.plist"
+    destination = output / APP_SCAFFOLD / info_path
+    if not destination.is_file() or destination.is_symlink():
+        raise ValueError("Composed app Info.plist is missing.")
+    project_text = (output / APP_SCAFFOLD / "ios/App/App.xcodeproj/project.pbxproj").read_text(
+        encoding="utf-8"
+    )
+    if "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption" in project_text:
+        raise ValueError(
+            "Refusing INFOPLIST_KEY_ITSAppUsesNonExemptEncryption in the composed project; "
+            "export-compliance key is owner-controlled."
+        )
+    original_sha256 = _digest(destination)
+    info = plistlib.loads(destination.read_bytes())
+    # Export-compliance key intentionally not set by this script; owner decision pending.
+    refuse_non_true_export_compliance(info)
+    info["NSMicrophoneUsageDescription"] = REVIEWED_MICROPHONE_USAGE
+    info["NSSpeechRecognitionUsageDescription"] = REVIEWED_SPEECH_USAGE
+    destination.write_bytes(plistlib.dumps(info, sort_keys=False))
+    record = next(item for item in placed if item["path"] == info_path)
+    derivation_path = "scripts/compose-portable-iphone.py"
+    derivation = _regular_file(repository, repository / derivation_path)
+    record.update(
+        {
+            "role": "derived-usage-description",
+            "sha256": _digest(destination),
+            "scaffold_input_sha256": original_sha256,
+            "derivation_source": derivation_path,
+            "derivation_source_sha256": _digest(derivation),
+            "wiring_note": (
+                "Derived microphone and speech usage descriptions; frozen scaffold "
+                "Info.plist unchanged. Export-compliance key intentionally not set by "
+                "this script; owner decision pending."
+            ),
+        }
+    )
+
+
 def _add_owned_app_privacy(repository: Path, output: Path, placed: list[dict[str, object]]) -> None:
     """Derive app privacy resources without changing the frozen scaffold."""
     source_path = "clients/apple/startup-recovery/PrivacyInfo.xcprivacy"
     source = _regular_file(repository, repository / source_path)
-    expected = {
-        "NSPrivacyAccessedAPITypes": [
-            {
-                "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
-                "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
-            }
-        ]
-    }
+    expected = REVIEWED_APP_PRIVACY
     if plistlib.loads(source.read_bytes()) != expected:
         raise ValueError(
-            "Owned app privacy manifest differs from reviewed required-reason coverage."
+            "Owned app privacy manifest differs from reviewed collected-data and "
+            "required-reason coverage."
         )
     app = output / APP_SCAFFOLD / "ios/App/App"
     destination = app / "PrivacyInfo.xcprivacy"
@@ -186,7 +318,11 @@ def _add_owned_app_privacy(repository: Path, output: Path, placed: list[dict[str
             "owner": "clients/apple",
             "sha256": _digest(destination),
             "authoritative_counterpart": source_path,
-            "wiring_note": "App-owned required-reason API privacy resource.",
+            "wiring_note": (
+                "App-owned privacy resource: system boot time required-reason, "
+                "tracking=false, and collected-data declarations for audio, user ID, "
+                "email, name, health, other user content, and device ID."
+            ),
         }
     )
 
@@ -487,6 +623,7 @@ def compose(repository: Path, output: Path) -> Path:
         if public.exists():
             raise ValueError("Generated web assets do not belong in this source composition.")
         _add_owned_app_privacy(repository, output, placed)
+        _apply_owned_usage_descriptions(repository, output, placed)
         _add_owned_capacitor_vendor(repository, output, placed)
         manifest = {
             "purpose": "portable-iphone-project-inputs",
