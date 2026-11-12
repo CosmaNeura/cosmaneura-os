@@ -334,6 +334,7 @@ jobs:
         run: |
           bash -n infra/beta/*.sh infra/beta/tests/*.sh
           bash infra/beta/tests/deployment-guards.sh
+          bash infra/beta/tests/copy-to-ehr-staging-deploy.sh
       - name: Enrollment configuration contract
         run: |
           node --test infra/enrollment/render.test.mjs infra/enrollment/verify-staging-hosts.test.mjs web/scripts/enrollment-hosting.test.mjs infra/enrollment/workspaces/render.test.mjs
