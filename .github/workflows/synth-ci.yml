@@ -338,6 +338,8 @@ jobs:
         run: |
           node --test infra/enrollment/render.test.mjs infra/enrollment/verify-staging-hosts.test.mjs web/scripts/enrollment-hosting.test.mjs infra/enrollment/workspaces/render.test.mjs
           python3 -m unittest discover -s infra/enrollment/runtime/tests -p test_dns.py -v
+      - name: Standalone host render node tests
+        run: node --test infra/standalone/render.test.mjs infra/standalone/render-beta.test.mjs
       - name: Validate independent enrollment runtime
         working-directory: infra/enrollment/runtime
         run: tofu fmt -check && tofu init -backend=false -input=false -lockfile=readonly && tofu validate -no-color && tofu test -no-color
@@ -473,8 +475,35 @@ jobs:
   synth-gate:
     name: synth-ci-gate
     runs-on: ubuntu-latest
+    if: always()
     needs: [python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey]
     steps:
+      - name: Require every needed job succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = []
+          for name, meta in sorted(needs.items()):
+              result = meta.get("result")
+              print(f"{name}: {result}")
+              if result != "success":
+                  failed.append(f"{name}={result}")
+          if failed:
+              print(
+                  "Gate failed because needed jobs were not all success: "
+                  + ", ".join(failed),
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print("All needed jobs succeeded")
+          PY
       - name: Confirm all synth gates passed
         run: |
           echo "python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey all green"

@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {resolve,join} from 'node:path';
 import {workspaceIdentityInputs} from '../../scripts/prepare-workspace-identity.mjs';
+import {REVIEWED_CORE_CAPTURE_ORIGIN} from '../../clients/shared/beta-feature-profile.mjs';
 
 export class Refused extends Error {}
 const refuse=code=>{throw new Refused(code);};
@@ -12,11 +13,56 @@ const object=(value,keys,code)=>{
   if(!value||typeof value!=='object'||Array.isArray(value)||
     Object.keys(value).length!==keys.length||keys.some(key=>!Object.hasOwn(value,key)))refuse(code);
 };
+// Default-off synthetic CosmaBot beta opt-in for Upload Recording + Chief tools.
+// Absent/false keeps render byte-identical to main (capture/tools dark).
+const CAPTURE_TOOLS_OPT_IN='syntheticBetaCaptureAndTools';
+const CAPTURE_TOOLS_CORE_KEYS=['core_capture_origin','core_web_origin','core_capture_scope',
+  'core_capture_managed_identity_client_id','core_capture_upload_host'];
+// Azure IMDS token endpoint used by ManagedIdentityCredential.get_token via
+// core_capture_connection.py:168-174 and BoundedIdentityTransport
+// (core_record_connection.py:195-214); path from azure.identity IMDS_TOKEN_PATH.
+const IMDS_TOKEN_HOST='169.254.169.254';
+const IMDS_TOKEN_PATH='/metadata/identity/oauth2/token';
+// Exact Core-issued blob host for CosmaBot API→blob PUT
+// (capture_upload_proxy.py:295-311). Runtime pins this exact host,
+// https and port 443, both when the URL is issued and again at PUT.
+const CORE_CAPTURE_UPLOAD_HOST=/^[a-z0-9]{3,24}\.blob\.core\.windows\.net$/;
+const publicUuid=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 // Synthetic web addresses, and the matching api.<host> names. Every other
 // cosmas.ai or cosmaneura.com hostname stays refused.
 const syntheticWebHosts=['staging.cosmas.ai','beta.cosmas.ai'];
 const ownedSyntheticHosts=new Set(syntheticWebHosts.flatMap(host=>[host,`api.${host}`]));
 const platformHosts=new Set(['cosmas.ai','www.cosmas.ai','app.cosmas.ai','api.cosmas.ai','bot.cosmas.ai',...ownedSyntheticHosts]);
+
+function captureToolsOptIn(value){
+  if(!Object.hasOwn(value,CAPTURE_TOOLS_OPT_IN))return false;
+  if(typeof value[CAPTURE_TOOLS_OPT_IN]!=='boolean')refuse('synthetic_beta_capture_tools_boolean_required');
+  return value[CAPTURE_TOOLS_OPT_IN];
+}
+
+function requireCaptureToolsInputs(value,features,ownedVm){
+  // Staging/beta owned CosmaBot only. Dedicated practice and every other profile stay dark.
+  if(!ownedVm||features.profile!=='independent-beta-v1'||
+    !syntheticWebHosts.includes(new URL(value.web_origin).hostname))
+    refuse('synthetic_beta_capture_tools_refused_for_profile');
+  for(const key of CAPTURE_TOOLS_CORE_KEYS){
+    if(typeof value[key]!=='string'||value[key]!==value[key].trim()||!value[key])refuse('exact_core_capture_public_inputs_required');
+  }
+  if(value.core_capture_origin!==REVIEWED_CORE_CAPTURE_ORIGIN||value.core_web_origin!==REVIEWED_CORE_CAPTURE_ORIGIN)
+    refuse('reviewed_core_capture_origin_required');
+  if(!value.core_capture_scope.startsWith('api://')||!value.core_capture_scope.endsWith('/.default')||
+    /\s/.test(value.core_capture_scope))refuse('exact_core_capture_scope_required');
+  if(!publicUuid(value.core_capture_managed_identity_client_id))refuse('exact_core_capture_managed_identity_required');
+  if(!CORE_CAPTURE_UPLOAD_HOST.test(value.core_capture_upload_host))refuse('exact_core_capture_upload_host_required');
+}
+
+function identityPreparationOptions(value,features,captureEnabled){
+  return {webOrigin:value.web_origin,
+    coreWebOrigin:captureEnabled?value.core_web_origin:'',
+    captureUploadOrigins:captureEnabled?[value.api_origin]:[],
+    dataMode:'synthetic',featureProfile:features.profile,
+    microsoftConnectionEnabled:!!features.microsoft,coreCaptureEnabled:captureEnabled};
+}
 function origin(value,ownedStaging=false){
   let url;try{url=new URL(value);}catch{refuse('exact_https_origin_required');}
   if(typeof value!=='string'||url.origin!==value||url.protocol!=='https:'||url.port||
@@ -48,8 +94,7 @@ function betaFeatures(value){
   }
   if(features.microsoft!==null){
     object(features.microsoft,['tenant_id','client_id','callback_uri','return_origin'],'public_microsoft_shape');
-    const identifier=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
-    if(!features.google||(features.microsoft.tenant_id!=='organizations'&&!identifier(features.microsoft.tenant_id))||!identifier(features.microsoft.client_id)||
+    if(!features.google||(features.microsoft.tenant_id!=='organizations'&&!publicUuid(features.microsoft.tenant_id))||!publicUuid(features.microsoft.client_id)||
       features.microsoft.callback_uri!==value.api_origin+'/connections/microsoft/callback'||
       features.microsoft.return_origin!==value.web_origin)refuse('matching_microsoft_public_contract_required');
   }
@@ -60,6 +105,9 @@ export function validateInput(value){
   const keys=['version','resource_scope','instance_id','box_id','source_commit','web_origin','api_origin',
     'identity_policy','identity','ports','artifacts','tls'];
   if(value&&Object.hasOwn(value,'beta_features'))keys.push('beta_features');
+  const captureEnabled=value?captureToolsOptIn(value):false;
+  if(value&&Object.hasOwn(value,CAPTURE_TOOLS_OPT_IN))keys.push(CAPTURE_TOOLS_OPT_IN);
+  if(captureEnabled)keys.push(...CAPTURE_TOOLS_CORE_KEYS);
   object(value,keys,'input_shape');
   const ownedVm=value.resource_scope==='owned-cosmabot-vm-instance';
   if(value.version!==1||!['dedicated-new-cosmabot-host','owned-cosmabot-vm-instance'].includes(value.resource_scope))refuse('dedicated_host_required');
@@ -79,11 +127,11 @@ export function validateInput(value){
     value.identity?.profile!==(staging?'operational-staging-v1':'operational-beta-v1')||
     value.identity?.apiOrigin!==value.api_origin||
     typeof audience!=='string'||(staging?audience!=='':!/^[\x21-\x7e]{1,255}$/.test(audience)))refuse('explicit_matching_identity_policy_required');
+  if(captureEnabled)requireCaptureToolsInputs(value,features,ownedVm);
   // Audience identifies the reviewed receiving application. The exact issuer,
   // organization and Box bind the practice; storage remains instance-specific.
   // This existing generator owns public identity validation and every client flag.
-  workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,coreWebOrigin:'',captureUploadOrigins:[],
-    dataMode:'synthetic',featureProfile:features.profile});
+  workspaceIdentityInputs(value.identity,identityPreparationOptions(value,features,captureEnabled));
   object(value.ports,['api','postgres'],'ports_shape');
   if(Object.values(value.ports).some(port=>!Number.isInteger(port)||port<1024||port>65535)||
     value.ports.api===value.ports.postgres)refuse('distinct_unprivileged_loopback_ports_required');
@@ -114,7 +162,11 @@ PORTAL_SETUP_ENABLED PORTAL_WORK_ENABLED PORTAL_IO_ENABLED FINANCE_WORK_ENABLED 
 MEMBERSHIP_WORK_ENABLED INBOX_WORK_ENABLED INBOX_HANDOFF_ENABLED FINANCE_IO_ENABLED FINANCE_EVENTS_ENABLED
 WORKSPACE_ROUTINES_ENABLED WORKSPACE_CAPTURE_CORRECTIONS_ENABLED WORKSPACE_CAPTURE_RECOVERY_ENABLED
 WORKSPACE_CAPTURE_SOURCE_ENABLED WORKSPACE_CAPTURE_LONG_VISITS_ENABLED WORKSPACE_SESSION_PREP_ENABLED
-WORKSPACE_AGENT_TOOLS_ENABLED WORKSPACE_LLM_USDZ_ENABLED`.split(/\s+/);
+WORKSPACE_AGENT_TOOLS_ENABLED WORKSPACE_LLM_USDZ_ENABLED
+WORKSPACE_CAPTURE_PROXY_ENABLED GOOGLE_CONNECTION_BROKER_ENABLED
+WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED WORKSPACE_ENROLLMENT_MANAGED
+COSMAS_EHR_REAL_DATA_ENABLED WORKSPACE_RX_SANDBOX_ENABLED
+REAL_PATIENT_RECORDING_ENABLED WORKSPACE_EFAX_SANDBOX_ENABLED`.split(/\s+/);
 
 function service({name,user,config,release,intended,writePaths,environment=false,https=false}){
   return `[Unit]\nDescription=${name} (review only; startup held)\n\n[Service]\nType=exec\nUser=${user}\nGroup=${user}\nWorkingDirectory=${release}\n${environment?`EnvironmentFile=${config}/api-public.env\nEnvironmentFile=${config}/api-private.env\n`:''}ExecStart=/bin/sh ${release}/STARTUP-HELD.sh\n# Intended command for a separately qualified release only:\n# ${intended}\nRestart=no\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=${writePaths.join(' ')}\nCapabilityBoundingSet=${https?'CAP_NET_BIND_SERVICE':''}\n${https?'AmbientCapabilities=CAP_NET_BIND_SERVICE\n':''}RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n\n# No Install section: this review unit cannot be enabled as a release.\n`;
@@ -123,13 +175,14 @@ function service({name,user,config,release,intended,writePaths,environment=false
 export function render(input){
   const value=validateInput(input),id=value.instance_id,short=id.replaceAll('-','').slice(0,12);
   const features=betaFeatures(value),ownedVm=value.resource_scope==='owned-cosmabot-vm-instance';
+  // Opt-in already validated in validateInput; read once here for the rest of render.
+  const captureEnabled=!!value[CAPTURE_TOOLS_OPT_IN];
   const parent=`/var/lib/cosmabot/standalone/${id}`;
   const root=ownedVm?parent+'/app':`/var/lib/cosmabot-standalone/${id}`,postgres=ownedVm?parent+'/postgres':`/var/lib/cosmabot-postgres/${id}`;
   const config=ownedVm?parent+'/config':`/etc/cosmabot-standalone/${id}`,release=ownedVm?parent+'/release':`/opt/cosmabot-standalone/${id}`,proxyRoot=ownedVm?parent+'/proxy':`/var/lib/cosmabot-https/${id}`;
   const apiUser=`cosmabot-api-${short}`,pgUser=`cosmabot-pg-${short}`,proxyUser=`cosmabot-web-${short}`;
   const dbName=`cosmabot_standalone_${id.replaceAll('-','')}`,dbRole=`cosmabot_runtime_${short}`,migrationRole=`cbpg_${short}`;
-  const files=workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,coreWebOrigin:'',captureUploadOrigins:[],
-    dataMode:'synthetic',featureProfile:features.profile,microsoftConnectionEnabled:!!features.microsoft});
+  const files=workspaceIdentityInputs(value.identity,identityPreparationOptions(value,features,captureEnabled));
   const parties=[value.web_origin,'app://cosmas','capacitor://localhost'].join(',');
   const environment={...Object.fromEntries(disabledFlags.map(name=>[name,'false'])),
     COSMAS_ENV:'standalone_clerk_synthetic',DATA_MODE:'synthetic',AUTH_MODE:'clerk_jwt',BETA_BOX_ID:value.box_id,
@@ -155,6 +208,16 @@ export function render(input){
     WORKSPACE_MICROSOFT_CALENDAR_ENABLED:'true',MICROSOFT_CONNECTION_TENANT_ID:features.microsoft.tenant_id,
     MICROSOFT_CONNECTION_CLIENT_ID:features.microsoft.client_id,MICROSOFT_CONNECTION_CALLBACK_URI:features.microsoft.callback_uri,
     MICROSOFT_CONNECTION_RETURN_ORIGIN:features.microsoft.return_origin});
+  // Opt-in only: Upload Recording (PR #350 Core capture path) + Chief agent tools.
+  // Real-patient recording stays process-default off; do not ship that process switch on.
+  if(captureEnabled)Object.assign(environment,{
+    WORKSPACE_AGENT_TOOLS_ENABLED:'true',WORKSPACE_CAPTURE_NOTES_ENABLED:'true',
+    WORKSPACE_CAPTURE_BACKEND:'core',WORKSPACE_CAPTURE_PROXY_ENABLED:'true',
+    WORKSPACE_CAPTURE_PROXY_ORIGIN:value.api_origin,
+    CORE_WEB_ORIGIN:value.core_web_origin,CORE_CAPTURE_ORIGIN:value.core_capture_origin,
+    CORE_CAPTURE_SCOPE:value.core_capture_scope,
+    CORE_CAPTURE_MANAGED_IDENTITY_CLIENT_ID:value.core_capture_managed_identity_client_id,
+    CORE_CAPTURE_UPLOAD_HOST:value.core_capture_upload_host});
   const contract={schema:'cosmabot-standalone-host-preparation/v1',state:'PREPARATION_ONLY_STARTUP_HELD',
     instance_id:id,box_id:value.box_id,source_commit:value.source_commit,resource_scope:value.resource_scope,
     deployment_authorized:false,resource_ownership_verified:false,account_mapping_verified:false,
@@ -209,6 +272,10 @@ export function render(input){
     contract.optional_runtime_features={model:!!features.model,google:!!features.google,microsoft:!!features.microsoft,live_provider_acceptance:false,
       secrets_in_package:false,practice_records:'invented synthetic records',google_content:'actual consenting account content; never relabelled as invented',
       microsoft_content:'actual consenting account content; never relabelled as invented'};
+    if(captureEnabled)Object.assign(contract.optional_runtime_features,{capture_and_agent_tools:true,
+      capture_content:'live microphone audio on a synthetic-only host; never relabelled as invented',
+      real_patient_recording_process_switch:false,
+      in_flight_v2_handoff_rollback:'Turning the opt-in off on a later render leaves in-flight v2 tool/capture handoffs to drain or fail closed; no automatic replay'});
     if(features.model)contract.private_environment.exact_names.push('WORKSPACE_LLM_API_KEY');
     if(features.google)contract.private_environment.exact_names.push('GOOGLE_CONNECTION_CLIENT_SECRET','GOOGLE_CONNECTION_ENCRYPTION_KEY');
     if(features.microsoft)contract.private_environment.exact_names.push('MICROSOFT_CONNECTION_CLIENT_SECRET','MICROSOFT_CONNECTION_ENCRYPTION_KEY');
@@ -218,6 +285,22 @@ export function render(input){
           'any_work_or_school_tenant':'configured_work_or_school_tenant',provider_registration_performed:false};
       if(features.microsoft.tenant_id==='organizations')contract.microsoft_registration.required_sign_in_audience='AzureADMultipleOrgs';
     }
+  }
+  if(captureEnabled){
+    // Live Core staging capture connection; content is live microphone audio on a synthetic-only host.
+    // Client manifests keep platformAccess:'disabled'; this entry is Core capture S2S only.
+    contract.client_manifest_platform_access=
+      "Client manifests keep platformAccess:'disabled'; Core capture uses this platform_connections entry, not Cosmaneura platformAccess";
+    contract.platform_connections=[{kind:'core_staging_capture',origin:value.core_capture_origin,
+      web_origin:value.core_web_origin,scope:value.core_capture_scope,
+      managed_identity_client_id:value.core_capture_managed_identity_client_id,
+      upload_proxy_origin:value.api_origin,
+      upload_host:value.core_capture_upload_host,
+      upload_host_control:'Runtime pins CORE_CAPTURE_UPLOAD_HOST exactly (https:443 only); host egress is defense in depth',
+      adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174',
+      upload_adapter:'src/cosmas_os/application/capture_upload_proxy.py:295-311',
+      content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
+      real_patient_recording_process_switch:false}];
   }
   if(ownedVm){
     contract.resource_identity.host_name='vm-cosmabot-staging-eus2-lab01';
@@ -252,10 +335,37 @@ export function render(input){
       firewall.api_egress.push({protocol:'https',hostname,tcp_port:443,redirects_allowed:false});
     (firewall.browser_oauth_origins??=[]).push('https://login.microsoftonline.com');
   }
+  let coreHost='';
+  if(captureEnabled){
+    // Core HTTPS origin from settings.core_capture_origin (core_capture_connection.py:174).
+    // IMDS token path from ManagedIdentityCredential.get_token (same lines) via
+    // BoundedIdentityTransport (core_record_connection.py:195-214).
+    // Blob PUT host from Core-issued upload URL (capture_upload_proxy.py:295-311);
+    // runtime pins CORE_CAPTURE_UPLOAD_HOST exactly; host egress is defense in depth.
+    coreHost=new URL(value.core_capture_origin).hostname;
+    const uploadHost=value.core_capture_upload_host;
+    firewall.api_egress.push({protocol:'https',hostname:coreHost,tcp_port:443,redirects_allowed:false,
+      adapter:'src/cosmas_os/adapters/core_capture_connection.py:174'});
+    firewall.api_egress.push({protocol:'http',hostname:IMDS_TOKEN_HOST,tcp_port:80,path:IMDS_TOKEN_PATH,
+      redirects_allowed:false,adapter:'src/cosmas_os/adapters/core_capture_connection.py:168-174'});
+    firewall.api_egress.push({protocol:'https',hostname:uploadHost,tcp_port:443,method:'PUT',
+      redirects_allowed:false,adapter:'src/cosmas_os/application/capture_upload_proxy.py:295-311'});
+    firewall.deny=firewall.deny.map(item=>{
+      if(item==='169.254.0.0/16 metadata and link-local')
+        return `169.254.0.0/16 metadata and link-local except ${IMDS_TOKEN_HOST}${IMDS_TOKEN_PATH}`;
+      if(item==='*.cosmaneura.com')
+        return `*.cosmaneura.com except ${coreHost} Core capture origin`;
+      return item;
+    });
+  }
   if(value.beta_features!==undefined){
-    firewall.dns='Only the exact configured Clerk/model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
+    firewall.dns=captureEnabled
+      ?`Only the exact configured Clerk/model, selected Google/Microsoft API hostnames, ${coreHost} Core capture, IMDS token host, and ${value.core_capture_upload_host} Core capture upload blob; qualify resolver enforcement separately.`
+      :'Only the exact configured Clerk/model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
     contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
-      'Host firewall and DNS qualification: only declared Clerk, optional own model and selected Google/Microsoft API egress; no metadata or other providers':item);
+      (captureEnabled
+        ?`Host firewall and DNS qualification: only declared Clerk, optional own model, selected Google/Microsoft, Core capture ${coreHost}, IMDS token endpoint, and Core capture upload blob ${value.core_capture_upload_host}; runtime pins that upload host exactly on https:443; no other providers`
+        :'Host firewall and DNS qualification: only declared Clerk, optional own model and selected Google/Microsoft API egress; no metadata or other providers'):item);
   }
   if(ownedVm){
     firewall.dedicated_host_required=false;firewall.existing_owned_cosmabot_host_required=true;

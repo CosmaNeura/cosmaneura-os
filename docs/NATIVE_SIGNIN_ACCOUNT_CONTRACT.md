@@ -30,6 +30,12 @@ paired production practice identity.
 | --- | --- | --- | --- | --- | --- | --- |
 | Synthetic staging | `synthetic` | `synthetic` | `operational-staging-v1` | `*.clerk.accounts.dev` (or dedicated staging Clerk) | `https://<practice_uuid>.staging.cosmas.ai/chief` | `https://api.<practice_uuid>.staging.cosmas.ai` |
 | Production / authorized beta | `production` | `authorized_beta` | `operational-beta-v1` | `https://clerk.cosmas.ai` | `https://<practice_uuid>.workspace.cosmas.ai/chief` | `https://api.<practice_uuid>.workspace.cosmas.ai` |
+| Production review / App Store candidate | not applicable (no native enrollment) | `authorized_beta` | `operational-production-v1` | `https://clerk.beta.cosmas.ai` (`pk_live_` encoding that host; keychain service host-qualified) | `https://beta.cosmas.ai` | `https://api.beta.cosmas.ai` |
+
+CTO decision, 11 Nov 2026 6:55pm ET: production-review Infos use
+`operational-production-v1` on `clerk.beta.cosmas.ai` / `api.beta.cosmas.ai`.
+`clerk.cosmas.ai` / `operational-beta-v1` remains the live profile and is
+reserved for the later per-practice enrollment design.
 
 Account-service hosts (not practice workspaces):
 

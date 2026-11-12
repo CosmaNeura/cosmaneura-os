@@ -7,6 +7,10 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {resolveHostedWorkspace} from '../clients/shared/hosted-workspace-config.mjs';
+import {
+  SYNTHETIC_IPHONE_SIM_PROFILE,
+  validateSyntheticIphoneSimIdentity,
+} from '../clients/shared/synthetic-iphone-sim-identity.mjs';
 import {validateOperationalNativeIdentity, validateOperationalNativeDataMode} from '../clients/desktop/native-identity-config.mjs';
 
 const source = fileURLToPath(new URL('../', import.meta.url));
@@ -74,7 +78,11 @@ export async function buildNativeRenderer({inputs, client, output}, {build} = {}
   const identityName = client + '-identity.json', envName = client + '-build-env.json';
   const identityInput = await flatJson(join(inputRoot, identityName));
   const envInput = await flatJson(join(inputRoot, envName));
-  const identity = validateOperationalNativeIdentity(identityInput.value, client, identityInput.value.apiOrigin);
+  // Test-only synthetic-iphone-sim-v1 is validated separately so the three
+  // operational profiles in operational-native-identity.mjs stay untouched.
+  const identity = identityInput.value?.profile === SYNTHETIC_IPHONE_SIM_PROFILE
+    ? validateSyntheticIphoneSimIdentity(identityInput.value, client, identityInput.value.apiOrigin)
+    : validateOperationalNativeIdentity(identityInput.value, client, identityInput.value.apiOrigin);
   const env = envInput.value;
   const profile = resolveBetaFeatureProfile({
     VITE_WORKSPACE_FEATURE_PROFILE: env.VITE_WORKSPACE_FEATURE_PROFILE,

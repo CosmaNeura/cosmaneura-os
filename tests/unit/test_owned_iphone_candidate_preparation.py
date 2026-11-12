@@ -311,3 +311,63 @@ def test_existing_pure_policy_adds_only_exact_api_csp_and_refuses_configured_htm
         apply(result, policy)
     with pytest.raises(ValueError, match="exact HTTPS"):
         PREPARE.workspace_policy(ROOT, "https://api.synthetic.example.invalid/unsafe", ())
+
+
+def test_composition_bindings_accepts_derived_usage_description_and_rejects_third_key_edits(tmp_path):
+    import hashlib
+    import sys
+
+    def compose_into(path: Path) -> None:
+        subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts/compose-portable-iphone.py"),
+                "--repository",
+                str(ROOT),
+                "--output",
+                str(path),
+            ],
+            check=True,
+            cwd=ROOT,
+        )
+
+    output = tmp_path / "composed"
+    compose_into(output)
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    composition, bindings = PREPARE.composition_bindings(ROOT, {"commit": commit}, output)
+    assert len(bindings) == len(composition["files"])
+    usage = [item for item in bindings if item["role"] == "derived-owned-info-plist"]
+    assert len(usage) == 1
+    assert usage[0]["destination"] == "ios/App/App/Info.plist"
+    assert usage[0]["source"] == "apps/capture/ios/App/App/Info.plist"
+
+    # Candidate configuration still only mutates Info.plist after composition.
+    identity = public_beta()
+    app = output / "apps/capture/ios/App/App"
+    before = plistlib.loads((app / "Info.plist").read_bytes())
+    configured = PREPARE.configured_info(
+        before, retained_beta(identity), identity, validate_google=NAVIGATION.validate_google
+    )
+    (app / "Info.plist").write_bytes(plistlib.dumps(configured, sort_keys=False))
+    changed = [
+        item["path"]
+        for item in composition["files"]
+        if PREPARE.digest(output / "apps/capture" / item["path"]) != item["sha256"]
+    ]
+    assert changed == ["ios/App/App/Info.plist"]
+
+    tampered_root = tmp_path / "tampered"
+    compose_into(tampered_root)
+    info_path = tampered_root / "apps/capture/ios/App/App/Info.plist"
+    info = plistlib.loads(info_path.read_bytes())
+    info["CFBundleDisplayName"] = "Tampered CosmaBot"
+    raw = plistlib.dumps(info, sort_keys=False)
+    info_path.write_bytes(raw)
+    manifest_path = tampered_root / "composition.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for item in manifest["files"]:
+        if item["path"] == "ios/App/App/Info.plist":
+            item["sha256"] = hashlib.sha256(raw).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Owned Info.plist derivation differs"):
+        PREPARE.composition_bindings(ROOT, {"commit": commit}, tampered_root)

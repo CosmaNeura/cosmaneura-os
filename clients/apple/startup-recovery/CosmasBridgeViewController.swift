@@ -2,6 +2,9 @@ import UIKit
 import WebKit
 import Capacitor
 import CosmaneuraIOSPCMCapacitor
+#if DEBUG
+import AVFAudio
+#endif
 #if canImport(CosmasWorkspaceAuthPlugin)
 import CosmasWorkspaceAuthPlugin
 #endif
@@ -173,6 +176,23 @@ import CosmasNativeAuth
             return
         }
         capturePlugin = plugin
+        #if DEBUG
+        // Synthetic Simulator XCUITest only. Never compiled into Release/TestFlight.
+        let uiTestSkipDemo = Bundle.main.bundleIdentifier == "com.cosmasos.synthetic"
+            && ProcessInfo.processInfo.arguments.contains("-COSMAS_SKIP_SYNTHETIC_DEMO")
+        let uiTestStartCapture = uiTestSkipDemo
+            && ProcessInfo.processInfo.arguments.contains("-COSMAS_UI_TEST_START_CAPTURE")
+        if uiTestSkipDemo {
+            exposeUiTestPluginLoadedMarker()
+            exposeUiTestMicPermissionMarker(currentRecordPermissionMarker())
+        }
+        if uiTestStartCapture {
+            Task { [weak self] in
+                let result = await plugin.uiTestStartRecordingThroughLoadedPlugin()
+                self?.exposeUiTestMicPermissionMarker(result)
+            }
+        }
+        #endif
         #if canImport(CosmasWorkspaceAuthPlugin)
         do {
             guard let auth = bridge?.plugin(withName: "CosmasWorkspaceAuth") as? CosmasWorkspaceAuthPlugin else {
@@ -182,6 +202,15 @@ import CosmasNativeAuth
             speechPlugin = bridge?.plugin(withName: "CosmasPrivateSpeech") as? CosmasPrivateSpeechPlugin
             try auth.prepareCosmaneuraNavigation(on: webView)
         } catch {
+            #if DEBUG
+            if uiTestSkipDemo {
+                // Keep the loaded IOSPCM plugin; synthetic auth is expected to
+                // fail without real Clerk keys. Do not quarantine XCUITest probes.
+                startedNavigation = true
+                super.viewDidLoad()
+                return
+            }
+            #endif
             quarantine()
             onFailure?()
             return
@@ -191,10 +220,93 @@ import CosmasNativeAuth
         navigationProxy = proxy
         webView.navigationDelegate = proxy
         do { try installLifecycle(on: webView) }
-        catch { quarantine(); onFailure?(); return }
+        catch {
+            #if DEBUG
+            if uiTestSkipDemo {
+                startedNavigation = true
+                super.viewDidLoad()
+                return
+            }
+            #endif
+            quarantine(); onFailure?(); return
+        }
         startedNavigation = true
         super.viewDidLoad()
     }
+
+    #if DEBUG
+    /// Hosted on the superview/window (outside the WKWebView subtree) so XCUITest
+    /// `otherElements` can see them. CAPBridgeViewController.view is the WebView.
+    private var uiTestLoadedMarkerView: UIView?
+    private var uiTestMicPermissionMarkerView: UIView?
+
+    private func exposeUiTestPluginLoadedMarker() {
+        guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic" else { return }
+        scheduleUiTestMarkerInstall(identifier: "cosmas.uiTest.iospcm.loaded", micPermission: false)
+    }
+
+    private func exposeUiTestMicPermissionMarker(_ token: String) {
+        guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic" else { return }
+        scheduleUiTestMarkerInstall(
+            identifier: "cosmas.uiTest.micPermission.\(token)",
+            micPermission: true
+        )
+    }
+
+    /// Non-zero-frame accessibility element outside the WKWebView. XCUITest does
+    /// not expose zero-frame subviews of WKWebView, and WebView-typed elements
+    /// are not matched by `app.otherElements[…]`.
+    private func scheduleUiTestMarkerInstall(identifier: String, micPermission: Bool) {
+        let install: () -> Void = { [weak self] in
+            self?.installUiTestMarker(identifier: identifier, micPermission: micPermission, attemptsLeft: 20)
+        }
+        if view.superview != nil || view.window != nil {
+            install()
+        } else {
+            DispatchQueue.main.async(execute: install)
+        }
+    }
+
+    private func installUiTestMarker(identifier: String, micPermission: Bool, attemptsLeft: Int) {
+        guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic" else { return }
+        guard let host = view.superview ?? view.window else {
+            guard attemptsLeft > 0 else { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.installUiTestMarker(
+                    identifier: identifier,
+                    micPermission: micPermission,
+                    attemptsLeft: attemptsLeft - 1
+                )
+            }
+            return
+        }
+        if micPermission {
+            uiTestMicPermissionMarkerView?.removeFromSuperview()
+        } else {
+            uiTestLoadedMarkerView?.removeFromSuperview()
+        }
+        let marker = UIView(frame: CGRect(x: 0, y: 0, width: 2, height: 2))
+        marker.isAccessibilityElement = true
+        marker.accessibilityIdentifier = identifier
+        marker.isUserInteractionEnabled = false
+        marker.backgroundColor = .clear
+        host.addSubview(marker)
+        if micPermission {
+            uiTestMicPermissionMarkerView = marker
+        } else {
+            uiTestLoadedMarkerView = marker
+        }
+    }
+
+    private func currentRecordPermissionMarker() -> String {
+        switch AVAudioApplication.shared.recordPermission {
+        case .undetermined: return "undetermined"
+        case .denied: return "denied"
+        case .granted: return "granted"
+        @unknown default: return "unknown"
+        }
+    }
+    #endif
 
     fileprivate func receive(_ message: WKScriptMessage) {
         if message.name == "cosmasPresentation" { receivePresentation(message); return }

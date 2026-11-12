@@ -41,14 +41,33 @@ def _secrets() -> tuple[str, ...]:
     return (MRN, EMAIL, PHONE, SSN, DOB, NAME, NOTE, "stuffed penguin", "Ada")
 
 
-def _capture(name: str) -> tuple[logging.Logger, io.StringIO, tuple[int, bool, list[logging.Handler], bool]]:
+def _capture(
+    name: str,
+) -> tuple[
+    logging.Logger,
+    io.StringIO,
+    tuple[int, bool, list[logging.Handler], bool, list[logging.Filter]],
+]:
     arm_plugin_loggers()
     logger = logging.getLogger(name)
     # Alembic fileConfig disables loggers that already exist. The full suite
     # does that before this test, which would drop the record and leave an
     # empty capture.
-    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
+    #
+    # capture_upload_proxy also installs CoreUploadHttpxFilter on the shared
+    # httpx logger at import time. That filter strips every URL query before
+    # the plugin scrubber runs, so request_id disappears whenever an earlier
+    # suite test imported the proxy module. Clear logger filters for the
+    # capture window and restore them afterward.
+    previous = (
+        logger.level,
+        logger.propagate,
+        list(logger.handlers),
+        logger.disabled,
+        list(logger.filters),
+    )
     logger.handlers = []
+    logger.filters = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
     logger.disabled = False
@@ -60,10 +79,12 @@ def _capture(name: str) -> tuple[logging.Logger, io.StringIO, tuple[int, bool, l
 
 
 def _restore(
-    logger: logging.Logger, previous: tuple[int, bool, list[logging.Handler], bool]
+    logger: logging.Logger,
+    previous: tuple[int, bool, list[logging.Handler], bool, list[logging.Filter]],
 ) -> None:
-    level, propagate, handlers, disabled = previous
+    level, propagate, handlers, disabled, filters = previous
     logger.handlers = handlers
+    logger.filters = filters
     logger.setLevel(level)
     logger.propagate = propagate
     logger.disabled = disabled
@@ -130,10 +151,35 @@ def test_plugin_logger_redacts_identifiers_drops_note_fields_and_redacts_queries
     assert REQUEST in extra_stream.getvalue()
 
 
+_CORE_UPLOAD_FILTER_MARKER = "cosmas_os.capture_upload_proxy.query"
+
+
+def _has_core_upload_filter(logger: logging.Logger) -> bool:
+    return any(getattr(item, "marker", None) == _CORE_UPLOAD_FILTER_MARKER for item in logger.filters)
+
+
+def _assert_plugin_httpx_scrub(text: str) -> None:
+    """Plugin scrub alone: keep request_id, redact identifiers, drop note query keys.
+
+    Whole-query stripping (CoreUploadHttpxFilter) would remove '?' entirely and
+    would not leave mrn=[redacted]. Passing these asserts with foreign filters
+    cleared proves the plugin scrubber did the work.
+    """
+    for secret in (MRN, EMAIL, NOTE, "stuffed penguin"):
+        assert secret not in text
+    assert "reads?" in text
+    assert "mrn=[redacted]" in text
+    assert "email=[redacted]" in text
+    assert f"request_id={REQUEST}" in text
+    assert "note_text" not in text
+
+
 def test_httpx_and_runner_logs_scrub_urls_and_exceptions() -> None:
     httpx_logger, httpx_stream, httpx_previous = _capture("httpx")
     runner, runner_stream, runner_previous = _capture("mcp.server.runner")
     try:
+        # Capture window must not rely on CoreUploadHttpxFilter.
+        assert not _has_core_upload_filter(httpx_logger)
         httpx_logger.info(
             'HTTP Request: %s %s "%s %d %s"',
             "POST",
@@ -158,22 +204,32 @@ def test_httpx_and_runner_logs_scrub_urls_and_exceptions() -> None:
     finally:
         _restore(httpx_logger, httpx_previous)
         _restore(runner, runner_previous)
-    combined = httpx_stream.getvalue() + runner_stream.getvalue()
+    httpx_text = httpx_stream.getvalue()
+    runner_text = runner_stream.getvalue()
+    combined = httpx_text + runner_text
     for secret in (MRN, EMAIL, NOTE, "stuffed penguin"):
         assert secret not in combined
-    assert REQUEST in httpx_stream.getvalue()
-    assert "request_id=" + REQUEST in runner_stream.getvalue()
-    assert "Traceback (most recent call last)" in runner_stream.getvalue()
-    assert "note_text = " not in runner_stream.getvalue()
-    assert "mrn = " not in runner_stream.getvalue()
-    assert "note_text" not in httpx_stream.getvalue()
-    assert f"request_id={REQUEST}" in httpx_stream.getvalue()
+    assert REQUEST in httpx_text
+    assert "request_id=" + REQUEST in runner_text
+    assert "Traceback (most recent call last)" in runner_text
+    assert "note_text = " not in runner_text
+    assert "mrn = " not in runner_text
+    assert "note_text" not in httpx_text
+    assert f"request_id={REQUEST}" in httpx_text
+    _assert_plugin_httpx_scrub(httpx_text)
 
 
 def test_preexisting_httpx_handler_is_armed() -> None:
     logger = logging.getLogger("httpx")
-    previous = (logger.level, logger.propagate, list(logger.handlers), logger.disabled)
+    previous = (
+        logger.level,
+        logger.propagate,
+        list(logger.handlers),
+        logger.disabled,
+        list(logger.filters),
+    )
     logger.handlers = []
+    logger.filters = []
     logger.setLevel(logging.INFO)
     logger.propagate = False
     logger.disabled = False
@@ -183,14 +239,64 @@ def test_preexisting_httpx_handler_is_armed() -> None:
     _original_add_handler(logger, handler)
     try:
         arm_plugin_loggers()
+        assert not _has_core_upload_filter(logger)
         logger.info("GET %s", URL)
         text = stream.getvalue()
         assert MRN not in text
         assert EMAIL not in text
         assert "penguin" not in text
         assert REQUEST in text
+        _assert_plugin_httpx_scrub(text)
     finally:
         _restore(logger, previous)
+
+
+def test_httpx_scrub_keeps_request_id_after_core_upload_filter_import() -> None:
+    """Regression: earlier suite imports leave CoreUploadHttpxFilter on httpx."""
+    from cosmas_os.application import capture_upload_proxy as proxy
+
+    attached = proxy.install_httpx_query_filter()
+    httpx_logger = logging.getLogger("httpx")
+    assert _has_core_upload_filter(httpx_logger)
+    assert attached.marker == proxy.CoreUploadHttpxFilter.marker
+
+    # With the foreign filter still attached, the whole query disappears.
+    # That is over-scrub from the proxy filter, not plugin scrub behavior.
+    polluted_previous = (
+        httpx_logger.level,
+        httpx_logger.propagate,
+        list(httpx_logger.handlers),
+        httpx_logger.disabled,
+        list(httpx_logger.filters),
+    )
+    httpx_logger.handlers = []
+    httpx_logger.setLevel(logging.INFO)
+    httpx_logger.propagate = False
+    httpx_logger.disabled = False
+    polluted_stream = io.StringIO()
+    polluted_handler = logging.StreamHandler(polluted_stream)
+    polluted_handler.setFormatter(logging.Formatter("%(message)s"))
+    httpx_logger.addHandler(polluted_handler)
+    try:
+        assert _has_core_upload_filter(httpx_logger)
+        httpx_logger.info(
+            'HTTP Request: %s %s "%s %d %s"',
+            "POST",
+            URL,
+            "HTTP/1.1",
+            200,
+            "OK",
+        )
+        polluted = polluted_stream.getvalue()
+        assert "reads?" not in polluted
+        assert REQUEST not in polluted
+        assert MRN not in polluted
+    finally:
+        _restore(httpx_logger, polluted_previous)
+
+    # Capture clears the foreign filter; plugin scrub alone must still redact.
+    test_httpx_and_runner_logs_scrub_urls_and_exceptions()
+    assert _has_core_upload_filter(httpx_logger)
 
 
 def test_stderr_writes_are_scrubbed_and_sign_in_text_remains(capsys: pytest.CaptureFixture[str]) -> None:

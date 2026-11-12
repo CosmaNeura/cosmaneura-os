@@ -21,7 +21,17 @@ import Security
             throw NativeAuthError.storageUnavailable
         }
         // No migration or wildcard read: default users keep their existing fence.
-        let service = bundleIdentifier + ".workspace-auth" + (profileNamespace.map { "." + $0 } ?? "")
+        // operationalBeta with nil profileNamespace stays bundle.workspace-auth.
+        // operationalProduction appends its exact Clerk host so the logout fence
+        // never shares storage with live Infos on the same bundle ID.
+        var service = bundleIdentifier + ".workspace-auth"
+        if profile == .operationalProduction {
+            guard let host = profile.allowedClerkHosts.sorted().first else {
+                throw NativeAuthError.storageUnavailable
+            }
+            service += "." + host
+        }
+        if let profileNamespace { service += "." + profileNamespace }
         query = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,

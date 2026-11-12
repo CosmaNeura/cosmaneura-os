@@ -56,6 +56,7 @@ def core_capture_values():
             "core_web_origin": "https://staging-app.cosmaneura.com",
             "core_capture_scope": "api://invented-core-audience/.default",
             "core_capture_managed_identity_client_id": "00000000-0000-4000-8000-0000000000aa",
+            "core_capture_upload_host": "inventedcaptureacct.blob.core.windows.net",
             # Explicit independent-beta proxy opt-in + CosmaBot API origin.
             "workspace_capture_proxy_enabled": True,
             "workspace_capture_proxy_origin": "https://api.invented-cosmabot.test"}
@@ -118,6 +119,9 @@ def test_model_incomplete_or_broadened_configuration_fails(clerk_standalone, cha
     {"workspace_capture_proxy_origin": "https://cosmaneurastaginguploads.blob.core.windows.net"},
     {"workspace_capture_proxy_origin": "https://staging-app.cosmaneura.com"},
     {"workspace_capture_proxy_origin": ""},
+    {"core_capture_upload_host": ""},
+    {"core_capture_upload_host": "InventedCaptureAcct.blob.core.windows.net"},
+    {"core_capture_upload_host": "otheraccount.blob.core.windows.net/extra"},
 ])
 def test_core_capture_incomplete_or_broadened_configuration_fails(clerk_standalone, change):
     runtime = clerk_standalone.runtime.model_copy(update=model_values() | google_values() | core_capture_values() | change)

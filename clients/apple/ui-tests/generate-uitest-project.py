@@ -8,7 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 TESTS = ROOT / "CosmasSyntheticUITests"
 PROJECT = ROOT / "CosmasSyntheticUITests.xcodeproj"
-SOURCE = "VisitTimerAndChiefIconUITests.swift"
+SOURCES = (
+    "VisitTimerAndChiefIconUITests.swift",
+    "MicrophonePermissionUITests.swift",
+)
 
 # Stable IDs so the generator is deterministic across reruns.
 PROJECT_ID = "A10000000000000000000001"
@@ -22,16 +25,51 @@ DEBUG_PROJECT = "A10000000000000000000008"
 RELEASE_PROJECT = "A10000000000000000000009"
 DEBUG_TARGET = "A1000000000000000000000A"
 RELEASE_TARGET = "A1000000000000000000000B"
-TEST_FILE_REF = "A1000000000000000000000C"
 TESTS_GROUP = "A1000000000000000000000D"
 PRODUCTS_GROUP = "A1000000000000000000000E"
 MAIN_GROUP = "A1000000000000000000000F"
 PRODUCT_REF = "A10000000000000000000010"
-BUILD_FILE = "A10000000000000000000011"
+# Per-source fileRef / buildFile pairs (even indices after the fixed block).
+SOURCE_IDS = (
+    ("A1000000000000000000000C", "A10000000000000000000011"),
+    ("A10000000000000000000012", "A10000000000000000000013"),
+)
+
+
+def _zip_equal(left, right):
+    """Python 3.9-safe zip that refuses length mismatch (Mac /usr/bin/python3)."""
+    if len(left) != len(right):
+        raise ValueError(
+            f"length mismatch: left={len(left)} right={len(right)}"
+        )
+    return zip(left, right)  # noqa: B905 — length checked above; Mac stock Python is 3.9
 
 
 def main() -> None:
-    assert (TESTS / SOURCE).is_file(), SOURCE
+    if len(SOURCES) != len(SOURCE_IDS):
+        raise ValueError(
+            f"SOURCES ({len(SOURCES)}) and SOURCE_IDS ({len(SOURCE_IDS)}) length mismatch"
+        )
+    for name in SOURCES:
+        assert (TESTS / name).is_file(), name
+
+    build_files = "\n".join(
+        f"\t\t{build} /* {name} in Sources */ = {{isa = PBXBuildFile; fileRef = {ref} /* {name} */; }};"
+        for (ref, build), name in _zip_equal(SOURCE_IDS, SOURCES)
+    )
+    file_refs = "\n".join(
+        f'\t\t{ref} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {name}; sourceTree = "<group>"; }};'
+        for (ref, _), name in _zip_equal(SOURCE_IDS, SOURCES)
+    )
+    group_children = "\n".join(
+        f"\t\t\t\t{ref} /* {name} */,"
+        for (ref, _), name in _zip_equal(SOURCE_IDS, SOURCES)
+    )
+    sources_phase_files = "\n".join(
+        f"\t\t\t\t{build} /* {name} in Sources */,"
+        for (_, build), name in _zip_equal(SOURCE_IDS, SOURCES)
+    )
+
     pbx = f"""// !$*UTF8*$!
 {{
 	archiveVersion = 1;
@@ -40,11 +78,11 @@ def main() -> None:
 	objects = {{
 
 /* Begin PBXBuildFile section */
-		{BUILD_FILE} /* {SOURCE} in Sources */ = {{isa = PBXBuildFile; fileRef = {TEST_FILE_REF} /* {SOURCE} */; }};
+{build_files}
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		{TEST_FILE_REF} /* {SOURCE} */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = {SOURCE}; sourceTree = "<group>"; }};
+{file_refs}
 		{PRODUCT_REF} /* CosmasSyntheticUITests.xctest */ = {{isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CosmasSyntheticUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; }};
 /* End PBXFileReference section */
 
@@ -70,7 +108,7 @@ def main() -> None:
 		{TESTS_GROUP} /* CosmasSyntheticUITests */ = {{
 			isa = PBXGroup;
 			children = (
-				{TEST_FILE_REF} /* {SOURCE} */,
+{group_children}
 			);
 			path = CosmasSyntheticUITests;
 			sourceTree = "<group>";
@@ -151,7 +189,7 @@ def main() -> None:
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				{BUILD_FILE} /* {SOURCE} in Sources */,
+{sources_phase_files}
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		}};
