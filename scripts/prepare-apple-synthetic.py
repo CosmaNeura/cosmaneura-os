@@ -36,6 +36,18 @@ _identity_spec = importlib.util.spec_from_file_location("native_identity_build",
 _identity = importlib.util.module_from_spec(_identity_spec)
 _identity_spec.loader.exec_module(_identity)
 
+_compose_spec = importlib.util.spec_from_file_location(
+    "compose_portable_iphone", Path(__file__).with_name("compose-portable-iphone.py")
+)
+if _compose_spec is None or _compose_spec.loader is None:
+    raise ValueError("Portable iPhone composer is unavailable.")
+_compose = importlib.util.module_from_spec(_compose_spec)
+_compose_spec.loader.exec_module(_compose)
+REVIEWED_MICROPHONE_USAGE = _compose.REVIEWED_MICROPHONE_USAGE
+REVIEWED_SPEECH_USAGE = _compose.REVIEWED_SPEECH_USAGE
+REVIEWED_SYNTHETIC_MICROPHONE_USAGE = _compose.REVIEWED_SYNTHETIC_MICROPHONE_USAGE
+refuse_non_true_export_compliance = _compose.refuse_non_true_export_compliance
+
 SOURCE_REF = "ea7f99d0278a05706531ffb1288cb1df7acf507b"
 SOURCE_PATHS = (
     "apps/capture/ios",
@@ -362,6 +374,28 @@ def simulator_native_auth_settings(identity: dict) -> dict[str, object]:
     return auth
 
 
+def apply_reviewed_apple_info_usage(
+    info: dict,
+    *,
+    operational: bool,
+    simulator_staging_auth: bool,
+) -> dict:
+    """Apply reviewed microphone/speech copy and refuse a non-true export-compliance key.
+
+    A pre-existing boolean true is preserved. The key is never written.
+    Historical prepare path; does not place the app-level PrivacyInfo.xcprivacy
+    (portable compose does).
+    """
+    refuse_non_true_export_compliance(info)
+    info["NSMicrophoneUsageDescription"] = (
+        REVIEWED_MICROPHONE_USAGE
+        if operational and not simulator_staging_auth
+        else REVIEWED_SYNTHETIC_MICROPHONE_USAGE
+    )
+    info["NSSpeechRecognitionUsageDescription"] = REVIEWED_SPEECH_USAGE
+    return info
+
+
 def prepare(
     source: Path, web: Path, output: Path, verification_variant: str | None = None,
     native_auth_clerk_archive: Path | None = None,
@@ -573,12 +607,11 @@ def prepare(
         for scene in scenes:
             scene.pop("UISceneStoryboardFile", None)
     info["CFBundleDisplayName"] = display_name
-    info["NSMicrophoneUsageDescription"] = (
-        "Cosmas records visit audio after you confirm consent and choose Start recording."
-        if operational and not simulator_staging_auth
-        else "Record an invented encounter only after you explicitly start a synthetic capture test."
+    apply_reviewed_apple_info_usage(
+        info,
+        operational=operational,
+        simulator_staging_auth=bool(simulator_staging_auth),
     )
-    info["NSSpeechRecognitionUsageDescription"] = "Transcribe your saved recording on this iPhone only when you choose Transcribe. Your audio is not sent to a speech server."
     info["NSAppTransportSecurity"] = {} if hosted_workspace else {"NSAllowsLocalNetworking": True}
     info_path.write_bytes(plistlib.dumps(info, sort_keys=False))
     (app / "capacitor.config.json").write_text(
