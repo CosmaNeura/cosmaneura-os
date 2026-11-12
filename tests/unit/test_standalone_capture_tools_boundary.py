@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from tests.unit import test_standalone_beta_features as beta
 from tests.unit import test_standalone_clerk_runtime as clerk_tests
-from tests.unit.test_capture_upload_proxy import _Runtime, _receipt, _seed
+from tests.unit.test_capture_upload_proxy import _receipt, _Runtime, _seed
 
 from cosmas_os.application import capture_upload_proxy as proxy
 from cosmas_os.application import workspace as ws
