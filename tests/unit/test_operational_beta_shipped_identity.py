@@ -258,7 +258,10 @@ def test_desktop_release_profile_accepts_shipped_identity():
 def test_transition_fixture_source_is_staging_host():
     text = (ROOT / "scripts/transition-desktop-identity.test.mjs").read_text(encoding="utf-8")
     assert "clerk.staging.cosmas.ai" in text
-    assert "sourceIdentity = identity('clerk.staging.cosmas.ai')" in text
+    # Default fixture source remains shipped staging; other hosts are explicit args.
+    assert "async function fixture(t, sourceHost = 'clerk.staging.cosmas.ai')" in text
+    assert "sourceIdentity = identity(sourceHost)" in text
+    assert "transition accepts operational-beta-v1 source on clerk.staging.cosmas.ai" in text
 
 
 def test_package_desktop_synthetic_source_refuses_production_identity():
