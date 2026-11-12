@@ -795,6 +795,11 @@ class Settings(BaseSettings):
         if (not self.allowed_origins
                 or not all(self._is_workspace_origin(origin) for origin in self.allowed_origins)):
             errors.append("Standalone origins must match its explicit workspace transports")
+        # Not an *_enabled flag; refuse managed admission on standalone explicitly.
+        if self.workspace_enrollment_managed:
+            errors.append(
+                "WORKSPACE_ENROLLMENT_MANAGED must remain false in standalone configuration"
+            )
         enabled_allowlist = {"workspace_enabled", "workspace_authenticated_enabled",
             "workspace_draft_recovery_required"}
         if real_clerk:
