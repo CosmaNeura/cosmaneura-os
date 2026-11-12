@@ -101,7 +101,7 @@ def test_synth_ci_draft_light_fail_closed_contract():
     concurrency = data["concurrency"]
     assert concurrency["cancel-in-progress"] == CANCEL_IN_PROGRESS
     assert concurrency["group"] == (
-        "${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+        "${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}"
     )
 
     jobs = data["jobs"]
