@@ -13,15 +13,15 @@ Proposed 12 Nov 2026. Takes effect when John merges this PR. Changing this file 
 Fable reviews after required CI is green at the same head. The Beta Tester's pass/fail applies to every PR. That way Fable sees clean PRs.
 
 ### 2a. High-risk: sorted by the PR's file list. Any match makes it high-risk.
-When in doubt, send it to Fable.
+All 2a globs match case-insensitively. When in doubt, send it to Fable.
 
 | Category | Matches (any changed path) |
 |---|---|
 | Patient data or deletes | `migrations/**`, `**/*patient*`, `**/*retention*`, `docs/RETENTION.md`, `scripts/*patient*`, `**/*delete*` in `src/**` |
-| Sign-in, accounts, Clerk | `**/*clerk*`, `**/*auth*`, `clients/apple/native-auth/**`, `**/*keychain*`, `**/*signin*`, `docs/NATIVE_SIGNIN*` |
-| Logging and redaction (code) | `src/**/*log*`, `src/**/*redact*`, `src/**/*scrub*`, `**/*audit*` (not test-only, see N1) |
+| Sign-in, accounts, Clerk | `**/*clerk*`, `docs/**/*clerk*`, `**/*auth*`, `clients/apple/native-auth/**`, `**/*keychain*`, `**/*signin*`, `docs/NATIVE_SIGNIN*` |
+| Logging and redaction (code) | `src/**/*log*`, `src/**/*redact*`, `src/**/*scrub*`, `**/*audit*`, `docs/**/*log-scrub*`, `docs/**/*logging*`, `**/*log-scrub*` |
 | Secrets | `.env*`, `**/*secret*`, `**/*.op`, `**/*vault*`, `.envrc` |
-| Infra, deploys, cost | `infra/**`, `**/*.tf`, `**/deploy*`, `.github/workflows/**` |
+| Infra, deploys, cost | `infra/**`, `**/*.tf`, `**/deploy*`, `**/*deployment*`, `docs/**/*deploy*`, `docs/**/*deployment*`, `.github/workflows/**` |
 | App Store and release | `**/Info.plist`, `**/PrivacyInfo.xcprivacy`, `**/*.entitlements`, `**/fastlane/**`, `scripts/compose-portable-iphone.py`, `scripts/prepare-owned-*`, `**/Release*` |
 | Database | `migrations/**`, `**/*.sql`, `**/models.py`, `**/schema*` |
 | Live-user access | `**/*enrollment*`, `**/*practice*`, `**/*invitation*`, `**/*baa*`, `**/*agreement*`, `**/*onboarding*`, `**/*billing*`, feature-flag or settings defaults (`infra/standalone/**`, `**/config.py`) |
@@ -31,16 +31,15 @@ When in doubt, send it to Fable.
 2. **Very large:** more than **1,500 changed lines** (additions + deletions) or more than **25 files**. For reference, the 30-day p90 was 2,658 changed lines (PRs created 15 Oct–12 Nov 2026).
 3. The author disputes a High or Blocking finding.
 
-## 3. Skip Fable: narrowings N1, N2 and N5
-These skip Fable even if a glob in 2a matches, unless a 2b rule fires. John's 11 Nov scope, in summary: the skip types are docs, copy, test-only and small UI. Those PRs need green checks. The Beta Tester's pass/fail applies to every PR. Every Fable HOLES must be closed by a Fable PASS at the final head; a delta-only re-check is fine. A PR that skips Fable must say "Fable not required (criteria)" in the PR body, naming the narrowing, and the App Store Release Lead records that line in the ledger.
+## 3. Skip Fable: narrowings N1 and N2
+The only skip types are docs, copy, test-only and small UI with no data or sign-in effect. Any 2a match beats every skip and the file goes to Fable. John's 11 Nov scope, in summary: the skip types are docs, copy, test-only and small UI. Those PRs need green checks. The Beta Tester's pass/fail applies to every PR. Every Fable HOLES must be closed by a Fable PASS at the final head; a delta-only re-check is fine. A PR that skips Fable must say "Fable not required (criteria)" in the PR body, naming the narrowing, and the App Store Release Lead records that line in the ledger.
 
 | # | Scope | Still goes to Fable if... |
 |---|---|---|
-| N1 | Test-only PRs: only `tests/**` or `*.test.*`, with synthetic fixtures | it changes a test that protects a 2a category **and** removes or weakens an assertion |
-| N2 | Docs and comments only | the docs are sign-in, release, realm or retention contracts (`docs/NATIVE_SIGNIN*`, `docs/operational-*`, `docs/RETENTION.md`), or the change is `docs/review-policy.md` or the "Coding rules from review findings" section of `AGENTS.md` |
-| N5 | Simulator and dev-only tooling paths only: `clients/apple/ui-tests/**`, `clients/capture/native-configured/ios-*-tests/**`, `scripts/configure-synthetic-iphone-simulator.py`, `scripts/run-iphone-sim-record-test*`, `scripts/prepare-synthetic-iphone-web-bundle*` | any 2a required-category glob match (infra, workflows, secrets, sign-in/Clerk, App Store or release, DB, logging/redaction, patient data or deletes, live-user access) always overrides N5 and section 3, so Fable is required |
+| N1 | Test-only PRs: only `tests/**` or `*.test.*`, with synthetic fixtures, and no changed path matches a 2a glob | any test or fixture file matches a 2a glob (case-insensitive), whatever the change — for example `clients/desktop/auth-session.test.mjs`, `connector-auth-proxy.test.mjs`, `connector-api-routes.scheduling-patient.test.mjs` |
+| N2 | Docs and copy only (not comment-only edits in code files), and no changed path matches a 2a glob | any changed path matches a 2a glob (case-insensitive), or the docs are sign-in, release, realm or retention contracts (`docs/NATIVE_SIGNIN*`, `docs/operational-*`, `docs/RETENTION.md`), or the change is `docs/review-policy.md` or the "Coding rules from review findings" section of `AGENTS.md` |
 
-What we accept by narrowing: less depth on test-only and simulator-tooling changes, and rare doc and code mismatches. The hard rules (2b) are the backstop.
+What we accept by narrowing: less depth on pure docs/copy and test-only changes that touch no 2a path, and small UI with no data or sign-in effect. The hard rules (2b) are the backstop.
 
 ## 4. Rules that always hold
 - No merge ask goes to John without a linked Fable PASS at the exact head, or, for a section 3 PR, the "Fable not required (criteria)" line plus green CI and the Beta result.
