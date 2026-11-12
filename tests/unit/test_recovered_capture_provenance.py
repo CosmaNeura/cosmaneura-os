@@ -509,7 +509,7 @@ def test_owned_privacy_manifest_declares_reviewed_coverage():
     assert plistlib.loads(OWNED_PRIVACY.read_bytes()) == EXPECTED_APP_PRIVACY
 
 
-def test_scaffold_info_plist_stays_frozen_without_false_export_claim():
+def test_scaffold_info_plist_stays_frozen_export_key_left_for_owner_decision():
     info = plistlib.loads(APP_INFO.read_bytes())
     # Frozen 1107 scaffold keeps historical copy; composer derives reviewed wording.
     assert info["NSMicrophoneUsageDescription"] == (
@@ -523,7 +523,7 @@ def test_scaffold_info_plist_stays_frozen_without_false_export_claim():
     assert "ITSAppUsesNonExemptEncryption" not in info
 
 
-def test_recording_path_uses_non_exempt_application_crypto():
+def test_recording_path_retains_native_crypto_and_speech_symbols():
     recording = RECORDING_ENCRYPTION.read_text(encoding="utf-8")
     queue = SECURE_QUEUE.read_text(encoding="utf-8")
     assert "AES.GCM" in recording and "rsaEncryptionOAEPSHA256" in recording

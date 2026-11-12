@@ -201,8 +201,8 @@ REVIEWED_APP_PRIVACY = {
 def refuse_non_true_export_compliance(info: dict) -> None:
     """Refuse any present export-compliance value that is not boolean True.
 
-    This script never writes ITSAppUsesNonExemptEncryption. The YES/NO answer
-    and questionnaire remain an owner decision outside composition.
+    A pre-existing boolean true is preserved. The key is never written. The
+    YES/NO answer and questionnaire remain an owner decision outside composition.
     """
     if "ITSAppUsesNonExemptEncryption" not in info:
         return

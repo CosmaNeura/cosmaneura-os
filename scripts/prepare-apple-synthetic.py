@@ -382,8 +382,9 @@ def apply_reviewed_apple_info_usage(
 ) -> dict:
     """Apply reviewed microphone/speech copy and refuse a non-true export-compliance key.
 
-    Never writes ITSAppUsesNonExemptEncryption. Historical prepare path; does not
-    place the app-level PrivacyInfo.xcprivacy (portable compose does).
+    A pre-existing boolean true is preserved. The key is never written.
+    Historical prepare path; does not place the app-level PrivacyInfo.xcprivacy
+    (portable compose does).
     """
     refuse_non_true_export_compliance(info)
     info["NSMicrophoneUsageDescription"] = (
