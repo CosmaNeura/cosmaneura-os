@@ -304,28 +304,105 @@ ALLOWED_RESOURCE_TYPES = frozenset(
 )
 
 
+def _rel_parts(path: Path, root: Path = ROOT) -> tuple[str, ...]:
+    try:
+        return path.resolve().relative_to(root.resolve()).parts
+    except ValueError:
+        return path.parts
+
+
+def _skip_scan_path(path: Path, root: Path = ROOT) -> bool:
+    return any(part in {".terraform", ".git", "tests"} for part in _rel_parts(path, root))
+
+
+def _resource_blocks(text: str):
+    for match in re.finditer(r'^\s*resource\s+"([^"]+)"\s+"([^"]+)"\s*\{', text, re.M):
+        start = match.end()
+        depth = 1
+        i = start
+        while i < len(text) and depth:
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+            i += 1
+        yield match.group(1), match.group(2), text[start : i - 1], match.start()
+
+
 def validate_resource_type_allowlist() -> None:
-    """Pin foundation/*.tf and modules/** resource TYPE set to an exact allowlist."""
+    """Pin foundation/*.tf and modules/** resource TYPE set; pin the sole VM extension."""
+    for path in sorted(ROOT.rglob("*.tf.json")):
+        if path.is_file() and not _skip_scan_path(path):
+            raise DryRunError(f"tf_json_forbidden:{path}")
     found: set[str] = set()
+    extensions: list[tuple[Path, str, str]] = []
     for path in sorted(FOUNDATION.rglob("*.tf")):
-        if "tests" in path.parts:
+        if _skip_scan_path(path, FOUNDATION):
             continue
-        for match in re.finditer(r'^resource\s+"([^"]+)"\s+"', path.read_text(), re.M):
-            found.add(match.group(1))
+        text = path.read_text()
+        for rtype, name, body, _ in _resource_blocks(text):
+            found.add(rtype)
+            if rtype == "azurerm_virtual_machine_extension":
+                extensions.append((path, name, body))
     if found != ALLOWED_RESOURCE_TYPES:
         raise DryRunError(
             f"resource_type_allowlist_mismatch:extra={sorted(found - ALLOWED_RESOURCE_TYPES)};"
             f"missing={sorted(ALLOWED_RESOURCE_TYPES - found)}"
         )
-    extension = (FOUNDATION / "runtime_monitoring.tf").read_text()
-    if 'publisher                  = "Microsoft.Azure.Monitor"' not in extension:
+    if len(extensions) != 1:
+        raise DryRunError(f"vm_extension_count_must_be_one:{len(extensions)}")
+    path, name, body = extensions[0]
+    if path.name != "runtime_monitoring.tf" or name != "health":
+        raise DryRunError(f"vm_extension_must_be_health_in_runtime_monitoring:{path.name}:{name}")
+    if not re.search(r'(?m)^\s*publisher\s*=\s*"Microsoft\.Azure\.Monitor"\s*$', body):
         raise DryRunError("vm_extension_must_use_azure_monitor_publisher")
-    if 'type                       = "AzureMonitorLinuxAgent"' not in extension:
+    if not re.search(r'(?m)^\s*type\s*=\s*"AzureMonitorLinuxAgent"\s*$', body):
         raise DryRunError("vm_extension_must_be_azure_monitor_linux_agent")
+    for path in sorted(ROOT.rglob("*.tf")):
+        if not path.is_file() or _skip_scan_path(path):
+            continue
+        text = path.read_text()
+        for needle in ("CustomScript", "commandToExecute", "protected_settings", "fileUris"):
+            if needle in text:
+                raise DryRunError(f"vm_extension_forbidden_setting:{path}:{needle}")
+
+
+def _allowed_transport_mention_lines() -> frozenset[str]:
+    """Exact stripped lines allowed to mention the forbid pattern (built without contiguous needles)."""
+    u = "run" + "_command"
+    h = "run" + "-command"
+    sp = "run" + " command"
+    return frozenset(
+        {
+            # foundation/bootstrap_local.py refusal lines
+            f'if rtype == "azurerm_virtual_machine_{u}":',
+            'raise Refused("Plan contains azurerm_virtual_machine_'
+            + u
+            + "; "
+            + "Run"
+            + " Command is forbidden\")",
+            # dry_run.py pattern / message lines
+            '"""Forbid '
+            + "Run"
+            + ' Command transports; allow only forbid-sentences in README/profile and pinned self-refs."""',
+            "def validate_no_" + u + "() -> None:",
+            'pattern = re.compile(r"run[-_ ]?command", re.I)',
+            'or "not ' + sp + '" in lowered',
+            'or "no ' + sp + '" in lowered',
+            'raise DryRunError(f"' + u + '_forbidden:{path}:{line_no}:{line.strip()[:120]}")',
+            'raise DryRunError(f"' + u + '_forbidden:{path}:extra_py_sh:{pat}")',
+            'raise DryRunError(f"' + u + '_forbidden:{path}:az_vm_adjacent")',
+            "validate_no_" + u + "()",
+            "if stripped in pinned:",
+            "if re.search(pat, line, re.I) and line.strip() not in pinned:",
+            "extra = (",
+            "pinned = _allowed_transport_mention_lines()",
+        }
+    )
 
 
 def validate_no_run_command() -> None:
-    """Forbid Run Command transports; allow only forbid-sentences in README/profile."""
+    """Forbid Run Command transports; allow only forbid-sentences in README/profile and pinned self-refs."""
     paths = [
         *ROOT.rglob("*.tf"),
         *ROOT.rglob("*.py"),
@@ -336,16 +413,26 @@ def validate_no_run_command() -> None:
         REPO / "infra/beta/apply-cosmabot-prod-foundation.sh",
     ]
     pattern = re.compile(r"run[-_ ]?command", re.I)
+    pinned = _allowed_transport_mention_lines()
+    h = "run" + "-command"
+    extra = (
+        h + r"\s+invoke",
+        r"invoke[^\n]*--scripts",
+        r"--scripts[^\n]*install-secrets",
+    )
     for path in paths:
-        if not path.is_file() or "tests" in path.parts:
+        if not path.is_file():
             continue
-        if path.name in {"dry_run.py", "bootstrap_local.py", "name_guards.py"}:
-            text_body = path.read_text()
-            if path.name == "bootstrap_local.py":
-                if re.search(r"az\s+vm\s+run[-_ ]?command", text_body, re.I):
-                    raise DryRunError(f"run_command_forbidden:{path}")
+        if path.resolve().is_relative_to(ROOT.resolve()):
+            if _skip_scan_path(path, ROOT):
+                continue
+        elif "tests" in path.parts:
             continue
-        for line_no, line in enumerate(path.read_text().splitlines(), 1):
+        text = path.read_text()
+        for line_no, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if stripped in pinned:
+                continue
             if not pattern.search(line):
                 continue
             lowered = line.lower()
@@ -360,7 +447,15 @@ def validate_no_run_command() -> None:
             if path.name in {"README.md", "runtime-public.json"} and allowed:
                 continue
             raise DryRunError(f"run_command_forbidden:{path}:{line_no}:{line.strip()[:120]}")
-
+        if path.suffix in {".py", ".sh"} and path.name != "dry_run.py":
+            for pat in extra:
+                for line in text.splitlines():
+                    if re.search(pat, line, re.I) and line.strip() not in pinned:
+                        raise DryRunError(f"run_command_forbidden:{path}:extra_py_sh:{pat}")
+        if path.name == "bootstrap_local.py" and re.search(
+            r'["\']az["\']\s*,\s*["\']vm["\']', text
+        ):
+            raise DryRunError(f"run_command_forbidden:{path}:az_vm_adjacent")
 
 def validate_foundation_source() -> None:
     text = "\n".join(
@@ -437,6 +532,8 @@ def validate_foundation_source() -> None:
         raise DryRunError("readme_secret_table_must_list_postgres_and_redis")
     if "Press Ctrl-C once" not in readme:
         raise DryRunError("readme_apply_must_document_ctrl_c_and_logs")
+    if "detaches the wrapper" not in readme:
+        raise DryRunError("readme_apply_must_document_second_ctrl_c_detaches")
     if "logs/apply-*.log" not in readme:
         raise DryRunError("readme_apply_must_document_apply_log_path")
     if "code **2**" not in readme and "code 2" not in readme.lower():

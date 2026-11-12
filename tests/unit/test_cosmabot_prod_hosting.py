@@ -189,6 +189,8 @@ def test_readme_secret_loading_dns_and_cto_labels():
         "## Later LLM cutover", 1
     )[0]
     assert "Press Ctrl-C once" in readme
+    assert "second Ctrl-C does" in readme
+    assert "detaches the wrapper" in readme
     assert "code **2**" in readme
     assert "logs/apply-*.log" in readme
     assert "Later LLM cutover" in readme
@@ -363,6 +365,33 @@ def test_resource_type_allowlist_and_root_wiring():
     dry_run.validate_resource_type_allowlist()
     openai = (FOUNDATION / "openai.tf").read_text()
     assert re.search(r"enabled\s*=\s*var\.enable_azure_openai", openai)
+
+
+def test_vm_extension_block_pin_and_forbidden_settings(tmp_path, monkeypatch):
+    dry_run.validate_resource_type_allowlist()
+    # .terraform noise must not fail dry_run (H4).
+    terraform = PROD / ".terraform" / "providers" / "x"
+    terraform.mkdir(parents=True, exist_ok=True)
+    changelog = terraform / "CHANGELOG.md"
+    changelog.write_text("mentions azurerm_virtual_machine_run_command for providers\n")
+    try:
+        dry_run.validate_no_run_command()
+    finally:
+        changelog.unlink(missing_ok=True)
+        # best-effort cleanup of empty dirs
+        for path in (terraform, terraform.parent, PROD / ".terraform"):
+            try:
+                path.rmdir()
+            except OSError:
+                break
+    # Same text in a tracked prod .md must fail.
+    tracked = PROD / "RUN_COMMAND_PROBE.md"
+    tracked.write_text("azurerm_virtual_machine_run_command must never appear here\n")
+    try:
+        with pytest.raises(dry_run.DryRunError, match="run_command_forbidden"):
+            dry_run.validate_no_run_command()
+    finally:
+        tracked.unlink(missing_ok=True)
 
 
 def test_staging_foundation_untouched_and_without_prod_names():

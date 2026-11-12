@@ -541,7 +541,32 @@ def read_approval(path: Path, *, plan_sha256: str, summary_sha256: str) -> dict:
     return approval
 
 
+def _operator_print(message: str) -> None:
+    try:
+        print(message, file=sys.stderr)
+    except OSError:
+        pass
+
+
+def _tofu_runtime_status(proc: subprocess.Popen, log_path: Path) -> str:
+    alive = proc.poll() is None
+    pid = getattr(proc, "pid", "?")
+    if alive:
+        return (
+            f"tofu pid {pid} is STILL RUNNING; it received one graceful interrupt and no further "
+            f"signal; do not retry, move or edit the private directory until it exits; follow the log "
+            f"path. log={log_path}"
+        )
+    code = getattr(proc, "returncode", proc.poll())
+    return f"tofu pid {pid} is not running (exit={code}). log={log_path}"
+
+
 def apply(folder: Path, *, confirm_apply: bool, approval_path: Path) -> dict:
+    logs = folder / "logs"
+    if logs.is_dir() and any(logs.glob("apply-*.log")):
+        _operator_print(
+            "An earlier apply may have been partial; existing apply-*.log files found under logs/."
+        )
     if not confirm_apply:
         raise Refused("refusing apply without --confirm-apply")
     os.umask(0o077)
@@ -595,15 +620,9 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path) -> dict:
         raise Refused("Recomputed plan summary does not match plan-result.json")
     if recomputed["summary_sha256"] != read_json(approval_path)["summary_sha256"]:
         raise Refused("Recomputed plan summary does not match approval summary_sha256")
-    logs = folder / "logs"
-    if logs.is_dir() and any(logs.glob("apply-*.log")):
-        print(
-            "An earlier apply may have been partial; existing apply-*.log files found under logs/.",
-            file=sys.stderr,
-        )
     logs.mkdir(mode=0o700, exist_ok=True)
     log_path = logs / f"apply-{secrets.token_hex(8)}.log"
-    print(f"Apply log path: {log_path}", file=sys.stderr)
+    _operator_print(f"Apply log path: {log_path}")
     argv = [
         str(tofu),
         "apply",
@@ -614,50 +633,50 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path) -> dict:
     ]
     apply_started = False
     returncode = None
+    proc: subprocess.Popen | None = None
+    previous_handlers: dict[int, object] = {}
+
+    def _route_to_keyboard_interrupt(signum, frame):  # noqa: ARG001
+        raise KeyboardInterrupt()
+
     try:
         with open(log_path, "wb") as log_stream:
-            proc = subprocess.Popen(
-                argv,
-                cwd=folder / "module",
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=log_stream,
-                stderr=subprocess.STDOUT,
-                umask=0o077,
-                start_new_session=True,
-            )
-            apply_started = True
-            previous_handlers: dict[int, object] = {}
-
-            def _route_to_keyboard_interrupt(signum, frame):  # noqa: ARG001
-                raise KeyboardInterrupt()
-
             for sig in (signal.SIGTERM, signal.SIGHUP):
                 previous_handlers[sig] = signal.signal(sig, _route_to_keyboard_interrupt)
+            apply_started = True
+            try:
+                proc = subprocess.Popen(
+                    argv,
+                    cwd=folder / "module",
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_stream,
+                    stderr=subprocess.STDOUT,
+                    umask=0o077,
+                    start_new_session=True,
+                )
+            except OSError:
+                apply_started = False
+                raise
             try:
                 try:
                     returncode = proc.wait(timeout=None)
                 except KeyboardInterrupt as first:
-                    print(
-                        f"graceful stop requested, do not press Ctrl-C again; log={log_path}",
-                        file=sys.stderr,
-                    )
                     proc.send_signal(signal.SIGINT)
+                    _operator_print(
+                        f"graceful stop requested, do not press Ctrl-C again; log={log_path}"
+                    )
                     try:
                         returncode = proc.wait(timeout=None)
                     except KeyboardInterrupt as second:
-                        print(
-                            "Second interrupt received; escalating may cause data loss. "
-                            f"No automatic SIGKILL. log={log_path}",
-                            file=sys.stderr,
-                        )
+                        _operator_print(_tofu_runtime_status(proc, log_path))
                         raise ApplyAttempted(
-                            "Apply interrupted after start; private logs retained. "
-                            f"{APPLY_RECOVERY} log={log_path}"
+                            "Apply interrupted after start; OpenTofu must be left to finish. "
+                            f"{APPLY_RECOVERY} {_tofu_runtime_status(proc, log_path)}"
                         ) from second
                     raise ApplyAttempted(
-                        "Apply interrupted after start; private logs retained. "
-                        f"{APPLY_RECOVERY} log={log_path}"
+                        "Apply interrupted after start; "
+                        f"{APPLY_RECOVERY} {_tofu_runtime_status(proc, log_path)}"
                     ) from first
             finally:
                 for sig, handler in previous_handlers.items():
@@ -666,15 +685,17 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path) -> dict:
         raise
     except BaseException as exc:
         if apply_started:
+            status = f" {_tofu_runtime_status(proc, log_path)}" if proc is not None else ""
             raise ApplyAttempted(
                 "Apply was attempted and did not complete cleanly; private logs retained. "
-                f"{APPLY_RECOVERY} log={log_path}"
+                f"{APPLY_RECOVERY}{status} log={log_path}"
             ) from exc
         raise
     if returncode:
+        status = f" {_tofu_runtime_status(proc, log_path)}" if proc is not None else ""
         raise ApplyAttempted(
             "Apply was attempted and failed; private logs retained. "
-            f"{APPLY_RECOVERY} log={log_path}"
+            f"{APPLY_RECOVERY}{status} log={log_path}"
         )
     return {"applied": True, "plan_sha256": plan_sha, "resource_group": RESOURCE_GROUP, "first_apply_only": True}
 
@@ -696,6 +717,7 @@ def main() -> None:
     apply_cmd.add_argument("--approval", type=Path, required=True)
     args = parser.parse_args()
     os.umask(0o077)
+    result = None
     try:
         if args.command == "fingerprint":
             result = fingerprint()
@@ -712,17 +734,24 @@ def main() -> None:
             result = plan(args.private_dir)
         else:
             result = apply(args.private_dir, confirm_apply=args.confirm_apply, approval_path=args.approval)
-        print(json.dumps(result, sort_keys=True))
+        try:
+            print(json.dumps(result, sort_keys=True))
+        except OSError:
+            if isinstance(result, dict) and result.get("applied"):
+                _operator_print(
+                    "Encrypted local bootstrap: apply was attempted and did not complete cleanly. "
+                    f"Result print failed after tofu started. {APPLY_RECOVERY}"
+                )
+                raise SystemExit(2) from None
+            raise
     except ApplyAttempted as exc:
-        print(
-            f"Encrypted local bootstrap: apply was attempted and did not complete cleanly. {exc}",
-            file=sys.stderr,
+        _operator_print(
+            f"Encrypted local bootstrap: apply was attempted and did not complete cleanly. {exc}"
         )
         raise SystemExit(2) from None
     except (Refused, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-        print(
-            "Encrypted local bootstrap refused; inspect reviewed inputs or private logs. No apply was attempted.",
-            file=sys.stderr,
+        _operator_print(
+            "Encrypted local bootstrap refused; inspect reviewed inputs or private logs. No apply was attempted."
         )
         raise SystemExit(1) from None
 

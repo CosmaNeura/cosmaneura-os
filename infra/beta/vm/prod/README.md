@@ -150,11 +150,11 @@ bash infra/beta/apply-cosmabot-prod-foundation.sh \
 Both `--confirm-apply` and `--approval` are required. Coding agents must not run
 apply.
 
-Press Ctrl-C once for a graceful stop of a running apply; do not press it again
-unless you accept possible data loss. Apply failures and interrupts exit with
-code **2** and point at a uniquely named `logs/apply-*.log` under the private
-directory. Partial-apply recovery: keep that private directory and open a
-separately reviewed recovery ticket before retry.
+Press Ctrl-C once for a graceful stop of a running apply. A second Ctrl-C does
+not stop OpenTofu; it only detaches the wrapper while tofu must be left to
+finish (follow the uniquely named `logs/apply-*.log`). Apply failures and
+interrupts exit with code **2**. Partial-apply recovery: keep that private
+directory and open a separately reviewed recovery ticket before retry.
 
 ## Load secrets into Key Vault (separate later secrets ticket)
 

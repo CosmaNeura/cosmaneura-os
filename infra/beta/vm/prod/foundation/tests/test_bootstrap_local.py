@@ -526,12 +526,7 @@ class BootstrapSafety(unittest.TestCase):
         self.assertIn("recomputed", str(err.exception).lower())
         popen.assert_not_called()
 
-    def test_apply_interrupt_forwards_one_sigint_no_kill(self):
-        plan_sha, summary, plan_json = self._planned()
-        approval = self._approval(plan_sha, summary["summary_sha256"])
-        signals = []
-        wait_timeouts = []
-
+    def _apply_command_side_effect(self, plan_json):
         def run(argv, **kwargs):
             if argv[1] == "version":
                 return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
@@ -539,9 +534,18 @@ class BootstrapSafety(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
             return subprocess.CompletedProcess(argv, 0, b"", b"")
 
+        return run
+
+    def test_apply_interrupt_forwards_one_sigint_no_kill(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        signals = []
+        wait_timeouts = []
+
         class FakeProc:
             def __init__(self):
                 self.pid = 4242
+                self.returncode = None
                 self._waits = 0
 
             def wait(self, timeout=None):
@@ -549,7 +553,11 @@ class BootstrapSafety(unittest.TestCase):
                 self._waits += 1
                 if self._waits == 1:
                     raise KeyboardInterrupt()
+                self.returncode = 0
                 return 0
+
+            def poll(self):
+                return self.returncode
 
             def send_signal(self, sig):
                 signals.append(sig)
@@ -561,7 +569,7 @@ class BootstrapSafety(unittest.TestCase):
                 raise AssertionError("kill must not be called")
 
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
-            bootstrap, "command", side_effect=run
+            bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
         ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
             bootstrap.ApplyAttempted
         ) as err:
@@ -571,17 +579,92 @@ class BootstrapSafety(unittest.TestCase):
         self.assertIn("interrupted", str(err.exception).lower())
         self.assertIn("partial-apply recovery", str(err.exception).lower())
 
-    def test_apply_second_interrupt_still_apply_attempted(self):
+    def test_apply_sigterm_and_sighup_route_to_one_sigint(self):
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            with self.subTest(sig=sig):
+                plan_sha, summary, plan_json = self._planned()
+                approval = self._approval(plan_sha, summary["summary_sha256"])
+                signals = []
+
+                class FakeProc:
+                    def __init__(self):
+                        self.pid = 4242
+                        self.returncode = None
+                        self._waits = 0
+
+                    def wait(self, timeout=None):
+                        self._waits += 1
+                        if self._waits == 1:
+                            signal.raise_signal(sig)
+                        self.returncode = 0
+                        return 0
+
+                    def poll(self):
+                        return self.returncode
+
+                    def send_signal(self, sent):
+                        signals.append(sent)
+
+                    def terminate(self):
+                        raise AssertionError("terminate must not be called")
+
+                    def kill(self):
+                        raise AssertionError("kill must not be called")
+
+                with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+                    bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
+                ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
+                    bootstrap.ApplyAttempted
+                ):
+                    bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+                self.assertEqual(signals, [signal.SIGINT])
+
+    def test_apply_print_oserror_still_sends_sigint(self):
         plan_sha, summary, plan_json = self._planned()
         approval = self._approval(plan_sha, summary["summary_sha256"])
         signals = []
 
-        def run(argv, **kwargs):
-            if argv[1] == "version":
-                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
-            if argv[1] == "show":
-                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
-            return subprocess.CompletedProcess(argv, 0, b"", b"")
+        class FakeProc:
+            def __init__(self):
+                self.pid = 4242
+                self.returncode = None
+                self._waits = 0
+
+            def wait(self, timeout=None):
+                self._waits += 1
+                if self._waits == 1:
+                    raise KeyboardInterrupt()
+                self.returncode = 0
+                return 0
+
+            def poll(self):
+                return self.returncode
+
+            def send_signal(self, sig):
+                signals.append(sig)
+
+            def terminate(self):
+                raise AssertionError("terminate must not be called")
+
+            def kill(self):
+                raise AssertionError("kill must not be called")
+
+        def raising_operator_print(message: str) -> None:
+            if "graceful stop" in message:
+                raise OSError("stderr dead")
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
+        ), patch.object(subprocess, "Popen", return_value=FakeProc()), patch.object(
+            bootstrap, "_operator_print", side_effect=raising_operator_print
+        ), self.assertRaises(bootstrap.ApplyAttempted):
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertEqual(signals, [signal.SIGINT])
+
+    def test_apply_second_interrupt_still_running_message(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        signals = []
 
         class FakeProc:
             def __init__(self):
@@ -589,6 +672,9 @@ class BootstrapSafety(unittest.TestCase):
 
             def wait(self, timeout=None):
                 raise KeyboardInterrupt()
+
+            def poll(self):
+                return None
 
             def send_signal(self, sig):
                 signals.append(sig)
@@ -600,13 +686,60 @@ class BootstrapSafety(unittest.TestCase):
                 raise AssertionError("kill must not be called")
 
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
-            bootstrap, "command", side_effect=run
+            bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
         ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
             bootstrap.ApplyAttempted
         ) as err:
             bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
         self.assertEqual(signals, [signal.SIGINT])
-        self.assertIn("interrupted", str(err.exception).lower())
+        msg = str(err.exception)
+        self.assertIn("4242", msg)
+        self.assertIn("STILL RUNNING", msg)
+
+    def test_apply_wait_non_keyboard_interrupt_becomes_attempted(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+
+        class FakeProc:
+            def __init__(self):
+                self.pid = 4242
+
+            def wait(self, timeout=None):
+                raise RuntimeError("wait exploded")
+
+            def poll(self):
+                return None
+
+            def send_signal(self, sig):
+                raise AssertionError("send_signal must not be called")
+
+            def terminate(self):
+                raise AssertionError("terminate must not be called")
+
+            def kill(self):
+                raise AssertionError("kill must not be called")
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
+        ), patch.object(subprocess, "Popen", return_value=FakeProc()), self.assertRaises(
+            bootstrap.ApplyAttempted
+        ) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        self.assertIn("attempted", str(err.exception).lower())
+
+    def test_apply_earlier_partial_notice_before_refusal(self):
+        self.prepare()
+        logs = self.folder / "logs"
+        logs.mkdir(mode=0o700, exist_ok=True)
+        (logs / "apply-deadbeefdeadbeef.log").write_text("prior\n")
+        (logs / "apply-deadbeefdeadbeef.log").chmod(0o600)
+        approval = self._approval("a" * 64, "b" * 64)
+        from io import StringIO
+
+        err = StringIO()
+        with patch.object(sys, "stderr", err), self.assertRaises(bootstrap.Refused):
+            bootstrap.apply(self.folder, confirm_apply=False, approval_path=approval)
+        self.assertIn("earlier apply may have been partial", err.getvalue().lower())
 
     def test_apply_failure_reports_attempted(self):
         plan_sha, summary, plan_json = self._planned()
@@ -620,7 +753,14 @@ class BootstrapSafety(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, b"", b"")
 
         class FakeProc:
+            def __init__(self):
+                self.pid = 4242
+                self.returncode = 1
+
             def wait(self, timeout=None):
+                return 1
+
+            def poll(self):
                 return 1
 
             def send_signal(self, sig):
@@ -653,7 +793,14 @@ class BootstrapSafety(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, b"", b"")
 
         class FakeProc:
+            def __init__(self):
+                self.pid = 4242
+                self.returncode = 1
+
             def wait(self, timeout=None):
+                return 1
+
+            def poll(self):
                 return 1
 
             def send_signal(self, sig):
@@ -687,6 +834,50 @@ class BootstrapSafety(unittest.TestCase):
         stderr = err_buf.getvalue()
         self.assertIn("Partial-apply recovery", stderr)
         self.assertNotIn("No apply was attempted", stderr)
+
+    def test_main_result_print_oserror_after_apply_exits_2(self):
+        plan_sha, summary, plan_json = self._planned()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+
+        class FakeProc:
+            def __init__(self):
+                self.pid = 4242
+                self.returncode = 0
+
+            def wait(self, timeout=None):
+                return 0
+
+            def poll(self):
+                return 0
+
+            def send_signal(self, sig):
+                return None
+
+            def terminate(self):
+                raise AssertionError("terminate must not be called")
+
+            def kill(self):
+                raise AssertionError("kill must not be called")
+
+        argv = [
+            "bootstrap_local.py",
+            "apply",
+            "--private-dir",
+            str(self.folder),
+            "--confirm-apply",
+            "--approval",
+            str(approval),
+        ]
+
+        with patch.object(sys, "argv", argv), patch.object(
+            bootstrap, "owner_context", return_value=self.context
+        ), patch.object(
+            bootstrap, "command", side_effect=self._apply_command_side_effect(plan_json)
+        ), patch.object(subprocess, "Popen", return_value=FakeProc()), patch(
+            "builtins.print", side_effect=OSError("stdout dead")
+        ), self.assertRaises(SystemExit) as err:
+            bootstrap.main()
+        self.assertEqual(err.exception.code, 2)
 
 
 class EncryptionProof(unittest.TestCase):

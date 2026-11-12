@@ -59,6 +59,38 @@ if grep -F -- "--confirm-apply" "$tmp_root/review.out" >/dev/null; then
 fi
 [[ ! -s "$COSMABOT_STUB_MARKER" ]] || { echo "stub az/tofu was invoked during cost-only" >&2; exit 1; }
 
+# Full review path with stub az/tofu (mocked; may fail mid-run). Output must lack --confirm-apply.
+mkdir -p "$tmp_root/mirror"
+cat >"$tmp_root/inputs.json" <<'EOF'
+{
+  "subscription_id": "00000000-0000-4000-8000-000000000001",
+  "tenant_id": "00000000-0000-4000-8000-000000000002",
+  "resource_name_suffix": "mock1234",
+  "vnet_address_prefix": "10.247.0.0/24",
+  "admin_username": "cosmasoperator",
+  "admin_ssh_public_key": "ssh-ed25519 invented-public-key",
+  "release_operator_object_id": "00000000-0000-4000-8000-000000000003",
+  "alert_contact_email": "operator@example.invalid",
+  "enable_azure_openai": false
+}
+EOF
+set +e
+bash "$beta_dir/review-cosmabot-prod-foundation.sh" \
+  --subscription-id "00000000-0000-4000-8000-000000000001" \
+  --inputs "$tmp_root/inputs.json" \
+  --private-dir "$tmp_root/fresh-private-never" \
+  --source-sha256 "$(python3 -c 'print("a"*64)')" \
+  --lock-sha256 "$(python3 -c 'print("b"*64)')" \
+  --tofu "$stub_bin/tofu" \
+  --provider-mirror "$tmp_root/mirror" \
+  >"$tmp_root/review-full.out" 2>"$tmp_root/review-full.err"
+set -e
+if grep -F -- "--confirm-apply" "$tmp_root/review-full.out" "$tmp_root/review-full.err" >/dev/null; then
+  echo "full review output must not contain --confirm-apply" >&2
+  exit 1
+fi
+: >"$COSMABOT_STUB_MARKER"
+
 # Offline dry-run (real interpreter PATH; stubs stay unused).
 PATH="/usr/bin:/bin" python3 "$beta_dir/vm/prod/dry_run.py" --allow-no-provider >"$tmp_root/dry-run.out"
 grep -F '"dry_run": true' "$tmp_root/dry-run.out" >/dev/null
