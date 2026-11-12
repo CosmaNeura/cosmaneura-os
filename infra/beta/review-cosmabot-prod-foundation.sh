@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Review CosmaBot production foundation: name guards, monthly cost estimate, OpenTofu plan.
-# Does not apply. Requires John's az login for the plan portion.
+# First-apply-only. Does not apply. Requires John's az login for the plan portion.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -12,21 +12,27 @@ private_dir=""
 subscription_id=""
 tofu_bin="${TOFU_BIN:-tofu}"
 provider_mirror="${PROVIDER_MIRROR:-}"
+source_sha256=""
+lock_sha256=""
 skip_plan=0
 
 usage() {
   cat <<EOF
-Usage: $0 --subscription-id UUID --inputs PATH [--private-dir PATH]
+Usage: $0 --subscription-id UUID --inputs PATH --private-dir PATH
+          --source-sha256 HEX --lock-sha256 HEX
           [--tofu PATH] [--provider-mirror PATH] [--cost-only]
 
-Prints the checked-in monthly cost estimate (labeled with price date), refuses
-staging names, then runs the encrypted local OpenTofu plan for
-rg-cosmabot-prod-eus2-01 (same prepare/plan pattern as staging).
+First-apply-only review. Prints the checked-in monthly cost estimate (labeled
+with price dates), refuses staging names, then runs the encrypted local
+OpenTofu plan for rg-cosmabot-prod-eus2-01.
 
-Prerequisites for the plan portion:
-  - az login to John's tenant
-  - subscription id passed explicitly
-  - pinned OpenTofu 1.12.5 and a verified azurerm provider mirror
+--private-dir must be a fresh absolute directory outside the repo.
+--source-sha256 / --lock-sha256 must be operator-supplied (from a prior
+fingerprint review), not self-trusted.
+--subscription-id must equal inputs.subscription_id.
+
+OpenAI opt-in must be in the first apply's inputs or wait for a separately
+reviewed day-2 tool. Do not run raw tofu by hand.
 
 --cost-only skips Azure/OpenTofu and only prints the estimate + name guards.
 EOF
@@ -44,6 +50,8 @@ while [[ $# -gt 0 ]]; do
     --private-dir) private_dir="${2:-}"; shift 2 ;;
     --tofu) tofu_bin="${2:-}"; shift 2 ;;
     --provider-mirror) provider_mirror="${2:-}"; shift 2 ;;
+    --source-sha256) source_sha256="${2:-}"; shift 2 ;;
+    --lock-sha256) lock_sha256="${2:-}"; shift 2 ;;
     --cost-only) skip_plan=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
@@ -64,31 +72,56 @@ from name_guards import PRODUCTION, STAGING, assert_production_inputs, assert_st
 prices = json.loads(price_path.read_text())
 if prices.get("label") != "estimate" or not prices.get("price_date"):
     raise SystemExit("price table must be labeled estimate with price_date")
-total = round(sum(float(item["monthly_usd"]) for item in prices["line_items"]), 2)
+
+def total_for(require_openai: bool) -> float:
+    amount = 0.0
+    for item in prices["line_items"]:
+        requires = item.get("requires")
+        if require_openai:
+            amount += float(item["monthly_usd"])
+        elif requires != "enable_azure_openai":
+            amount += float(item["monthly_usd"])
+    return round(amount, 2)
+
+default_total = total_for(False)
+optin_total = total_for(True)
 print("=== CosmaBot production hosting monthly cost estimate ===")
 print(f"label: {prices['label']}")
 print(f"price_date: {prices['price_date']}")
+print(f"envelope_price_date: {prices.get('envelope_price_date', prices['price_date'])}")
+print(f"openai_price_date: {prices.get('openai_price_date', prices['price_date'])}")
 print(f"currency: {prices.get('currency', 'USD')}")
 print("")
 for item in prices["line_items"]:
-    print(f"- {item['component']}: ${float(item['monthly_usd']):.2f}  ({item['quantity']})")
+    priced = item.get("priced_on", prices["price_date"])
+    req = item.get("requires")
+    suffix = f" [requires={req}]" if req else ""
+    print(f"- {item['component']}: ${float(item['monthly_usd']):.2f}  ({item['quantity']}; priced_on {priced}){suffix}")
 print("")
-print(f"ESTIMATED MONTHLY TOTAL: ${total:.2f}")
+for note in prices.get("notes", []):
+    print(f"note: {note}")
+print("")
+print(f"DEFAULT PLAN (enable_azure_openai=false): ${default_total:.2f}")
+delta = round(optin_total - default_total, 2)
+print(f"WITH AZURE OPENAI OPT-IN: ${optin_total:.2f} (+${delta:.2f} standing, token usage excluded)")
 threshold = float(prices.get("warning_threshold_usd", 300))
-if total > threshold:
+larger = max(default_total, optin_total)
+if larger > threshold:
     print("")
     print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-    print(f"WARNING: estimate ${total:.2f}/month EXCEEDS ${threshold:.0f}/month")
+    print(f"WARNING: larger standing estimate ${larger:.2f}/month EXCEEDS ${threshold:.0f}/month")
     print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 else:
-    print(f"(under ${threshold:.0f}/month warning threshold)")
-print("")
-print("Azure OpenAI module: OFF by default (enable_azure_openai=false).")
-print("Estimate includes OpenAI PE/DNS standing when opted in; token usage is pay-as-you-go.")
+    print(
+        f"Standing costs only (token usage not included) are under ${threshold:.0f}/month. "
+        + prices.get(
+            "illustrative_token_assumption",
+            "Capacity-bounded token spend is operator-estimated and excluded from these totals.",
+        )
+    )
 print("This is an estimate, not an Azure invoice.")
 print("")
 
-# Bidirectional name refusal proof during review.
 try:
     assert_production_inputs({
         "resource_group": PRODUCTION["resource_group"],
@@ -138,12 +171,14 @@ fi
 [[ -n "$subscription_id" ]] || die "pass --subscription-id"
 [[ -n "$inputs" && -f "$inputs" ]] || die "pass --inputs PATH to reviewed public inputs JSON"
 [[ -n "$private_dir" ]] || die "pass --private-dir to a fresh absolute directory outside the repo"
+[[ -n "$source_sha256" ]] || die "pass operator-supplied --source-sha256"
+[[ -n "$lock_sha256" ]] || die "pass operator-supplied --lock-sha256"
 [[ -n "$provider_mirror" && -d "$provider_mirror" ]] || die "pass --provider-mirror to the verified azurerm mirror"
 command -v "$tofu_bin" >/dev/null || die "OpenTofu not found; pass --tofu"
 command -v az >/dev/null || die "az CLI required; run az login to John's tenant first"
+[[ ! -e "$private_dir" ]] || die "private directory must be fresh (path must not exist yet)"
 
-# Refuse staging coordinates in the inputs file before any Azure mutation.
-python3 - "$inputs" "$prod_dir" <<'PY'
+python3 - "$inputs" "$prod_dir" "$subscription_id" <<'PY'
 import json, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[2])
@@ -153,24 +188,38 @@ try:
     assert_production_inputs(inputs)
 except NameGuardError as exc:
     raise SystemExit(str(exc)) from exc
-print("Reviewed inputs cleared production name guards.")
+sub = str(inputs.get("subscription_id", ""))
+if sub.lower() != sys.argv[3].lower():
+    raise SystemExit("--subscription-id must equal inputs.subscription_id")
+print("Reviewed inputs cleared production name guards; subscription id matches.")
 PY
 
-fingerprint="$(python3 "$foundation_dir/bootstrap_local.py" fingerprint)"
-source_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["source_sha256"])' <<<"$fingerprint")"
-lock_sha="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["lock_sha256"])' <<<"$fingerprint")"
+python3 "$foundation_dir/bootstrap_local.py" prepare \
+  --private-dir "$private_dir" \
+  --inputs "$inputs" \
+  --source-sha256 "$source_sha256" \
+  --lock-sha256 "$lock_sha256" \
+  --tofu "$tofu_bin" \
+  --provider-mirror "$provider_mirror"
 
-if [[ ! -d "$private_dir" ]]; then
-  python3 "$foundation_dir/bootstrap_local.py" prepare \
-    --private-dir "$private_dir" \
-    --inputs "$inputs" \
-    --source-sha256 "$source_sha" \
-    --lock-sha256 "$lock_sha" \
-    --tofu "$tofu_bin" \
-    --provider-mirror "$provider_mirror"
-fi
-
-python3 "$foundation_dir/bootstrap_local.py" plan --private-dir "$private_dir"
-printf '\nReview complete. Plan saved under the private directory. Nothing was applied.\n'
-printf 'To apply after explicit yes:\n'
-printf '  bash infra/beta/apply-cosmabot-prod-foundation.sh --confirm-apply --private-dir %q\n' "$private_dir"
+plan_json="$(python3 "$foundation_dir/bootstrap_local.py" plan --private-dir "$private_dir")"
+python3 - "$plan_json" "$private_dir" <<'PY'
+import json, sys
+from pathlib import Path
+result = json.loads(sys.argv[1])
+summary = json.loads((Path(sys.argv[2]) / "plan-summary.json").read_text())
+print("")
+print("=== Sanitised plan summary ===")
+print(json.dumps(summary, sort_keys=True, indent=2))
+print("")
+print(f"enable_azure_openai (effective): {summary.get('enable_azure_openai')}")
+print(f"plan_sha256: {result['plan_sha256']}")
+print(f"summary_sha256: {result['summary_sha256']}")
+print("Review complete. Plan saved under the private directory. Nothing was applied.")
+print("First-apply-only. After John's yes, bind an approval file to plan_sha256 + summary_sha256, then:")
+print(
+    "  bash infra/beta/apply-cosmabot-prod-foundation.sh "
+    "--confirm-apply --approval /absolute/path/approval.json "
+    f"--private-dir {sys.argv[2]}"
+)
+PY

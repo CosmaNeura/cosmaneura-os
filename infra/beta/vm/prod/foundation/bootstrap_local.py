@@ -1,6 +1,7 @@
-"""Prepare and plan a fresh encrypted local CosmaBot production foundation.
+"""Prepare, plan, and apply a fresh encrypted local CosmaBot production foundation.
 
-Apply stays in infra/beta/apply-cosmabot-prod-foundation.sh and requires --confirm-apply.
+First-apply-only tooling. OpenAI opt-in must be in the first apply's inputs or
+wait for a separately reviewed day-2 tool. Do not run raw tofu by hand.
 """
 from __future__ import annotations
 
@@ -8,28 +9,40 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import secrets
 import stat
 import subprocess
 import sys
+from collections import Counter
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from name_guards import NameGuardError, assert_production_inputs  # noqa: E402
 
 MODULE = Path(__file__).resolve().parent
+PROD = MODULE.parent
 REPO = MODULE.parents[4]
 NAMESPACE = "cosmabot-vm/eastus2/prod01/local-initial"
 RESOURCE_GROUP = "rg-cosmabot-prod-eus2-01"
 TOFU_VERSION = "1.12.5"
 REQUIRED = {
-    "subscription_id", "tenant_id", "resource_name_suffix", "vnet_address_prefix",
-    "admin_username", "admin_ssh_public_key", "release_operator_object_id", "alert_contact_email",
+    "subscription_id",
+    "tenant_id",
+    "resource_name_suffix",
+    "vnet_address_prefix",
+    "admin_username",
+    "admin_ssh_public_key",
+    "release_operator_object_id",
+    "alert_contact_email",
 }
 OPTIONAL = {"location", "ubuntu_image_version"}
-# Optional JSON bool only. Absent means false (OpenTofu variable default).
 OPTIONAL_BOOLS = {"enable_azure_openai"}
 PROTECTED_FILES = {"inputs.json", "backend.hcl", "tofurc", "encryption.passphrase"}
+EXTRA_FINGERPRINT = (
+    PROD / "name_guards.py",
+    REPO / "infra/beta/review-cosmabot-prod-foundation.sh",
+    REPO / "infra/beta/apply-cosmabot-prod-foundation.sh",
+)
 
 
 class Refused(RuntimeError):
@@ -46,7 +59,12 @@ def json_bytes(value) -> bytes:
 
 def secure_file(path: Path) -> None:
     value = path.lstat()
-    if not stat.S_ISREG(value.st_mode) or value.st_uid != os.getuid() or value.st_nlink != 1 or stat.S_IMODE(value.st_mode) != 0o600:
+    if (
+        not stat.S_ISREG(value.st_mode)
+        or value.st_uid != os.getuid()
+        or value.st_nlink != 1
+        or stat.S_IMODE(value.st_mode) != 0o600
+    ):
         raise Refused("Private bootstrap file ownership or mode is invalid")
 
 
@@ -63,7 +81,10 @@ def private_directory(path: Path, *, fresh=False) -> Path:
         raise Refused("Use an absolute canonical private directory outside the repository")
     if fresh:
         path.mkdir(mode=0o700, parents=False, exist_ok=False)
-    info = path.lstat()
+    try:
+        info = path.lstat()
+    except FileNotFoundError as exc:
+        raise Refused("Bootstrap directory must be owned by the operator with mode 0700") from exc
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
         raise Refused("Bootstrap directory must be owned by the operator with mode 0700")
     return path
@@ -77,18 +98,21 @@ def read_json(path: Path):
                 raise Refused("Duplicate JSON fields are refused")
             result[key] = value
         return result
+
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 65536:
         raise Refused("Use one bounded regular JSON input")
     return json.loads(path.read_text(), object_pairs_hook=unique)
 
 
 def source_files() -> list[Path]:
-    files = sorted({
-        *MODULE.glob("*.tf"),
-        *MODULE.glob("modules/**/*.tf"),
-        MODULE / ".terraform.lock.hcl",
-        MODULE / "bootstrap_local.py",
-    })
+    files = sorted(
+        {
+            *MODULE.glob("*.tf"),
+            *MODULE.glob("modules/**/*.tf"),
+            MODULE / ".terraform.lock.hcl",
+            MODULE / "bootstrap_local.py",
+        }
+    )
     for path in MODULE.iterdir():
         if path.name.endswith((".tf.json", ".tofu", ".tofu.json", ".tfvars", ".tfvars.json")):
             raise Refused("Unreviewed alternate configuration or automatic variable file in foundation source")
@@ -98,12 +122,19 @@ def source_files() -> list[Path]:
 
 
 def source_manifest() -> dict[str, str]:
-    return {path.relative_to(MODULE).as_posix(): digest(path) for path in source_files()}
+    files = {path.relative_to(MODULE).as_posix(): digest(path) for path in source_files()}
+    for path in EXTRA_FINGERPRINT:
+        files[f"extra/{path.name}"] = digest(path)
+    return files
 
 
 def fingerprint() -> dict:
     files = source_manifest()
-    return {"source_sha256": hashlib.sha256(json_bytes(files)).hexdigest(), "lock_sha256": files[".terraform.lock.hcl"], "files": files}
+    return {
+        "source_sha256": hashlib.sha256(json_bytes(files)).hexdigest(),
+        "lock_sha256": files[".terraform.lock.hcl"],
+        "files": files,
+    }
 
 
 def clean_environment() -> dict[str, str]:
@@ -113,7 +144,16 @@ def clean_environment() -> dict[str, str]:
 
 
 def command(argv, *, env, cwd=None, timeout=120):
-    return subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout, check=False, umask=0o077)
+    return subprocess.run(
+        argv,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+        umask=0o077,
+    )
 
 
 def owner_context(env: dict, inputs: dict) -> dict:
@@ -122,23 +162,86 @@ def owner_context(env: dict, inputs: dict) -> dict:
         raise Refused("Cannot verify the current owner Azure CLI context")
     account = json.loads(result.stdout)
     user = account.get("user", {})
-    if (account.get("state") != "Enabled" or user.get("type") != "user" or not user.get("name")
-            or str(account.get("id", "")).lower() != inputs["subscription_id"].lower()
-            or str(account.get("tenantId", "")).lower() != inputs["tenant_id"].lower()):
-        raise Refused("The enabled subscription/tenant must match the current owner user CLI session; managed identities are refused")
-    exists = command(["az", "group", "exists", "--name", RESOURCE_GROUP, "--subscription", inputs["subscription_id"], "--output", "json", "--only-show-errors"], env=env)
+    if (
+        account.get("state") != "Enabled"
+        or user.get("type") != "user"
+        or not user.get("name")
+        or str(account.get("id", "")).lower() != inputs["subscription_id"].lower()
+        or str(account.get("tenantId", "")).lower() != inputs["tenant_id"].lower()
+    ):
+        raise Refused(
+            "The enabled subscription/tenant must match the current owner user CLI session; managed identities are refused"
+        )
+    exists = command(
+        [
+            "az",
+            "group",
+            "exists",
+            "--name",
+            RESOURCE_GROUP,
+            "--subscription",
+            inputs["subscription_id"],
+            "--output",
+            "json",
+            "--only-show-errors",
+        ],
+        env=env,
+    )
     if exists.returncode or json.loads(exists.stdout) is not False:
         raise Refused("The exact new workload resource group must still be absent for the fresh initial plan")
-    return {"subscription_id": account["id"].lower(), "tenant_id": account["tenantId"].lower(),
-            "user_type": "user", "user_name_sha256": hashlib.sha256(user["name"].encode()).hexdigest()}
+    return {
+        "subscription_id": account["id"].lower(),
+        "tenant_id": account["tenantId"].lower(),
+        "user_type": "user",
+        "user_name_sha256": hashlib.sha256(user["name"].encode()).hexdigest(),
+    }
 
 
 def execution_environment(folder: Path) -> dict[str, str]:
     env = clean_environment()
-    env.update({"TF_DATA_DIR": str(folder / "tofu-data"), "TF_WORKSPACE": "default", "TF_INPUT": "0", "TF_IN_AUTOMATION": "1",
-                "TF_CLI_CONFIG_FILE": str(folder / "tofurc"), "TF_VAR_bootstrap_key_file": str(folder / "encryption.passphrase"),
-                "ARM_USE_CLI": "true", "ARM_USE_MSI": "false", "ARM_USE_OIDC": "false"})
+    env.update(
+        {
+            "TF_DATA_DIR": str(folder / "tofu-data"),
+            "TF_WORKSPACE": "default",
+            "TF_INPUT": "0",
+            "TF_IN_AUTOMATION": "1",
+            "TF_CLI_CONFIG_FILE": str(folder / "tofurc"),
+            "TF_VAR_bootstrap_key_file": str(folder / "encryption.passphrase"),
+            "ARM_USE_CLI": "true",
+            "ARM_USE_MSI": "false",
+            "ARM_USE_OIDC": "false",
+        }
+    )
     return env
+
+
+def normalize_inputs(inputs: dict) -> dict:
+    if not isinstance(inputs, dict) or not REQUIRED <= set(inputs):
+        raise Refused(
+            "Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret"
+        )
+    unknown = set(inputs) - REQUIRED - OPTIONAL - OPTIONAL_BOOLS
+    if unknown:
+        raise Refused(
+            "Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret"
+        )
+    string_keys = (REQUIRED | OPTIONAL) & set(inputs)
+    if not all(isinstance(inputs[key], str) and inputs[key] for key in string_keys):
+        raise Refused(
+            "Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret"
+        )
+    for key in OPTIONAL_BOOLS & set(inputs):
+        if not isinstance(inputs[key], bool):
+            raise Refused("enable_azure_openai must be a JSON boolean when present")
+    if inputs.get("location", "eastus2") != "eastus2" or inputs.get(
+        "ubuntu_image_version", "22.04.202608060"
+    ) != "22.04.202608060":
+        raise Refused("Keep the reviewed East US 2 location and immutable image")
+    try:
+        assert_production_inputs({key: value for key, value in inputs.items() if isinstance(value, str)})
+    except NameGuardError as exc:
+        raise Refused(str(exc)) from exc
+    return inputs
 
 
 def prepare(folder: Path, inputs_path: Path, expected_source: str, expected_lock: str, tofu: Path, mirror: Path) -> dict:
@@ -146,24 +249,7 @@ def prepare(folder: Path, inputs_path: Path, expected_source: str, expected_lock
     actual = fingerprint()
     if actual["source_sha256"] != expected_source or actual["lock_sha256"] != expected_lock:
         raise Refused("Foundation source/lock differs from the reviewed hashes")
-    inputs = read_json(inputs_path)
-    if not isinstance(inputs, dict) or not REQUIRED <= set(inputs):
-        raise Refused("Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret")
-    unknown = set(inputs) - REQUIRED - OPTIONAL - OPTIONAL_BOOLS
-    if unknown:
-        raise Refused("Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret")
-    string_keys = (REQUIRED | OPTIONAL) & set(inputs)
-    if not all(isinstance(inputs[key], str) and inputs[key] for key in string_keys):
-        raise Refused("Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret")
-    for key in OPTIONAL_BOOLS & set(inputs):
-        if not isinstance(inputs[key], bool):
-            raise Refused("enable_azure_openai must be a JSON boolean when present")
-    if inputs.get("location", "eastus2") != "eastus2" or inputs.get("ubuntu_image_version", "22.04.202608060") != "22.04.202608060":
-        raise Refused("Keep the reviewed East US 2 location and immutable image")
-    try:
-        assert_production_inputs({key: value for key, value in inputs.items() if isinstance(value, str)})
-    except NameGuardError as exc:
-        raise Refused(str(exc)) from exc
+    inputs = normalize_inputs(read_json(inputs_path))
     context = owner_context(env, inputs)
     tofu = tofu.resolve(strict=True)
     mirror = mirror.resolve(strict=True)
@@ -175,54 +261,90 @@ def prepare(folder: Path, inputs_path: Path, expected_source: str, expected_lock
     folder = private_directory(folder, fresh=True)
     for name in ("module", "state", "plans", "workspaces", "logs"):
         (folder / name).mkdir(mode=0o700)
-    # Secret material is generated directly into a private file. It is never an argument, environment value or output.
     write_private(folder / "encryption.passphrase", (secrets.token_urlsafe(48) + "\n").encode())
     for name in actual["files"]:
-        if name == "bootstrap_local.py":
+        if name == "bootstrap_local.py" or name.startswith("extra/"):
             continue
         target = folder / "module" / name
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         write_private(target, (MODULE / name).read_bytes())
+    inputs = dict(inputs)
     inputs["state_namespace"] = NAMESPACE
     write_private(folder / "inputs.json", json_bytes(inputs))
     backend = {"path": str(folder / "state/foundation.tfstate"), "workspace_dir": str(folder / "workspaces")}
-    write_private(folder / "backend.hcl", "\n".join(f"{key} = {json.dumps(value)}" for key, value in backend.items()).encode() + b"\n")
-    cli = 'provider_installation {\n filesystem_mirror {\n  path = ' + json.dumps(str(mirror)) + '\n  include = ["registry.opentofu.org/hashicorp/azurerm"]\n }\n}\n'
+    write_private(
+        folder / "backend.hcl",
+        "\n".join(f"{key} = {json.dumps(value)}" for key, value in backend.items()).encode() + b"\n",
+    )
+    cli = (
+        "provider_installation {\n filesystem_mirror {\n  path = "
+        + json.dumps(str(mirror))
+        + '\n  include = ["registry.opentofu.org/hashicorp/azurerm"]\n }\n}\n'
+    )
     write_private(folder / "tofurc", cli.encode())
-    manifest = {"version": 1, "profile": NAMESPACE, "resource_group": RESOURCE_GROUP, "source": actual,
-                "tofu": str(tofu), "tofu_sha256": digest(tofu), "context": context,
-                "protected_files": {name: digest(folder / name) for name in sorted(PROTECTED_FILES)}}
+    manifest = {
+        "version": 1,
+        "profile": NAMESPACE,
+        "resource_group": RESOURCE_GROUP,
+        "source": actual,
+        "tofu": str(tofu),
+        "tofu_sha256": digest(tofu),
+        "context": context,
+        "protected_files": {name: digest(folder / name) for name in sorted(PROTECTED_FILES)},
+        "first_apply_only": True,
+    }
     write_private(folder / "manifest.json", json_bytes(manifest))
-    return {"prepared": True, "private_directory": str(folder), "source_sha256": expected_source, "state_backend": "local-encrypted", "cloud_mutations": False}
+    return {
+        "prepared": True,
+        "private_directory": str(folder),
+        "source_sha256": expected_source,
+        "state_backend": "local-encrypted",
+        "cloud_mutations": False,
+        "first_apply_only": True,
+    }
 
 
 def ciphertext(path: Path) -> None:
     secure_file(path)
     value = read_json_large(path)
-    if not isinstance(value, dict) or value.get("encryption_version") != "v0" or not isinstance(value.get("encrypted_data"), str) or not value["encrypted_data"] or not isinstance(value.get("meta"), dict):
+    if (
+        not isinstance(value, dict)
+        or value.get("encryption_version") != "v0"
+        or not isinstance(value.get("encrypted_data"), str)
+        or not value["encrypted_data"]
+        or not isinstance(value.get("meta"), dict)
+    ):
         raise Refused("Saved artifact is not an encrypted OpenTofu envelope")
 
 
 def read_json_large(path: Path):
-    # This reads the encryption envelope only, never decrypted plan/state contents.
     if path.stat().st_size > 128 * 1024 * 1024:
         raise Refused("Encrypted artifact exceeds the reviewed bound")
     return json.loads(path.read_bytes())
 
 
-def plan(folder: Path) -> dict:
+def _verify_prepared(folder: Path) -> tuple[dict, dict]:
     folder = private_directory(folder)
     for name in ("manifest.json", "inputs.json", "backend.hcl", "tofurc", "encryption.passphrase"):
         secure_file(folder / name)
     manifest = read_json(folder / "manifest.json")
-    if manifest.get("version") != 1 or manifest.get("profile") != NAMESPACE or manifest.get("resource_group") != RESOURCE_GROUP or manifest.get("source") != fingerprint():
+    if (
+        manifest.get("version") != 1
+        or manifest.get("profile") != NAMESPACE
+        or manifest.get("resource_group") != RESOURCE_GROUP
+        or manifest.get("source") != fingerprint()
+    ):
         raise Refused("Prepared bootstrap no longer matches the reviewed source/namespace")
     if set(manifest.get("protected_files", {})) != PROTECTED_FILES:
         raise Refused("Prepared bootstrap file bindings are incomplete")
     for name, expected in manifest["protected_files"].items():
         if digest(folder / name) != expected:
             raise Refused("Prepared bootstrap inputs changed")
-    expected_files = {name: value for name, value in manifest["source"]["files"].items() if name != "bootstrap_local.py"}
+    expected_files = {
+        name: value
+        for name, value in manifest["source"]["files"].items()
+        if name != "bootstrap_local.py" and not name.startswith("extra/")
+    }
     actual_files = {
         path.relative_to(folder / "module").as_posix(): digest(path)
         for path in (folder / "module").rglob("*")
@@ -235,17 +357,72 @@ def plan(folder: Path) -> dict:
             secure_file(path)
     for name in ("module", "state", "plans", "workspaces", "logs"):
         private_directory(folder / name)
-    if (folder / "tofu-data").exists() or any((folder / "state").iterdir()) or any((folder / "plans").iterdir()) or any((folder / "workspaces").iterdir()):
+    return manifest, read_json(folder / "inputs.json")
+
+
+def sanitize_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256: str) -> dict:
+    changes = plan_json.get("resource_changes") or []
+    counts: dict[str, Counter] = {
+        "create": Counter(),
+        "update": Counter(),
+        "replace": Counter(),
+        "delete": Counter(),
+    }
+    for change in changes:
+        actions = (change.get("change") or {}).get("actions") or []
+        rtype = change.get("type") or "unknown"
+        if actions == ["create"]:
+            counts["create"][rtype] += 1
+        elif actions == ["update"]:
+            counts["update"][rtype] += 1
+        elif "delete" in actions and "create" in actions:
+            counts["replace"][rtype] += 1
+        elif actions == ["delete"]:
+            counts["delete"][rtype] += 1
+    if sum(counts["delete"].values()) or sum(counts["replace"].values()):
+        raise Refused("Plan contains delete or replace actions; first-apply-only tooling refuses")
+    enabled = bool(inputs.get("enable_azure_openai", False))
+    summary = {
+        "create": dict(sorted(counts["create"].items())),
+        "update": dict(sorted(counts["update"].items())),
+        "replace": {},
+        "delete": {},
+        "enable_azure_openai": enabled,
+        "subscription_id": inputs["subscription_id"],
+        "tenant_id": inputs["tenant_id"],
+        "plan_sha256": plan_sha256,
+        "resource_group": RESOURCE_GROUP,
+        "first_apply_only": True,
+    }
+    summary["summary_sha256"] = hashlib.sha256(json_bytes(summary)).hexdigest()
+    return summary
+
+
+def plan(folder: Path) -> dict:
+    manifest, inputs = _verify_prepared(folder)
+    if (folder / "tofu-data").exists() or any((folder / "state").iterdir()) or any(
+        (folder / "plans").iterdir()
+    ) or any((folder / "workspaces").iterdir()):
         raise Refused("Only a fresh initial plan with no state, saved plan or alternate workspace is supported")
     tofu = Path(manifest["tofu"])
     if digest(tofu) != manifest["tofu_sha256"]:
         raise Refused("Pinned OpenTofu executable changed")
     env = execution_environment(folder)
-    if owner_context(clean_environment(), read_json(folder / "inputs.json")) != manifest["context"]:
+    if owner_context(clean_environment(), inputs) != manifest["context"]:
         raise Refused("Owner CLI context changed since preparation")
     commands = [
         ("init", ["init", "-input=false", "-lockfile=readonly", "-backend-config=" + str(folder / "backend.hcl")]),
-        ("plan", ["plan", "-input=false", "-lock=true", "-lock-timeout=30s", "-var-file=" + str(folder / "inputs.json"), "-out=" + str(folder / "plans/first.tfplan")]),
+        (
+            "plan",
+            [
+                "plan",
+                "-input=false",
+                "-lock=true",
+                "-lock-timeout=30s",
+                "-var-file=" + str(folder / "inputs.json"),
+                "-out=" + str(folder / "plans/first.tfplan"),
+            ],
+        ),
     ]
     for name, args in commands:
         result = command([str(tofu), *args], cwd=folder / "module", env=env, timeout=300)
@@ -255,16 +432,104 @@ def plan(folder: Path) -> dict:
         if name == "init":
             backend = read_json(folder / "tofu-data/terraform.tfstate").get("backend", {})
             config = backend.get("config", {})
-            if backend.get("type") != "local" or config.get("path") != str(folder / "state/foundation.tfstate") or config.get("workspace_dir") != str(folder / "workspaces"):
+            if (
+                backend.get("type") != "local"
+                or config.get("path") != str(folder / "state/foundation.tfstate")
+                or config.get("workspace_dir") != str(folder / "workspaces")
+            ):
                 raise Refused("Initialized backend differs from the fixed new local paths")
             workspace_file = folder / "tofu-data/environment"
             if workspace_file.exists() and workspace_file.read_text().strip() != "default":
                 raise Refused("Only the new default workspace is supported")
     ciphertext(folder / "plans/first.tfplan")
-    result = {"planned": True, "plan": str(folder / "plans/first.tfplan"), "plan_sha256": digest(folder / "plans/first.tfplan"),
-              "source_sha256": manifest["source"]["source_sha256"], "state_backend": "local-encrypted", "applied": False}
+    plan_sha = digest(folder / "plans/first.tfplan")
+    show = command(
+        [str(tofu), "show", "-json", str(folder / "plans/first.tfplan")],
+        cwd=folder / "module",
+        env=env,
+        timeout=120,
+    )
+    if show.returncode:
+        raise Refused("Unable to render sanitised plan summary; no apply was attempted")
+    summary = sanitize_plan_summary(json.loads(show.stdout), inputs=inputs, plan_sha256=plan_sha)
+    write_private(folder / "plan-summary.json", json_bytes(summary))
+    result = {
+        "planned": True,
+        "plan": str(folder / "plans/first.tfplan"),
+        "plan_sha256": plan_sha,
+        "summary_sha256": summary["summary_sha256"],
+        "enable_azure_openai": summary["enable_azure_openai"],
+        "source_sha256": manifest["source"]["source_sha256"],
+        "state_backend": "local-encrypted",
+        "applied": False,
+        "first_apply_only": True,
+    }
     write_private(folder / "plan-result.json", json_bytes(result))
     return result
+
+
+def read_approval(path: Path, *, plan_sha256: str, summary_sha256: str) -> dict:
+    if not path.is_absolute() or path.resolve() != path or path.is_relative_to(REPO):
+        raise Refused("Approval file must be an absolute path outside the repository")
+    secure_file(path)
+    approval = read_json(path)
+    required = {"reviewer", "review_reference", "plan_sha256", "summary_sha256"}
+    if set(approval) != required or not all(isinstance(approval[key], str) and approval[key] for key in required):
+        raise Refused("Approval file must contain reviewer, review_reference, plan_sha256, summary_sha256 only")
+    if approval["plan_sha256"] != plan_sha256:
+        raise Refused("Approval plan_sha256 does not match the reviewed plan file")
+    if approval["summary_sha256"] != summary_sha256:
+        raise Refused("Approval summary_sha256 does not match the sanitised plan summary")
+    return approval
+
+
+def apply(folder: Path, *, confirm_apply: bool, approval_path: Path) -> dict:
+    if not confirm_apply:
+        raise Refused("refusing apply without --confirm-apply")
+    os.umask(0o077)
+    manifest, inputs = _verify_prepared(folder)
+    if manifest.get("resource_group") != RESOURCE_GROUP:
+        raise Refused(f"manifest resource_group is not production: {manifest.get('resource_group')}")
+    if manifest.get("profile") != NAMESPACE:
+        raise Refused(f"manifest profile is not production namespace: {manifest.get('profile')}")
+    plan_path = folder / "plans/first.tfplan"
+    result_path = folder / "plan-result.json"
+    summary_path = folder / "plan-summary.json"
+    if not plan_path.is_file() or not result_path.is_file() or not summary_path.is_file():
+        raise Refused("Reviewed plan, plan-result.json, and plan-summary.json are required before apply")
+    secure_file(plan_path)
+    secure_file(result_path)
+    secure_file(summary_path)
+    plan_sha = digest(plan_path)
+    plan_result = read_json(result_path)
+    summary = read_json(summary_path)
+    if plan_result.get("plan_sha256") != plan_sha:
+        raise Refused("plan-result.json plan_sha256 does not match plans/first.tfplan")
+    if summary.get("plan_sha256") != plan_sha or summary.get("summary_sha256") != plan_result.get("summary_sha256"):
+        raise Refused("plan-summary.json does not match the reviewed plan result")
+    read_approval(approval_path, plan_sha256=plan_sha, summary_sha256=summary["summary_sha256"])
+    tofu = Path(manifest["tofu"])
+    if digest(tofu) != manifest["tofu_sha256"]:
+        raise Refused("Pinned OpenTofu executable changed")
+    version = command([str(tofu), "version", "-json"], env=clean_environment())
+    if version.returncode or json.loads(version.stdout).get("terraform_version") != TOFU_VERSION:
+        raise Refused("OpenTofu must be the pinned version 1.12.5")
+    env = execution_environment(folder)
+    if owner_context(clean_environment(), inputs) != manifest["context"]:
+        raise Refused("Owner CLI context changed since preparation")
+    result = command(
+        [str(tofu), "apply", "-input=false", "-lock=true", "-lock-timeout=30s", str(plan_path)],
+        cwd=folder / "module",
+        env=env,
+        timeout=600,
+    )
+    write_private(folder / "logs/apply.log", result.stdout + result.stderr)
+    if result.returncode:
+        raise Refused(
+            "Apply failed; private logs retained. Partial-apply recovery: keep the private directory, "
+            "do not run raw tofu by hand, and open a separately reviewed recovery ticket before retry."
+        )
+    return {"applied": True, "plan_sha256": plan_sha, "resource_group": RESOURCE_GROUP, "first_apply_only": True}
 
 
 def main() -> None:
@@ -278,20 +543,35 @@ def main() -> None:
     first.add_argument("--lock-sha256", required=True)
     later = commands.add_parser("plan")
     later.add_argument("--private-dir", type=Path, required=True)
+    apply_cmd = commands.add_parser("apply")
+    apply_cmd.add_argument("--private-dir", type=Path, required=True)
+    apply_cmd.add_argument("--confirm-apply", action="store_true")
+    apply_cmd.add_argument("--approval", type=Path, required=True)
     args = parser.parse_args()
     os.umask(0o077)
     try:
         if args.command == "fingerprint":
             result = fingerprint()
         elif args.command == "prepare":
-            result = prepare(args.private_dir, args.inputs, args.source_sha256, args.lock_sha256, args.tofu, args.provider_mirror)
-        else:
+            result = prepare(
+                args.private_dir,
+                args.inputs,
+                args.source_sha256,
+                args.lock_sha256,
+                args.tofu,
+                args.provider_mirror,
+            )
+        elif args.command == "plan":
             result = plan(args.private_dir)
+        else:
+            result = apply(args.private_dir, confirm_apply=args.confirm_apply, approval_path=args.approval)
         print(json.dumps(result, sort_keys=True))
     except (Refused, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-        # Never echo arbitrary provider errors, inputs or key material to the caller.
-        print("Encrypted local bootstrap refused; inspect reviewed inputs or private logs. No apply was attempted.", file=sys.stderr)
-        raise SystemExit(1)
+        print(
+            "Encrypted local bootstrap refused; inspect reviewed inputs or private logs. No apply was attempted.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

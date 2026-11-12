@@ -1,8 +1,9 @@
-# Separate Azure OpenAI module. Default plan keeps enabled=false so no spend.
-# Enabling requires enable_azure_openai=true in John's reviewed inputs at plan time.
-# Local key auth stays enabled: CosmaBot runtime still reads WORKSPACE_LLM_API_KEY
-# (see infra/beta/vm/runtime/entrypoint.py model_credential_required and
-# src/cosmas_os/adapters/gpt41.py Bearer Authorization). Do not disable local auth.
+# Separate Azure OpenAI module. Variable default remains false for module safety.
+# When enable_azure_openai=true in reviewed inputs, these resources appear in the
+# plan John reviews. Local key auth stays enabled: CosmaBot loads
+# WORKSPACE_LLM_API_KEY from a 0400 host file (see prod README secret loading).
+# Do not disable local auth. Do not grant Cognitive Services OpenAI User to the
+# runtime identity — the app uses the API key, not managed-identity token auth.
 
 resource "azurerm_cognitive_account" "openai" {
   count                         = var.enabled ? 1 : 0
@@ -20,7 +21,7 @@ resource "azurerm_cognitive_account" "openai" {
   }
 }
 
-# Matching staging/app T-USDZ deployment name and Data Zone Standard US shape.
+# Same model as staging (gpt-4.1 / 2025-04-14) on Data Zone Standard US.
 resource "azurerm_cognitive_deployment" "gpt41_dzus" {
   count                = var.enabled ? 1 : 0
   name                 = "gpt-4.1-dzus"
@@ -76,12 +77,4 @@ resource "azurerm_private_endpoint" "openai" {
   }
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.openai]
-}
-
-resource "azurerm_role_assignment" "runtime_openai_user" {
-  count                            = var.enabled ? 1 : 0
-  scope                            = azurerm_cognitive_account.openai[0].id
-  role_definition_name             = "Cognitive Services OpenAI User"
-  principal_id                     = var.runtime_principal_id
-  skip_service_principal_aad_check = true
 }

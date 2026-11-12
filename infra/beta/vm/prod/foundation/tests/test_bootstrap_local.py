@@ -1,15 +1,16 @@
 """Local bootstrap refusal tests and an actual OpenTofu encryption-only proof."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
 import secrets
 import shutil
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 MODULE = Path(__file__).resolve().parents[1]
@@ -125,14 +126,18 @@ class BootstrapSafety(unittest.TestCase):
         self.prepare()
         key = self.folder / "encryption.passphrase"
         key.chmod(0o644)
-        with self.assertRaises(bootstrap.Refused):
+        with patch.object(bootstrap, "owner_context") as azure, patch.object(bootstrap, "command") as command, self.assertRaises(bootstrap.Refused):
             bootstrap.plan(self.folder)
+        azure.assert_not_called()
+        command.assert_not_called()
         key.chmod(0o600)
         saved = self.folder / "moved-passphrase"
         key.rename(saved)
         key.symlink_to(saved)
-        with self.assertRaises(bootstrap.Refused):
+        with patch.object(bootstrap, "owner_context") as azure, patch.object(bootstrap, "command") as command, self.assertRaises(bootstrap.Refused):
             bootstrap.plan(self.folder)
+        azure.assert_not_called()
+        command.assert_not_called()
 
     def test_replaced_generated_key_is_refused_before_azure_or_init(self):
         result, _ = self.prepare()
@@ -170,17 +175,81 @@ class BootstrapSafety(unittest.TestCase):
                     "path": str(self.folder / "state/foundation.tfstate"), "workspace_dir": str(self.folder / "workspaces")}}}))
             elif argv[1] == "plan":
                 bootstrap.write_private(self.folder / "plans/first.tfplan", bootstrap.json_bytes({"encryption_version": "v0", "encrypted_data": "invented-ciphertext-envelope", "meta": {}}))
+            elif argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"resource_changes": [{"type": "azurerm_resource_group", "change": {"actions": ["create"]}}]}).encode(), b"")
             return subprocess.CompletedProcess(argv, 0, b"private simulated command output", b"")
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(bootstrap, "command", side_effect=run):
             result = bootstrap.plan(self.folder)
-        self.assertEqual([argv[1] for argv, _ in calls], ["init", "plan"])
+        self.assertEqual([argv[1] for argv, _ in calls], ["init", "plan", "show"])
         self.assertFalse(result["applied"])
+        self.assertTrue((self.folder / "plan-summary.json").is_file())
         for argv, kwargs in calls:
             self.assertNotIn("-backend=false", argv)
             self.assertEqual(kwargs["env"]["TF_WORKSPACE"], "default")
             self.assertEqual(kwargs["env"]["TF_VAR_bootstrap_key_file"], str(self.folder / "encryption.passphrase"))
             self.assertNotIn("TF_ENCRYPTION", kwargs["env"])
             self.assertEqual(kwargs["cwd"], self.folder / "module")
+
+    def test_m9_prepare_refuses_staging_name_and_leaves_folder_absent(self):
+        self.input_file.write_text(json.dumps({**self.inputs, "alert_contact_email": "ops@staging.cosmas.ai"}))
+        with self.assertRaises(bootstrap.Refused):
+            self.prepare()
+        self.assertFalse(self.folder.exists())
+
+    def test_module_openai_snapshot_byte_identical_and_edit_refuses_before_owner(self):
+        self.prepare()
+        snap = self.folder / "module/modules/azure_openai/main.tf"
+        source = bootstrap.MODULE / "modules/azure_openai/main.tf"
+        self.assertEqual(snap.read_bytes(), source.read_bytes())
+        snap.write_bytes(snap.read_bytes() + b"\n# edited\n")
+        with patch.object(bootstrap, "owner_context") as azure, patch.object(bootstrap, "command") as command, self.assertRaises(bootstrap.Refused):
+            bootstrap.plan(self.folder)
+        azure.assert_not_called()
+        command.assert_not_called()
+        # Fingerprint covers the openai module path: changing the source digest map entry changes source_sha256.
+        files = bootstrap.source_manifest()
+        self.assertIn("modules/azure_openai/main.tf", files)
+        mutated = dict(files)
+        mutated["modules/azure_openai/main.tf"] = "0" * 64
+        self.assertNotEqual(
+            hashlib.sha256(bootstrap.json_bytes(files)).hexdigest(),
+            hashlib.sha256(bootstrap.json_bytes(mutated)).hexdigest(),
+        )
+
+    def test_m13_apply_refuses_staging_rg_profile_and_missing_manifest(self):
+        approval = self.root / "approval.json"
+        approval.write_text(json.dumps({
+            "reviewer": "john@example.invalid",
+            "review_reference": "ticket",
+            "plan_sha256": "a" * 64,
+            "summary_sha256": "b" * 64,
+        }))
+        approval.chmod(0o600)
+        with self.assertRaises(bootstrap.Refused) as missing:
+            bootstrap.apply(self.root / "missing-folder", confirm_apply=True, approval_path=approval)
+        self.assertIn("0700", str(missing.exception).lower() + "canonical" + str(missing.exception))
+        self.prepare()
+        manifest = json.loads((self.folder / "manifest.json").read_text())
+        manifest["resource_group"] = "".join(["rg-cosmas-os-vm-", "staging", "-eus2-lab01"])
+        (self.folder / "manifest.json").write_text(json.dumps(manifest))
+        # protected digest no longer matches
+        with patch.object(bootstrap, "owner_context") as azure, patch.object(bootstrap, "command") as command, self.assertRaises(bootstrap.Refused):
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        azure.assert_not_called()
+        command.assert_not_called()
+
+    def test_apply_refuses_without_confirm_flag(self):
+        approval = self.root / "approval2.json"
+        approval.write_text(json.dumps({
+            "reviewer": "john@example.invalid",
+            "review_reference": "ticket",
+            "plan_sha256": "a" * 64,
+            "summary_sha256": "b" * 64,
+        }))
+        approval.chmod(0o600)
+        with self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(self.folder, confirm_apply=False, approval_path=approval)
+        self.assertIn("refusing apply without --confirm-apply", str(err.exception))
 
 
 class EncryptionProof(unittest.TestCase):

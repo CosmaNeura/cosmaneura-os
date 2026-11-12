@@ -61,8 +61,8 @@ mock_provider "azurerm" {
   }
   mock_resource "azurerm_container_registry" {
     defaults = {
-      id           = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft.ContainerRegistry/registries/acrstage"
-      login_server = "acrstage.azurecr.io"
+      id           = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft.ContainerRegistry/registries/acrprod"
+      login_server = "acrprod.azurecr.io"
     }
   }
   mock_resource "azurerm_storage_account" {
@@ -341,8 +341,15 @@ run "reject_alerts_without_monitoring" {
 run "azure_openai_defaults_off" {
   command = plan
   assert {
-    condition     = module.azure_openai.created == false && var.enable_azure_openai == false
-    error_message = "Default production plan must not create Azure OpenAI."
+    condition = (
+      module.azure_openai.created == false &&
+      var.enable_azure_openai == false &&
+      module.azure_openai.endpoint == null &&
+      module.azure_openai.deployment_name == null &&
+      module.azure_openai.private_dns_zone_id == null &&
+      output.azure_openai_endpoint == null
+    )
+    error_message = "Default production plan must not create Azure OpenAI; outputs null."
   }
 }
 
@@ -356,7 +363,8 @@ run "azure_openai_opt_in_creates_dzus_and_private_path" {
       module.azure_openai.created == true &&
       module.azure_openai.deployment_name == "gpt-4.1-dzus" &&
       module.azure_openai.private_endpoint_id != null &&
-      module.azure_openai.private_dns_zone_id != null
+      module.azure_openai.private_dns_zone_id != null &&
+      output.azure_openai_deployment_name == "gpt-4.1-dzus"
     )
     error_message = "Opt-in plan must create gpt-4.1-dzus with private endpoint and DNS."
   }

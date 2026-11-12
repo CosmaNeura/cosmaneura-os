@@ -1,6 +1,6 @@
 variable "enabled" {
   type        = bool
-  description = "When false, this module creates no Azure OpenAI resources. Requires a separate John yes to enable."
+  description = "When false, this module creates no Azure OpenAI resources."
   default     = false
 }
 
@@ -26,11 +26,6 @@ variable "subnet_id" {
 variable "virtual_network_id" {
   type        = string
   description = "Production VNet id for the OpenAI private DNS zone link when enabled."
-}
-
-variable "runtime_principal_id" {
-  type        = string
-  description = "VM runtime user-assigned identity principal for Cognitive Services OpenAI User."
 }
 
 variable "tags" {
