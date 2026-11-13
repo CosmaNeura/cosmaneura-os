@@ -227,11 +227,13 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   }
   if (state?.phase === "unavailable" || failed) return <StatusScreen title="Sign-in needs attention"
     detail="This installation could not verify your account. Try signing in again, or reopen the app. Your private workspace stays closed until verification succeeds.">
+    <AccountPublicLinks/>
     <div className="row account-controls" aria-label="Account recovery">
       <button className="button" onClick={() => void act("signIn")}>Sign in again</button>
       <button className="button secondary" onClick={() => void act("signOut")}>Log out</button>
     </div>
   </StatusScreen>;
+
   if (!state || state.phase === "loading") return <StatusScreen title="Checking your session"
     detail="Your workspace will open after your account is verified." role="status" />;
   const pending = state.phase === "signOutPending";

@@ -1,18 +1,26 @@
 import {afterEach,expect,it,vi} from 'vitest';
+import {ACCOUNT_PUBLIC_URL_KEYS,validAccountPublicUrl} from '../../clients/shared/account-public-url.mjs';
 import {
   accountPublicLinksHiddenOnClient,
   privacyPolicyUrl,
   supportUrl,
-  validAccountPublicUrl,
 } from './account-public-links';
 
 afterEach(()=>{
   vi.unstubAllEnvs();
 });
 
-it('accepts https URLs on host cosmas.ai without credentials',()=>{
+it('exports the shared Account public URL keys for build pass-through',()=>{
+  expect([...ACCOUNT_PUBLIC_URL_KEYS]).toEqual(['VITE_PRIVACY_POLICY_URL','VITE_SUPPORT_URL']);
+});
+
+it('accepts https URLs on host cosmas.ai without credentials or port',()=>{
   expect(validAccountPublicUrl('https://cosmas.ai/cosmabot/privacy')).toBe('https://cosmas.ai/cosmabot/privacy');
   expect(validAccountPublicUrl(' https://cosmas.ai/cosmabot/support ')).toBe('https://cosmas.ai/cosmabot/support');
+});
+
+it('accepts uppercase https cosmas.ai URLs after URL normalization',()=>{
+  expect(validAccountPublicUrl('HTTPS://COSMAS.AI/cosmabot/privacy')).toBe('https://cosmas.ai/cosmabot/privacy');
 });
 
 it.each([
@@ -22,9 +30,13 @@ it.each([
   'cosmas.ai/cosmabot/privacy',
   '//cosmas.ai/cosmabot/privacy',
   'https://user:pass@cosmas.ai/cosmabot/privacy',
+  'https://user@cosmas.ai/cosmabot/privacy',
   'https://evil.example/privacy',
   'https://www.cosmas.ai/privacy',
   'https://cosmas.ai.evil.example/privacy',
+  'https://evilcosmas.ai/privacy',
+  'https://cosmas.ai./privacy',
+  'https://cosmas.ai:8443/privacy',
   '',
   '   ',
   undefined,

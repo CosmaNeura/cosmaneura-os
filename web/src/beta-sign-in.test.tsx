@@ -64,3 +64,21 @@ it("renders Privacy Policy and Support under BetaSignIn when configured", async 
   expect(links[1].href).toBe("https://cosmas.ai/cosmabot/support");
   expect(host.querySelector('[data-testid="clerk-sign-in-mock"]')).toBeTruthy();
 });
+
+it("keeps Clerk SignIn and hides public links under BetaSignIn when env is unset", async () => {
+  vi.stubEnv("VITE_WORKSPACE_HOSTED_CLIENT", "web");
+  vi.stubEnv("VITE_PRIVACY_POLICY_URL", undefined);
+  vi.stubEnv("VITE_SUPPORT_URL", undefined);
+  await act(async () => root.render(<BetaSignIn />));
+  expect(host.querySelectorAll(".account-public-links a")).toHaveLength(0);
+  expect(host.querySelector('[data-testid="clerk-sign-in-mock"]')).toBeTruthy();
+});
+
+it("keeps Clerk SignIn and hides public links under BetaSignIn on Mac desktop", async () => {
+  vi.stubEnv("VITE_WORKSPACE_HOSTED_CLIENT", "desktop");
+  vi.stubEnv("VITE_PRIVACY_POLICY_URL", "https://cosmas.ai/cosmabot/privacy");
+  vi.stubEnv("VITE_SUPPORT_URL", "https://cosmas.ai/cosmabot/support");
+  await act(async () => root.render(<BetaSignIn />));
+  expect(host.querySelectorAll(".account-public-links a")).toHaveLength(0);
+  expect(host.querySelector('[data-testid="clerk-sign-in-mock"]')).toBeTruthy();
+});

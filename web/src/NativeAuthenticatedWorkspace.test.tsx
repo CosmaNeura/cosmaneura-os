@@ -84,6 +84,58 @@ describe("native workspace session", () => {
     expect(links[1].href).toBe('https://cosmas.ai/cosmabot/support');
     expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Sign in')).toBe(true);
   });
+  it('shows Privacy Policy and Support on Finish signing out when configured',async()=>{
+    vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','apple');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://cosmas.ai/cosmabot/privacy');
+    vi.stubEnv('VITE_SUPPORT_URL','https://cosmas.ai/cosmabot/support');
+    await render(harness(pending));
+    expect(container.textContent).toContain('Finish signing out');
+    const links=[...container.querySelectorAll<HTMLAnchorElement>('.account-public-links a')];
+    expect(links.map(link=>link.textContent)).toEqual(['Privacy Policy','Support']);
+    expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Retry sign-out')).toBe(true);
+  });
+  it('shows Privacy Policy and Support on Sign-in didn’t finish recovery when configured',async()=>{
+    vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','apple');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://cosmas.ai/cosmabot/privacy');
+    vi.stubEnv('VITE_SUPPORT_URL','https://cosmas.ai/cosmabot/support');
+    const native=harness(signedOut);
+    native.plugin.signIn.mockImplementationOnce(async()=>{native.set(pending);});
+    await render(native);await click('Sign in');
+    expect(container.textContent).toContain('Sign-in didn’t finish');
+    const links=[...container.querySelectorAll<HTMLAnchorElement>('.account-public-links a')];
+    expect(links.map(link=>link.textContent)).toEqual(['Privacy Policy','Support']);
+    expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Try signing in again')).toBe(true);
+  });
+  it('shows Privacy Policy and Support on Sign-in needs attention when configured',async()=>{
+    vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','apple');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://cosmas.ai/cosmabot/privacy');
+    vi.stubEnv('VITE_SUPPORT_URL','https://cosmas.ai/cosmabot/support');
+    const native=harness(first);
+    await render(native);
+    await act(async()=>native.emit({...first,identity:second.identity}));
+    expect(container.textContent).toContain('Sign-in needs attention');
+    const links=[...container.querySelectorAll<HTMLAnchorElement>('.account-public-links a')];
+    expect(links.map(link=>link.textContent)).toEqual(['Privacy Policy','Support']);
+    expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Sign in again')).toBe(true);
+  });
+  it('keeps Sign in and hides public links on the signed-out StatusScreen when env is unset',async()=>{
+    vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','apple');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL',undefined);
+    vi.stubEnv('VITE_SUPPORT_URL',undefined);
+    await render(harness(signedOut));
+    expect(container.textContent).toContain('Sign in to CosmaBot');
+    expect(container.querySelectorAll('.account-public-links a')).toHaveLength(0);
+    expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Sign in')).toBe(true);
+  });
+  it('keeps Sign in and hides public links on the signed-out StatusScreen on Mac desktop',async()=>{
+    vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','desktop');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://cosmas.ai/cosmabot/privacy');
+    vi.stubEnv('VITE_SUPPORT_URL','https://cosmas.ai/cosmabot/support');
+    await render(harness(signedOut));
+    expect(container.textContent).toContain('Sign in to CosmaBot');
+    expect(container.querySelectorAll('.account-public-links a')).toHaveLength(0);
+    expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Sign in')).toBe(true);
+  });
   it('keeps beta account controls unchanged when a registered practice plugin has no complete host',async()=>{
     const native=harness(),practice=practiceHarness(false);
     await act(async()=>root.render(<NativeAuthenticatedWorkspace plugin={native.plugin} available practicePlugin={practice} practiceConnectionAvailable/>));
