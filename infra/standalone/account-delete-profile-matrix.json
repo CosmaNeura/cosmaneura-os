@@ -1,0 +1,173 @@
+[
+  {
+    "id": "shared_staging_policy_alone",
+    "policy": "shared_staging",
+    "web_origin": "https://workspace.invented-practice.test",
+    "cors": "https://workspace.invented-practice.test",
+    "issuer": "https://invented-own-practice.clerk.accounts.dev",
+    "expect": "staging",
+    "render": "classify"
+  },
+  {
+    "id": "audience_staging_origin",
+    "policy": "audience",
+    "web_origin": "https://staging.cosmas.ai",
+    "cors": "https://staging.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.staging.cosmas.ai",
+    "expect": "staging",
+    "render": "classify"
+  },
+  {
+    "id": "review_audience_beta_clerk_beta",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "review",
+    "render": "classify"
+  },
+  {
+    "id": "refused_shared_staging_with_beta_cors",
+    "policy": "shared_staging",
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "refuse"
+  },
+  {
+    "id": "refused_audience_mixed_cors",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,https://staging.cosmas.ai,app://cosmas",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_invented",
+    "policy": "audience",
+    "web_origin": "https://workspace.invented-practice.test",
+    "cors": "https://workspace.invented-practice.test",
+    "issuer": "https://clerk.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "refused_review_wrong_issuer",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.staging.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "refused_review_prod_issuer",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "shared_staging_with_beta_in_cors_only",
+    "policy": "shared_staging",
+    "web_origin": "https://workspace.invented-practice.test",
+    "cors": "https://workspace.invented-practice.test,https://beta.cosmas.ai",
+    "issuer": "https://invented-own-practice.clerk.accounts.dev",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_beta_second_in_cors",
+    "policy": "audience",
+    "web_origin": "https://cosmas.ai",
+    "cors": "https://cosmas.ai,https://beta.cosmas.ai",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_uppercase_beta",
+    "policy": "audience",
+    "web_origin": "https://BETA.COSMAS.AI",
+    "cors": "https://BETA.COSMAS.AI,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "staging_shared_staging_uppercase_beta_variant",
+    "policy": "shared_staging",
+    "web_origin": "https://workspace.invented-practice.test",
+    "cors": "https://workspace.invented-practice.test,https://BETA.COSMAS.AI",
+    "issuer": "https://invented-own-practice.clerk.accounts.dev",
+    "expect": "staging",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_beta_trailing_slash",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai/",
+    "cors": "https://beta.cosmas.ai/,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "staging_shared_staging_beta_trailing_slash_variant",
+    "policy": "shared_staging",
+    "web_origin": "https://workspace.invented-practice.test",
+    "cors": "https://workspace.invented-practice.test,https://beta.cosmas.ai/",
+    "issuer": "https://invented-own-practice.clerk.accounts.dev",
+    "expect": "staging",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_beta_port_443",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai:443",
+    "cors": "https://beta.cosmas.ai:443,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "staging_shared_staging_beta_port_443_variant",
+    "policy": "shared_staging",
+    "web_origin": "https://workspace.invented-practice.test",
+    "cors": "https://workspace.invented-practice.test,https://beta.cosmas.ai:443",
+    "issuer": "https://invented-own-practice.clerk.accounts.dev",
+    "expect": "staging",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_missing_issuer",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": null,
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_empty_issuer",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": "",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "refused_missing_policy_with_beta",
+    "policy": null,
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  }
+]

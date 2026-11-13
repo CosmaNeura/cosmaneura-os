@@ -1577,14 +1577,18 @@ def _clerk_user_deletion_port():
     """Clerk Backend delete client. Tests override this dependency.
 
     Reads only ACCOUNT_DELETE_CLERK_SECRET_KEY so sign-in stays JWKS-only and
-    CLERK_SECRET_KEY is never required for CosmaBot auth.
+    CLERK_SECRET_KEY is never required for CosmaBot auth. Whitespace-only
+    values are treated as absent ("account deletion is not configured").
     """
     secret = settings.account_delete_clerk_secret_key
-    if secret is None or not secret.get_secret_value():
+    if secret is None:
+        return None
+    raw = secret.get_secret_value()
+    if raw is None or not str(raw).strip():
         return None
     from cosmas_os.enrollment.provisioning import ClerkProvisioningPort
 
-    return ClerkProvisioningPort(secret.get_secret_value())
+    return ClerkProvisioningPort(str(raw).strip())
 
 
 @app.post("/account/delete")

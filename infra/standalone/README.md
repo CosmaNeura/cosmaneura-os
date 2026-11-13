@@ -17,6 +17,28 @@ Key absent is the live-compatible path. Explicit
 `syntheticBetaCaptureAndTools: false` matches absent for every rendered file
 except the echoed `host-input.json` value.
 
+## Production-review (`beta.cosmas.ai`) account delete
+
+Owned `https://beta.cosmas.ai` is the production-review CosmaBot host. Account
+delete name mapping on that host is exclusive:
+
+- Identity policy must be `audience` (never `shared_staging`).
+- Identity profile must be `operational-production-v1`.
+- Clerk issuer must be exactly `https://clerk.beta.cosmas.ai` (added condition;
+  never the sole admit). Other issuers (`clerk.staging.cosmas.ai`,
+  `clerk.cosmas.ai`, invented) are refused.
+- `operational-beta-v1` on `beta.cosmas.ai` is refused.
+- Host key name (private mount / env alias): `CLERK_ACCOUNT_DELETION_SECRET`.
+  Azure Key Vault object name (hyphens): `CLERK-ACCOUNT-DELETION-SECRET`.
+  Render maps that host key into app env `ACCOUNT_DELETE_CLERK_SECRET_KEY`.
+- Staging keeps vault secret `account-delete-clerk-secret-key` and vault
+  `kv-cbot-stg-stg0925c1` unchanged; production-review never emits those.
+- Shared predicate: `src/cosmas_os/production_review_profile.py::classify_review_profile`
+  (JS twin `classifyAccountDeleteProfile` in `render.mjs`).
+
+No live users are on `api.beta` yet; this contract change is listed as
+out-of-scope of the delete-name ticket in the PR body with that reason.
+
 ## Explicit-false backend switches
 
 `test_settings_contract.py` requires every `Settings` bool to appear in the
