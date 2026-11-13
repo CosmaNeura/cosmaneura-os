@@ -24,7 +24,7 @@ Both must be merged **before** the AI-on first start in decision §9 (b).
 
 | PR | What it does | Status |
 | --- | --- | --- |
-| [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) | Production-review accepts the secret **name** `ACCOUNT_DELETE_CLERK_SECRET_KEY` (delete-key name mapping from KV/`CLERK_ACCOUNT_DELETION_SECRET` custody toward the App Store delete mount name). No Key Vault write, no deploy. | **Pending** (draft) |
+| [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) | Production-review accepts process env name `ACCOUNT_DELETE_CLERK_SECRET_KEY`. Custody mapping stays vault `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET` (#356 README line 191). No Key Vault write, no deploy. | **Pending** (draft) |
 | [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381) | **Decision (a) decided (CTO, 13 Nov).** Allows the exact production host pattern `https://oai-cbot-prd-[a-z0-9]{6,10}.openai.azure.com/openai/v1` and wires hosted chat (text and tools, including streaming) to the configured endpoint. Unusable configured endpoint → fail closed, never silent CosmasCode fallback. No endpoint set (staging) → unchanged. Model, deployment, and API version unchanged. | **Pending** (open; merge before AI-on first start) |
 
 Do not merge or apply those from this docs ticket. Agents may drive them to
@@ -102,11 +102,15 @@ Not John's hands-on. Still synthetic; still no staging:
 1. Host bootstrap → Docker/IMDS guard → Postgres 16 + Redis on the VM (§3).
 2. Install mode-0400 secret files from the names John pasted (§4); Run Command
    still must not carry secret values.
-3. When `#377` + `#381` are merged and John chose AI-on: flip runnable
-   profile flags per §9 (b); include `WORKSPACE_LLM_API_KEY` (**prod** account
-   key name only).
-4. Render + `start.sh data` → `prepare` → `run`.
-5. Verify `/ready`, `/version.json`, smoke, eight backend switches `'false'`
+3. **Before AI-on first start:** run the deploy-time STOP checks in §4.1
+   (prod `WORKSPACE_LLM_API_KEY` reference) and §4.2 (bundle API origins).
+   On any mismatch: **STOP and roll back** — do not flip AI-on flags, do not
+   start API/worker with model traffic.
+4. When `#377` + `#381` are merged, checks pass, and John chose AI-on: flip
+   runnable profile flags per §9 (b); include `WORKSPACE_LLM_API_KEY` (**prod**
+   account key name only).
+5. Render + `start.sh data` → `prepare` → `run`.
+6. Verify `/ready`, `/version.json`, smoke, eight backend switches `'false'`
    (§8). Admit smoke only after John's separate yes.
 
 External TestFlight still needs **Alfred's go + John's direct yes** (not today).
@@ -160,14 +164,21 @@ Mirror staging host/runtime:
   `WORKSPACE_RX_SANDBOX_ENABLED`, `REAL_PATIENT_RECORDING_ENABLED`,
   `WORKSPACE_EFAX_SANDBOX_ENABLED`
 
-### Account deletion name mapping (depends on `#377`)
+### Account deletion name mapping (matches `#356` README)
 
-- KV / custody name: `CLERK-ACCOUNT-DELETION-SECRET` → host
-  `CLERK_ACCOUNT_DELETION_SECRET`
-- App Store delete mount name required by the API:
-  `ACCOUNT_DELETE_CLERK_SECRET_KEY`
-- `#377` allows that **name** on production-review (`beta.cosmas.ai`). Pending.
-  Do not mount until `#377` is merged and John pastes the value himself.
+Per `#356` `infra/beta/vm/prod/README.md` on branch `grok/cosmabot-prod-hosting`
+(**lines 188–191** of that file; table row at **line 191**):
+
+| Key Vault secret name | Host file name | Services |
+| --- | --- | --- |
+| `CLERK-ACCOUNT-DELETION-SECRET` | `CLERK_ACCOUNT_DELETION_SECRET` | `api`, `worker` |
+
+That is the custody mapping for the account-delete step. Do **not** invent a
+different vault object name. `#377` separately allows the production-review
+process env **name** `ACCOUNT_DELETE_CLERK_SECRET_KEY` (App Store delete path);
+install still starts from vault object `CLERK-ACCOUNT-DELETION-SECRET` → host
+`CLERK_ACCOUNT_DELETION_SECRET`. Do not mount until `#377` is merged and John
+pastes the value himself. No Clerk secret values in this runbook.
 
 ### Key Vault → host file names only
 
@@ -180,14 +191,106 @@ Mirror staging host/runtime:
 | `REDIS-PASSWORD` | `REDIS_PASSWORD` |
 | `HUMAN-DEPLOY-EVIDENCE-REF` | `HUMAN_DEPLOY_EVIDENCE_REF` |
 
-Also for AI-on first start (§9 (b)): host/KV name `WORKSPACE_LLM_API_KEY`
-(prod account only — never CosmasCode). Optional after `#377`:
-`ACCOUNT_DELETE_CLERK_SECRET_KEY`.
+Also for AI-on first start (§9 (b) / §4.1): host file `WORKSPACE_LLM_API_KEY`
+from the **production** OpenAI account only — never CosmasCode or staging.
 
 ### Clerk public values (Sitting 1)
 
 Issuer, JWKS URL, audience, authorized parties, organization ID, publishable
-key. Secrets: Sitting 2 Key Vault only.
+key. Secrets: Sitting 2 Key Vault only. (No Clerk values in this docs push.)
+
+### 4.1 Deploy-time STOP — `WORKSPACE_LLM_API_KEY` is production OpenAI only
+
+**When:** after secrets are named in KV/host files, **before** AI-on first start
+(§9 (b) step that flips `WORKSPACE_LLM_BACKEND=azure_gpt41`).
+
+**Rule:** the vault **reference** (name / id / tags / linked account name) for
+`WORKSPACE_LLM_API_KEY` must belong to the production Azure OpenAI account
+`oai-cbot-prd-*`, not CosmasCode and not staging. Check **names and references
+only**. Never print, log, or copy a secret **value**. On mismatch: **STOP and
+roll back** (do not start AI-on; leave backend disabled / prior release).
+
+Read-only checks (names only; adjust vault/RG to the applied prod names):
+
+```bash
+# 1) Production OpenAI account name must match oai-cbot-prd-<6-10 alnum>
+az cognitiveservices account list \
+  --resource-group rg-cosmabot-prod-eus2-01 \
+  --query "[?kind=='OpenAI'].name" -o tsv
+# Expect exactly one name matching: ^oai-cbot-prd-[a-z0-9]{6,10}$
+# STOP if missing, or if any name contains cosmascode / staging.
+
+# 2) Vault secret *metadata* only — never query value / never --output that prints value
+az keyvault secret show \
+  --vault-name "$PROD_KV_NAME" \
+  --name WORKSPACE-LLM-API-KEY \
+  --query "{name:name, id:id, contentType:contentType, tags:tags}" -o json
+# STOP if vault name is not the prod kv-cbot-prd-* vault.
+# STOP if id/name/tags reference cosmascode, staging, or a non oai-cbot-prd-* account.
+
+# 3) Host install lists the file name only (no cat / no od of the secret file)
+ls -l /etc/cosmabot/runtime/"$RELEASE_ID"/api/WORKSPACE_LLM_API_KEY \
+      /etc/cosmabot/runtime/"$RELEASE_ID"/worker/WORKSPACE_LLM_API_KEY
+# Expect mode 0400; STOP if the path is missing or if a CosmasCode/staging
+# reference file was installed instead.
+```
+
+Also confirm runnable public env (when AI-on is prepared) sets
+`WORKSPACE_LLM_ENDPOINT` to the `#381` pattern
+`https://oai-cbot-prd-[a-z0-9]{6,10}.openai.azure.com/openai/v1` — still no
+secret values.
+
+### 4.2 Deploy-time STOP — production bundles embed `https://api.beta.cosmas.ai`
+
+**When:** before admitting the production-review iPhone / web build that talks
+to this host (and before AI-on first start that serves that API). **STOP** if
+the embedded API origin is not exactly `https://api.beta.cosmas.ai`, or if any
+staging API origin is present.
+
+**iPhone (composed/production `.app` or unpacked IPA `Payload/*.app`) — read-only:**
+
+```bash
+APP="/path/to/CosmaBot.app"   # reviewed production-review artifact only
+/usr/bin/plutil -extract CosmasNativeIdentity.apiOrigin raw -o - "$APP/Info.plist"
+# Expect exactly one line:
+# https://api.beta.cosmas.ai
+# STOP on any other value (including empty or api.staging.cosmas.ai).
+
+# Refuse staging origin anywhere in the stamped Info:
+if /usr/bin/plutil -convert json -o - "$APP/Info.plist" \
+  | rg -F 'api.staging.cosmas.ai' -q; then
+  echo "STOP: staging API origin in iPhone Info.plist"; exit 1
+fi
+```
+
+**Web (unpacked production web archive / release web root) — read-only:**
+
+```bash
+WEB_ROOT="/path/to/reviewed-web-dist"   # production-review archive only
+
+# Must embed the exact production API origin:
+rg -aF 'https://api.beta.cosmas.ai' "$WEB_ROOT" -q \
+  || { echo "STOP: missing https://api.beta.cosmas.ai in web bundle"; exit 1; }
+
+# Must not embed staging API origin:
+if rg -aF 'https://api.staging.cosmas.ai' "$WEB_ROOT" -q; then
+  echo "STOP: staging API origin in web bundle"; exit 1
+fi
+
+# If the release retained web-build-env.json beside the archive, pin both keys:
+if test -f "$WEB_ROOT/../web-build-env.json"; then
+  jq -er '
+    (.VITE_API_BASE // empty),
+    (.VITE_WORKSPACE_HOSTED_API_ORIGIN // empty)
+    | select(length > 0)
+    | select(. != "https://api.beta.cosmas.ai")
+    | "STOP: " + .
+  ' "$WEB_ROOT/../web-build-env.json"
+  # Any printed STOP line means rollback; empty output means pass.
+fi
+```
+
+Do not ship or admit a candidate that fails either check.
 
 ---
 
@@ -338,15 +441,18 @@ resource for this.
 3. Host prep (agents after Sitting 2 yes).
 4. Sitting 2: John sets mode-600 passwords; pastes KV names:
    `DATABASE_PASSWORD`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
-   `CLERK_SECRET_KEY`, `CLERK_ACCOUNT_DELETION_SECRET`,
-   `HUMAN_DEPLOY_EVIDENCE_REF`, then `WORKSPACE_LLM_API_KEY` (prod only), and
-   `ACCOUNT_DELETE_CLERK_SECRET_KEY` once `#377` is merged.
-5. Flags flip: backend `azure_gpt41`; endpoint matching `#381` pattern
+   `CLERK_SECRET_KEY`, vault `CLERK-ACCOUNT-DELETION-SECRET` → host
+   `CLERK_ACCOUNT_DELETION_SECRET` (#356 README line 191),
+   `HUMAN_DEPLOY_EVIDENCE_REF`, then `WORKSPACE_LLM_API_KEY` (prod only).
+5. **STOP checks before AI-on:** §4.1 (prod OpenAI key reference) and §4.2
+   (iPhone + web embed exactly `https://api.beta.cosmas.ai`, no staging). On
+   failure: roll back; do not flip AI-on.
+6. Flags flip: backend `azure_gpt41`; endpoint matching `#381` pattern
    `https://oai-cbot-prd-<suffix>.openai.azure.com/openai/v1`;
    USDZ/deployment `gpt-4.1-dzus`; `secret_names` includes
    `WORKSPACE_LLM_API_KEY`; synthetic + eight switches false.
-6. Install 0400 files; `data` → `prepare` → `run`.
-7. `/ready` after DB prepare, secrets loaded, BASE satisfied, `#381`
+7. Install 0400 files; `data` → `prepare` → `run`.
+8. `/ready` after DB prepare, secrets loaded, BASE satisfied, `#381`
    availability true for the configured prod host, DNS or local checks OK;
    `/version.json` shows reviewed commit.
 
@@ -369,7 +475,10 @@ resource for this.
 - [ ] Sitting 1: plan-hash yes → `#356` apply → IP recorded → Clerk public values sent
 - [ ] Between: agent prep only (no secrets, no staging)
 - [ ] Sitting 2: KV names pasted → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
-- [ ] After 14:30: host Postgres/Redis → secrets install → flags per §9 (b) → `/ready` + `version.json`
+- [ ] After 14:30: host Postgres/Redis → secrets install
+- [ ] §4.1 STOP check: `WORKSPACE_LLM_API_KEY` reference is `oai-cbot-prd-*` only (no CosmasCode/staging); else rollback
+- [ ] §4.2 STOP check: iPhone + web embed exactly `https://api.beta.cosmas.ai` (no staging); else rollback
 - [ ] `#377` **and** `#381` merged before AI-on first start
-- [ ] `#377` merged before delete-key mount
+- [ ] Account-delete vault `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET` (#356 README line 191)
+- [ ] Flags per §9 (b) → `/ready` + `version.json`
 - [ ] Eight switches false; synthetic only; staging untouched; no CosmasCode key in prod
