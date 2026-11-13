@@ -1,6 +1,7 @@
 # Synthetic CI — no production secrets, no cloud deploy.
 # Jobs are required; do not mark continue-on-error.
-# Pinned ubuntu-24.04: ubuntu-latest rolled to 26.04 on 13 Nov 2026 with no postgresql-16.
+# Pin ubuntu-24.04: ubuntu-latest moved to 26.04 (PG 18 only). Pytest and
+# enrollment still need /usr/lib/postgresql/16/bin (initdb/pg_ctl/pg_config).
 
 name: synth-ci
 
