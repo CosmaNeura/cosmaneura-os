@@ -1,5 +1,7 @@
 # Synthetic CI — no production secrets, no cloud deploy.
 # Jobs are required; do not mark continue-on-error.
+# Pin ubuntu-24.04: ubuntu-latest moved to 26.04 (PG 18 only). Pytest and
+# enrollment still need /usr/lib/postgresql/16/bin (initdb/pg_ctl/pg_config).
 
 name: synth-ci
 
@@ -24,7 +26,7 @@ env:
 
 jobs:
   ci-mode:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       full: ${{ steps.decide.outputs.full }}
     steps:
@@ -41,7 +43,7 @@ jobs:
 
   python-quality:
     name: python-lint-type
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
@@ -58,7 +60,7 @@ jobs:
     name: python-tests-migrate (${{ matrix.suite }})
     needs: [ci-mode]
     if: needs.ci-mode.outputs.full != 'false'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -133,7 +135,7 @@ jobs:
 
   web:
     name: web-test-build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -197,7 +199,7 @@ jobs:
 
   container-image:
     name: release-image-manifest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [python-quality, python-tests, web]
     services:
       postgres:
@@ -332,7 +334,7 @@ jobs:
 
   beta-infra-static:
     name: beta-infra-static
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -411,7 +413,7 @@ jobs:
 
   enrollment-journey:
     name: enrollment-journey
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -493,7 +495,7 @@ jobs:
 
   synth-gate:
     name: synth-ci-gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: always()
     needs: [ci-mode, python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey]
     steps:

@@ -1,0 +1,95 @@
+{
+  "label": "estimate",
+  "price_date": "2026-11-11",
+  "envelope_price_date": "2026-09-25",
+  "openai_price_date": "2026-11-11",
+  "currency": "USD",
+  "hours_per_month": 730,
+  "notes": [
+    "Checked-in retail estimate for the CosmaBot production VM foundation shape.",
+    "VM/ACR/storage envelope priced_on 2026-09-25; Azure OpenAI Data Zone token rates and OpenAI PE/DNS priced_on 2026-11-11 (Azure Retail Prices API eastus2).",
+    "Not an Azure invoice, reservation quote, or spending cap. No credits, tax, or transfer assumed.",
+    "Standing costs only in the printed totals. Token usage is pay-as-you-go and not included.",
+    "First-apply DataZoneStandard capacity is 1 (1000 TPM). Continuous-use ceiling at that capacity is 1000 TPM \u00d7 60 \u00d7 730 \u2248 43,800,000 tokens/month; dollar spend depends on input/output mix and is not a standing fee. Capacity increases only in the later LLM cutover ticket.",
+    "Reviewer arithmetic at saturation (capacity 1): about $96 to $385 a month of token spend depending on input/output mix at the Retail Prices rates above; not a standing fee and not included in the printed totals."
+  ],
+  "line_items": [
+    {
+      "component": "Linux VM Standard_D2s_v5",
+      "quantity": "1 \u00d7 730 hours",
+      "monthly_usd": 70.08,
+      "priced_on": "2026-09-25"
+    },
+    {
+      "component": "Managed disks (64 GiB OS + 128 GiB data Standard SSD LRS)",
+      "quantity": "192 GiB",
+      "monthly_usd": 14.4,
+      "priced_on": "2026-09-25"
+    },
+    {
+      "component": "Standard static public IPv4",
+      "quantity": "1 \u00d7 730 hours",
+      "monthly_usd": 3.65,
+      "priced_on": "2026-09-25"
+    },
+    {
+      "component": "Premium ACR (private)",
+      "quantity": "1",
+      "monthly_usd": 50.69,
+      "priced_on": "2026-09-25"
+    },
+    {
+      "component": "Private endpoints (ACR, Key Vault, app Blob, backup Blob)",
+      "quantity": "4 \u00d7 $0.01/hour",
+      "monthly_usd": 29.2,
+      "priced_on": "2026-09-25"
+    },
+    {
+      "component": "Private DNS zones (ACR, Key Vault, shared Blob)",
+      "quantity": "3 \u00d7 $0.50",
+      "monthly_usd": 1.5,
+      "priced_on": "2026-09-25"
+    },
+    {
+      "component": "Metric alerts (three time series, gross)",
+      "quantity": "3",
+      "monthly_usd": 0.3,
+      "priced_on": "2026-09-25"
+    },
+    {
+      "component": "Log Analytics workspace (0.1 GB/day quota setting; usage extra)",
+      "quantity": "workspace fixed portion modeled as $0 in this table",
+      "monthly_usd": 0.0,
+      "priced_on": "2026-09-25"
+    },
+    {
+      "component": "Illustrative usage (10 GB app objects + 100 GB backups + 0.1 GB/day logs + 10k Key Vault ops)",
+      "quantity": "planning assumption",
+      "monthly_usd": 10.45,
+      "priced_on": "2026-09-25"
+    },
+    {
+      "component": "Azure OpenAI gpt-4.1 Data Zone Standard US (no standing fee; usage only)",
+      "quantity": "input $0.0022/1K + cached input $0.00055/1K + output $0.0088/1K tokens (Retail Prices eastus2 2026-11-11)",
+      "monthly_usd": 0.0,
+      "priced_on": "2026-11-11",
+      "requires": "enable_azure_openai"
+    },
+    {
+      "component": "Azure OpenAI private endpoint (when enable_azure_openai=true)",
+      "quantity": "1 \u00d7 $0.01/hour \u00d7 730 hours",
+      "monthly_usd": 7.3,
+      "priced_on": "2026-11-11",
+      "requires": "enable_azure_openai"
+    },
+    {
+      "component": "Azure OpenAI private DNS zone privatelink.openai.azure.com (when enable_azure_openai=true)",
+      "quantity": "1 \u00d7 $0.50",
+      "monthly_usd": 0.5,
+      "priced_on": "2026-11-11",
+      "requires": "enable_azure_openai"
+    }
+  ],
+  "warning_threshold_usd": 300,
+  "illustrative_token_assumption": "Standing OpenAI network + envelope only; token spend excluded. First-apply capacity 1 ceiling \u2248 43,800,000 tokens/month at continuous 1000 TPM. Reviewer arithmetic saturation range about $96 to $385 a month at capacity 1; not printed in the standing totals."
+}

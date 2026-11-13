@@ -1,0 +1,11 @@
+{
+  "subscription_id": "00000000-0000-4000-8000-000000000001",
+  "tenant_id": "00000000-0000-4000-8000-000000000002",
+  "resource_name_suffix": "abcd1234",
+  "vnet_address_prefix": "10.249.0.0/24",
+  "admin_username": "cosmasoperator",
+  "admin_ssh_public_key": "ssh-ed25519 AAAAOPENSSHPLACEHOLDER reviewer@example.invalid",
+  "release_operator_object_id": "00000000-0000-4000-8000-000000000003",
+  "alert_contact_email": "owner@example.invalid",
+  "enable_azure_openai": false
+}
