@@ -14,6 +14,22 @@ from cosmas_os.workspace_llm import DEFAULT_DEPLOYMENT, USDZ_DEPLOYMENT
 
 STANDALONE_ENVS = frozenset({"standalone_synthetic", "standalone_clerk_synthetic"})
 
+# Shared CosmasCode Azure OpenAI v1 origin used by staging/synth/live-today hosts.
+COSMASCODE_LLM_ENDPOINT = "https://cosmascode.services.ai.azure.com/openai/v1"
+# Production account from #356: name/custom_subdomain `oai-cbot-prd-${suffix}`
+# with suffix `[a-z0-9]{6,10}` → classic `*.openai.azure.com` (not services.ai).
+# App form appends `/openai/v1` to the Cognitive account base URL.
+PROD_OPENAI_LLM_ENDPOINT_PATTERN = (
+    r"https://oai-cbot-prd-[a-z0-9]{6,10}\.openai\.azure\.com/openai/v1"
+)
+
+
+def reviewed_hosted_llm_endpoint(endpoint: str) -> bool:
+    """True when the hosted profile may turn AI on for this exact endpoint form."""
+    return endpoint == COSMASCODE_LLM_ENDPOINT or bool(
+        re.fullmatch(PROD_OPENAI_LLM_ENDPOINT_PATTERN, endpoint)
+    )
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -235,7 +251,7 @@ class Settings(BaseSettings):
     core_session_prep_scope: str = ""
     core_session_prep_managed_identity_client_id: str = ""
     workspace_llm_backend: Literal["disabled", "azure_gpt41"] = "disabled"
-    workspace_llm_endpoint: str = "https://cosmascode.services.ai.azure.com/openai/v1"
+    workspace_llm_endpoint: str = COSMASCODE_LLM_ENDPOINT
     workspace_llm_deployment: str = DEFAULT_DEPLOYMENT
     workspace_llm_api_key: SecretStr | None = None
     # T-USDZ: when true, CosmaBot chat uses Data Zone Standard US deployment
@@ -446,7 +462,7 @@ class Settings(BaseSettings):
             return bool(self.workspace_llm_backend == "azure_gpt41" and self.workspace_available
                         and not self._standalone_model_errors())
         return bool(self.workspace_available and self.workspace_llm_backend == "azure_gpt41"
-                    and self.workspace_llm_endpoint == "https://cosmascode.services.ai.azure.com/openai/v1"
+                    and reviewed_hosted_llm_endpoint(self.workspace_llm_endpoint)
                     and self.workspace_llm_deployment in self.workspace_llm_reviewed_deployments
                     and self.workspace_llm_api_key and self.workspace_llm_api_key.get_secret_value())
 
