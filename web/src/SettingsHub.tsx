@@ -209,11 +209,10 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       {label:'Not checked',reason:'Account status has not been checked.',action:'Check connection',tone:'neutral'};
   }
   const nativeConnectionDirectory=!!nativePresentation&&!!connectionIdentity;
-  // Key discovery on checkKind/state, not production label text ("Not available").
-  // Include production "Not available" label; also key on checkKind so a renamed
-  // production label cannot sneak a discovery card into the native directory.
+  // Key discovery on checkKind first. Production "Not available" always ships with
+  // checkKind:'availability' (connection-summary), so it is not duplicated in the label list.
   const discoveryOnly=(value:ConnectionSummary)=>value.checkKind==='availability'
-    ||['Ready to connect','Needs setup','Practice setup required','Coming soon','Not available','Not checked'].includes(value.label);
+    ||['Ready to connect','Needs setup','Practice setup required','Coming soon','Not checked'].includes(value.label);
   const directoryCards=nativeConnectionDirectory
     ?current&&!current.denied?connectionCards.filter(item=>{
       // Keep an existing service reachable while its check is pending or failed;

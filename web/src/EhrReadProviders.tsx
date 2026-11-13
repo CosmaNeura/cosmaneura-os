@@ -6,8 +6,6 @@ import {AthenaAllergyMount} from './AthenaAllergyMount';
 import {AthenaMedicationMount} from './AthenaMedicationMount';
 import {
  isProductionReviewProfile,
- practiceRecordsSavedDraftRecoveryAction,
- practiceRecordsSavedDraftRecoveryCopy,
  practiceRecordsUnavailableCopy,
 } from './production-review-copy';
 export type RecordsProvider=EhrProvider|'athena';
@@ -39,25 +37,15 @@ export function EhrReadProviders({requestedProvider,...props}:Omit<EhrReadMountP
  const elationBusy=useCallback((value:boolean)=>update('elation',value),[update]),tebraBusy=useCallback((value:boolean)=>update('tebra',value),[update]),athenaBusy=useCallback((value:boolean)=>update('athena',value),[update]);
  useEffect(()=>()=>report.current?.(false),[]);
  const locked=Boolean(dispatching||props.locked||props.recoveryLocked);
- const [draftRecoveryOffered,setDraftRecoveryOffered]=useState(false);
  function choose(next:RecordsProvider){
   if(busy.current.elation||busy.current.tebra||busy.current.athena||props.locked||props.recoveryLocked)return;
   setProvider(next);setVisited(old=>old.includes(next)?old:[...old,next]);
  }
  const mounts=visited.map(name=><div key={name} hidden={provider!==name}>{name==='athena'?<AthenaRecords {...props} active={props.active!==false&&provider===name} onBusyChange={athenaBusy}/>:name==='tebra'?<TebraRecords {...props} active={props.active!==false&&provider===name} onBusyChange={tebraBusy}/>:<EhrReadMount {...props} provider={name} active={props.active!==false&&provider===name} onBusyChange={elationBusy}/>}</div>);
- // Production-review: no Records-system tabs and no EHR panel mounts. Neutral unavailable
- // line plus a disclosure that only reopens a saved private draft.
+ // Production-review: no Records-system tabs and no EHR panel mounts — unavailable line only.
  if(isProductionReviewProfile()){
   return <div className="ehr-read-panel" role="status" aria-label="Practice records unavailable">
    <p>{practiceRecordsUnavailableCopy()}</p>
-   <details>
-    <summary>Saved work recovery</summary>
-    <p>{practiceRecordsSavedDraftRecoveryCopy()}</p>
-    <button type="button" disabled={locked} onClick={()=>setDraftRecoveryOffered(true)}>
-     {practiceRecordsSavedDraftRecoveryAction()}
-    </button>
-    {draftRecoveryOffered&&<p role="status">Saved private draft ready to review for this visit.</p>}
-   </details>
   </div>;
  }
  return <>

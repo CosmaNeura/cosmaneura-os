@@ -25,17 +25,6 @@ export function practiceRecordsUnavailableCopy(env: Env = import.meta.env): stri
     : '';
 }
 
-/** Production-only recovery disclosure: reopen a saved private draft (no EHR panel mounts). */
-export function practiceRecordsSavedDraftRecoveryCopy(env: Env = import.meta.env): string {
-  return isProductionReviewProfile(env)
-    ? 'Reopen a saved private draft for this visit.'
-    : '';
-}
-
-export function practiceRecordsSavedDraftRecoveryAction(env: Env = import.meta.env): string {
-  return isProductionReviewProfile(env) ? 'Review saved private draft' : '';
-}
-
 export function nativeSignInUnavailableDetail(env: Env = import.meta.env): string {
   return isProductionReviewProfile(env)
     ? 'This installation could not start sign-in. Reopen the app or contact your practice administrator.'

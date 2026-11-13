@@ -10,8 +10,6 @@ import {
   isProductionReviewProfile,
   nativeSignInUnavailableDetail,
   paymentsComingSoonReason,
-  practiceRecordsSavedDraftRecoveryAction,
-  practiceRecordsSavedDraftRecoveryCopy,
   practiceRecordsUnavailableCopy,
   remainsUnavailableClause,
   schedulingGuideAccess,
@@ -97,9 +95,6 @@ describe('production-review copy helpers', () => {
     );
     expect(nativeSignInUnavailableDetail(production)).not.toMatch(/test build|synthetic|invented|rehearsal|Coming soon/i);
     expect(practiceRecordsUnavailableCopy(production)).toBe('Practice records are not available in this release.');
-    expect(practiceRecordsSavedDraftRecoveryCopy(production)).toBe('Reopen a saved private draft for this visit.');
-    expect(practiceRecordsSavedDraftRecoveryCopy(production)).not.toContain('does not read practice records');
-    expect(practiceRecordsSavedDraftRecoveryAction(production)).toBe('Review saved private draft');
     expect(inventedRecordsDisclaimer(production)).toMatch(/Sample records|not from a live/i);
     expect(athenaInventedExampleSuffix(production)).toContain('Sample records, not from your Athena account');
     expect(tebraInventedExampleSuffix(production)).toBe(' · Sample records, not from your Tebra account');
