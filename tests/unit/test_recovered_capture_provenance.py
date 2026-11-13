@@ -102,6 +102,14 @@ EXPECTED_APP_PRIVACY = {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
             "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
         },
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"],
+        },
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": ["E174.1"],
+        },
     ],
 }
 SYNTHETIC_MICROPHONE_USAGE = (
@@ -570,15 +578,14 @@ def test_owned_privacy_manifest_declares_reviewed_coverage():
     assert plistlib.loads(OWNED_PRIVACY.read_bytes()) == EXPECTED_APP_PRIVACY
 
 
-def test_owned_privacy_manifest_declares_file_timestamp_c617_for_fstat():
-    """App PrivacyInfo must declare FileTimestamp/C617.1 for NativeCaptureProcessFence fstat.
+def test_owned_privacy_manifest_declares_precautionary_file_timestamp_c617():
+    """App PrivacyInfo keeps precautionary FileTimestamp/C617.1 even though iOS compiles fstat out.
 
     Apple lists fstat/fstatat under NSPrivacyAccessedAPICategoryFileTimestamp
     (https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
-    C617.1 fits because the fence reads size/mode/identity metadata of files inside
-    a private app-container directory. The CosmasWorkspaceAuthPlugin SPM target
-    (Bridge path) compiles NativeCaptureProcessFence.swift into the iPhone App via
-    CapApp-SPM; fstat call sites are #if os(macOS)-gated.
+    NativeCaptureProcessFence.swift ships via CosmasWorkspaceAuthPlugin → CapApp-SPM → App,
+    but every fstat/fstatat call site is under #if os(macOS) and is compiled out on iOS.
+    C617.1 remains as a precautionary app-level declaration for that shared Bridge source.
     """
     raw = OWNED_PRIVACY.read_bytes()
     privacy = plistlib.loads(raw)
@@ -602,7 +609,21 @@ def test_owned_privacy_manifest_declares_file_timestamp_c617_for_fstat():
     fence = (
         ROOT / "clients/apple/native-auth/Bridge/NativeCaptureProcessFence.swift"
     ).read_text(encoding="utf-8")
-    assert re.search(r"\bfstat(?:at)?\s*\(", fence)
+    # fstat/fstatat stay macOS-gated: present on macOS path, compiled out on iOS.
+    macos = re.sub(
+        r"#if os\(macOS\)\n(.*?)#else\n.*?#endif\n",
+        r"\1",
+        fence,
+        flags=re.DOTALL,
+    )
+    iphone = re.sub(
+        r"#if os\(macOS\)\n.*?#else\n(.*?)#endif\n",
+        r"\1",
+        fence,
+        flags=re.DOTALL,
+    )
+    assert re.search(r"\bfstat(?:at)?\s*\(", macos)
+    assert re.search(r"\bfstat(?:at)?\s*\(", iphone) is None
 
 
 def test_scaffold_info_plist_stays_frozen_export_key_left_for_owner_decision():

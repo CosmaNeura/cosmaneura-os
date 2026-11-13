@@ -214,6 +214,14 @@ REVIEWED_APP_PRIVACY = {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
             "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
         },
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"],
+        },
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": ["E174.1"],
+        },
     ],
 }
 
@@ -368,10 +376,12 @@ def _add_owned_app_privacy(repository: Path, output: Path, placed: list[dict[str
             "sha256": _digest(destination),
             "authoritative_counterpart": source_path,
             "wiring_note": (
-                "App-owned privacy resource: system boot time and file timestamp "
-                "required-reason coverage, tracking=false, and collected-data "
-                "declarations for audio, user ID, email, name, health, other user "
-                "content, and device ID."
+                "App-owned privacy resource: system boot time, precautionary "
+                "file timestamp C617.1 (fstat/fstatat in NativeCaptureProcessFence "
+                "are compiled out on iOS via #if os(macOS)), UserDefaults CA92.1, "
+                "and DiskSpace E174.1; tracking=false; collected-data declarations "
+                "for audio, user ID, email, name, health, other user content, and "
+                "device ID."
             ),
         }
     )
