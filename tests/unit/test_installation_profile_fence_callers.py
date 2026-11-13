@@ -88,7 +88,11 @@ def test_raw_validate_callers_match_explicit_allow_list():
             continue
         if rel == "clients/shared/operational-native-identity.mjs":
             continue
-        if "/test" in f"/{rel}" or rel.endswith(".test.mjs") or rel.startswith("tests/"):
+        if (
+            "/test" in f"/{rel}"
+            or rel.endswith((".test.mjs", ".test.js", ".test.ts", ".test.tsx"))
+            or rel.startswith("tests/")
+        ):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         if pattern.search(text):
