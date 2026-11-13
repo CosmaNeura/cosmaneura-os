@@ -22,10 +22,22 @@ COSMASCODE_LLM_ENDPOINT = "https://cosmascode.services.ai.azure.com/openai/v1"
 PROD_OPENAI_LLM_ENDPOINT_PATTERN = (
     r"https://oai-cbot-prd-[a-z0-9]{6,10}\.openai\.azure\.com/openai/v1"
 )
+# Exact CosmasCode or #356 production chat URL. Shared with gpt41_tools.
+REVIEWED_HOSTED_CHAT_COMPLETIONS_URL_PATTERN = (
+    r"(?:"
+    + re.escape(COSMASCODE_LLM_ENDPOINT)
+    + r"|"
+    + PROD_OPENAI_LLM_ENDPOINT_PATTERN
+    + r")/chat/completions"
+)
 
 
 def reviewed_hosted_llm_endpoint(endpoint: str) -> bool:
-    """True when the hosted profile may turn AI on for this exact endpoint form."""
+    """True when the endpoint form is CosmasCode or the #356 production pattern.
+
+    Environment binding (production-review vs staging) is applied separately in
+    ``Settings.workspace_llm_available`` / ``runtime_configuration_errors``.
+    """
     return endpoint == COSMASCODE_LLM_ENDPOINT or bool(
         re.fullmatch(PROD_OPENAI_LLM_ENDPOINT_PATTERN, endpoint)
     )
@@ -44,6 +56,21 @@ def hosted_chat_completions_url(endpoint: str) -> str | None:
     if bool(re.fullmatch(PROD_OPENAI_LLM_ENDPOINT_PATTERN, endpoint)):
         return endpoint + "/chat/completions"
     raise ValueError("hosted_chat_endpoint_refused")
+
+
+def _production_openai_endpoint(endpoint: str) -> bool:
+    return bool(re.fullmatch(PROD_OPENAI_LLM_ENDPOINT_PATTERN, endpoint or ""))
+
+
+def _hosted_review_profile_kind(settings: Settings) -> str | None:
+    from cosmas_os.production_review_profile import classify_review_profile
+
+    return classify_review_profile(
+        policy=settings.clerk_session_policy,
+        web_origin=None,
+        cors=settings.cors_allowed_origins,
+        issuer=settings.clerk_issuer,
+    )
 
 
 class Settings(BaseSettings):
@@ -476,10 +503,19 @@ class Settings(BaseSettings):
         if self.cosmas_env == "standalone_clerk_synthetic":
             return bool(self.workspace_llm_backend == "azure_gpt41" and self.workspace_available
                         and not self._standalone_model_errors())
-        return bool(self.workspace_available and self.workspace_llm_backend == "azure_gpt41"
-                    and reviewed_hosted_llm_endpoint(self.workspace_llm_endpoint)
-                    and self.workspace_llm_deployment in self.workspace_llm_reviewed_deployments
-                    and self.workspace_llm_api_key and self.workspace_llm_api_key.get_secret_value())
+        if not (
+            self.workspace_available
+            and self.workspace_llm_backend == "azure_gpt41"
+            and self.workspace_llm_deployment in self.workspace_llm_reviewed_deployments
+            and self.workspace_llm_api_key
+            and self.workspace_llm_api_key.get_secret_value()
+        ):
+            return False
+        # Production-review (#356 VM / beta.cosmas.ai) requires the production
+        # pattern; every other hosted profile stays CosmasCode-only.
+        if _hosted_review_profile_kind(self) == "review":
+            return _production_openai_endpoint(self.workspace_llm_endpoint)
+        return self.workspace_llm_endpoint == COSMASCODE_LLM_ENDPOINT
 
     @property
     def workspace_available(self) -> bool:
@@ -686,7 +722,23 @@ class Settings(BaseSettings):
             errors.append("Hosted native transport requires WORKSPACE_HOSTED_ENABLED")
         if self.workspace_capture_backend != "disabled" and not self.workspace_capture_available:
             errors.append("Workspace capture requires an authenticated workspace and complete Core workload configuration")
-        if self.workspace_llm_backend != "disabled" and not self.workspace_llm_available:
+        if self.workspace_llm_backend == "azure_gpt41":
+            kind = _hosted_review_profile_kind(self)
+            prod_ep = _production_openai_endpoint(self.workspace_llm_endpoint)
+            if kind == "review" and not prod_ep:
+                # Unset defaults to CosmasCode; production-review never accepts it.
+                errors.append(
+                    "Production-review requires the production Azure OpenAI endpoint"
+                )
+            elif kind != "review" and prod_ep:
+                errors.append(
+                    "Non-production profiles refuse the production Azure OpenAI endpoint"
+                )
+            elif not self.workspace_llm_available:
+                errors.append(
+                    "Workspace GPT-4.1 requires an available workspace and the exact configured deployment"
+                )
+        elif self.workspace_llm_backend != "disabled" and not self.workspace_llm_available:
             errors.append("Workspace GPT-4.1 requires an available workspace and the exact configured deployment")
         if self.workspace_enabled and not self.workspace_available:
             errors.append("WORKSPACE_ENABLED requires the dedicated local synthetic or hosted beta profile")

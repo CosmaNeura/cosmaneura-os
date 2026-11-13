@@ -47,7 +47,7 @@ from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.application.encounter_access import patient_visible
 from cosmas_os.application.enrollment_access import require_worker_admission
-from cosmas_os.config import COSMASCODE_LLM_ENDPOINT, hosted_chat_completions_url
+from cosmas_os.config import hosted_chat_completions_url
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import (
     AppointmentObservation,
@@ -1246,9 +1246,7 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_ex
     # reviewed host. Unusable configured endpoints fail closed — never fall back.
     runtime = team.runtime_settings
     try:
-        chat_url = hosted_chat_completions_url(
-            getattr(runtime, "workspace_llm_endpoint", COSMASCODE_LLM_ENDPOINT)
-        )
+        chat_url = hosted_chat_completions_url(runtime.workspace_llm_endpoint)
     except ValueError:
         raise ModelCallFailure(dispatch="not_dispatched") from None
     if claimed.envelope.get("contract") in TOOL_PREPARED_CONTRACTS:

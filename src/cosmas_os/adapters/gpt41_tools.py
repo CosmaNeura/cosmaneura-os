@@ -107,10 +107,9 @@ class GPT41ToolsConnector:
     def __init__(self, credential: Callable[[], str], *, transport: httpx.BaseTransport | None = None,
         monotonic: Callable[[], float] = time.monotonic, deployment: str = MODEL,
         endpoint: str = ENDPOINT):
-        if not re.fullmatch(
-            r"https://[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)/openai/v1/chat/completions",
-            endpoint,
-        ):
+        from cosmas_os.config import REVIEWED_HOSTED_CHAT_COMPLETIONS_URL_PATTERN
+
+        if not re.fullmatch(REVIEWED_HOSTED_CHAT_COMPLETIONS_URL_PATTERN, endpoint):
             raise ValueError("Exact Azure OpenAI v1 endpoint required")
         if deployment not in REQUEST_DEPLOYMENTS:
             raise ValueError("Exact reviewed Azure OpenAI deployment required")

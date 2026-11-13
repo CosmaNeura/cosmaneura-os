@@ -1,5 +1,6 @@
 """Private, versioned Provider Team templates using existing agent principals."""
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from cosmas_os.api.team_schemas import TeamConfiguration
 from cosmas_os.application.workspace import WorkspaceError, _human
+from cosmas_os.config import COSMASCODE_LLM_ENDPOINT, PROD_OPENAI_LLM_ENDPOINT_PATTERN
 from cosmas_os.config import settings as runtime_settings
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import AuditEvent, Principal, ProviderBot, ProviderTeamRevision
@@ -159,12 +161,18 @@ def read(s: Session, box: str, owner: str, *, version: ProviderTeamRevision | No
                     if runtime_settings.workspace_session_prep_available:
                         capability.update(label="Session Prep brief", state="enabled",
                                           contract="core.session-prep.brief.v1")
+        endpoint = getattr(runtime_settings, "workspace_llm_endpoint", COSMASCODE_LLM_ENDPOINT)
+        connector_label = (
+            "GPT-4.1"
+            if re.fullmatch(PROD_OPENAI_LLM_ENDPOINT_PATTERN, endpoint or "")
+            else "CosmasCode · GPT-4.1"
+        )
         capabilities.append(
             {
                 "key": "assistant.answer",
                 "label": "GPT-4.1 conversation",
                 "state": "enabled" if llm_enabled else "awaiting_connection",
-                "connector": "CosmasCode · GPT-4.1",
+                "connector": connector_label,
                 "contract": "openai.chat.completions.v1",
             }
         )
