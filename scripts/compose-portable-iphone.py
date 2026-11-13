@@ -53,6 +53,9 @@ CAPACITOR_LOCALIZATION_TARGETS = (
 # ClerkKeychainCredentials.swift is required by the owned ClerkKitWorkspaceDriver
 # overlay (clearStoredCredentials) but is absent from the frozen 1107 provenance.
 NATIVE_PRACTICE_ADDITIONS = (
+    "Sources/CosmasNativeAuth/NativeAppleSignIn.swift",
+    "Bridge/CosmasAppleSignInPlugin.swift",
+    "Tests/CosmasNativeAuthTests/NativeAppleSignInTests.swift",
     "Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift",
     "Sources/CosmasNativeAuth/NativePracticeProfile.swift",
     "Sources/CosmasNativeAuth/NativePracticeActivationOwner.swift",

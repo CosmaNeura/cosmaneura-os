@@ -1,0 +1,60 @@
+Synthetic-only local Mac qualification for Sign in with Apple.
+No real Apple authorization, real user, signed build, or deployment was performed.
+
+Native tests (Mac; not collected by Linux Synth CI):
+swift test --scratch-path /private/tmp/siwa-native-auth-build-20261113 --filter NativeAppleSignInTests
+Exit code: 0
+Build complete! (1.39 sec)
+◇ Test run started.
+↳ Testing Library Version: 2403
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite NativeAppleSignInTests started.
+◇ Test replacedScreenCannotOverlapAppleAuthorizationOrUnlockAnotherGesture() started.
+◇ Test environmentRequiresAnExplicitAppleBoolean() started.
+◇ Test gestureOwnsAuthorizationUntilBrowserCompletionAndAllowsRetry() started.
+◇ Test onlyAppleUserCancellationIsSilent() started.
+◇ Test onlyTheSuccessfulRequestedEnvironmentCanEnableApple() started.
+◇ Test publicReadIsBoundToTheValidatedBundleRealmAndBrowserKey() started.
+✔ Test replacedScreenCannotOverlapAppleAuthorizationOrUnlockAnotherGesture() passed after 0.001 seconds.
+✔ Test gestureOwnsAuthorizationUntilBrowserCompletionAndAllowsRetry() passed after 0.001 seconds.
+✔ Test onlyAppleUserCancellationIsSilent() passed after 0.001 seconds.
+✔ Test onlyTheSuccessfulRequestedEnvironmentCanEnableApple() passed after 0.001 seconds.
+✔ Test environmentRequiresAnExplicitAppleBoolean() passed after 0.001 seconds.
+✔ Test publicReadIsBoundToTheValidatedBundleRealmAndBrowserKey() passed after 0.001 seconds.
+✔ Suite NativeAppleSignInTests passed after 0.001 seconds.
+✔ Test run with 6 tests in 1 suite passed after 0.001 seconds.
+
+Native plugin Simulator compilation:
+swift build --scratch-path /private/tmp/siwa-plugin-build-20261113 --sdk <Xcode iPhoneSimulator27.2 SDK> --triple arm64-apple-ios17.0-simulator --target CosmasWorkspaceAuthPlugin
+Working directory: composed apps/capture/native-plugins/cosmas-native-auth
+Exit code: 0
+Build complete! (9.63 sec)
+
+Full App Simulator build limitation (signing disabled):
+The unchanged base 9d26ed95b01aeb9ce8ff44fde9a87247a2ea84c3 and the Apple branch both failed in App with the same existing capture-module import error.
+siwa-base-build-20261113.log:
+CosmasBridgeViewController.swift:4:8: error: Unable to resolve module dependency: 'CosmaneuraIOSPCMCapacitor' (in target 'App' from project 'App')
+** BUILD FAILED **
+siwa-iphone-build-20261113.log:
+CosmasBridgeViewController.swift:4:8: error: Unable to resolve module dependency: 'CosmaneuraIOSPCMCapacitor' (in target 'App' from project 'App')
+** BUILD FAILED **
+
+Web mutation checks:
+{'mutation': 'environment admits missing/nonboolean flags', 'killed': True}
+{'mutation': 'no-invite refusal removed', 'killed': True}
+{'mutation': 'incomplete sign-in admitted', 'killed': True}
+{'mutation': 'missing session admitted', 'killed': True}
+{'mutation': 'partial sign-in cleanup removed', 'killed': True}
+{'mutation': 'partial sign-up cleanup removed', 'killed': True}
+{'mutation': 'user cancellation treated as error', 'killed': True}
+{'mutation': 'retired-screen credential admitted', 'killed': True}
+{'mutation': 'repeated Apple gestures admitted', 'killed': True}
+
+Native mutation checks (all detected by behavioral assertions):
+Apple flag inverted: KILLED (environmentRequiresAnExplicitAppleBoolean)
+HTTP success fence inverted: KILLED (onlyTheSuccessfulRequestedEnvironmentCanEnableApple)
+Busy gesture replacement admitted: KILLED (gestureOwnsAuthorizationUntilBrowserCompletionAndAllowsRetry)
+Credential permitted without native gesture: KILLED (gestureOwnsAuthorizationUntilBrowserCompletionAndAllowsRetry)
+Button unlocked during authorization: KILLED (gestureOwnsAuthorizationUntilBrowserCompletionAndAllowsRetry)
+
+All mutations were restored before the passing native test run above.

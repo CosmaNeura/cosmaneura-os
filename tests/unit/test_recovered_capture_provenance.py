@@ -119,11 +119,19 @@ SYNTHETIC_MICROPHONE_USAGE = (
 EXTERNAL_CAPTURE_SNAPSHOT = "ea7f99d0278a05706531ffb1288cb1df7acf507b"
 FROZEN_CAPTURE_PROVENANCE_SHA256 = "ab6b9ac9af69cafcc8a890852fa1d37b2fa340b026324d177425de91d58dd208"
 
+# CTO-accepted Apple sign-in ticket (13 Nov 2026 11:04 ET). The historical
+# provenance remains untouched. Only the requested entitlement and the
+# credential-only entry point supplement its exact current-source assertions.
+REVIEWED_APPLE_SIGN_IN_SCAFFOLD_SHA256 = {
+    "ios/App/App/CosmasDevice.entitlements": "d774e2400836115a77943694facea631c5293bb2f8b0b25166c98f33b569a80e",
+    "native-plugins/cosmas-native-auth/vendor/Sources/ClerkKit/Core/Auth+Apple.swift": "15aa56b5107551e1decf61705e908b59e899b94fcfea80ea82aaa61339ccce0c",
+}
+
 # Reviewed owned-source evolution for the native practice connection. These
 # exact current bytes supplement, never rewrite, frozen 1107 provenance. Every
 # unlisted counterpart retains its original recorded SHA assertion below.
 REVIEWED_PRACTICE_CONNECTION_COUNTERPART_SHA256 = {
-    "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "43529246e2049613e96162591dfa9aef10652957f7c987d29db0f416343fb385",
+    "clients/apple/startup-recovery/CosmasBridgeViewController.swift": "cd4052cb615ee7a540c02b811b26a7db299cd3e47943c0dad327b6bd943da269",
     "clients/apple/startup-recovery/CosmasWorkspaceViewController.swift": "3ed5a94c6ccfc309ee60b49c1e46aebf07b603a3168fc80583a5811bae19fe65",
     "clients/apple/startup-recovery/WorkspaceRecoveryState.swift": "c07f68af3d311b75890108c4fc5c04b5e38eeeda11cb0047f25424a04531cfd1",
     "clients/apple/native-auth/Bridge/CosmasWorkspaceAuthPlugin.swift": "8132283f189b8cd0497957326fbcc020efc44e7c4b9fe2327ce0248b44d9494f",
@@ -189,7 +197,9 @@ def test_recovered_capture_matches_its_recorded_evidence_and_stays_unqualified()
     reviewed_iospcm = set()
     for item in record["files"]:
         recovered = ROOT / "apps/capture" / item["path"]
-        assert _sha256(recovered) == item["repository_sha256"]
+        assert _sha256(recovered) == REVIEWED_APPLE_SIGN_IN_SCAFFOLD_SHA256.get(
+            item["path"], item["repository_sha256"]
+        )
         equivalent = item["tracked_equivalent"]
         if equivalent is None:
             continue
@@ -398,6 +408,9 @@ def test_portable_iphone_entry_selects_owned_clients_without_the_external_snapsh
     # from the frozen 1107 provenance; every composed iPhone app — including
     # prepare-owned-iphone-candidate.py — receives them via NATIVE_PRACTICE_ADDITIONS.
     additions = (
+        "Sources/CosmasNativeAuth/NativeAppleSignIn.swift",
+        "Bridge/CosmasAppleSignInPlugin.swift",
+        "Tests/CosmasNativeAuthTests/NativeAppleSignInTests.swift",
         "Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift",
         "Sources/CosmasNativeAuth/NativePracticeProfile.swift",
         "Sources/CosmasNativeAuth/NativePracticeActivationOwner.swift",
