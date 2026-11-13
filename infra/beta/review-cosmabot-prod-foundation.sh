@@ -222,16 +222,17 @@ fi
 python3 "$foundation_dir/bootstrap_local.py" "${prepare_args[@]}"
 
 plan_json="$(python3 "$foundation_dir/bootstrap_local.py" "${plan_args[@]}")"
-summary_file="plan-summary.json"
-if [[ "$recover" -eq 1 ]]; then
-  summary_file="recover-plan-summary.json"
-fi
-python3 - "$plan_json" "$private_dir" "$summary_file" "$recover" <<'PY'
+python3 - "$plan_json" "$private_dir" "$recover" <<'PY'
 import json, sys
 from pathlib import Path
 result = json.loads(sys.argv[1])
-summary = json.loads((Path(sys.argv[2]) / sys.argv[3]).read_text())
-recover = sys.argv[4] == "1"
+private_dir = Path(sys.argv[2])
+recover = sys.argv[3] == "1"
+if recover:
+    summary_path = Path(result["summary_path"])
+else:
+    summary_path = private_dir / "plan-summary.json"
+summary = json.loads(summary_path.read_text())
 print("")
 print("=== Sanitised plan summary ===")
 print(json.dumps(summary, sort_keys=True, indent=2))
@@ -241,6 +242,7 @@ print(f"plan_sha256: {result['plan_sha256']}")
 print(f"summary_sha256: {result['summary_sha256']}")
 if recover:
     print("Recovery review complete. Plan saved under plans/recover-<UTC>.tfplan.")
+    print(f"Summary/result: {summary_path.name} / {Path(result['result_path']).name}")
     print("Nothing was applied. plans/first.tfplan was not overwritten.")
     print("After John's yes on this recovery plan hash, bind an approval file (0600, outside the repo) to:")
 else:

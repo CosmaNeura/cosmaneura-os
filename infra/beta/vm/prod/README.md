@@ -187,11 +187,16 @@ bash infra/beta/review-cosmabot-prod-foundation.sh \
 The recover path reuses the existing private dir in place, requires
 `state/foundation.tfstate` and `encryption.passphrase`, allows only the existing
 production resource group to pre-exist, and writes `plans/recover-<UTC>.tfplan`
-plus `recover-plan-summary.json` / `recover-plan-result.json`. It never
-overwrites `plans/first.tfplan` or the first-apply summary/result files. The
-plan is accepted for approval only when it is ADD-ONLY (0 change, 0 replace,
-0 destroy), every changed resource is inside `rg-cosmabot-prod-eus2-01`, and
-name guards refuse cross-environment / staging names.
+plus `recover-plan-summary-<UTC>.json` / `recover-plan-result-<UTC>.json`. It
+never overwrites `plans/first.tfplan` or the first-apply summary/result files.
+Before planning it also writes `state/foundation.tfstate.pre-recover-<UTC>` and
+`manifest.first-apply.json` (0600). The plan is accepted for approval only when
+it is ADD-ONLY (0 change, 0 replace, 0 destroy), every create's
+`resource_group_name` / scope and every nested ARM
+`/subscriptions/.../resourceGroups/.../` id resolve to this subscription and
+`rg-cosmabot-prod-eus2-01` (case-insensitive; unknown id fields in
+`after_unknown` are refused), and name guards refuse cross-environment /
+staging names.
 
 3. John reviews the printed `plan_sha256` / `summary_sha256` and types yes on
    that new recovery plan hash only.

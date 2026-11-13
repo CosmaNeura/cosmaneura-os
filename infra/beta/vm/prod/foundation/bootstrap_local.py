@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from name_guards import (  # noqa: E402
+    STAGING,
     NameGuardError,
     assert_production_inputs,
     refuse_cross_environment,
@@ -88,7 +89,18 @@ APPLY_RECOVERY = (
     "and use --recover on the reviewed recovery tooling before retry."
 )
 RECOVER_PLAN_NAME = re.compile(r"^recover-\d{8}T\d{6}Z\.tfplan$")
-STAGING_RG_PREFIX = "rg-cosmabot-stg"
+RECOVER_SUMMARY_NAME = re.compile(r"^recover-plan-summary-\d{8}T\d{6}Z\.json$")
+RECOVER_RESULT_NAME = re.compile(r"^recover-plan-result-\d{8}T\d{6}Z\.json$")
+ARM_RESOURCE_GROUP_RE = re.compile(
+    r"/subscriptions/([^/]+)/resourceGroups/([^/]+)",
+    re.IGNORECASE,
+)
+# Derived from name_guards.STAGING (parity-tested); refuse embedding this RG name.
+STAGING_RG_NEEDLE = STAGING["resource_group"].lower()
+RELEVANT_UNKNOWN_ID_KEY = re.compile(
+    r"(^|_)(id|ids)$|(^|_)scope$|resource_id|resource_ids|subnet_id|virtual_network_id",
+    re.IGNORECASE,
+)
 EXTRA_FINGERPRINT = (
     PROD / "name_guards.py",
     REPO / "infra/beta/review-cosmabot-prod-foundation.sh",
@@ -454,25 +466,60 @@ def prepare_recover(
     bound["state_namespace"] = NAMESPACE
     if read_json(folder / "inputs.json") != bound:
         raise Refused("Recovery inputs must match the existing private inputs.json")
+    first_apply_path = folder / "manifest.first-apply.json"
+    if first_apply_path.exists():
+        secure_file(first_apply_path)
+        first_apply = read_json(first_apply_path)
+    else:
+        if prior.get("recover"):
+            raise Refused("manifest.first-apply.json is required before a second recover prepare")
+        write_private(first_apply_path, json_bytes(prior))
+        first_apply = prior
+    tofu_sha = digest(tofu)
+    if first_apply.get("tofu_sha256") != tofu_sha:
+        raise Refused(
+            "Recovery tofu_sha256 differs from first-apply manifest: "
+            f"first_apply={first_apply.get('tofu_sha256')} recover={tofu_sha}"
+        )
+    if first_apply.get("context") != context:
+        raise Refused(
+            "Recovery owner context differs from first-apply manifest: "
+            f"first_apply={first_apply.get('context')} recover={context}"
+        )
+    stamp = utc_plan_stamp()
+    state_backup = folder / "state" / f"foundation.tfstate.pre-recover-{stamp}"
+    write_private(state_backup, state_path.read_bytes())
+    secure_file(state_backup)
+    ciphertext(state_backup)
     first_plan = folder / "plans/first.tfplan"
     first_plan_sha = digest(first_plan) if first_plan.is_file() else None
+    state_sha = digest(state_path)
     manifest = {
         "version": 1,
         "profile": NAMESPACE,
         "resource_group": RESOURCE_GROUP,
         "source": actual,
         "tofu": str(tofu),
-        "tofu_sha256": digest(tofu),
+        "tofu_sha256": tofu_sha,
         "context": context,
         "protected_files": {name: digest(folder / name) for name in sorted(PROTECTED_FILES)},
         "first_apply_only": True,
         "recover": True,
+        "recover_backups": {
+            "state_pre_recover": str(state_backup),
+            "state_pre_recover_sha256": digest(state_backup),
+            "state_sha256_at_prepare": state_sha,
+            "manifest_first_apply": str(first_apply_path),
+            "manifest_first_apply_sha256": digest(first_apply_path),
+        },
     }
     replace_private(folder / "manifest.json", json_bytes(manifest))
     if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
         raise Refused("Recovery prepare must not modify plans/first.tfplan")
     if digest(passphrase) != prior["protected_files"]["encryption.passphrase"]:
         raise Refused("Recovery prepare must not modify encryption.passphrase")
+    if digest(state_path) != state_sha:
+        raise Refused("Recovery prepare must not modify state/foundation.tfstate")
     return {
         "prepared": True,
         "recover": True,
@@ -482,6 +529,7 @@ def prepare_recover(
         "cloud_mutations": False,
         "first_apply_only": True,
     }
+
 
 
 def ciphertext(path: Path) -> None:
@@ -606,6 +654,23 @@ def _string_candidates(value) -> list[str]:
     return found
 
 
+def _iter_unknown_true_keys(value, prefix: str = ""):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if item is True:
+                yield path, str(key)
+            else:
+                yield from _iter_unknown_true_keys(item, path)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _iter_unknown_true_keys(item, f"{prefix}[{index}]")
+
+
+def _relevant_unknown_id_key(key: str) -> bool:
+    return RELEVANT_UNKNOWN_ID_KEY.search(key) is not None
+
+
 def _change_resource_group(change: dict) -> str | None:
     after = (change.get("change") or {}).get("after") or {}
     rtype = change.get("type") or ""
@@ -617,36 +682,83 @@ def _change_resource_group(change: dict) -> str | None:
         return rg
     scope = after.get("scope")
     if isinstance(scope, str):
-        marker = "/resourcegroups/"
-        lowered = scope.lower()
-        if marker in lowered:
-            start = lowered.index(marker) + len(marker)
-            rest = scope[start:]
-            return rest.split("/", 1)[0]
+        match = ARM_RESOURCE_GROUP_RE.search(scope)
+        if match:
+            return match.group(2)
     return None
 
 
-def assert_recover_add_only(plan_json: dict) -> Counter:
+def _assert_arm_ids_in_prod_rg(after, *, subscription_id: str, address: str) -> None:
+    for raw in _string_candidates(after):
+        for match in ARM_RESOURCE_GROUP_RE.finditer(raw):
+            sub, rg = match.group(1), match.group(2)
+            if sub.lower() != subscription_id.lower() or rg.lower() != RESOURCE_GROUP.lower():
+                raise Refused(
+                    "Recovery plan ARM id is outside "
+                    f"{RESOURCE_GROUP} in subscription {subscription_id}: "
+                    f"{address} -> /subscriptions/{sub}/resourceGroups/{rg}"
+                )
+
+
+def _assert_no_unknown_id_fields(change: dict) -> None:
+    after_unknown = (change.get("change") or {}).get("after_unknown")
+    if after_unknown is None:
+        return
+    for path, key in _iter_unknown_true_keys(after_unknown):
+        if _relevant_unknown_id_key(key):
+            raise Refused(
+                "Recovery plan has after_unknown id/scope field "
+                f"(refused until known): {change.get('address') or change.get('type')} {path}"
+            )
+
+
+def _assert_recover_entry_type_guards(change: dict) -> str:
+    rtype = change.get("type") or "unknown"
+    if rtype == "azurerm_virtual_machine_run_command":
+        raise Refused("Plan contains azurerm_virtual_machine_run_command; Run Command is forbidden")
+    if rtype not in ALLOWED_RESOURCE_TYPES:
+        raise Refused(f"Plan contains unlisted resource type: {rtype}")
+    after = (change.get("change") or {}).get("after") or {}
+    if rtype == "azurerm_virtual_machine_extension":
+        publisher = after.get("publisher") if isinstance(after, dict) else None
+        ext_type = after.get("type") if isinstance(after, dict) else None
+        if publisher != MONITOR_AGENT_PUBLISHER or ext_type != MONITOR_AGENT_TYPE:
+            raise Refused("Plan contains unlisted VM extension; only AzureMonitorLinuxAgent is allowed")
+    return rtype
+
+
+def assert_recover_add_only(plan_json: dict, *, subscription_id: str) -> Counter:
     """Hard-fail unless the plan is ADD-ONLY inside the production RG with no staging names."""
+    if not isinstance(subscription_id, str) or not subscription_id:
+        raise Refused("Recovery plan validation requires subscription_id")
     changes = plan_json.get("resource_changes") or []
     creates: Counter = Counter()
     for change in changes:
-        actions = (change.get("change") or {}).get("actions") or []
-        if not actions or actions == ["no-op"] or actions == ["read"]:
+        if not isinstance(change, dict):
+            raise Refused("Recovery plan resource_changes entries must be objects")
+        rtype = _assert_recover_entry_type_guards(change)
+        if change.get("importing") is not None:
+            raise Refused("Recovery plan must not import resources into state")
+        previous = change.get("previous_address")
+        address = change.get("address")
+        if previous is not None and previous != address:
+            raise Refused("Recovery plan must not move/rename resources in state")
+        if change.get("deposed") is not None:
+            raise Refused("Recovery plan must not include deposed resource instances")
+        change_body = change.get("change")
+        if not isinstance(change_body, dict):
+            raise Refused("Recovery plan change body is missing")
+        if "actions" not in change_body:
+            raise Refused("Recovery plan change is missing actions")
+        actions = change_body.get("actions")
+        if not isinstance(actions, list) or not actions:
+            raise Refused("Recovery plan change has empty or invalid actions")
+        if actions == ["no-op"] or actions == ["read"]:
             continue
-        rtype = change.get("type") or "unknown"
-        if rtype == "azurerm_virtual_machine_run_command":
-            raise Refused("Plan contains azurerm_virtual_machine_run_command; Run Command is forbidden")
-        if rtype not in ALLOWED_RESOURCE_TYPES:
-            raise Refused(f"Plan contains unlisted resource type: {rtype}")
-        after = (change.get("change") or {}).get("after") or {}
-        if rtype == "azurerm_virtual_machine_extension":
-            publisher = after.get("publisher")
-            ext_type = after.get("type")
-            if publisher != MONITOR_AGENT_PUBLISHER or ext_type != MONITOR_AGENT_TYPE:
-                raise Refused(
-                    "Plan contains unlisted VM extension; only AzureMonitorLinuxAgent is allowed"
-                )
+        after = change_body.get("after") or {}
+        if not isinstance(after, dict):
+            after = {}
+        _assert_no_unknown_id_fields(change)
         if actions == ["update"]:
             raise Refused("Recovery plan must be ADD-ONLY; update/change actions are refused")
         if "delete" in actions and "create" in actions:
@@ -656,11 +768,14 @@ def assert_recover_add_only(plan_json: dict) -> Counter:
         if actions != ["create"]:
             raise Refused(f"Recovery plan must be ADD-ONLY; refused actions {actions}")
         rg = _change_resource_group(change)
-        if rg != RESOURCE_GROUP:
+        if rg is None or rg.lower() != RESOURCE_GROUP.lower():
             raise Refused(
                 "Recovery plan resource is outside "
                 f"{RESOURCE_GROUP}: {change.get('address') or rtype}"
             )
+        _assert_arm_ids_in_prod_rg(
+            after, subscription_id=subscription_id, address=str(change.get("address") or rtype)
+        )
         candidates = [
             str(change.get("address") or ""),
             str(change.get("name") or ""),
@@ -668,7 +783,7 @@ def assert_recover_add_only(plan_json: dict) -> Counter:
             *(_string_candidates(after)),
         ]
         for raw in candidates:
-            if STAGING_RG_PREFIX in raw.lower():
+            if STAGING_RG_NEEDLE in raw.lower():
                 raise Refused("Recovery plan touches staging resource group names")
         try:
             refuse_cross_environment("production", candidates)
@@ -681,7 +796,7 @@ def assert_recover_add_only(plan_json: dict) -> Counter:
 
 
 def sanitize_recover_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256: str) -> dict:
-    creates = assert_recover_add_only(plan_json)
+    creates = assert_recover_add_only(plan_json, subscription_id=str(inputs["subscription_id"]))
     enabled = bool(inputs.get("enable_azure_openai", False))
     summary = {
         "create": dict(sorted(creates.items())),
@@ -698,6 +813,7 @@ def sanitize_recover_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256:
     }
     summary["summary_sha256"] = hashlib.sha256(json_bytes(summary)).hexdigest()
     return summary
+
 
 
 def plan(folder: Path, *, recover: bool = False) -> dict:
@@ -776,6 +892,10 @@ def plan_recover(folder: Path) -> dict:
     manifest, inputs = _verify_prepared(folder)
     if not manifest.get("recover"):
         raise Refused("Recovery plan requires prepare --recover on this private directory")
+    backups = manifest.get("recover_backups") or {}
+    expected_state_sha = backups.get("state_sha256_at_prepare")
+    if not isinstance(expected_state_sha, str) or not expected_state_sha:
+        raise Refused("Recovery manifest is missing state_sha256_at_prepare backup binding")
     passphrase = folder / "encryption.passphrase"
     state_path = folder / "state/foundation.tfstate"
     if not passphrase.exists():
@@ -784,6 +904,8 @@ def plan_recover(folder: Path) -> dict:
         raise Refused("Recovery requires existing state/foundation.tfstate")
     secure_file(passphrase)
     ciphertext(state_path)
+    if digest(state_path) != expected_state_sha:
+        raise Refused("Recovery state/foundation.tfstate changed since prepare --recover")
     first_plan = folder / "plans/first.tfplan"
     first_plan_sha = digest(first_plan) if first_plan.is_file() else None
     first_summary = folder / "plan-summary.json"
@@ -792,9 +914,11 @@ def plan_recover(folder: Path) -> dict:
     first_result_sha = digest(first_result) if first_result.is_file() else None
     stamp = utc_plan_stamp()
     plan_path = folder / "plans" / f"recover-{stamp}.tfplan"
+    summary_path = folder / f"recover-plan-summary-{stamp}.json"
+    result_path = folder / f"recover-plan-result-{stamp}.json"
     if plan_path.name == "first.tfplan" or plan_path.resolve() == (folder / "plans/first.tfplan").resolve():
         raise Refused("Recovery plan must not overwrite plans/first.tfplan")
-    if plan_path.exists():
+    if plan_path.exists() or summary_path.exists() or result_path.exists():
         raise Refused("Recovery plan path already exists; refuse overwrite")
     tofu = Path(manifest["tofu"])
     if digest(tofu) != manifest["tofu_sha256"]:
@@ -825,28 +949,30 @@ def plan_recover(folder: Path) -> dict:
             ],
         ),
     ]
-    for name, args in commands:
-        result = command([str(tofu), *args], cwd=folder / "module", env=env, timeout=300)
-        write_private(folder / "logs" / f"recover-{name}-{stamp}.log", result.stdout + result.stderr)
-        if result.returncode:
-            if plan_path.exists():
-                plan_path.unlink()
-            raise Refused("Recovery " + name + " failed; private logs retained, no apply was attempted")
-        if name == "init":
-            backend = read_json(folder / "tofu-data/terraform.tfstate").get("backend", {})
-            config = backend.get("config", {})
-            if (
-                backend.get("type") != "local"
-                or config.get("path") != str(folder / "state/foundation.tfstate")
-                or config.get("workspace_dir") != str(folder / "workspaces")
-            ):
-                raise Refused("Initialized backend differs from the fixed local paths")
-            workspace_file = folder / "tofu-data/environment"
-            if workspace_file.exists() and workspace_file.read_text().strip() != "default":
-                raise Refused("Only the default workspace is supported")
-    if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
-        raise Refused("Recovery plan must not overwrite plans/first.tfplan")
+    summary = None
+    result = None
     try:
+        for name, args in commands:
+            cmd_result = command([str(tofu), *args], cwd=folder / "module", env=env, timeout=300)
+            write_private(folder / "logs" / f"recover-{name}-{stamp}.log", cmd_result.stdout + cmd_result.stderr)
+            if cmd_result.returncode:
+                raise Refused("Recovery " + name + " failed; private logs retained, no apply was attempted")
+            if name == "init":
+                backend = read_json(folder / "tofu-data/terraform.tfstate").get("backend", {})
+                config = backend.get("config", {})
+                if (
+                    backend.get("type") != "local"
+                    or config.get("path") != str(folder / "state/foundation.tfstate")
+                    or config.get("workspace_dir") != str(folder / "workspaces")
+                ):
+                    raise Refused("Initialized backend differs from the fixed local paths")
+                workspace_file = folder / "tofu-data/environment"
+                if workspace_file.exists() and workspace_file.read_text().strip() != "default":
+                    raise Refused("Only the default workspace is supported")
+        if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
+            raise Refused("Recovery plan must not overwrite plans/first.tfplan")
+        if digest(state_path) != expected_state_sha:
+            raise Refused("Recovery plan modified state/foundation.tfstate")
         ciphertext(plan_path)
         plan_sha = digest(plan_path)
         show = command(
@@ -860,31 +986,42 @@ def plan_recover(folder: Path) -> dict:
         summary = sanitize_recover_plan_summary(
             json.loads(show.stdout), inputs=inputs, plan_sha256=plan_sha
         )
+        result = {
+            "planned": True,
+            "recover": True,
+            "stamp": stamp,
+            "plan": str(plan_path),
+            "summary_path": str(summary_path),
+            "result_path": str(result_path),
+            "plan_sha256": plan_sha,
+            "summary_sha256": summary["summary_sha256"],
+            "enable_azure_openai": summary["enable_azure_openai"],
+            "source_sha256": manifest["source"]["source_sha256"],
+            "state_backend": "local-encrypted",
+            "applied": False,
+            "first_apply_only": False,
+        }
+        write_private(summary_path, json_bytes(summary))
+        write_private(result_path, json_bytes(result))
     except Exception:
         if plan_path.exists():
             plan_path.unlink()
+        if summary_path.exists():
+            summary_path.unlink()
+        if result_path.exists():
+            result_path.unlink()
         raise
-    write_private(folder / "recover-plan-summary.json", json_bytes(summary))
-    result = {
-        "planned": True,
-        "recover": True,
-        "plan": str(plan_path),
-        "plan_sha256": plan_sha,
-        "summary_sha256": summary["summary_sha256"],
-        "enable_azure_openai": summary["enable_azure_openai"],
-        "source_sha256": manifest["source"]["source_sha256"],
-        "state_backend": "local-encrypted",
-        "applied": False,
-        "first_apply_only": False,
-    }
-    write_private(folder / "recover-plan-result.json", json_bytes(result))
     if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
         raise Refused("Recovery plan must not overwrite plans/first.tfplan")
     if first_summary_sha is not None and digest(first_summary) != first_summary_sha:
         raise Refused("Recovery plan must not overwrite first-apply plan-summary.json")
     if first_result_sha is not None and digest(first_result) != first_result_sha:
         raise Refused("Recovery plan must not overwrite first-apply plan-result.json")
+    if digest(state_path) != expected_state_sha:
+        raise Refused("Recovery plan modified state/foundation.tfstate")
+    assert result is not None
     return result
+
 
 
 def read_approval(path: Path, *, plan_sha256: str, summary_sha256: str) -> dict:
@@ -930,21 +1067,45 @@ def _tofu_runtime_status(
     return f"tofu pid {pid} is not running (exit={code}). log={log_path}"
 
 
+def _latest_recover_result(folder: Path) -> Path:
+    matches = sorted(
+        path
+        for path in folder.glob("recover-plan-result-*.json")
+        if path.is_file() and RECOVER_RESULT_NAME.match(path.name)
+    )
+    if not matches:
+        raise Refused(
+            "Reviewed recover-plan-result-<UTC>.json is required before recovery apply"
+        )
+    return matches[-1]
+
+
 def _resolve_apply_artifacts(folder: Path, *, recover: bool) -> tuple[Path, Path, Path, dict, dict]:
     if recover:
-        result_path = folder / "recover-plan-result.json"
-        summary_path = folder / "recover-plan-summary.json"
-        if not result_path.is_file() or not summary_path.is_file():
-            raise Refused(
-                "Reviewed recover-plan-result.json and recover-plan-summary.json are required before recovery apply"
-            )
+        result_path = _latest_recover_result(folder)
         secure_file(result_path)
-        secure_file(summary_path)
         plan_result = read_json(result_path)
+        summary_value = plan_result.get("summary_path")
+        if isinstance(summary_value, str) and summary_value:
+            summary_path = Path(summary_value)
+        else:
+            stamp = plan_result.get("stamp")
+            if not isinstance(stamp, str) or not stamp:
+                raise Refused("recover-plan-result is missing stamp/summary_path")
+            summary_path = folder / f"recover-plan-summary-{stamp}.json"
+        if not summary_path.is_absolute():
+            raise Refused("recover summary path must be absolute")
+        if summary_path.parent.resolve() != folder.resolve():
+            raise Refused("recover summary must live in the private directory root")
+        if not RECOVER_SUMMARY_NAME.match(summary_path.name):
+            raise Refused("recover summary name must be recover-plan-summary-<UTC>.json")
+        if not summary_path.is_file():
+            raise Refused("Reviewed recover-plan-summary-<UTC>.json is required before recovery apply")
+        secure_file(summary_path)
         summary = read_json(summary_path)
         plan_value = plan_result.get("plan")
         if not isinstance(plan_value, str) or not plan_value:
-            raise Refused("recover-plan-result.json is missing the recover plan path")
+            raise Refused("recover-plan-result is missing the recover plan path")
         plan_path = Path(plan_value)
         if not plan_path.is_absolute():
             raise Refused("recover plan path must be absolute")
@@ -970,6 +1131,7 @@ def _resolve_apply_artifacts(folder: Path, *, recover: bool) -> tuple[Path, Path
     return plan_path, result_path, summary_path, read_json(result_path), read_json(summary_path)
 
 
+
 def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bool = False) -> dict:
     logs = folder / "logs"
     if logs.is_dir() and any(logs.glob("apply-*.log")):
@@ -993,8 +1155,8 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bo
     )
     secure_file(plan_path)
     plan_sha = digest(plan_path)
-    mismatch_label = "recover-plan-result.json" if recover else "plan-result.json"
-    summary_label = "recover-plan-summary.json" if recover else "plan-summary.json"
+    mismatch_label = result_path.name if recover else "plan-result.json"
+    summary_label = summary_path.name if recover else "plan-summary.json"
     expected_plan_name = plan_path.name
     if recover:
         if plan_result.get("plan_sha256") != plan_sha:
