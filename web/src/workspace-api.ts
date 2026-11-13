@@ -20,6 +20,7 @@ import {modelWorkApi} from "./model-work-api";
 import { readVendorPracticeCatalog } from "./vendor-api";
 import { validatePracticeWorkPage } from "./practice-work-catalog";
 import type { SharedVendorWork } from "./vendor-schema";
+import {teamSetupPrerequisitesChangedMessage,teamSetupReviewRequiredMessage} from "./production-review-copy";
 
 export const WORKSPACE_BUILD = import.meta.env.VITE_WORKSPACE_ENABLED === "true" &&
   (import.meta.env.VITE_COSMAS_ENV === "synth_os" || !!hostedWorkspaceConfiguration());
@@ -240,8 +241,8 @@ export class WorkspaceApiError extends Error {
       code === "model_attempt_in_progress" ? "A request is already in progress. Check its saved result before starting another." :
       code === "bot_resource_restricted" ? "This bot's settings restrict this preparation or scheduling source. Review its source choices." :
       code === "team_resource_changed" ? "A selected source changed or is unavailable. Refresh the inventory and review the team draft; saved restrictions remain in place." :
-      code === "team_setup_prerequisites_changed" ? "Team prerequisites changed. Your settings are retained; refresh the setup and run the invented rehearsal again before saving." :
-      code === "team_setup_review_required" || code === "team_setup_configuration_changed" || code === "team_catalog_changed" ? "Review this exact team configuration and run the invented rehearsal again before saving. Your draft is retained." :
+      code === "team_setup_prerequisites_changed" ? teamSetupPrerequisitesChangedMessage() :
+      code === "team_setup_review_required" || code === "team_setup_configuration_changed" || code === "team_catalog_changed" ? teamSetupReviewRequiredMessage() :
       code === "capture_notebook_changed" ? "The saved scratch notes changed. Check the latest notebook revision and prepare a draft from it before review." :
       code === "note_source_context_changed" ? "This Chief answer predates the current visit connection. Your note text is kept. Ask Chief for a draft in the current visit before importing a new answer." :
       code === "core_note_changed" || code === "capture_note_conflict" ? "The saved Core note or recording changed. Check its saved draft, use the current version for review, and review it again before follow-up." :

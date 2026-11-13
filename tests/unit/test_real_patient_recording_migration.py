@@ -18,7 +18,7 @@ PREVIOUS = "z35e1b98a742"
 REAL_PATIENT = "aa46f2c09b853"
 UPLOAD_PROXY = "bb57e3d10c964"
 # Application head after #295; T-REL-6 revisions remain in its ancestry.
-APPLICATION_HEAD = "a46f2c09d853"
+APPLICATION_HEAD = "b57c3d0e9142"
 
 
 @pytest.fixture

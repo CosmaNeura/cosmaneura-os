@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {render,validateInput,Refused} from './render.mjs';
 import {REVIEWED_CORE_CAPTURE_ORIGIN} from '../../clients/shared/beta-feature-profile.mjs';
+import {PRODUCTION_NATIVE_PROFILE} from '../../clients/shared/operational-native-identity.mjs';
 
 const sample=JSON.parse(await readFile(new URL('./invented-host-input.json',import.meta.url),'utf8'));
 const CORE_SCOPE='api://invented-core-audience/.default';
@@ -17,10 +18,20 @@ function ownedBeta({host='staging.cosmas.ai',microsoft=false,staging=false}={}){
   value.resource_scope='owned-cosmabot-vm-instance';
   value.web_origin=`https://${host}`;value.api_origin=`https://api.${host}`;
   value.identity.apiOrigin=value.api_origin;value.tls.hostnames=[host,`api.${host}`];
+  if(host==='beta.cosmas.ai'&&!staging){
+    value.identity.profile=PRODUCTION_NATIVE_PROFILE;
+    value.identity.frontendOrigin='https://clerk.beta.cosmas.ai';
+    value.identity.publishableKey='pk_live_'+Buffer.from('clerk.beta.cosmas.ai$').toString('base64');
+  }
   if(staging){
     value.identity_policy='shared_staging';value.identity.profile='operational-staging-v1';
     value.identity.audience='';value.identity.frontendOrigin='https://invented-own-practice.clerk.accounts.dev';
     value.identity.publishableKey='pk_test_'+Buffer.from('invented-own-practice.clerk.accounts.dev$').toString('base64');
+  }else if(host==='beta.cosmas.ai'){
+    value.identity.profile='operational-production-v1';
+    value.identity.frontendOrigin='https://clerk.beta.cosmas.ai';
+    value.identity.publishableKey='pk_live_'+Buffer.from('clerk.beta.cosmas.ai$').toString('base64');
+    value.identity.audience='cosmas-os-beta-api';
   }
   value.beta_features={model:{origin:'https://invented-owned-chief.openai.azure.com',
     endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'},
@@ -88,9 +99,9 @@ function assertNoRealPatientOn(files){
 
 // Off-path must stay byte-identical to origin/main after #361 (eight Settings
 // bools rendered explicitly false). Values match render-goldens.test.mjs.
-const MAIN_DEDICATED_FINGERPRINT='a8157eea72ab7be14aca790f5e4fa27a7f3ea839a4d34682dce2cb4c448f372f';
-// Updated for T-REL-7c staging ACCOUNT_DELETE KV/egress/DNS contract on owned staging.
-const MAIN_OWNED_STAGING_FINGERPRINT='a2e8726ce2de6ea44208d8d73b69ac039243884b71e922222ee680ba1a0e8c7f';
+// Regenerated after schema_revision bump to b57c3d0e9142 (account_delete_intents).
+const MAIN_DEDICATED_FINGERPRINT='d905f23a38bc908aca675744a2de9b6a67a2731d97dd9a064f80b5bc3f82b8a2';
+const MAIN_OWNED_STAGING_FINGERPRINT='9841c565c3bcd0ad985cb5581b48366707a6fe9e6f8fd70e424c6835505dde0f';
 
 test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const baseline=render(structuredClone(sample));

@@ -47,6 +47,7 @@ from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.application.encounter_access import patient_visible
 from cosmas_os.application.enrollment_access import require_worker_admission
+from cosmas_os.config import hosted_chat_completions_url
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import (
     AppointmentObservation,
@@ -1241,6 +1242,13 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_ex
             raise ModelCallFailure(dispatch="not_dispatched")
         return GPT41Connector(lambda: key.get_secret_value() if key else "", transport=transport,
                               endpoint=runtime.workspace_llm_endpoint + "/chat/completions").review_prepared(claimed.envelope)
+    # Hosted path: CosmasCode keeps the adapter default; production uses its own
+    # reviewed host. Unusable configured endpoints fail closed — never fall back.
+    runtime = team.runtime_settings
+    try:
+        chat_url = hosted_chat_completions_url(runtime.workspace_llm_endpoint)
+    except ValueError:
+        raise ModelCallFailure(dispatch="not_dispatched") from None
     if claimed.envelope.get("contract") in TOOL_PREPARED_CONTRACTS:
         from cosmas_os.application.agent_tools import AgentToolExecutor
         from cosmas_os.db import make_session_factory
@@ -1264,11 +1272,22 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_ex
                 return value
         connector = (GPT41DeliveryToolsConnector if claimed.envelope["contract"] == DELIVERY_TOOL_PREPARED_CONTRACT else GPT41ConnectorToolsConnector if claimed.envelope["contract"] == CONNECTOR_TOOL_PREPARED_CONTRACT else GPT41CompactToolsConnector if claimed.envelope["contract"] == COMPACT_TOOL_PREPARED_CONTRACT
             else GPT41ToolsConnector)
-        return connector(lambda: key.get_secret_value() if key else "", transport=transport).review_prepared(
-            claimed.envelope, execute=execute)
-    return GPT41Connector(lambda: key.get_secret_value() if key else "").review_prepared(
-        claimed.envelope
-    )
+        if chat_url is None:
+            return connector(lambda: key.get_secret_value() if key else "", transport=transport).review_prepared(
+                claimed.envelope, execute=execute)
+        return connector(lambda: key.get_secret_value() if key else "", transport=transport,
+                         endpoint=chat_url).review_prepared(claimed.envelope, execute=execute)
+    # CosmasCode with no transport keeps today's constructor call site byte-for-byte.
+    if chat_url is None and transport is None:
+        return GPT41Connector(lambda: key.get_secret_value() if key else "").review_prepared(
+            claimed.envelope
+        )
+    if chat_url is None:
+        return GPT41Connector(lambda: key.get_secret_value() if key else "", transport=transport).review_prepared(
+            claimed.envelope
+        )
+    return GPT41Connector(lambda: key.get_secret_value() if key else "", transport=transport,
+                          endpoint=chat_url).review_prepared(claimed.envelope)
 
 
 def settle(s, claimed, result, *, reauthenticate=None, clock=None):

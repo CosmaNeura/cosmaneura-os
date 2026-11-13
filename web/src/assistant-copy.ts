@@ -1,4 +1,5 @@
 import type {BotRole} from './workspace-api';
+import {isProductionReviewProfile} from './production-review-copy';
 
 /** Plain one-line descriptions for built-in AI assistants. Not API/template text. */
 export const ASSISTANT_DESCRIPTIONS: Record<Exclude<BotRole, 'custom'>, string> = {
@@ -19,7 +20,10 @@ export function showCustomBotControls(env: Record<string, string | boolean | und
   return env.VITE_CUSTOM_BOTS_ENABLED === 'true';
 }
 
-/** Coming-soon connection cards stay hidden unless explicitly enabled. */
+/** Coming-soon connection cards stay hidden unless explicitly enabled.
+ * Production-review builds always show them as neutral "Not available" cards so
+ * Review-saved-work recovery stays reachable for payments and portals. */
 export function showComingSoonConnections(env: Record<string, string | boolean | undefined> = import.meta.env): boolean {
+  if (isProductionReviewProfile(env)) return true;
   return env.VITE_COMING_SOON_CONNECTIONS_ENABLED === 'true';
 }

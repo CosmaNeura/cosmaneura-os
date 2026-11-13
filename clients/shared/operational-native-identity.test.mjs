@@ -43,6 +43,13 @@ test('production profile accepts only clerk.beta.cosmas.ai and staging rejects p
       organizationId:'org_invented_beta',audience:'cosmas-os-beta-api',
     };
     assert.deepEqual(shared.validateOperationalNativeIdentity(production,client,production.apiOrigin),production);
+    // Non-production profiles must not carry PRODUCTION_API_ORIGIN.
+    assert.throws(()=>shared.validateOperationalNativeIdentity({
+      version:1,profile:shared.OPERATIONAL_NATIVE_PROFILE,client,
+      apiOrigin:shared.PRODUCTION_API_ORIGIN,
+      frontendOrigin:'https://clerk.cosmas.ai',publishableKey:liveKey('clerk.cosmas.ai'),
+      organizationId:'org_invented_beta',audience:'cosmas-os-beta-api',
+    },client,shared.PRODUCTION_API_ORIGIN));
     assert.equal(shared.operationalNativeAuthSettings(production).frontendOrigin,'https://clerk.beta.cosmas.ai');
     assert.equal(shared.validateOperationalNativeDataMode('authorized_beta',production),'authorized_beta');
     for (const changed of [

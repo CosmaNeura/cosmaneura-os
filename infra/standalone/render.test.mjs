@@ -129,6 +129,7 @@ test('staging session policy must be explicitly matched to existing development 
 });
 
 test('production audience profile keep private allowlist byte-compatible and omits account-delete vault mapping',()=>{
+  // Invented dedicated audience host (not beta.cosmas.ai) still refuses the delete name.
   const files=render(copy());
   const privateEnv=files['host-preparation.json'].private_environment;
   assert.deepEqual(Object.keys(privateEnv).sort(),[

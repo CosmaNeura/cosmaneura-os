@@ -46,10 +46,56 @@ FORBIDDEN_PUBLIC = {
     "PHI_AUTHORIZATION_REF",
     "SSL_CERT_FILE",
 }
+# Production-review (#356) host key → Settings SecretStr env name. Admitted in
+# secret_names only when classify_review_profile == "review"; remapped before
+# Settings. Staging / non-review refuse the host key (same as standalone).
+ACCOUNT_DELETE_ENV_NAME = "ACCOUNT_DELETE_CLERK_SECRET_KEY"
+REVIEW_ACCOUNT_DELETE_HOST_KEY = "CLERK_ACCOUNT_DELETION_SECRET"
 
 
 class Refused(ValueError):
     """Messages are fixed diagnostic codes, never input/exception reprs."""
+
+
+def _classify_account_delete_kind(environment: dict) -> str | None:
+    """Import shared predicate inside the guarded path (image PYTHONPATH=/app/src)."""
+    from cosmas_os.production_review_profile import classify_review_profile
+
+    return classify_review_profile(
+        policy=environment.get("CLERK_SESSION_POLICY"),
+        web_origin=None,
+        cors=environment.get("CORS_ALLOWED_ORIGINS"),
+        issuer=environment.get("CLERK_ISSUER"),
+    )
+
+
+def _remap_account_delete_secret_names(
+    environment: dict, names: list[str]
+) -> tuple[list[str], dict[str, str]]:
+    """Map review host key to ACCOUNT_DELETE_CLERK_SECRET_KEY for Settings.
+
+    Returns (settings_secret_names, file_aliases) where file_aliases maps the
+    Settings env name to the on-disk host key filename. Non-review host key is
+    refused. Both names together are refused. Values are never logged.
+    """
+    if REVIEW_ACCOUNT_DELETE_HOST_KEY not in names:
+        return list(names), {}
+    if (
+        _classify_account_delete_kind(environment) != "review"
+        or ACCOUNT_DELETE_ENV_NAME in names
+    ):
+        raise Refused("secret_environment_names")
+    mapped = [
+        ACCOUNT_DELETE_ENV_NAME if name == REVIEW_ACCOUNT_DELETE_HOST_KEY else name
+        for name in names
+    ]
+    return mapped, {ACCOUNT_DELETE_ENV_NAME: REVIEW_ACCOUNT_DELETE_HOST_KEY}
+
+
+def _normalize_account_delete_secret_value(value: str) -> str | None:
+    """Strip padding; whitespace-only is absent (no boot refusal)."""
+    stripped = value.strip()
+    return stripped or None
 
 
 def read_json(path: Path):
@@ -121,14 +167,20 @@ def validate_public(configuration: dict) -> None:
         not isinstance(names, list)
         or any(not isinstance(name, str) for name in names)
         or len(names) != len(set(names))
-        or any(
+    ):
+        raise Refused("secret_environment_names")
+    # Host key → ACCOUNT_DELETE only on exclusive production-review; otherwise
+    # refuse. Admission check uses remapped Settings names.
+    mapped_names, _ = _remap_account_delete_secret_names(values, names)
+    if (
+        any(
             not (
                 name in secrets | {"HUMAN_DEPLOY_EVIDENCE_REF"}
                 or re.fullmatch(r"COSMAS_MANAGED_SECRET_[A-Z][A-Z0-9_]{0,63}", name)
             )
-            for name in names
+            for name in mapped_names
         )
-        or "HUMAN_DEPLOY_EVIDENCE_REF" not in names
+        or "HUMAN_DEPLOY_EVIDENCE_REF" not in mapped_names
     ):
         raise Refused("secret_environment_names")
     for child, parent in (
@@ -169,18 +221,31 @@ def validate_public(configuration: dict) -> None:
 
 def load_environment(configuration: dict, directory: Path) -> dict[str, str]:
     validate_public(configuration)
-    credentials = {
-        key: read_private(directory / key, API_UID)
-        for key in ["DATABASE_PASSWORD", "REDIS_PASSWORD", *configuration["secret_names"]]
-    }
+    mapped_names, file_aliases = _remap_account_delete_secret_names(
+        configuration["environment"], configuration["secret_names"]
+    )
+    credentials: dict[str, str] = {}
+    for key in ["DATABASE_PASSWORD", "REDIS_PASSWORD", *mapped_names]:
+        file_name = file_aliases.get(key, key)
+        credentials[key] = read_private(directory / file_name, API_UID)
     for key in ("DATABASE_PASSWORD", "REDIS_PASSWORD"):
         if (
             not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", credentials[key])
             or len(set(credentials[key])) < 12
         ):
             raise Refused("service_password_strength")
+    # Padded / whitespace-only delete secret is absent, not a boot refusal.
+    if ACCOUNT_DELETE_ENV_NAME in credentials:
+        normalized = _normalize_account_delete_secret_value(
+            credentials[ACCOUNT_DELETE_ENV_NAME]
+        )
+        if normalized is None:
+            credentials.pop(ACCOUNT_DELETE_ENV_NAME)
+            mapped_names = [name for name in mapped_names if name != ACCOUNT_DELETE_ENV_NAME]
+        else:
+            credentials[ACCOUNT_DELETE_ENV_NAME] = normalized
     values = dict(configuration["environment"])
-    values.update({key: credentials[key] for key in configuration["secret_names"]})
+    values.update({key: credentials[key] for key in mapped_names})
     values["DATABASE_URL"] = (
         "postgresql+psycopg://cosmas:"
         + quote(credentials["DATABASE_PASSWORD"], safe="")

@@ -4,6 +4,7 @@ import {NativePracticeConnection,nativePracticeConnectionAvailable,type NativePr
 import {nativeEnrollmentCapabilities,nativeAccountEntryRequested} from './native-enrollment';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {NativeAccountControls} from './NativeAccountControls';
+import {AccountPublicLinks} from './AccountPublicLinks';
 import {hostedWorkspaceRequested} from './hosted-workspace';
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceAuth, nativeWorkspaceAuthAvailable, type WorkspaceAuthPlugin } from "../../clients/capture/src/native/workspace-auth-plugin";
@@ -13,6 +14,7 @@ import { parseNativeAuthState, parseNativeToken, sameNativeState, type NativeAut
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
 import {nativeSceneSignal,notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 import {hasUnsavedWork} from './unsaved-work';
+import {nativeSignInUnavailableDetail} from './production-review-copy';
 
 type Session = {
   plugin: WorkspaceAuthPlugin; active: boolean; epoch: number; pending: boolean;
@@ -202,7 +204,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   if(connectingPractice)return <NativeEnrollmentEntry plugin={practicePlugin} available={practiceConnectionAvailable} readyPractices onReturn={returnFromPractice}/>;
 
   if (!available || state?.phase === "disabled") return <StatusScreen title="Sign-in isn't available in this build"
-    detail="Use the approved test build to sign in to your workspace." />;
+    detail={nativeSignInUnavailableDetail()} />;
   if (busy || state?.phase === "signingIn") {
     const signingIn = busy ? busyAction === "signIn" : state?.phase === "signingIn";
     return <StatusScreen title={signingIn ? "Finish signing in" : "Signing out"}
@@ -226,11 +228,13 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   }
   if (state?.phase === "unavailable" || failed) return <StatusScreen title="Sign-in needs attention"
     detail="This installation could not verify your account. Try signing in again, or reopen the app. Your private workspace stays closed until verification succeeds.">
+    <AccountPublicLinks/>
     <div className="row account-controls" aria-label="Account recovery">
       <button className="button" onClick={() => void act("signIn")}>Sign in again</button>
       <button className="button secondary" onClick={() => void act("signOut")}>Log out</button>
     </div>
   </StatusScreen>;
+
   if (!state || state.phase === "loading") return <StatusScreen title="Checking your session"
     detail="Your workspace will open after your account is verified." role="status" />;
   const pending = state.phase === "signOutPending";
@@ -239,6 +243,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     detail={signInRecovery ? "Close any unfinished sign-in window, then try again. Your workspace stays closed until your account is verified." :
       pending ? "Your workspace is closed. Reconnect and finish signing out before continuing." :
       "Sign in with your invited account to start a private note and meet your team."}>
+    <AccountPublicLinks/>
     <button className="button" onClick={() => void act(pending && !signInRecovery ? "signOut" : "signIn")}>
       {signInRecovery ? "Try signing in again" : pending ? "Retry sign-out" : "Sign in"}
     </button>
