@@ -2,13 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {render} from './render.mjs';
+import {PRODUCTION_NATIVE_PROFILE} from '../../clients/shared/operational-native-identity.mjs';
 
 const sample=JSON.parse(await readFile(new URL('./invented-host-input.json',import.meta.url),'utf8'));
 function candidate({model=true,google=true,owned=false,host='staging.cosmas.ai'}={}){
   const value=structuredClone(sample);
   if(owned){value.resource_scope='owned-cosmabot-vm-instance';value.web_origin=`https://${host}`;
     value.api_origin=`https://api.${host}`;value.identity.apiOrigin=value.api_origin;
-    value.tls.hostnames=[host,`api.${host}`];}
+    value.tls.hostnames=[host,`api.${host}`];
+    // api.beta.cosmas.ai is production-only; pin clerk.beta + operational-production-v1.
+    if(host==='beta.cosmas.ai'){
+      value.identity.profile=PRODUCTION_NATIVE_PROFILE;
+      value.identity.frontendOrigin='https://clerk.beta.cosmas.ai';
+      value.identity.publishableKey='pk_live_'+Buffer.from('clerk.beta.cosmas.ai$').toString('base64');
+    }}
   value.beta_features={model:model?{origin:'https://invented-owned-chief.openai.azure.com',
     endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'}:null,
     google:google?{client_id:'invented-client.apps.googleusercontent.com',

@@ -5,6 +5,12 @@ import {fileURLToPath} from 'node:url';
 import {resolve,join} from 'node:path';
 import {workspaceIdentityInputs} from '../../scripts/prepare-workspace-identity.mjs';
 import {REVIEWED_CORE_CAPTURE_ORIGIN} from '../../clients/shared/beta-feature-profile.mjs';
+import {
+  OPERATIONAL_NATIVE_PROFILE,
+  PRODUCTION_API_ORIGIN,
+  PRODUCTION_NATIVE_PROFILE,
+  STAGING_NATIVE_PROFILE,
+} from '../../clients/shared/operational-native-identity.mjs';
 
 export class Refused extends Error {}
 const refuse=code=>{throw new Refused(code);};
@@ -123,8 +129,11 @@ export function validateInput(value){
   if(issuer.endsWith('.invalid')||issuer.endsWith('.localhost')||[web,api].includes(issuer))refuse('separate_explicit_clerk_issuer_required');
   const staging=value.identity_policy==='shared_staging';
   const audience=value.identity?.audience;
+  // api.beta.cosmas.ai is production-only; owned beta.cosmas.ai must use operational-production-v1.
+  const productionOwned=value.web_origin==='https://beta.cosmas.ai'&&value.api_origin===PRODUCTION_API_ORIGIN;
+  const expectedProfile=staging?STAGING_NATIVE_PROFILE:productionOwned?PRODUCTION_NATIVE_PROFILE:OPERATIONAL_NATIVE_PROFILE;
   if(!['audience','shared_staging'].includes(value.identity_policy)||
-    value.identity?.profile!==(staging?'operational-staging-v1':'operational-beta-v1')||
+    value.identity?.profile!==expectedProfile||
     value.identity?.apiOrigin!==value.api_origin||
     typeof audience!=='string'||(staging?audience!=='':!/^[\x21-\x7e]{1,255}$/.test(audience)))refuse('explicit_matching_identity_policy_required');
   if(captureEnabled)requireCaptureToolsInputs(value,features,ownedVm);

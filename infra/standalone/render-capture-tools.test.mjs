@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {render,validateInput,Refused} from './render.mjs';
 import {REVIEWED_CORE_CAPTURE_ORIGIN} from '../../clients/shared/beta-feature-profile.mjs';
+import {PRODUCTION_NATIVE_PROFILE} from '../../clients/shared/operational-native-identity.mjs';
 
 const sample=JSON.parse(await readFile(new URL('./invented-host-input.json',import.meta.url),'utf8'));
 const CORE_SCOPE='api://invented-core-audience/.default';
@@ -17,6 +18,11 @@ function ownedBeta({host='staging.cosmas.ai',microsoft=false,staging=false}={}){
   value.resource_scope='owned-cosmabot-vm-instance';
   value.web_origin=`https://${host}`;value.api_origin=`https://api.${host}`;
   value.identity.apiOrigin=value.api_origin;value.tls.hostnames=[host,`api.${host}`];
+  if(host==='beta.cosmas.ai'&&!staging){
+    value.identity.profile=PRODUCTION_NATIVE_PROFILE;
+    value.identity.frontendOrigin='https://clerk.beta.cosmas.ai';
+    value.identity.publishableKey='pk_live_'+Buffer.from('clerk.beta.cosmas.ai$').toString('base64');
+  }
   if(staging){
     value.identity_policy='shared_staging';value.identity.profile='operational-staging-v1';
     value.identity.audience='';value.identity.frontendOrigin='https://invented-own-practice.clerk.accounts.dev';
