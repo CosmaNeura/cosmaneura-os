@@ -88,7 +88,7 @@ Hands-on only. Exact order:
 
 | # | John does | ~Min | Gate |
 | --- | --- | --- | ---: |
-| 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from John's own `/32`, set via `--file`. **John only, §4.1:** Step A resolve+print account id → rotate/load `WORKSPACE-LLM-API-KEY` with `source-account=<that id>` → Step B `secret list` compare (names/tags only) **inside this window**. Then restore `publicNetworkAccess=Disabled` and empty `ipRules`. **If interrupted:** restore Disabled + empty `ipRules` first, then verify by printing the whole `ipRules` list (§4.3). Agents never rotate or load. | 25 | **"yes, KV secrets loaded and public access disabled"** |
+| 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from Johns own `/32`, set via `--file`. **John only, §4.1:** paste Step A fence → **pause** → rotate/load fence → **pause** → Step B fence (names/tags only) **inside this window**. Then restore `publicNetworkAccess=Disabled` and empty `ipRules`. **If interrupted:** restore Disabled + empty `ipRules` first, then verify by printing the whole `ipRules` list (§4.3). Agents never rotate or load. | 25 | **"yes, KV secrets loaded and public access disabled"** |
 | 2 | On the new VM as root: create distinct DB/Postgres/Redis passwords in a **mode-600** file he owns. **Never** via Azure Run Command | 10 | **"yes, mode-600 password file is on the host"** |
 | 3 | Type **yes** to format the new empty data disk (prod IDs only) | 5 | **"yes, format the new empty data disk"** |
 | 4 | Publish Cloudflare DNS (proxy **off**): `beta.cosmas.ai` A, `api.beta.cosmas.ai` A → public IP; `clerk.beta.cosmas.ai` CNAME from Clerk | 10 | — |
@@ -216,26 +216,33 @@ mismatch: **STOP and roll back**.
 **Shell rule (N1):** `set -e` is inert inside a function/subshell invoked as
 `if ! fn`. Every check must be chained with `|| return 1` (or run the whole
 block as `bash -c 'set -euo pipefail; …'` / a script file where `-e` is live).
-Do not rely on bare `test` / `[[` mid-body. Do not use bare `exit` (keeps
-John's interactive shell open).
+Do not rely on bare `test` / `[[` mid-body. Do not use bare `exit` (keeps the
+interactive shell open).
+
+**Mac paste rule (H-A / N2):** default macOS zsh has `interactivecomments`
+off, so `#` is not a comment at the prompt. Every pasteable fence below has
+**no `#` lines and no apostrophes inside the fence**. Paste into bash 3.2+ or
+default zsh. Instructions live outside the fences. Split Step A, load, and
+Step B into three fences with an explicit pause between them so Step B does
+not run before the load.
 
 **Operator smoke (before trusting):** for each function below, feed one
 deliberately wrong input (wrong path, empty `ACCOUNT_ID`, Enabled vault, wrong
 origin) and confirm it STOPs before using it on real artifacts.
 
-#### Sitting 2 (John) — Step A resolve+print, load, Step B list (never `secret show`)
+#### Sitting 2 (John) — Step A, pause, load, pause, Step B (never `secret show`)
 
 John only. Inside the temporary public-access window, **before** restoring
-`Disabled`. **Shell:** bash 3.2+ or zsh (portable; **no `mapfile`**). Agents
-never run the write.
+`Disabled`. **Shell:** bash 3.2+ or default macOS zsh (no `mapfile`). Agents
+never run the write. Set `PROD_KV_NAME` / `RG` to the applied prod names first
+(`PROD_KV_NAME` must match `^kv-cbot-prd-`).
+
+**Fence 1 — Step A** (resolve exactly one prod OpenAI account; print the
+account resource id — not a secret):
 
 ```bash
-# Adjust names to the applied prod vault / RG.
-PROD_KV_NAME='kv-cbot-prd-REPLACE'   # must match ^kv-cbot-prd-
+PROD_KV_NAME='kv-cbot-prd-REPLACE'
 RG='rg-cosmabot-prod-eus2-01'
-
-# Step A — resolve exactly one prod OpenAI account; print account resource id
-# (not a secret). John copies that id into the load tag.
 cosmabot_llm_kv_step_a_resolve_account() {
   command -v az >/dev/null || return 1
   command -v jq >/dev/null || return 1
@@ -255,22 +262,32 @@ cosmabot_llm_kv_step_a_resolve_account() {
   test -n "$ACCOUNT_ID" || return 1
   printf '%s\n' "$ACCOUNT_ID"
 }
-
 ACCOUNT_ID=$(cosmabot_llm_kv_step_a_resolve_account) || {
-  echo "STOP: Step A failed — no usable oai-cbot-prd account id"
+  echo "STOP: Step A failed - no usable oai-cbot-prd account id"
   false
 }
 echo "source-account tag value (account resource id, not a secret): $ACCOUNT_ID"
+```
 
-# John: rotate the provider key on that account, then load via --file with the
-# printed id (path is on John's machine; never paste the secret value into chat):
-#   az keyvault secret set \
-#     --vault-name "$PROD_KV_NAME" \
-#     --name WORKSPACE-LLM-API-KEY \
-#     --file /path/to/rotated-key-file \
-#     --tags "source-account=${ACCOUNT_ID}"
+**Pause here.** Do not paste Fence 3 yet. Rotate the provider key on that
+OpenAI account. Put the new key in a local file on the operator Mac (never
+paste the secret value into chat). Then paste Fence 2 only.
 
-# Step B — metadata only (never `az keyvault secret show`).
+**Fence 2 — load** (John only; replace the file path):
+
+```bash
+az keyvault secret set \
+  --vault-name "$PROD_KV_NAME" \
+  --name WORKSPACE-LLM-API-KEY \
+  --file /path/to/rotated-key-file \
+  --tags "source-account=${ACCOUNT_ID}"
+```
+
+**Pause here.** Confirm the set command exited 0. Then paste Fence 3.
+
+**Fence 3 — Step B** (metadata only; never `az keyvault secret show`):
+
+```bash
 cosmabot_llm_kv_step_b_verify_tag() {
   command -v az >/dev/null || return 1
   command -v jq >/dev/null || return 1
@@ -284,9 +301,8 @@ cosmabot_llm_kv_step_b_verify_tag() {
   test -n "$TAGGED" || return 1
   test "$TAGGED" = "$ACCOUNT_ID" || return 1
 }
-
 cosmabot_llm_kv_step_b_verify_tag || {
-  echo "STOP: Step B failed — source-account tag missing or not equal to Step A id; close vault per §4.3"
+  echo "STOP: Step B failed - source-account tag missing or not equal to Step A id; close vault per section 4.3"
   false
 }
 ```
@@ -336,16 +352,17 @@ cosmabot_stop_llm_http_status() {
   ENDPOINT=$WORKSPACE_LLM_ENDPOINT
   printf '%s' "$ENDPOINT" | grep -Eq '^https://oai-cbot-prd-[a-z0-9]{6,10}\.openai\.azure\.com/openai/v1$' || return 1
   HDR=$(mktemp) || return 1
-  # Header file only — never -H "api-key: $(cat …)" on the curl argv.
-  { printf 'api-key: '; cat "$KEYFILE"; printf '\n'; } >"$HDR" || { rm -f "$HDR"; return 1; }
+  trap 'rm -f "$HDR"' EXIT INT
+  { printf 'api-key: '; cat "$KEYFILE"; printf '\n'; } >"$HDR" || return 1
   set +x
   STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
     --connect-timeout 10 --max-time 60 \
     -H 'Content-Type: application/json' \
     -H @"$HDR" \
     -d '{"model":"gpt-4.1-dzus","messages":[{"role":"user","content":"ping"}],"max_tokens":1}' \
-    "${ENDPOINT}/chat/completions") || { rm -f "$HDR"; return 1; }
+    "${ENDPOINT}/chat/completions") || return 1
   rm -f "$HDR"
+  trap - EXIT INT
   test "$STATUS" = "200" || return 1
 }
 cosmabot_stop_llm_http_status || {
@@ -357,26 +374,57 @@ cosmabot_stop_llm_http_status || {
 ### 4.2 Deploy-time STOP — production bundles embed `https://api.beta.cosmas.ai`
 
 **When:** before admitting the production-review iPhone / web build (and before
-AI-on first start). **Primary proof:** exact equality on Info.plist and the two
-JSON files. **Secondary:** refuse configured-origin staging forms and
-`accounts.dev` only — not the bare substring `staging.cosmas.ai` (web source
-literals such as `WorkspaceEnrollmentRecoveryGate.tsx` would false-stop).
+AI-on first start).
+
+**Primary proof (exact equality):**
+
+- iPhone `Info.plist`: `CosmasNativeIdentity.apiOrigin` =
+  `https://api.beta.cosmas.ai`
+- iPhone `Info.plist`: `CosmasNativeIdentity.frontendOrigin` (Clerk issuer) =
+  `https://clerk.beta.cosmas.ai`
+- iPhone `Info.plist`: `CosmasNativeIdentity.publishableKey` equals the Sitting
+  1 public publishable key (`pk_live_…` only; never a secret)
+- `web-build-arguments.json`: `VITE_WORKSPACE_HOSTED_API_ORIGIN` and
+  `VITE_CLERK_PUBLISHABLE_KEY`
+- `web-build-env.json`: both `VITE_API_BASE` and
+  `VITE_WORKSPACE_HOSTED_API_ORIGIN`, plus `VITE_CLERK_PUBLISHABLE_KEY`
+
+**Secondary scan (configured staging API origins only):** refuse
+`https://api.staging.`, `https://enrollment-api.staging.`, and
+`https://api.<x>.staging.` under the scanned roots. Do **not** substring-match
+`staging.cosmas.ai` or `accounts.dev` (Swift/Clerk source literals would
+false-stop a real `CosmaBot.app`).
+
+**iPhone scan scope (H-B):** scan **only** `Info.plist` (via `plutil` exact
+extracts) and the embedded web assets directory `$APP/public` (Capacitor
+`webDir`). Do **not** scan the whole `.app` tree or Mach-O binaries.
 
 Confirmed in-repo artifact names (`scripts/prepare-workspace-identity.mjs`,
-`docs/beta/WEB_RELEASE.md`):
+`docs/beta/WEB_RELEASE.md`, `apps/capture/ios/App/App/capacitor.config.json`):
 
-| File | Path (prepare output / protected builder) | API-origin keys |
+| File | Path | Keys checked |
 | --- | --- | --- |
-| `web-build-arguments.json` | prepare output root; protected example `/protected/ephemeral/web-build-arguments.json` | `VITE_WORKSPACE_HOSTED_API_ORIGIN` (this file does **not** carry `VITE_API_BASE`) |
-| `web-build-env.json` | same prepare output (`web` client env) — correct companion file | **both** `VITE_API_BASE` and `VITE_WORKSPACE_HOSTED_API_ORIGIN` must be present and equal |
+| `Info.plist` | inside reviewed `.app` | `CosmasNativeIdentity.apiOrigin`, `.frontendOrigin`, `.publishableKey` |
+| `$APP/public` | Capacitor web assets only | staging API origin forms (scan) |
+| `web-build-arguments.json` | prepare output / `/protected/ephemeral/…` | `VITE_WORKSPACE_HOSTED_API_ORIGIN`, `VITE_CLERK_PUBLISHABLE_KEY` |
+| `web-build-env.json` | same prepare output | `VITE_API_BASE`, `VITE_WORKSPACE_HOSTED_API_ORIGIN`, `VITE_CLERK_PUBLISHABLE_KEY` |
 
-**Shell:** bash 3.2+ or zsh for Mac-side iPhone/web checks; chain every check
-with `|| return 1`.
+**Shell:** bash 3.2+ or default macOS zsh; chain every check with `|| return 1`.
+Pasteable fence has no `#` comments and no apostrophes. Set
+`EXPECTED_CLERK_PUBLISHABLE_KEY` from Sitting 1 public values first (no
+secrets).
 
 ```bash
 WANT='https://api.beta.cosmas.ai'
-
-# Refuse only configured-origin forms (not bare staging.cosmas.ai).
+EXPECTED_CLERK_ISSUER='https://clerk.beta.cosmas.ai'
+test -n "${EXPECTED_CLERK_PUBLISHABLE_KEY:-}" || {
+  echo "STOP: set EXPECTED_CLERK_PUBLISHABLE_KEY from Sitting 1 public values"
+  false
+}
+printf '%s' "$EXPECTED_CLERK_PUBLISHABLE_KEY" | grep -Eq '^pk_live_' || {
+  echo "STOP: publishable key must be pk_live_ public value"
+  false
+}
 cosmabot_scan_forbidden_origins() {
   root=$1
   test -d "$root" || return 1
@@ -399,23 +447,23 @@ cosmabot_scan_forbidden_origins() {
   if _hit 'https://api\.[^/[:space:]]+\.staging\.'; then
     echo "STOP: https://api.<x>.staging. under $root"; return 1
   fi
-  if _hit 'accounts\.dev'; then
-    echo "STOP: accounts.dev under $root"; return 1
-  fi
   return 0
 }
-
 cosmabot_stop_iphone_api_origin() {
   APP=$1
   command -v /usr/bin/plutil >/dev/null || return 1
   test -d "$APP" || return 1
   test -f "$APP/Info.plist" || return 1
+  WEB_ASSETS="$APP/public"
+  test -d "$WEB_ASSETS" || return 1
   ORIGIN=$(/usr/bin/plutil -extract CosmasNativeIdentity.apiOrigin raw -o - "$APP/Info.plist") || return 1
   test "$ORIGIN" = "$WANT" || return 1
-  # Whole .app tree includes embedded web assets (www/public/…).
-  cosmabot_scan_forbidden_origins "$APP" || return 1
+  ISSUER=$(/usr/bin/plutil -extract CosmasNativeIdentity.frontendOrigin raw -o - "$APP/Info.plist") || return 1
+  test "$ISSUER" = "$EXPECTED_CLERK_ISSUER" || return 1
+  PK=$(/usr/bin/plutil -extract CosmasNativeIdentity.publishableKey raw -o - "$APP/Info.plist") || return 1
+  test "$PK" = "$EXPECTED_CLERK_PUBLISHABLE_KEY" || return 1
+  cosmabot_scan_forbidden_origins "$WEB_ASSETS" || return 1
 }
-
 cosmabot_stop_web_api_origin() {
   WEB_ROOT=$1
   ARGS=${2:-"$WEB_ROOT/../web-build-arguments.json"}
@@ -431,30 +479,89 @@ cosmabot_stop_web_api_origin() {
   cosmabot_scan_forbidden_origins "$WEB_ROOT" || return 1
   test -f "$ARGS" || return 1
   test "$(jq -er '.VITE_WORKSPACE_HOSTED_API_ORIGIN' "$ARGS")" = "$WANT" || return 1
+  test "$(jq -er '.VITE_CLERK_PUBLISHABLE_KEY' "$ARGS")" = "$EXPECTED_CLERK_PUBLISHABLE_KEY" || return 1
   test -f "$ENVJSON" || return 1
-  jq -e --arg want "$WANT" '
+  jq -e --arg want "$WANT" --arg pk "$EXPECTED_CLERK_PUBLISHABLE_KEY" '
     (.VITE_API_BASE | type == "string" and length > 0 and . == $want)
     and (.VITE_WORKSPACE_HOSTED_API_ORIGIN | type == "string" and length > 0 and . == $want)
+    and (.VITE_CLERK_PUBLISHABLE_KEY | type == "string" and length > 0 and . == $pk)
   ' "$ENVJSON" >/dev/null || return 1
 }
-
-# Reviewed artifacts only — then smoke with one wrong path each before trusting:
-# cosmabot_stop_iphone_api_origin /path/to/CosmaBot.app || { echo "STOP: iPhone"; false; }
-# cosmabot_stop_web_api_origin /path/to/reviewed-web-dist || { echo "STOP: web"; false; }
 ```
 
-Do not ship or admit a candidate that fails either check.
+After defining the functions, run one wrong-path smoke, then the real
+artifacts (paths outside the fence so zsh paste stays clean):
+
+1. `cosmabot_stop_iphone_api_origin /path/to/wrong.app` must STOP
+2. `cosmabot_stop_iphone_api_origin /path/to/CosmaBot.app` must pass
+3. `cosmabot_stop_web_api_origin /path/to/reviewed-web-dist` must pass
+
+#### Baseline from a known-good production build (N3)
+
+Before trusting candidates, record a baseline from one known-good
+production-review build (public values only). Store it outside the repo
+(example path `/protected/ephemeral/prod-bundle-baseline.json`):
+
+```bash
+cosmabot_record_bundle_baseline() {
+  APP=$1
+  WEB_ROOT=$2
+  OUT=$3
+  ARGS=${4:-"$WEB_ROOT/../web-build-arguments.json"}
+  ENVJSON=${5:-"$WEB_ROOT/../web-build-env.json"}
+  command -v jq >/dev/null || return 1
+  command -v /usr/bin/plutil >/dev/null || return 1
+  test -f "$APP/Info.plist" || return 1
+  test -d "$APP/public" || return 1
+  test -f "$ARGS" || return 1
+  test -f "$ENVJSON" || return 1
+  jq -n \
+    --arg api "$(/usr/bin/plutil -extract CosmasNativeIdentity.apiOrigin raw -o - "$APP/Info.plist")" \
+    --arg issuer "$(/usr/bin/plutil -extract CosmasNativeIdentity.frontendOrigin raw -o - "$APP/Info.plist")" \
+    --arg pk "$(/usr/bin/plutil -extract CosmasNativeIdentity.publishableKey raw -o - "$APP/Info.plist")" \
+    --arg wapi "$(jq -er '.VITE_WORKSPACE_HOSTED_API_ORIGIN' "$ARGS")" \
+    --arg wpk "$(jq -er '.VITE_CLERK_PUBLISHABLE_KEY' "$ARGS")" \
+    --arg eapi "$(jq -er '.VITE_API_BASE' "$ENVJSON")" \
+    --arg eorigin "$(jq -er '.VITE_WORKSPACE_HOSTED_API_ORIGIN' "$ENVJSON")" \
+    --arg epk "$(jq -er '.VITE_CLERK_PUBLISHABLE_KEY' "$ENVJSON")" \
+    '{apiOrigin:$api,clerkIssuer:$issuer,publishableKey:$pk,webBuildArguments:{VITE_WORKSPACE_HOSTED_API_ORIGIN:$wapi,VITE_CLERK_PUBLISHABLE_KEY:$wpk},webBuildEnv:{VITE_API_BASE:$eapi,VITE_WORKSPACE_HOSTED_API_ORIGIN:$eorigin,VITE_CLERK_PUBLISHABLE_KEY:$epk}}' >"$OUT" || return 1
+  test "$(jq -er '.apiOrigin' "$OUT")" = "https://api.beta.cosmas.ai" || return 1
+  test "$(jq -er '.clerkIssuer' "$OUT")" = "https://clerk.beta.cosmas.ai" || return 1
+}
+cosmabot_compare_bundle_to_baseline() {
+  APP=$1
+  WEB_ROOT=$2
+  BASELINE=$3
+  ARGS=${4:-"$WEB_ROOT/../web-build-arguments.json"}
+  ENVJSON=${5:-"$WEB_ROOT/../web-build-env.json"}
+  test -f "$BASELINE" || return 1
+  cosmabot_stop_iphone_api_origin "$APP" || return 1
+  cosmabot_stop_web_api_origin "$WEB_ROOT" "$ARGS" "$ENVJSON" || return 1
+  test "$(/usr/bin/plutil -extract CosmasNativeIdentity.apiOrigin raw -o - "$APP/Info.plist")" = "$(jq -er '.apiOrigin' "$BASELINE")" || return 1
+  test "$(/usr/bin/plutil -extract CosmasNativeIdentity.frontendOrigin raw -o - "$APP/Info.plist")" = "$(jq -er '.clerkIssuer' "$BASELINE")" || return 1
+  test "$(/usr/bin/plutil -extract CosmasNativeIdentity.publishableKey raw -o - "$APP/Info.plist")" = "$(jq -er '.publishableKey' "$BASELINE")" || return 1
+  test "$(jq -er '.VITE_WORKSPACE_HOSTED_API_ORIGIN' "$ARGS")" = "$(jq -er '.webBuildArguments.VITE_WORKSPACE_HOSTED_API_ORIGIN' "$BASELINE")" || return 1
+  test "$(jq -er '.VITE_CLERK_PUBLISHABLE_KEY' "$ARGS")" = "$(jq -er '.webBuildArguments.VITE_CLERK_PUBLISHABLE_KEY' "$BASELINE")" || return 1
+  test "$(jq -er '.VITE_API_BASE' "$ENVJSON")" = "$(jq -er '.webBuildEnv.VITE_API_BASE' "$BASELINE")" || return 1
+  test "$(jq -er '.VITE_WORKSPACE_HOSTED_API_ORIGIN' "$ENVJSON")" = "$(jq -er '.webBuildEnv.VITE_WORKSPACE_HOSTED_API_ORIGIN' "$BASELINE")" || return 1
+  test "$(jq -er '.VITE_CLERK_PUBLISHABLE_KEY' "$ENVJSON")" = "$(jq -er '.webBuildEnv.VITE_CLERK_PUBLISHABLE_KEY' "$BASELINE")" || return 1
+}
+```
+
+Do not ship or admit a candidate that fails the STOP checks or the baseline
+compare. Re-record the baseline only when John accepts a new known-good build.
 
 ### 4.3 Interrupted Key Vault access window
 
-If Sitting 2 is interrupted while the vault is open to John's `/32`:
+If Sitting 2 is interrupted while the vault is open to the operator `/32`:
 
 1. **First:** restore `publicNetworkAccess=Disabled` and empty `ipRules`
    (John only; use the `#356` README restore commands for the prod vault).
-2. **Then verify** by printing the **whole** `ipRules` list (and access flag):
+2. **Then verify** by printing the **whole** `ipRules` list (and access flag).
+
+**Shell:** bash 3.2+ or default macOS zsh. Fence has no `#` comments.
 
 ```bash
-# Shell: bash 3.2+ or zsh (John's Mac). Chain every check with || return 1.
 cosmabot_verify_kv_closed() {
   command -v az >/dev/null || return 1
   test -n "${PROD_KV_NAME:-}" || return 1
@@ -469,12 +576,35 @@ cosmabot_verify_kv_closed() {
   test "$COUNT" = "0" || return 1
 }
 cosmabot_verify_kv_closed || {
-  echo "STOP: vault still open or ipRules not empty — fix before continuing"
+  echo "STOP: vault still open or ipRules not empty - fix before continuing"
   false
 }
 ```
 
 Do not continue Sitting 2 secret work until that verify passes.
+
+### 4.4 Mac-side fence syntax proof (H-A)
+
+Every pasteable Mac-side fence in §4.1–§4.3 must parse under both `bash -n`
+and `zsh -n` (and under zsh with `interactivecomments` unset). Proof commands
+and results are recorded when this runbook revision is authored; re-run after
+editing those fences:
+
+```text
+bash -n fence1-step-a.sh
+bash -n fence2-load.sh
+bash -n fence3-step-b.sh
+bash -n fence-bundle-checks.sh
+bash -n fence-kv-closed.sh
+zsh -f -c 'unsetopt interactivecomments; zsh -n fence1-step-a.sh'
+zsh -f -c 'unsetopt interactivecomments; zsh -n fence2-load.sh'
+zsh -f -c 'unsetopt interactivecomments; zsh -n fence3-step-b.sh'
+zsh -f -c 'unsetopt interactivecomments; zsh -n fence-bundle-checks.sh'
+zsh -f -c 'unsetopt interactivecomments; zsh -n fence-kv-closed.sh'
+```
+
+Author proof results for this revision (all exit 0): listed in the PR body and
+agent report for the commit that added §4.4.
 
 ---
 
@@ -639,8 +769,9 @@ After-14:30 host work):**
    secrets-transport ticket/PR exists (do not invent a transport). Matches §1
    After 14:30 step 2.
 6. **STOP checks** before AI-on: §4.1 (host files) and §4.2 (exact
-   `https://api.beta.cosmas.ai` on Info.plist + JSON; refuse configured staging
-   origin forms + `accounts.dev`). On failure: roll back; do not flip AI-on.
+   `https://api.beta.cosmas.ai` + Clerk issuer/publishable key on Info.plist /
+   JSON; scan `$APP/public` only; refuse configured staging API origin forms;
+   compare to known-good baseline). On failure: roll back; do not flip AI-on.
 7. **Flag flip:** `WORKSPACE_LLM_BACKEND=azure_gpt41`;
    `WORKSPACE_LLM_USDZ_ENABLED=true` (required for `gpt-4.1-dzus` per `#356`
    README later LLM cutover item 3 / `config.py` reviewed-deployment set);
@@ -676,11 +807,11 @@ After-14:30 host work):**
 - [ ] Agents: runbook PR green; `#377` and `#381` watched
 - [ ] Sitting 1: plan-hash yes → `#356` apply → IP recorded → Clerk public values sent
 - [ ] Between: agent prep only (no secrets, no staging); bootstrap retarget **BLOCKED** until named ticket/PR
-- [ ] Sitting 2: §4.1 Step A print account id → load `WORKSPACE-LLM-API-KEY` + tag → Step B list check → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
+- [ ] Sitting 2: §4.1 Fence 1 Step A → pause → Fence 2 load → pause → Fence 3 Step B → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
 - [ ] §4.3 if interrupted: restore Disabled + empty `ipRules`, print whole list, verify
 - [ ] After 14:30 (= §9 (b) steps 4–9): install (BLOCKED) → checks → flag flip → render/start
-- [ ] §4.1: Step A/B portable; every check `|| return 1`; wrong-input smoke; HTTP 200 with header file
-- [ ] §4.2: exact Info.plist + JSON; refuse `https://api.staging.` / `enrollment-api.staging.` / `https://api.<x>.staging.` / `accounts.dev` only
+- [ ] §4.1: split fences; no `#`/apostrophes in Mac fences; bash -n + zsh -n proof; HTTP 200 with header file
+- [ ] §4.2: Info.plist + `$APP/public` only; exact Clerk issuer/pk; staging API forms only; baseline compare
 - [ ] `#377` **and** `#381` merged before AI-on first start (`#377` for VM-runtime delete host-key mapping)
 - [ ] Account-delete vault `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET` (#356 README line 191)
 - [ ] Flags: `WORKSPACE_LLM_BACKEND=azure_gpt41`, `WORKSPACE_LLM_USDZ_ENABLED=true` → `/ready` + `version.json`
