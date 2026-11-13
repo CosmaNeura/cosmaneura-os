@@ -7,23 +7,9 @@ import stat
 import sys
 from pathlib import Path
 
-# python -I (standalone Dockerfile.api.fragment) ignores PYTHONPATH; the image
-# ships application sources at /app/src (root Dockerfile COPY src ./src).
-_APP_SRC = Path("/app/src")
-if _APP_SRC.is_dir() and str(_APP_SRC) not in sys.path:
-    sys.path.insert(0, str(_APP_SRC))
-
-from cosmas_os.production_review_profile import (  # noqa: E402, F401
-    REVIEW_CLERK_ISSUER,
-    REVIEW_SESSION_POLICY,
-    REVIEW_WEB_ORIGIN,
-    STAGING_SESSION_POLICY,
-    STAGING_WEB_ORIGIN,
-    classify_review_profile,
-)
-
-# Thin alias — shared predicate lives in cosmas_os.production_review_profile.
-classify_account_delete_profile = classify_review_profile
+# Absolute image layout (Dockerfile COPY src ./src). Tests may patch APP_ROOT.
+APP_ROOT = Path("/app")
+APP_SRC = APP_ROOT / "src"
 
 PUBLIC = Path("/run/cosmabot-standalone/api-public.json")
 PRIVATE = Path("/run/cosmabot-standalone/api-private.json")
@@ -45,12 +31,67 @@ REVIEW_ACCOUNT_DELETE_VAULT_OBJECT = "CLERK-ACCOUNT-DELETION-SECRET"
 REVIEW_ACCOUNT_DELETE_KV_NAME = REVIEW_ACCOUNT_DELETE_HOST_KEY
 OPTIONAL_PRIVATE_NAMES = MODEL_PRIVATE_NAMES | GOOGLE_PRIVATE_NAMES | MICROSOFT_PRIVATE_NAMES
 
+_SHARED_BOUND = False
+# Populated by _bind_shared_predicate (inside main's guarded path).
+STAGING_WEB_ORIGIN = None
+REVIEW_WEB_ORIGIN = None
+REVIEW_CLERK_ISSUER = None
+STAGING_SESSION_POLICY = None
+REVIEW_SESSION_POLICY = None
+classify_review_profile = None
+classify_account_delete_profile = None
+
 
 class Refused(Exception):
     """Do not include configuration values or underlying exceptions in output."""
 
 
+def _bind_shared_predicate() -> None:
+    """Import the shared predicate after /app/src is on sys.path (python -I safe)."""
+    global _SHARED_BOUND
+    global STAGING_WEB_ORIGIN, REVIEW_WEB_ORIGIN, REVIEW_CLERK_ISSUER
+    global STAGING_SESSION_POLICY, REVIEW_SESSION_POLICY
+    global classify_review_profile, classify_account_delete_profile
+    if _SHARED_BOUND and classify_review_profile is not None:
+        return
+    from cosmas_os.production_review_profile import (
+        REVIEW_CLERK_ISSUER as _issuer,
+        REVIEW_SESSION_POLICY as _review_policy,
+        REVIEW_WEB_ORIGIN as _review_web,
+        STAGING_SESSION_POLICY as _staging_policy,
+        STAGING_WEB_ORIGIN as _staging_web,
+        classify_review_profile as _classify,
+    )
+
+    STAGING_WEB_ORIGIN = _staging_web
+    REVIEW_WEB_ORIGIN = _review_web
+    REVIEW_CLERK_ISSUER = _issuer
+    STAGING_SESSION_POLICY = _staging_policy
+    REVIEW_SESSION_POLICY = _review_policy
+    classify_review_profile = _classify
+    # Thin alias — no private classify body.
+    classify_account_delete_profile = _classify
+    _SHARED_BOUND = True
+
+
+def __getattr__(name: str):
+    """Lazy bind for tests that read shared constants before main()."""
+    if name in {
+        "STAGING_WEB_ORIGIN",
+        "REVIEW_WEB_ORIGIN",
+        "REVIEW_CLERK_ISSUER",
+        "STAGING_SESSION_POLICY",
+        "REVIEW_SESSION_POLICY",
+        "classify_review_profile",
+        "classify_account_delete_profile",
+    }:
+        _bind_shared_predicate()
+        return globals()[name]
+    raise AttributeError(name)
+
+
 def account_delete_kind(checked) -> str | None:
+    _bind_shared_predicate()
     return classify_review_profile(
         policy=getattr(checked, "clerk_session_policy", None),
         web_origin=None,
@@ -71,6 +112,7 @@ def review_account_delete_profile(checked) -> bool:
 
 def review_account_delete_host(public: dict) -> bool:
     """True when public fields classify as exclusive production-review."""
+    _bind_shared_predicate()
     return (
         classify_review_profile(
             policy=public.get("CLERK_SESSION_POLICY"),
@@ -97,6 +139,26 @@ def remap_review_account_delete_private(private: dict, *, review: bool) -> dict:
     remapped = dict(private)
     remapped[ACCOUNT_DELETE_ENV_NAME] = remapped.pop(REVIEW_ACCOUNT_DELETE_HOST_KEY)
     return remapped
+
+
+def _normalize_account_delete_secret(private: dict) -> dict:
+    """Treat padded/whitespace delete secrets as absent; never refuse boot for padding.
+
+    Non-delete private values may keep surrounding whitespace (staging wall fix).
+    app.py strips the delete secret at use time.
+    """
+    if ACCOUNT_DELETE_ENV_NAME not in private:
+        return private
+    value = private[ACCOUNT_DELETE_ENV_NAME]
+    if not isinstance(value, str):
+        raise Refused()
+    stripped = value.strip()
+    out = dict(private)
+    if not stripped:
+        out.pop(ACCOUNT_DELETE_ENV_NAME)
+    elif stripped != value:
+        out[ACCOUNT_DELETE_ENV_NAME] = stripped
+    return out
 
 
 def unique(pairs):
@@ -139,6 +201,7 @@ def read_json(path: Path, *, private: bool):
 def load_configuration(public_path=PUBLIC, private_path=PRIVATE):
     # Imported only after main clears inherited environment. The second process
     # below receives the selected values before importing the application module.
+    _bind_shared_predicate()
     from cosmas_os.config import Settings
 
     public = read_json(public_path, private=False)
@@ -150,16 +213,16 @@ def load_configuration(public_path=PUBLIC, private_path=PRIVATE):
     # CLERK_SECRET_KEY is never an allowed private name.
     review = review_account_delete_host(public)
     private = remap_review_account_delete_private(private, review=review)
+    private = _normalize_account_delete_secret(private)
     candidate_optional = OPTIONAL_PRIVATE_NAMES | ACCOUNT_DELETE_PRIVATE_NAMES
     # Host key must never appear in the public mount (review or staging).
     public_leak_names = PRIVATE_NAMES | candidate_optional | {REVIEW_ACCOUNT_DELETE_HOST_KEY}
     if (not PRIVATE_NAMES.issubset(private) or set(private) - PRIVATE_NAMES - candidate_optional
             or public_leak_names.intersection(public)):
         raise Refused()
-    if any(
-        not isinstance(value, str) or not value or value != value.strip()
-        for value in private.values()
-    ):
+    # Non-empty strings only. Do NOT refuse on surrounding whitespace for
+    # non-delete secrets (staging wall). Delete-key padding handled above.
+    if any(not isinstance(value, str) or not value for value in private.values()):
         raise Refused()
     known = {name.upper() for name in Settings.model_fields}
     secret_names = {name.upper() for name, field in Settings.model_fields.items()
@@ -213,10 +276,15 @@ def main():
         if not 1024 <= port <= 65535:
             raise Refused()
         os.environ.clear()
-        os.chdir("/app")
-        if Path(".env").exists():
+        os.chdir(APP_ROOT)
+        if (APP_ROOT / ".env").exists():
             raise Refused()
-        sys.path.insert(0, "/app/src")
+        # python -I ignores PYTHONPATH; bind shared predicate only inside this try
+        # so ImportError becomes the fixed refusal (exit 78), not a traceback.
+        src = str(APP_SRC)
+        if src not in sys.path:
+            sys.path.insert(0, src)
+        _bind_shared_predicate()
         environment = load_configuration()
     except Exception:
         print("Standalone API configuration refused.", file=sys.stderr)

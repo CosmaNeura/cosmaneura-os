@@ -21,6 +21,7 @@ from cosmas_os.microsoft_connection_models import (
     MicrosoftConnectionCredential,
 )
 from cosmas_os.models import (
+    AccountDeleteIntent,
     AuditEvent,
     BoxContext,
     CoreCaptureAccount,
@@ -42,6 +43,9 @@ class ClerkUserDeletionPort(Protocol):
     def require_user(self, subject: str) -> dict: ...
 
     def delete_user(self, subject: str) -> None: ...
+
+    # Optional: prefer lookup_user when present (None = Clerk 404).
+    # def lookup_user(self, subject: str) -> dict | None: ...
 
 
 def _now() -> datetime:
@@ -91,6 +95,92 @@ def _wipe_personal_connection(session: Session, account_id: str) -> None:
         )
     ):
         scheduling.revoked_at = _now()
+
+
+def _ensure_delete_intents(
+    session: Session,
+    *,
+    box_id: str,
+    principal_id: str,
+    subjects: list[str],
+) -> None:
+    """Commit durable per-subject delete intents after confirm, before wipe/delete."""
+    for subject in subjects:
+        existing = session.scalar(
+            select(AccountDeleteIntent).where(
+                AccountDeleteIntent.box_id == box_id,
+                AccountDeleteIntent.principal_id == principal_id,
+                AccountDeleteIntent.provider == "clerk",
+                AccountDeleteIntent.subject == subject,
+            )
+        )
+        if existing is None:
+            session.add(
+                AccountDeleteIntent(
+                    box_id=box_id,
+                    principal_id=principal_id,
+                    provider="clerk",
+                    subject=subject,
+                )
+            )
+    session.commit()
+
+
+def _has_delete_intent(
+    session: Session,
+    *,
+    box_id: str,
+    principal_id: str,
+    subject: str,
+) -> bool:
+    return (
+        session.scalar(
+            select(AccountDeleteIntent.id).where(
+                AccountDeleteIntent.box_id == box_id,
+                AccountDeleteIntent.principal_id == principal_id,
+                AccountDeleteIntent.provider == "clerk",
+                AccountDeleteIntent.subject == subject,
+            )
+        )
+        is not None
+    )
+
+
+def _confirm_clerk_subjects(
+    session: Session,
+    clerk: ClerkUserDeletionPort,
+    *,
+    box_id: str,
+    principal_id: str,
+    subjects: list[str],
+) -> None:
+    """Confirm each subject exists, or accept 404 only when durable intent exists."""
+    for subject in subjects:
+        lookup = getattr(clerk, "lookup_user", None)
+        if callable(lookup):
+            found = lookup(subject)
+            if found is not None:
+                continue
+            if _has_delete_intent(
+                session, box_id=box_id, principal_id=principal_id, subject=subject
+            ):
+                continue
+            # No intent: same EnrollmentError require_user would raise (no second GET).
+            from cosmas_os.enrollment.domain import EnrollmentError
+
+            raise EnrollmentError(
+                "provisioning_identity_unavailable",
+                "Practice identity setup can be retried safely.",
+                503,
+            )
+        try:
+            clerk.require_user(subject)
+        except Exception:
+            if _has_delete_intent(
+                session, box_id=box_id, principal_id=principal_id, subject=subject
+            ):
+                continue
+            raise
 
 
 def delete_own_account(
@@ -168,11 +258,50 @@ def delete_own_account(
         # Fail closed before any local wipe or Clerk HTTP call.
         raise AccountDeletionError(NOT_CONFIGURED)
 
-    # Confirm every Clerk subject exists under this Backend secret before any
-    # local mutation. A 404 / wrong-instance key must not tombstone locally.
-    if clerk is not None:
-        for subject in clerk_subjects:
-            clerk.require_user(subject)
+    if clerk is not None and clerk_subjects:
+        # Confirm before recording intent: a first-attempt wrong-instance 404 must
+        # not become acceptable merely because we wrote an intent row.
+        _confirm_clerk_subjects(
+            session,
+            clerk,
+            box_id=box_id,
+            principal_id=principal_id,
+            subjects=clerk_subjects,
+        )
+        # Durable intent after confirm, before wipe/Clerk delete: survives a later
+        # commit failure so retry can accept Clerk 404 for already-deleted subjects.
+        _ensure_delete_intents(
+            session,
+            box_id=box_id,
+            principal_id=principal_id,
+            subjects=clerk_subjects,
+        )
+        # Re-lock after intent commit.
+        box = session.scalar(select(BoxContext).where(BoxContext.id == box_id).with_for_update())
+        actor = session.scalar(
+            select(Principal)
+            .where(Principal.id == principal_id, Principal.box_id == box_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if box is None or actor is None:
+            raise AuthorizationError("account deletion is unavailable")
+        if actor.state != PrincipalState.ACTIVE.value or actor.tombstoned_at is not None:
+            raise AuthorizationError("account deletion is unavailable")
+        bindings = list(
+            session.scalars(
+                select(ExternalIdentity)
+                .where(
+                    ExternalIdentity.principal_id == actor.id,
+                    ExternalIdentity.box_id == box_id,
+                )
+                .with_for_update()
+            )
+        )
+        active_bindings = [b for b in bindings if b.active]
+        if not active_bindings:
+            raise AuthorizationError("account deletion is unavailable")
+        clerk_subjects = sorted({b.subject for b in active_bindings if b.provider == "clerk"})
 
     try:
         for binding in bindings:

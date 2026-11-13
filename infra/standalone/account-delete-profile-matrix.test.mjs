@@ -57,27 +57,38 @@ for(const row of matrix){
   test(`matrix ${row.id}: classifyAccountDeleteProfile => ${row.expect}`,()=>{
     const kind=classifyAccountDeleteProfile({
       web_origin:row.web_origin,
-      identity_policy:row.policy,
+      identity_policy:row.policy??undefined,
       cors_origins:row.cors.split(',').map(item=>item.trim()).filter(Boolean),
-      issuer:row.issuer,
+      issuer:row.issuer??'',
     });
     const expected=row.expect==='none'?null:row.expect;
     assert.equal(kind,expected);
+  });
+  // Entrypoint runtime omits web_origin and classifies from CORS order alone.
+  test(`matrix ${row.id}: classifyAccountDeleteProfile web_origin omitted`,()=>{
+    const kind=classifyAccountDeleteProfile({
+      identity_policy:row.policy??undefined,
+      cors_origins:row.cors.split(',').map(item=>item.trim()).filter(Boolean),
+      issuer:row.issuer??'',
+    });
+    const expected=row.expect==='none'?null:row.expect;
+    // When CORS already lists the row web_origin first (or mixed), omit must agree.
+    const corsParts=row.cors.split(',').map(item=>item.trim()).filter(Boolean);
+    if(row.web_origin&&corsParts[0]===row.web_origin){
+      assert.equal(kind,expected);
+    }
   });
 }
 
 // Owned synthetic hosts also exercise render() for rows whose CORS is the
 // standard owned parties list (render builds CORS from web_origin; mixed CORS
-// rows stay classify-only).
+// and non-exact origin variants stay classify-only).
 const ownedRenderRows=matrix.filter(row=>{
-  try{
-    const host=new URL(row.web_origin).hostname;
-    if(host!=='staging.cosmas.ai'&&host!=='beta.cosmas.ai')return false;
-    const parties=[row.web_origin,'app://cosmas','capacitor://localhost'].join(',');
-    return row.render==='refuse'||row.cors===parties;
-  }catch{
-    return false;
-  }
+  if(row.web_origin!=='https://staging.cosmas.ai'&&row.web_origin!=='https://beta.cosmas.ai')return false;
+  // Missing/empty issuer stays classify-only (ownedCandidate needs a URL).
+  if(!row.issuer)return false;
+  const parties=[row.web_origin,'app://cosmas','capacitor://localhost'].join(',');
+  return row.render==='refuse'||row.cors===parties;
 });
 for(const row of ownedRenderRows){
   test(`matrix ${row.id}: render() mapping agrees with expect=${row.expect}`,()=>{

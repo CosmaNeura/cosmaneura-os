@@ -88,5 +88,86 @@
     "issuer": "https://clerk.beta.cosmas.ai",
     "expect": "none",
     "render": "classify"
+  },
+  {
+    "id": "refused_audience_uppercase_beta",
+    "policy": "audience",
+    "web_origin": "https://BETA.COSMAS.AI",
+    "cors": "https://BETA.COSMAS.AI,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "staging_shared_staging_uppercase_beta_variant",
+    "policy": "shared_staging",
+    "web_origin": "https://workspace.invented-practice.test",
+    "cors": "https://workspace.invented-practice.test,https://BETA.COSMAS.AI",
+    "issuer": "https://invented-own-practice.clerk.accounts.dev",
+    "expect": "staging",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_beta_trailing_slash",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai/",
+    "cors": "https://beta.cosmas.ai/,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "staging_shared_staging_beta_trailing_slash_variant",
+    "policy": "shared_staging",
+    "web_origin": "https://workspace.invented-practice.test",
+    "cors": "https://workspace.invented-practice.test,https://beta.cosmas.ai/",
+    "issuer": "https://invented-own-practice.clerk.accounts.dev",
+    "expect": "staging",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_beta_port_443",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai:443",
+    "cors": "https://beta.cosmas.ai:443,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "staging_shared_staging_beta_port_443_variant",
+    "policy": "shared_staging",
+    "web_origin": "https://workspace.invented-practice.test",
+    "cors": "https://workspace.invented-practice.test,https://beta.cosmas.ai:443",
+    "issuer": "https://invented-own-practice.clerk.accounts.dev",
+    "expect": "staging",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_missing_issuer",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": null,
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "refused_audience_empty_issuer",
+    "policy": "audience",
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": "",
+    "expect": "none",
+    "render": "classify"
+  },
+  {
+    "id": "refused_missing_policy_with_beta",
+    "policy": null,
+    "web_origin": "https://beta.cosmas.ai",
+    "cors": "https://beta.cosmas.ai,app://cosmas,capacitor://localhost",
+    "issuer": "https://clerk.beta.cosmas.ai",
+    "expect": "none",
+    "render": "classify"
   }
 ]

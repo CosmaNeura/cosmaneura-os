@@ -58,6 +58,8 @@ class FakeClerkUsers:
             status = self.delete_status.get(subject, 200)
             if status == 404:
                 return httpx.Response(404, json={"error": "not_found"})
+            if status >= 400:
+                return httpx.Response(status, json={"error": "invented_clerk_failure"})
             self.deleted.append(subject)
             return httpx.Response(200, json={"id": subject, "deleted": True})
         return httpx.Response(500, json={"error": "unexpected"})
@@ -500,3 +502,98 @@ def test_clerk_egress_blocked_leaves_local_account_rows_unchanged(deletion, sess
     still_signed_in = deletion.client.get("/account/identity", headers=deletion.headers("peer"))
     assert still_signed_in.status_code == 200
     assert still_signed_in.json()["state"] == "allowed"
+
+
+def test_retry_succeeds_after_clerk_delete_then_commit_failure(deletion, session, monkeypatch):
+    """Intent survives wipe rollback; retry accepts Clerk 404 and finishes locally."""
+    from cosmas_os.models import AccountDeleteIntent
+
+    commits = {"n": 0}
+    real_commit = session.commit
+
+    def flaky_commit():
+        commits["n"] += 1
+        # 1 = durable intent; 2 = wipe/tombstone commit after Clerk delete.
+        if commits["n"] == 2:
+            raise RuntimeError("invented-db-commit-failure")
+        return real_commit()
+
+    monkeypatch.setattr(session, "commit", flaky_commit)
+    first = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert first.status_code >= 400
+    assert deletion.clerk_transport.deleted == ["user_delete_peer"]
+    peer = session.get(Principal, deletion.people["peer"])
+    session.refresh(peer)
+    assert peer.state == PrincipalState.ACTIVE.value
+    intent = session.scalar(
+        select(AccountDeleteIntent).where(
+            AccountDeleteIntent.box_id == deletion.box,
+            AccountDeleteIntent.principal_id == deletion.people["peer"],
+            AccountDeleteIntent.subject == "user_delete_peer",
+        )
+    )
+    assert intent is not None
+
+    deletion.clerk_transport.get_status["user_delete_peer"] = 404
+    monkeypatch.setattr(session, "commit", real_commit)
+    second = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert second.status_code == 200, second.text
+    assert second.json() == {"status": "deleted"}
+    session.refresh(peer)
+    assert peer.state == PrincipalState.TOMBSTONED.value
+
+
+def test_retry_succeeds_after_second_subject_clerk_5xx(deletion, session):
+    """Two Clerk subjects: first deleted, second 5xx; retry finishes both."""
+    from cosmas_os.models import AccountDeleteIntent
+
+    second_binding = ExternalIdentity(
+        box_id=deletion.box,
+        principal_id=deletion.people["peer"],
+        provider="clerk",
+        issuer="https://identity.example.invalid",
+        subject="user_delete_peer_b",
+        # Distinct org so uq_external_identity_org_principal allows a second row.
+        organization_id="org_identity_invented_b",
+        reviewed_by="Invented reviewer",
+        evidence_ref="test:account-deletion-second-subject",
+    )
+    session.add(second_binding)
+    session.commit()
+
+    deletion.clerk_transport.delete_status["user_delete_peer_b"] = 500
+    first = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert first.status_code == 503
+    assert "user_delete_peer" in deletion.clerk_transport.deleted
+    assert "user_delete_peer_b" not in deletion.clerk_transport.deleted
+    peer = session.get(Principal, deletion.people["peer"])
+    session.refresh(peer)
+    assert peer.state == PrincipalState.ACTIVE.value
+    intents = list(
+        session.scalars(
+            select(AccountDeleteIntent).where(
+                AccountDeleteIntent.box_id == deletion.box,
+                AccountDeleteIntent.principal_id == deletion.people["peer"],
+            )
+        )
+    )
+    assert {row.subject for row in intents} >= {"user_delete_peer", "user_delete_peer_b"}
+
+    deletion.clerk_transport.get_status["user_delete_peer"] = 404
+    deletion.clerk_transport.delete_status.pop("user_delete_peer_b", None)
+    deletion.clerk_transport.deleted.clear()
+    deletion.clerk_transport.looked_up.clear()
+    second = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert second.status_code == 200, second.text
+    assert second.json() == {"status": "deleted"}
+    session.refresh(peer)
+    assert peer.state == PrincipalState.TOMBSTONED.value
+    assert "user_delete_peer_b" in deletion.clerk_transport.deleted

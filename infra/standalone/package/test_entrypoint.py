@@ -279,8 +279,8 @@ def test_review_loads_without_account_delete_key(mounted):
     assert entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY not in environment
 
 
-def test_review_refuses_empty_or_whitespace_host_key_alias(mounted):
-    """Empty or whitespace-only host-key alias is refused (same as untrimmed secrets)."""
+def test_review_empty_or_whitespace_host_key_alias_treated_as_absent(mounted):
+    """Empty/whitespace host-key alias is absent, not a boot refusal."""
     public, private, values, secrets = mounted
     _review_public(values)
     public.write_text(json.dumps(values))
@@ -289,22 +289,98 @@ def test_review_refuses_empty_or_whitespace_host_key_alias(mounted):
             **secrets,
             entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY: bad,
         }))
-        with pytest.raises(entrypoint.Refused):
-            entrypoint.load_configuration(public, private)
+        environment = entrypoint.load_configuration(public, private)
+        assert entrypoint.ACCOUNT_DELETE_ENV_NAME not in environment
+        assert entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY not in environment
 
 
-def test_private_whitespace_account_delete_secret_is_refused(mounted):
-    """Untrimmed ACCOUNT_DELETE_CLERK_SECRET_KEY values are refused at the entrypoint."""
+def test_padded_account_delete_secret_is_stripped_not_refused(mounted):
+    """Padded ACCOUNT_DELETE_CLERK_SECRET_KEY is stripped; whitespace-only is absent."""
     public, private, values, secrets = mounted
     real_profile(values, entrypoint.STAGING_SESSION_POLICY)
     public.write_text(json.dumps(values))
-    for bad in (" sk_test_pad ", "\tsk_test", "sk_test\n"):
+    private.write_text(json.dumps({
+        **secrets,
+        entrypoint.ACCOUNT_DELETE_ENV_NAME: " sk_test_pad ",
+    }))
+    environment = entrypoint.load_configuration(public, private)
+    assert environment[entrypoint.ACCOUNT_DELETE_ENV_NAME] == "sk_test_pad"
+    for blank in ("   ", "\t\n"):
         private.write_text(json.dumps({
             **secrets,
-            entrypoint.ACCOUNT_DELETE_ENV_NAME: bad,
+            entrypoint.ACCOUNT_DELETE_ENV_NAME: blank,
         }))
-        with pytest.raises(entrypoint.Refused):
-            entrypoint.load_configuration(public, private)
+        environment = entrypoint.load_configuration(public, private)
+        assert entrypoint.ACCOUNT_DELETE_ENV_NAME not in environment
+
+
+def test_staging_padded_non_delete_private_value_still_boots(mounted):
+    """Staging wall: trailing whitespace on DATABASE_URL must not refuse boot."""
+    public, private, values, secrets = mounted
+    real_profile(values, entrypoint.STAGING_SESSION_POLICY)
+    public.write_text(json.dumps(values))
+    padded = {**secrets, "DATABASE_URL": secrets["DATABASE_URL"] + "\n"}
+    private.write_text(json.dumps(padded))
+    environment = entrypoint.load_configuration(public, private)
+    assert environment["DATABASE_URL"].endswith("\n")
+    assert environment["CLERK_SESSION_POLICY"] == entrypoint.STAGING_SESSION_POLICY
+
+
+def test_main_isolated_import_failure_exits_78(tmp_path, monkeypatch, capsys):
+    """python -I image-like layout: missing shared predicate → fixed refusal 78."""
+    app = tmp_path / "app"
+    src = app / "src"
+    src.mkdir(parents=True)
+    (src / "cosmas_os").mkdir()
+    (src / "cosmas_os" / "__init__.py").write_text("")
+    # No production_review_profile.py → ImportError inside main()'s try.
+    monkeypatch.setattr(entrypoint, "APP_ROOT", app)
+    monkeypatch.setattr(entrypoint, "APP_SRC", src)
+    monkeypatch.setattr(entrypoint.os, "geteuid", lambda: 23017)
+    monkeypatch.setattr(entrypoint.sys, "argv", ["entrypoint.py", "51887"])
+    monkeypatch.setattr(entrypoint, "_SHARED_BOUND", False)
+    monkeypatch.setattr(entrypoint, "classify_review_profile", None)
+    # Force re-bind from the empty image src, not the installed package.
+    monkeypatch.setattr(entrypoint.sys, "path", [str(src)])
+    # main() clears os.environ; restore so later tests still have PATH.
+    saved_environ = dict(os.environ)
+    try:
+        assert entrypoint.main() == 78
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_environ)
+    assert capsys.readouterr().err == "Standalone API configuration refused.\n"
+
+
+def test_python_dash_I_image_layout_missing_predicate_exits_78(tmp_path):
+    """Subprocess python -I with image-like /app/src layout expects exit 78."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    app = tmp_path / "app"
+    (app / "src" / "cosmas_os").mkdir(parents=True)
+    (app / "src" / "cosmas_os" / "__init__.py").write_text("")
+    # No production_review_profile.py under src.
+    source = Path(entrypoint.__file__).read_text(encoding="utf-8")
+    source = source.replace('APP_ROOT = Path("/app")', f"APP_ROOT = Path({str(app)!r})")
+    # Cloud agent UIDs are often <= 10001; pin runtime UID so refusal is the import.
+    source = source.replace(
+        "if os.geteuid() <= 10001 or len(sys.argv) != 2",
+        "if False or len(sys.argv) != 2",
+    )
+    script = app / "standalone-entrypoint.py"
+    script.write_text(source, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-I", str(script), "51887"],
+        cwd=str(app),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 78, result.stdout + result.stderr
+    assert result.stderr.strip() == "Standalone API configuration refused."
 
 
 def test_staging_refuses_clerk_account_deletion_secret_alias(mounted):

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {render} from './render.mjs';
+import {render,Refused} from './render.mjs';
 
 const sample=JSON.parse(await readFile(new URL('./invented-host-input.json',import.meta.url),'utf8'));
 function liveKey(host){
@@ -129,6 +129,20 @@ test('owned beta with shared_staging is refused (exclusive review predicate)',()
   value.identity.frontendOrigin='https://invented-own-practice.clerk.accounts.dev';
   value.identity.publishableKey='pk_test_'+Buffer.from('invented-own-practice.clerk.accounts.dev$').toString('base64');
   assert.throws(()=>render(value));
+});
+
+test('owned beta refuses operational-beta-v1 and non-clerk.beta issuers',()=>{
+  const betaProfile=candidate({owned:true,host:'beta.cosmas.ai'});
+  betaProfile.identity.profile='operational-beta-v1';
+  assert.throws(()=>render(betaProfile),error=>error instanceof Refused);
+  const wrongIssuer=candidate({owned:true,host:'beta.cosmas.ai'});
+  wrongIssuer.identity.frontendOrigin='https://clerk.staging.cosmas.ai';
+  wrongIssuer.identity.publishableKey=liveKey('clerk.staging.cosmas.ai');
+  assert.throws(()=>render(wrongIssuer),error=>error instanceof Refused);
+  const prodIssuer=candidate({owned:true,host:'beta.cosmas.ai'});
+  prodIssuer.identity.frontendOrigin='https://clerk.cosmas.ai';
+  prodIssuer.identity.publishableKey=liveKey('clerk.cosmas.ai');
+  assert.throws(()=>render(prodIssuer),error=>error instanceof Refused);
 });
 
 test('owned beta.cosmas.ai stays synthetic and every other host stays refused',()=>{
