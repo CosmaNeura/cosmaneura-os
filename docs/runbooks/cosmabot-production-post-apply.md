@@ -2,7 +2,8 @@
 
 **Tonight for existing live users: nothing. Docs only, nothing applied.**
 
-Status: **PREP ONLY — clock for Fri 13 Nov 2026 (ET).** This runbook does not
+Status: **PREP ONLY — clock for Fri 13 Nov 2026 (ET).** Times below are
+**targets** and shift later if a sitting starts late. This runbook does not
 authorize OpenTofu apply, Azure writes, DNS changes, Clerk console work, secret
 pastes, or a deploy. Coding agents must not run those steps from this document.
 John asked to start production server work today; the schedule below compresses
@@ -19,13 +20,15 @@ stays untouched. Synthetic data only.
 
 ## Pending prerequisites (app fixes — not this PR, not `#356`)
 
-| PR / branch | What it does | Status |
-| --- | --- | --- |
-| [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) `grok/appstore-1-review-delete-key` | Production-review accepts the secret **name** `ACCOUNT_DELETE_CLERK_SECRET_KEY` (delete-key name mapping from KV/`CLERK_ACCOUNT_DELETION_SECRET` custody toward the App Store delete mount name). No Key Vault write, no deploy. | **Pending** (draft) |
-| New small app PR on **`grok/prod-openai-endpoint-allow`** | Allow the configured **production** Azure OpenAI endpoint in hosted `workspace_llm_available` (today pinned to CosmasCode only — §9 (a)). No model change. | **Pending** (must be opened/merged before AI-on first start) |
+Both must be merged **before** the AI-on first start in decision §9 (b).
 
-Do not merge or apply those from this docs ticket. Agents may open/land them on
-their own branches while John is in a sitting or between sittings.
+| PR | What it does | Status |
+| --- | --- | --- |
+| [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) | Production-review accepts the secret **name** `ACCOUNT_DELETE_CLERK_SECRET_KEY` (delete-key name mapping from KV/`CLERK_ACCOUNT_DELETION_SECRET` custody toward the App Store delete mount name). No Key Vault write, no deploy. | **Pending** (draft) |
+| [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381) | **Decision (a) decided (CTO, 13 Nov).** Allows the exact production host pattern `https://oai-cbot-prd-[a-z0-9]{6,10}.openai.azure.com/openai/v1` and wires hosted chat (text and tools, including streaming) to the configured endpoint. Unusable configured endpoint → fail closed, never silent CosmasCode fallback. No endpoint set (staging) → unchanged. Model, deployment, and API version unchanged. | **Pending** (open; merge before AI-on first start) |
+
+Do not merge or apply those from this docs ticket. Agents may drive them to
+green while John is in a sitting or between sittings; John merges.
 
 ---
 
@@ -52,7 +55,7 @@ Times are planning envelopes; slip only if John is filming.
 
 | Who | Work | ~Duration |
 | --- | --- | --- |
-| Agents | Keep this runbook draft green (`ci:full`); watch `#377`; open/drive **`grok/prod-openai-endpoint-allow`** (decision §9 (a)) | ongoing |
+| Agents | Keep this runbook draft green (`ci:full`); watch [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) and [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381) | ongoing |
 | Agents | Prep `#356` review packet on John's Mac path (hashes, opt-in inputs with `enable_azure_openai: true`) — **do not apply** | 30–45 min |
 | Agents | List secret **names** and Clerk public fields John will need (below) | 10 min |
 
@@ -77,7 +80,7 @@ Hands-on only. Exact order:
 | --- | --- |
 | Agents | Read-only verify RG/VM/IP/OpenAI names; draft DNS record text (do not publish) |
 | Agents | Retarget host-bootstrap receipt fields to prod VM/disk IDs (staging names refused) |
-| Agents | Advance `#377` and `grok/prod-openai-endpoint-allow` toward green; do not merge without John |
+| Agents | Advance [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) and [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381) toward green; do not merge without John |
 | Agents | Prepare Key Vault **names** checklist and mode-600 password-file instructions for Sitting 2 |
 | Agents | No Run Command with secrets; no staging changes |
 
@@ -90,7 +93,7 @@ Hands-on only. Exact order:
 | 3 | Type **yes** to format the new empty data disk (prod IDs only) | 5 | **"yes, format the new empty data disk"** |
 | 4 | Publish Cloudflare DNS (proxy **off**): `beta.cosmas.ai` A, `api.beta.cosmas.ai` A → public IP; `clerk.beta.cosmas.ai` CNAME from Clerk | 10 | — |
 | 5 | Decide §9 (b) path (recommended: AI-on first start after endpoint-allow PR) and type **yes** for agents to continue host prep / data services after this sitting | 5 | **"yes, continue host prep"** |
-| 6 | Optional: merge `#377` and/or `grok/prod-openai-endpoint-allow` when green | 5 | Owner merge only |
+| 6 | Optional: merge `#377` and/or `#381` when green (both required before AI-on first start) | 5 | Owner merge only |
 
 ### After 14:30 ET — agents (same day if John said yes)
 
@@ -99,7 +102,7 @@ Not John's hands-on. Still synthetic; still no staging:
 1. Host bootstrap → Docker/IMDS guard → Postgres 16 + Redis on the VM (§3).
 2. Install mode-0400 secret files from the names John pasted (§4); Run Command
    still must not carry secret values.
-3. When `#377` + endpoint-allow are merged and John chose AI-on: flip runnable
+3. When `#377` + `#381` are merged and John chose AI-on: flip runnable
    profile flags per §9 (b); include `WORKSPACE_LLM_API_KEY` (**prod** account
    key name only).
 4. Render + `start.sh data` → `prepare` → `run`.
@@ -198,7 +201,8 @@ Created in Sitting 1 apply when `enable_azure_openai: true`:
 - Rotate provider-generated keys before loading `WORKSPACE_LLM_API_KEY`
 - Shared CosmasCode / staging keys must never enter prod
 
-Runnable traffic needs §9 (a) endpoint-allow PR + §9 (b) flag flips.
+Runnable traffic needs `#381` merged + §9 (b) flag flips (and `#377` before
+delete-key mount / AI-on first start prerequisites).
 
 ---
 
@@ -217,10 +221,12 @@ Runnable traffic needs §9 (a) endpoint-allow PR + §9 (b) flag flips.
 ## 7. OpenAI endpoint kind vs app pin
 
 **Verdict:** `#356` creates classic Azure OpenAI (`*.openai.azure.com`). App
-default pin is CosmasCode `*.services.ai.azure.com/openai/v1`. Standalone
-client/validators accept both hosts with `/openai/v1`. Hosted
-`workspace_llm_available` does **not** — see §9 (a). Prefer classic
-`https://<prod>.openai.azure.com/openai/v1` at cutover; do not change the model.
+default pin is CosmasCode `*.services.ai.azure.com/openai/v1`. **Decision (a)
+is decided (CTO, 13 Nov):** [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381)
+allows the exact production pattern
+`https://oai-cbot-prd-[a-z0-9]{6,10}.openai.azure.com/openai/v1` and wires
+hosted chat to that configured endpoint (fail closed if set but unusable; staging
+with no endpoint unchanged). Model/deployment/API version unchanged.
 
 ### Evidence (`#356` branch `grok/cosmabot-prod-hosting`)
 
@@ -275,30 +281,34 @@ API surface: Azure OpenAI **v1** path (`/openai/v1/...`), not `?api-version=`.
 Do **not** fix these in `#356`. Do **not** change app/runtime code in this
 docs PR. No model change.
 
-### (a) Hosted AI availability is pinned to CosmasCode
+### (a) Hosted production endpoint — **decided (CTO, 13 Nov)**
 
-**Confirm:**
+**Pre-decision evidence on `main` (why `#381` exists):**
 
 | File | Lines | Behavior |
 | --- | --- | --- |
 | `src/cosmas_os/config.py` | 237–238 | Default backend `disabled`; endpoint CosmasCode |
-| `src/cosmas_os/config.py` | 444–451 | Non-standalone `workspace_llm_available` requires **exact** CosmasCode endpoint + `azure_gpt41` + reviewed deployment + key |
+| `src/cosmas_os/config.py` | 444–451 (pre-`#381`) | Non-standalone `workspace_llm_available` required **exact** CosmasCode endpoint |
 | `src/cosmas_os/config.py` | 658–659 | Backend on but unavailable → runtime refuse |
 | `src/cosmas_os/adapters/gpt41.py` | 31, 170 | Default CosmasCode; constructor accepts either host |
 | `src/cosmas_os/config.py` | 912 | Standalone already accepts either host |
 
-**Contradiction:** `#356` creates a separate prod OpenAI account. Hosted path
-still refuses any non-CosmasCode endpoint when AI is on.
+**Decision:** [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381)
+(`grok/prod-openai-endpoint-allow`):
 
-**Smallest fix:** new small app PR on **`grok/prod-openai-endpoint-allow`** —
-widen lines 448–451 to accept a configured prod endpoint matching the line 912
-regex (keep CosmasCode for live users; keep deployment + key checks; no model
-change). Optional tighter one-origin allowlist if John wants it.
+1. Allows the exact production host pattern
+   `https://oai-cbot-prd-[a-z0-9]{6,10}.openai.azure.com/openai/v1` (and keeps
+   CosmasCode for existing live / unset-staging paths).
+2. Wires hosted chat — text and tools, including streaming — to the configured
+   endpoint.
+3. If that endpoint is set but unusable → fail closed with a clear error; **never**
+   silently fall back to CosmasCode.
+4. With no endpoint set (staging) → nothing changes.
+5. Model, deployment name, and API version unchanged.
 
-**Tests (mutation-killing):** prod `*.openai.azure.com/openai/v1` → available
-true; CosmasCode still true; invented host false; backend disabled still off;
-line 658 guard; model pins unchanged. CI: hosted/LLM unit shards + new matrix
-module.
+Once `#381` is merged and the production endpoint is configured, production
+chat uses production's own AI account. Do **not** recreate the `#356` OpenAI
+resource for this.
 
 ### (b) VM runtime refuses start unless AI is on with its key; `#356` profile is AI-off
 
@@ -311,29 +321,34 @@ module.
 | `infra/beta/vm/runtime/entrypoint.py` | 158–159 | Missing `WORKSPACE_LLM_API_KEY` in `secret_names` → `model_credential_required` |
 | `#356` profile `runtime-public.json` | 11–13, 16–22 | `disabled`; no `WORKSPACE_LLM_API_KEY` |
 
+**Prerequisites before AI-on first start:** merge
+[`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381) **and**
+[`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377).
+
 **Fork:**
 
-1. **Recommended today:** AI-on first start after `grok/prod-openai-endpoint-allow`
-   merges; treat `#356` disabled profile as foundation-only.
+1. **Recommended today:** AI-on first start only after `#381` + `#377` merge;
+   treat `#356` disabled profile as foundation-only.
 2. **Alternative:** separate runtime PR allowing AI-off first start (not `#356`).
 
 **Order for first `/ready` (path 1):**
 
-1. Merge `grok/prod-openai-endpoint-allow` (§9 (a)).
+1. Merge `#381` (§9 (a) decided) **and** `#377` (delete-key name allowance).
 2. Sitting 1: apply `#356` (RG, VM, OpenAI `gpt-4.1-dzus`).
 3. Host prep (agents after Sitting 2 yes).
 4. Sitting 2: John sets mode-600 passwords; pastes KV names:
    `DATABASE_PASSWORD`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`,
    `CLERK_SECRET_KEY`, `CLERK_ACCOUNT_DELETION_SECRET`,
-   `HUMAN_DEPLOY_EVIDENCE_REF`, then `WORKSPACE_LLM_API_KEY` (prod only).
-   After `#377`: optional `ACCOUNT_DELETE_CLERK_SECRET_KEY`.
-5. Flags flip: backend `azure_gpt41`; endpoint
-   `https://<prod>.openai.azure.com/openai/v1`; USDZ/deployment `gpt-4.1-dzus`;
-   `secret_names` includes `WORKSPACE_LLM_API_KEY`; synthetic + eight switches
-   false.
+   `HUMAN_DEPLOY_EVIDENCE_REF`, then `WORKSPACE_LLM_API_KEY` (prod only), and
+   `ACCOUNT_DELETE_CLERK_SECRET_KEY` once `#377` is merged.
+5. Flags flip: backend `azure_gpt41`; endpoint matching `#381` pattern
+   `https://oai-cbot-prd-<suffix>.openai.azure.com/openai/v1`;
+   USDZ/deployment `gpt-4.1-dzus`; `secret_names` includes
+   `WORKSPACE_LLM_API_KEY`; synthetic + eight switches false.
 6. Install 0400 files; `data` → `prepare` → `run`.
-7. `/ready` after DB prepare, secrets loaded, BASE satisfied, (a) available
-   true, DNS or local checks OK; `/version.json` shows reviewed commit.
+7. `/ready` after DB prepare, secrets loaded, BASE satisfied, `#381`
+   availability true for the configured prod host, DNS or local checks OK;
+   `/version.json` shows reviewed commit.
 
 ### Other gaps
 
@@ -350,11 +365,11 @@ module.
 
 ## 10. Today's checklist (Fri 13 Nov)
 
-- [ ] Agents: runbook PR green; `#377` watched; `grok/prod-openai-endpoint-allow` opened
+- [ ] Agents: runbook PR green; `#377` and `#381` watched
 - [ ] Sitting 1: plan-hash yes → `#356` apply → IP recorded → Clerk public values sent
 - [ ] Between: agent prep only (no secrets, no staging)
 - [ ] Sitting 2: KV names pasted → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
 - [ ] After 14:30: host Postgres/Redis → secrets install → flags per §9 (b) → `/ready` + `version.json`
+- [ ] `#377` **and** `#381` merged before AI-on first start
 - [ ] `#377` merged before delete-key mount
-- [ ] Endpoint-allow merged before AI-on against prod endpoint
 - [ ] Eight switches false; synthetic only; staging untouched; no CosmasCode key in prod
