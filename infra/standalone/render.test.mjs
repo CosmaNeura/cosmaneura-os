@@ -130,8 +130,10 @@ test('production audience profile keep private allowlist byte-compatible and omi
   assert.equal(Object.hasOwn(privateEnv,'optional_exact_names'),false);
   assert.equal(Object.hasOwn(privateEnv,'key_vault_secret_names'),false);
   assert.equal(Object.hasOwn(privateEnv,'key_vault_name'),false);
+  // Main fixture issuer is clerk.cosmas.ai (was identity.standalone.example.com on #272's base).
   assert.equal(files['network-requirements.json'].api_egress.length,1);
-  assert.equal(files['network-requirements.json'].api_egress[0].hostname,'identity.standalone.example.com');
+  assert.equal(files['network-requirements.json'].api_egress[0].hostname,'clerk.cosmas.ai');
+  assert.ok(!files['network-requirements.json'].api_egress.some(item=>item.hostname==='api.clerk.com'));
 });
 
 test('shared platform resources, identity ambiguity, plaintext origins and configuration injection are rejected before rendering',()=>{
