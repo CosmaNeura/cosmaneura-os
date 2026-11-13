@@ -31,6 +31,21 @@ def reviewed_hosted_llm_endpoint(endpoint: str) -> bool:
     )
 
 
+def hosted_chat_completions_url(endpoint: str) -> str | None:
+    """Resolve the hosted chat/completions URL for runtime dispatch.
+
+    Returns None when the configured base is CosmasCode so callers keep today's
+    adapter default path. Returns an explicit URL for the #356 production host.
+    Raises ValueError with a non-secret code when the configured base is set but
+    unusable — never silently falls back to CosmasCode.
+    """
+    if endpoint == COSMASCODE_LLM_ENDPOINT:
+        return None
+    if bool(re.fullmatch(PROD_OPENAI_LLM_ENDPOINT_PATTERN, endpoint)):
+        return endpoint + "/chat/completions"
+    raise ValueError("hosted_chat_endpoint_refused")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

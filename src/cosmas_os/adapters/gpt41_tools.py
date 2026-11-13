@@ -105,11 +105,18 @@ class GPT41ToolsConnector:
     tool_names = TOOL_NAMES
 
     def __init__(self, credential: Callable[[], str], *, transport: httpx.BaseTransport | None = None,
-        monotonic: Callable[[], float] = time.monotonic, deployment: str = MODEL):
+        monotonic: Callable[[], float] = time.monotonic, deployment: str = MODEL,
+        endpoint: str = ENDPOINT):
+        if not re.fullmatch(
+            r"https://[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)/openai/v1/chat/completions",
+            endpoint,
+        ):
+            raise ValueError("Exact Azure OpenAI v1 endpoint required")
         if deployment not in REQUEST_DEPLOYMENTS:
             raise ValueError("Exact reviewed Azure OpenAI deployment required")
         self.credential, self.transport, self.monotonic = credential, transport, monotonic
         self.deployment = deployment
+        self.endpoint = endpoint
 
     def _validate(self, envelope):
         return validate_prepared(envelope)
@@ -160,7 +167,7 @@ class GPT41ToolsConnector:
                         raise ValueError("operational deadline exceeded")
                     round_deadline = self.monotonic() + min(ROUND_SECONDS, remaining)
                     dispatch, sent_unknown = "started_unconfirmed", True
-                    with client.stream("POST", ENDPOINT,
+                    with client.stream("POST", self.endpoint,
                         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
                         json=body, timeout=min(ROUND_SECONDS, remaining)) as response:
                         raw = bytearray()
