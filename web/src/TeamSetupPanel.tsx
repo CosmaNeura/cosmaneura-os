@@ -8,10 +8,12 @@ import "./team-setup.css";
 import type {ReviewedTeamDraft} from './session/model';
 import {remainsUnavailableClause,unavailableInBetaLabel} from './production-review-copy';
 export type {ReviewedTeamDraft} from './session/model';
-export const readinessLabels:Record<ReadinessState,string>={ready_local:"Available locally",available_for_scoped_request:"Scoped request available",
+export function readinessLabels(env:Record<string,string|boolean|undefined>=import.meta.env):Record<ReadinessState,string>{
+  return{ready_local:"Available locally",available_for_scoped_request:"Scoped request available",
   requires_encounter:"Encounter review required",connection_required:"Prerequisite missing",disabled_by_owner:"Disabled by your settings",
-  paused:"Bot paused",retired:"Bot retired",unavailable_in_beta:unavailableInBetaLabel(),resource_restricted:"Source restricted by your settings",
+  paused:"Bot paused",retired:"Bot retired",unavailable_in_beta:unavailableInBetaLabel(env),resource_restricted:"Source restricted by your settings",
   resource_unavailable:"Selected source unavailable",work_limit_reached:"New model work paused or allowance used"};
+}
 const capabilityLabels:Record<CapabilityId,string>={saved_notebook:"Saved notebook",saved_evidence:"Saved evidence",work_status:"Work status",
   model_answer:"AI answers",private_draft_handoff:"Private bot assignments",practice_work_brief:"Scheduled work briefs",encounter_prep:"Saved intake preparation",
   consented_capture:"Consented recording",clinical_note:"Clinical note",transcript_correction:"Transcript correction",calendar_availability:"Calendar availability",
@@ -22,7 +24,7 @@ export function SetupReadiness({configuration,setup,label}:{configuration:TeamCo
     <p>Availability depends on the current connections and the access you allow. Each action checks its required sources and permissions again.</p>
     {configuration.bots.map(bot=><details key={botAddress(bot)}><summary>{bot.name || "Unnamed coworker"} · {bot.retired?"Retired":bot.enabled?"Configured":"Paused"}</summary>
       <ul>{setup.capabilities.filter(c=>c.bot===botAddress(bot)).map(c=><li key={c.capability}>
-        <div><strong>{capabilityLabels[c.capability]}</strong><span className="team-pill">{readinessLabels[c.state]}</span></div>
+        <div><strong>{capabilityLabels[c.capability]}</strong><span className="team-pill">{readinessLabels()[c.state]}</span></div>
         <p>{c.explanation}</p>
         {c.sources.length>0&&<small>{c.sources.map(s=>s.kind==="runtime"?`Runtime ${s.key}: ${s.enabled?"enabled":"disabled"}`:
           s.kind==="account"?`Account mapping ${s.key}: ${s.state}`:s.kind==="routine"?`Routine revision ${s.revision}: ${s.status.replaceAll("_"," ")}`:

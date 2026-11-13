@@ -6,9 +6,31 @@ type Env = Record<string, string | boolean | undefined>;
  * App Store / production-review builds pin VITE_WORKSPACE_HOSTED_API_ORIGIN to
  * PRODUCTION_API_ORIGIN (api.beta.cosmas.ai) via the operational-production-v1
  * identity. Staging and live beta use other origins. Unknown/omitted → not production.
+ * Compare via URL.origin so a trailing slash still matches; non-URL values fail closed.
+ *
+ * Every client pointed at api.beta.cosmas.ai (hosted web included) gets this copy on
+ * purpose — that origin is the production-review / production API host.
  */
 export function isProductionReviewProfile(env: Env = import.meta.env): boolean {
-  return env.VITE_WORKSPACE_HOSTED_API_ORIGIN === PRODUCTION_API_ORIGIN;
+  const raw = env.VITE_WORKSPACE_HOSTED_API_ORIGIN;
+  if (typeof raw !== 'string' || !raw) return false;
+  try {
+    return new URL(raw).origin === PRODUCTION_API_ORIGIN;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Production must not present mock/synthetic EHR data as live clinical records.
+ * Hide Athena, Tebra and EHR-read panels when transport is mock or mode is synthetic.
+ */
+export function hideMockSyntheticEhrOnProduction(
+  status: {transport?: string; mode?: string},
+  env: Env = import.meta.env,
+): boolean {
+  if (!isProductionReviewProfile(env)) return false;
+  return status.transport === 'mock' || status.mode === 'synthetic';
 }
 
 export function nativeSignInUnavailableDetail(env: Env = import.meta.env): string {
@@ -17,17 +39,60 @@ export function nativeSignInUnavailableDetail(env: Env = import.meta.env): strin
     : 'Use the approved test build to sign in to your workspace.';
 }
 
-/** Trailing disclaimer after the EHR instructional sentence; empty on production. */
+/** Trailing disclaimer after the EHR instructional sentence. Never empty on production. */
 export function inventedRecordsDisclaimer(env: Env = import.meta.env): string {
-  return isProductionReviewProfile(env) ? '' : ' Only invented records are supported in this setup.';
+  return isProductionReviewProfile(env)
+    ? ' Sample records are not from a live EHR account.'
+    : ' Only invented records are supported in this setup.';
 }
 
 export function athenaInventedExampleSuffix(env: Env = import.meta.env): string {
-  return isProductionReviewProfile(env) ? '' : ' · Local example — invented Athena clinical records';
+  return isProductionReviewProfile(env)
+    ? ' · Sample records, not from your Athena account'
+    : ' · Local example — invented Athena clinical records';
 }
 
 export function tebraInventedExampleSuffix(env: Env = import.meta.env): string {
-  return isProductionReviewProfile(env) ? '' : ' · Local example — invented Tebra clinical records';
+  return isProductionReviewProfile(env)
+    ? ' · Sample records, not from your Tebra account'
+    : ' · Local example — invented Tebra clinical records';
+}
+
+/** Neutral transport / practice label for EHR-read; never claims live clinical records. */
+export function ehrTransportLabelCopy(
+  value: {transport?: 'mock' | 'vendor_sandbox'; provider?: 'elation' | 'tebra'},
+  env: Env = import.meta.env,
+): string {
+  const production = isProductionReviewProfile(env);
+  if (value.provider === 'tebra') {
+    return production
+      ? 'Sample records, not from your Tebra account'
+      : 'Local example — invented Tebra records';
+  }
+  if (value.transport === 'vendor_sandbox') {
+    return production ? 'Elation sandbox' : 'Elation sandbox — invented test data';
+  }
+  return production ? 'Sample records, not from a live EHR account' : 'Local example';
+}
+
+export function ehrAccessNotEnabledMessage(
+  kind: 'problems' | 'medications' | 'labs',
+  env: Env = import.meta.env,
+): string {
+  const setup = isProductionReviewProfile(env) ? '' : ' in this setup';
+  if (kind === 'problems') {
+    return `Problem-list access is not enabled${setup}. Appointment review remains available.`;
+  }
+  if (kind === 'medications') {
+    return `Medication-record access is not enabled${setup}. Appointment review remains available.`;
+  }
+  return `Laboratory-report access is not enabled${setup}. Other available records remain accessible.`;
+}
+
+export function elationSandboxEnableButtonLabel(env: Env = import.meta.env): string {
+  return isProductionReviewProfile(env)
+    ? 'Enable this practice’s Elation sandbox'
+    : 'Use this practice’s Elation sandbox';
 }
 
 export function comingSoonLabel(env: Env = import.meta.env): string {
@@ -86,3 +151,14 @@ export function vendorDeliveryDisabledMessage(env: Env = import.meta.env): strin
     ? 'Vendor delivery is disabled for this environment.'
     : 'Vendor delivery is disabled for this beta environment.';
 }
+
+/** Phrases App Store reviewers must not see on the production-review origin. */
+export const TEST_STAGE_PHRASES = [
+  'Use the approved test build to sign in',
+  'Coming soon',
+  'Only invented records',
+  'invented rehearsal',
+  'Synthetic preview',
+  'Local example — invented',
+  'Tebra clinical records',
+] as const;

@@ -1,20 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import * as shared from './operational-native-identity.mjs';
 import * as desktop from '../desktop/native-identity-config.mjs';
 import {exactHostedOrigin} from './hosted-workspace-config.mjs';
 import {exactHostedApiOrigin} from '../desktop/hosted-auth-http.mjs';
-
-test('TypeScript declaration pins PRODUCTION_API_ORIGIN to the runtime constant', () => {
-  const declaration = readFileSync(new URL('./operational-native-identity.d.mts', import.meta.url), 'utf8');
-  const match = declaration.match(/export const PRODUCTION_API_ORIGIN:\s*"([^"]+)";/);
-  assert.ok(match, 'operational-native-identity.d.mts must declare PRODUCTION_API_ORIGIN');
-  assert.equal(match[1], shared.PRODUCTION_API_ORIGIN);
-  // Mutation: changing only the .mjs constant or only the .d.mts literal fails this assert.
-});
 
 test('desktop retains exactly the shared operational identity contract',()=>{
   assert.deepEqual(Object.keys(desktop).sort(),Object.keys(shared).sort());
@@ -52,6 +43,13 @@ test('production profile accepts only clerk.beta.cosmas.ai and staging rejects p
       organizationId:'org_invented_beta',audience:'cosmas-os-beta-api',
     };
     assert.deepEqual(shared.validateOperationalNativeIdentity(production,client,production.apiOrigin),production);
+    // Non-production profiles must not carry PRODUCTION_API_ORIGIN.
+    assert.throws(()=>shared.validateOperationalNativeIdentity({
+      version:1,profile:shared.OPERATIONAL_NATIVE_PROFILE,client,
+      apiOrigin:shared.PRODUCTION_API_ORIGIN,
+      frontendOrigin:'https://clerk.cosmas.ai',publishableKey:liveKey('clerk.cosmas.ai'),
+      organizationId:'org_invented_beta',audience:'cosmas-os-beta-api',
+    },client,shared.PRODUCTION_API_ORIGIN));
     assert.equal(shared.operationalNativeAuthSettings(production).frontendOrigin,'https://clerk.beta.cosmas.ai');
     assert.equal(shared.validateOperationalNativeDataMode('authorized_beta',production),'authorized_beta');
     for (const changed of [

@@ -8,7 +8,7 @@ import {modelCanonical,modelTime,modelStrip,validModelWorkspace,MODEL_WORKSPACE_
 import {teamClosed,teamHash,teamNatural,teamUuid} from './team-setup-request';
 import {parseVendorJson,vendorSha256} from './vendor-contract';
 import {PERSONAL_CONNECTION_DEADLINE_MS} from './connection-operation-health';
-import {isProductionReviewProfile} from './production-review-copy';
+import {ehrTransportLabelCopy} from './production-review-copy';
 
 export const EHR_READ_BUILD=import.meta.env.VITE_EHR_READ_ENABLED==='true';
 export type EhrProvider='elation'|'tebra';
@@ -19,15 +19,8 @@ export type EhrPractice={label:string;timezone:string};
 export type EhrTransport='mock'|'vendor_sandbox';
 export type EhrInstallation={id:string;sha256:string};
 export const ehrTransport=(value:{transport?:EhrTransport}):EhrTransport=>value.transport??'mock';
-export const ehrTransportLabel=(value:{transport?:EhrTransport;provider?:EhrProvider})=>{
-  if(ehrProvider(value)==='tebra'){
-    return isProductionReviewProfile()?'Tebra clinical records':'Local example — invented Tebra records';
-  }
-  if(ehrTransport(value)==='vendor_sandbox'){
-    return isProductionReviewProfile()?'Elation sandbox':'Elation sandbox — invented test data';
-  }
-  return 'Local example';
-};
+export const ehrTransportLabel=(value:{transport?:EhrTransport;provider?:EhrProvider})=>
+  ehrTransportLabelCopy({transport:ehrTransport(value),provider:ehrProvider(value)});
 export type EhrInstallRequest={action:'install';installation_id:string;installation_sha256:string;idempotency_key:string};
 export type EhrInstallReceipt={contract_version:1;status:'installed'|'unavailable';transport:'vendor_sandbox';installation_id:string;installation_sha256:string;connection_id:string;binding_sha256:string;idempotency_key:string;request_sha256:string};
 export type EhrReadStatus={contract_version:1;provider:EhrProvider;mode:'synthetic';status:'not_enabled'|'not_configured'|'setup_required'|'ready';transport?:EhrTransport;installation?:EhrInstallation|null;connection_id:string|null;binding_sha256:string|null;practice:EhrPractice|null;problems?:'available'|'not_enabled'|'not_configured';medications?:'available'|'not_enabled'|'not_configured';labs?:'available'|'not_enabled'|'not_configured'};
