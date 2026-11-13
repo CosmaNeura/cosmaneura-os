@@ -19,10 +19,10 @@ const fingerprint=files=>createHash('sha256').update(JSON.stringify(files)).dige
 //   const fp=f=>createHash('sha256').update(JSON.stringify(f)).digest('hex');
 //   console.log(fp(render(structuredClone(sample))));
 //   "
-const DEDICATED_AUDIENCE_FINGERPRINT='a8157eea72ab7be14aca790f5e4fa27a7f3ea839a4d34682dce2cb4c448f372f';
-// Updated for T-REL-7c staging ACCOUNT_DELETE KV/egress/DNS contract.
-const DEDICATED_SHARED_STAGING_FINGERPRINT='6c88253824fce08e91f2831fa1ff0e4c72c65c55567943e9182f782f7ad34cf9';
-const OWNED_STAGING_FINGERPRINT='a2e8726ce2de6ea44208d8d73b69ac039243884b71e922222ee680ba1a0e8c7f';
+// Regenerated after schema_revision bump to b57c3d0e9142 (account_delete_intents).
+const DEDICATED_AUDIENCE_FINGERPRINT='d905f23a38bc908aca675744a2de9b6a67a2731d97dd9a064f80b5bc3f82b8a2';
+const DEDICATED_SHARED_STAGING_FINGERPRINT='68b6fad649ce96733f2cf8e462fc73c0af33fb27968c040c79a179449384f54f';
+const OWNED_STAGING_FINGERPRINT='9841c565c3bcd0ad985cb5581b48366707a6fe9e6f8fd70e424c6835505dde0f';
 
 const EXPLICIT_FALSE=[
   'WORKSPACE_CAPTURE_PROXY_ENABLED','GOOGLE_CONNECTION_BROKER_ENABLED',
