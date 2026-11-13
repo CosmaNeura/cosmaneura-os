@@ -8,6 +8,13 @@
 import AuthenticationServices
 
 extension Auth {
+  /// Obtain a native Apple token for an existing browser Clerk client. This
+  /// credential-only entry point neither configures Clerk nor starts sign-up.
+  @MainActor public static func requestAppleIdentityToken() async throws -> String {
+    let credential = try await appleCredential([.email], environment: nil)
+    return credential.tokenString
+  }
+
   private static let appleSignUpRestrictionErrorCodes: Set<String> = [
     "sign_up_mode_restricted",
     "sign_up_restricted_waitlist",
