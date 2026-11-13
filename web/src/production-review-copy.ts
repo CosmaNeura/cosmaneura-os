@@ -1,3 +1,4 @@
+import {exactHostedOrigin} from '../../clients/shared/hosted-workspace-config.mjs';
 import {PRODUCTION_API_ORIGIN} from '../../clients/shared/operational-native-identity.mjs';
 
 type Env = Record<string, string | boolean | undefined>;
@@ -6,31 +7,22 @@ type Env = Record<string, string | boolean | undefined>;
  * App Store / production-review builds pin VITE_WORKSPACE_HOSTED_API_ORIGIN to
  * PRODUCTION_API_ORIGIN (api.beta.cosmas.ai) via the operational-production-v1
  * identity. Staging and live beta use other origins. Unknown/omitted → not production.
- * Compare via URL.origin so a trailing slash still matches; non-URL values fail closed.
+ * Uses exactHostedOrigin (https, no port/userinfo/path/trailing slash) then exact
+ * equality with PRODUCTION_API_ORIGIN. Non-exact values fail closed.
  *
  * Every client pointed at api.beta.cosmas.ai (hosted web included) gets this copy on
  * purpose — that origin is the production-review / production API host.
  */
 export function isProductionReviewProfile(env: Env = import.meta.env): boolean {
   const raw = env.VITE_WORKSPACE_HOSTED_API_ORIGIN;
-  if (typeof raw !== 'string' || !raw) return false;
-  try {
-    return new URL(raw).origin === PRODUCTION_API_ORIGIN;
-  } catch {
-    return false;
-  }
+  return typeof raw === 'string' && exactHostedOrigin(raw) && raw === PRODUCTION_API_ORIGIN;
 }
 
-/**
- * Production must not present mock/synthetic EHR data as live clinical records.
- * Hide Athena, Tebra and EHR-read panels when transport is mock or mode is synthetic.
- */
-export function hideMockSyntheticEhrOnProduction(
-  status: {transport?: string; mode?: string},
-  env: Env = import.meta.env,
-): boolean {
-  if (!isProductionReviewProfile(env)) return false;
-  return status.transport === 'mock' || status.mode === 'synthetic';
+/** Shown when production-review builds open the EHR / practice-records task. */
+export function practiceRecordsUnavailableCopy(env: Env = import.meta.env): string {
+  return isProductionReviewProfile(env)
+    ? 'Practice records are not available in this release.'
+    : '';
 }
 
 export function nativeSignInUnavailableDetail(env: Env = import.meta.env): string {

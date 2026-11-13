@@ -10,7 +10,7 @@ import {emptyEhrReadRecovery,validateEhrReadRecovery,type EhrReadRecovery,type E
 import {useGoogleNativeForeground} from './use-google-native-foreground';
 import {useUnsavedWork} from './unsaved-work';
 import {modelCanonical} from './model-work-request';
-import {ehrAccessNotEnabledMessage,elationSandboxEnableButtonLabel,elationSandboxSetupCopy,hideMockSyntheticEhrOnProduction,inventedRecordsDisclaimer} from './production-review-copy';
+import {ehrAccessNotEnabledMessage,elationSandboxEnableButtonLabel,elationSandboxSetupCopy,inventedRecordsDisclaimer} from './production-review-copy';
 export type EhrReadPanelProps={provider?:EhrProvider;identity:AuthenticatedWorkspaceIdentity;scope:EhrReadScope;recovery:EhrReadRecoveryAccess;workspace:EhrReadVisit;active?:boolean;locked?:boolean;recoveryLocked?:boolean;currentSources?:readonly {id:string;state:'current'|'unavailable'}[];onBusyChange?(busy:boolean):void;onAuthenticationLost(error:unknown):void;onAskChief?(source:EhrReadSaved):void;onRefreshVisit?():Promise<void>};
 const authority=(e:unknown)=>e instanceof WorkspaceApiError&&[401,403].includes(e.status);
 const localTime=(date:Date)=>new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
@@ -141,8 +141,6 @@ export function EhrReadPanel(props:EhrReadPanelProps){
  const reviewVisit=observation&&observation.kind!=='window'?(observation.kind==='lab_reports'||observation.kind==='verified_lab_report'?record?.verified?.observation.kind==='verified_visit'?record.verified.observation.item:null:observation.item):null;
  const windowObservation=available&&record?.window?.observation.kind==='window'?record.window.observation:null;
  const format=(s:string)=>new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short',timeZone:connection?.practice?.timezone||'UTC'}).format(new Date(s));
- // EhrReadStatus is typed mode:'synthetic'; hide mock/synthetic EHR on production-review.
- if(hideMockSyntheticEhrOnProduction(connection??{mode:'synthetic',transport:'mock'}))return null;
  return <section className="ehr-read-panel" aria-label={`${name} appointments`}>
   <h3>Choose an appointment for this visit</h3><p>Visit: <strong>{workspace.label}</strong></p>
   <p className="team-fine">Choose the dates, check the patient and appointment, then review the available records before saving a source. Your draft stays in place.{inventedRecordsDisclaimer()}{provider==='tebra'?' Tebra supports appointment review only here.':''}</p>

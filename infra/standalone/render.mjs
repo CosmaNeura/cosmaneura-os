@@ -7,13 +7,16 @@ import {workspaceIdentityInputs} from '../../scripts/prepare-workspace-identity.
 import {REVIEWED_CORE_CAPTURE_ORIGIN} from '../../clients/shared/beta-feature-profile.mjs';
 import {
   OPERATIONAL_NATIVE_PROFILE,
-  PRODUCTION_API_ORIGIN,
   PRODUCTION_NATIVE_PROFILE,
   STAGING_NATIVE_PROFILE,
 } from '../../clients/shared/operational-native-identity.mjs';
 
 export class Refused extends Error {}
 const refuse=code=>{throw new Refused(code);};
+// Align with #377 production-review host predicates (refusal text and behavior).
+export const REVIEW_WEB_ORIGIN='https://beta.cosmas.ai';
+export const REVIEW_CLERK_ISSUER='https://clerk.beta.cosmas.ai';
+export const STAGING_SESSION_POLICY='shared_staging';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const object=(value,keys,code)=>{
   if(!value||typeof value!=='object'||Array.isArray(value)||
@@ -120,6 +123,9 @@ export function validateInput(value){
   const features=betaFeatures(value);
   const ownedPair=syntheticWebHosts.some(host=>value.web_origin===`https://${host}`&&value.api_origin===`https://api.${host}`);
   if(ownedVm&&(features.profile!=='independent-beta-v1'||!ownedPair))refuse('exact_owned_cosmabot_routes_required');
+  // Production-review host cannot use shared_staging (exclusive review predicate).
+  if(value.web_origin===REVIEW_WEB_ORIGIN&&value.identity_policy===STAGING_SESSION_POLICY)
+    refuse('production_review_requires_audience_policy');
   if(typeof value.instance_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.instance_id))refuse('instance_uuid_required');
   if(typeof value.box_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.box_id)||value.box_id===value.instance_id)refuse('distinct_fresh_box_uuid_required');
   if(!/^[0-9a-f]{40}$/.test(value.source_commit))refuse('source_commit_required');
@@ -127,15 +133,17 @@ export function validateInput(value){
   if(web===api)refuse('separate_api_and_web_origins_required');
   const issuer=origin(value.identity?.frontendOrigin);
   if(issuer.endsWith('.invalid')||issuer.endsWith('.localhost')||[web,api].includes(issuer))refuse('separate_explicit_clerk_issuer_required');
-  const staging=value.identity_policy==='shared_staging';
+  const staging=value.identity_policy===STAGING_SESSION_POLICY;
+  const reviewHost=value.web_origin===REVIEW_WEB_ORIGIN;
+  const expectedProfile=staging?STAGING_NATIVE_PROFILE:reviewHost?PRODUCTION_NATIVE_PROFILE:OPERATIONAL_NATIVE_PROFILE;
   const audience=value.identity?.audience;
-  // api.beta.cosmas.ai is production-only; owned beta.cosmas.ai must use operational-production-v1.
-  const productionOwned=value.web_origin==='https://beta.cosmas.ai'&&value.api_origin===PRODUCTION_API_ORIGIN;
-  const expectedProfile=staging?STAGING_NATIVE_PROFILE:productionOwned?PRODUCTION_NATIVE_PROFILE:OPERATIONAL_NATIVE_PROFILE;
   if(!['audience','shared_staging'].includes(value.identity_policy)||
     value.identity?.profile!==expectedProfile||
     value.identity?.apiOrigin!==value.api_origin||
     typeof audience!=='string'||(staging?audience!=='':!/^[\x21-\x7e]{1,255}$/.test(audience)))refuse('explicit_matching_identity_policy_required');
+  // Exclusive review: beta.cosmas.ai + audience also requires clerk.beta issuer.
+  if(reviewHost&&!staging&&value.identity.frontendOrigin!==REVIEW_CLERK_ISSUER)
+    refuse('production_review_requires_clerk_beta_issuer');
   if(captureEnabled)requireCaptureToolsInputs(value,features,ownedVm);
   // Audience identifies the reviewed receiving application. The exact issuer,
   // organization and Box bind the practice; storage remains instance-specific.

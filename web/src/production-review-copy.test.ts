@@ -6,11 +6,11 @@ import {
   ehrAccessNotEnabledMessage,
   ehrTransportLabelCopy,
   elationSandboxEnableButtonLabel,
-  hideMockSyntheticEhrOnProduction,
   inventedRecordsDisclaimer,
   isProductionReviewProfile,
   nativeSignInUnavailableDetail,
   paymentsComingSoonReason,
+  practiceRecordsUnavailableCopy,
   remainsUnavailableClause,
   schedulingGuideAccess,
   teamSaveRequiresCheckMessage,
@@ -23,7 +23,6 @@ import {
 } from './production-review-copy';
 
 const production = {VITE_WORKSPACE_HOSTED_API_ORIGIN: PRODUCTION_API_ORIGIN};
-const productionSlash = {VITE_WORKSPACE_HOSTED_API_ORIGIN: `${PRODUCTION_API_ORIGIN}/`};
 const staging = {VITE_WORKSPACE_HOSTED_API_ORIGIN: 'https://api.staging.cosmas.ai'};
 const betaPractice = {
   VITE_WORKSPACE_HOSTED_API_ORIGIN: 'https://api.00000000-0000-4000-8000-000000000001.workspace.cosmas.ai',
@@ -35,24 +34,28 @@ afterEach(() => {
 });
 
 describe('isProductionReviewProfile', () => {
-  it('is true only for the pinned production-review API origin (URL.origin)', () => {
+  it('is true only for the exact hosted production-review API origin', () => {
     expect(isProductionReviewProfile(production)).toBe(true);
-    expect(isProductionReviewProfile(productionSlash)).toBe(true);
     expect(isProductionReviewProfile(staging)).toBe(false);
     expect(isProductionReviewProfile(betaPractice)).toBe(false);
     expect(isProductionReviewProfile(omitted)).toBe(false);
     expect(isProductionReviewProfile({VITE_WORKSPACE_HOSTED_API_ORIGIN: 'https://api.beta.cosmas.ai.evil.invalid'})).toBe(false);
     expect(isProductionReviewProfile({VITE_WORKSPACE_HOSTED_API_ORIGIN: 'not-a-url'})).toBe(false);
   });
-});
 
-describe('hideMockSyntheticEhrOnProduction', () => {
-  it('hides mock or synthetic EHR only on the production origin', () => {
-    expect(hideMockSyntheticEhrOnProduction({mode: 'synthetic', transport: 'mock'}, production)).toBe(true);
-    expect(hideMockSyntheticEhrOnProduction({mode: 'synthetic'}, production)).toBe(true);
-    expect(hideMockSyntheticEhrOnProduction({transport: 'mock'}, production)).toBe(true);
-    expect(hideMockSyntheticEhrOnProduction({transport: 'vendor_sandbox'}, production)).toBe(false);
-    expect(hideMockSyntheticEhrOnProduction({mode: 'synthetic', transport: 'mock'}, staging)).toBe(false);
+  it('refuses lookalike origins (port, http, trailing dot, userinfo host, beta.staging)', () => {
+    for (const raw of [
+      'https://api.beta.cosmas.ai:443',
+      'https://api.beta.cosmas.ai:8443',
+      'http://api.beta.cosmas.ai',
+      'https://api.beta.cosmas.ai.',
+      'https://api.beta.cosmas.ai@other-host.invalid',
+      'https://api.beta.staging.cosmas.ai',
+      `${PRODUCTION_API_ORIGIN}/`,
+      `${PRODUCTION_API_ORIGIN}/path`,
+    ]) {
+      expect(isProductionReviewProfile({VITE_WORKSPACE_HOSTED_API_ORIGIN: raw}), raw).toBe(false);
+    }
   });
 });
 
@@ -82,46 +85,31 @@ describe('production-review copy helpers', () => {
       expect(ehrTransportLabelCopy({provider: 'tebra'}, env)).toBe('Local example — invented Tebra records');
       expect(ehrTransportLabelCopy({transport: 'vendor_sandbox'}, env)).toBe('Elation sandbox — invented test data');
       expect(ehrTransportLabelCopy({transport: 'mock'}, env)).toBe('Local example');
+      expect(practiceRecordsUnavailableCopy(env)).toBe('');
     }
   });
 
-  it('gives production reviewers honest non-test-stage wording without claiming live EHR', () => {
+  it('gives production reviewers honest non-test-stage wording without empty screens', () => {
     expect(nativeSignInUnavailableDetail(production)).toBe(
       'This installation could not start sign-in. Reopen the app or contact your practice administrator.',
     );
     expect(nativeSignInUnavailableDetail(production)).not.toMatch(/test build|synthetic|invented|rehearsal|Coming soon/i);
-    expect(inventedRecordsDisclaimer(production)).not.toBe('');
-    expect(inventedRecordsDisclaimer(production)).toMatch(/Sample records|not from a live/i);
-    expect(athenaInventedExampleSuffix(production)).toContain('Sample records, not from your Athena account');
-    expect(tebraInventedExampleSuffix(production)).toBe(' · Sample records, not from your Tebra account');
-    expect(ehrTransportLabelCopy({provider: 'tebra'}, production)).toBe('Sample records, not from your Tebra account');
-    expect(ehrTransportLabelCopy({provider: 'tebra'}, production)).not.toBe('Tebra clinical records');
-    expect(ehrTransportLabelCopy({transport: 'mock'}, production)).toMatch(/Sample records/i);
-    expect(ehrTransportLabelCopy({transport: 'vendor_sandbox'}, production)).toBe('Elation sandbox');
+    expect(practiceRecordsUnavailableCopy(production)).toBe('Practice records are not available in this release.');
     expect(comingSoonLabel(production)).toBe('Not available');
     expect(paymentsComingSoonReason(production)).toBe('Live payment collection is not available in this release.');
     expect(schedulingGuideAccess(production)).toContain('Live booking is not available in this release.');
     expect(unavailableInBetaLabel(production)).toBe('Unavailable');
     expect(teamSaveRequiresCheckMessage(production)).not.toContain('rehearsal');
-    expect(elationSandboxSetupCopy(production)).not.toContain('invented');
-    expect(elationSandboxEnableButtonLabel(production)).toBe('Enable this practice’s Elation sandbox');
-    expect(ehrAccessNotEnabledMessage('labs', production)).toBe(
-      'Laboratory-report access is not enabled. Other available records remain accessible.',
-    );
     expect(vendorDeliveryDisabledMessage(production)).toBe('Vendor delivery is disabled for this environment.');
   });
 });
 
-describe('ehrTransportLabel production vs staging', () => {
-  it('keeps invented transport labels off production and on staging', async () => {
+describe('ehrTransportLabel staging path', () => {
+  it('keeps invented transport labels on staging (panel still mounts off production)', async () => {
     const {ehrTransportLabel} = await import('./ehr-read-api');
     vi.stubEnv('VITE_WORKSPACE_HOSTED_API_ORIGIN', 'https://api.staging.cosmas.ai');
     expect(ehrTransportLabel({provider: 'tebra'})).toBe('Local example — invented Tebra records');
     expect(ehrTransportLabel({transport: 'vendor_sandbox'})).toBe('Elation sandbox — invented test data');
     expect(ehrTransportLabel({transport: 'mock'})).toBe('Local example');
-    vi.stubEnv('VITE_WORKSPACE_HOSTED_API_ORIGIN', PRODUCTION_API_ORIGIN);
-    expect(ehrTransportLabel({provider: 'tebra'})).toBe('Sample records, not from your Tebra account');
-    expect(ehrTransportLabel({transport: 'vendor_sandbox'})).toBe('Elation sandbox');
-    expect(ehrTransportLabel({transport: 'mock'})).toMatch(/Sample records/i);
   });
 });

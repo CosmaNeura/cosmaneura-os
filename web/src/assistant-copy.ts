@@ -21,8 +21,9 @@ export function showCustomBotControls(env: Record<string, string | boolean | und
 }
 
 /** Coming-soon connection cards stay hidden unless explicitly enabled.
- * Production-review builds always hide them (App Store must not show test-stage placeholders). */
+ * Production-review builds always show them as neutral "Not available" cards so
+ * Review-saved-work recovery stays reachable for payments and portals. */
 export function showComingSoonConnections(env: Record<string, string | boolean | undefined> = import.meta.env): boolean {
-  if (isProductionReviewProfile(env)) return false;
+  if (isProductionReviewProfile(env)) return true;
   return env.VITE_COMING_SOON_CONNECTIONS_ENABLED === 'true';
 }
