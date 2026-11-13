@@ -576,6 +576,16 @@ def test_portable_iphone_compose_refuses_to_rewrite_the_frozen_scaffold(tmp_path
     assert list(existing.iterdir()) == []
 
 
+def test_composed_iphone_apple_entitlement_adds_only_default(tmp_path):
+    output = tmp_path / "apple-entitlement"
+    _portable().compose(ROOT, output)
+    entitlements = output / "apps/capture/ios/App/App/CosmasDevice.entitlements"
+    assert plistlib.loads(entitlements.read_bytes()) == {
+        "keychain-access-groups": ["$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)"],
+        "com.apple.developer.applesignin": ["Default"],
+    }
+
+
 def test_portable_iphone_requires_every_reviewed_native_practice_addition_before_output(tmp_path, monkeypatch):
     module = _portable()
     monkeypatch.setattr(module, "NATIVE_PRACTICE_ADDITIONS", (
