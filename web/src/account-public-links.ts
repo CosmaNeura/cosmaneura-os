@@ -8,8 +8,8 @@
  * TODO(John): publish the final Privacy Policy and Support URLs, then replace
  * these clearly marked placeholder defaults in build/env composition.
  */
-export const DEFAULT_PRIVACY_POLICY_URL = 'https://cosmas.ai/privacy';
-export const DEFAULT_SUPPORT_URL = 'https://cosmas.ai/support';
+export const DEFAULT_PRIVACY_POLICY_URL = 'https://cosmas.ai/cosmabot/privacy';
+export const DEFAULT_SUPPORT_URL = 'https://cosmas.ai/cosmabot/support';
 
 function configuredUrl(value: string | undefined, fallback: string): string {
   const trimmed = value?.trim();

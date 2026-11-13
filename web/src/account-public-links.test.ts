@@ -11,8 +11,8 @@ afterEach(()=>{
 });
 
 it('pins the clearly marked placeholder defaults until John publishes final URLs',()=>{
-  expect(DEFAULT_PRIVACY_POLICY_URL).toBe('https://cosmas.ai/privacy');
-  expect(DEFAULT_SUPPORT_URL).toBe('https://cosmas.ai/support');
+  expect(DEFAULT_PRIVACY_POLICY_URL).toBe('https://cosmas.ai/cosmabot/privacy');
+  expect(DEFAULT_SUPPORT_URL).toBe('https://cosmas.ai/cosmabot/support');
 });
 
 it('falls back to placeholder defaults when config keys are omitted or blank',()=>{

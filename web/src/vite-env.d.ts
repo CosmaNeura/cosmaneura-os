@@ -30,12 +30,12 @@ interface ImportMetaEnv {
   readonly VITE_COMING_SOON_CONNECTIONS_ENABLED?: string;
   /**
    * Public Privacy Policy URL shown on the Account screen (App Store 5.1.1(i)).
-   * Placeholder default is https://cosmas.ai/privacy until John publishes the final URL.
+   * Placeholder default is https://cosmas.ai/cosmabot/privacy until John publishes the final URL.
    */
   readonly VITE_PRIVACY_POLICY_URL?: string;
   /**
    * Public Support URL shown on the Account screen.
-   * Placeholder default is https://cosmas.ai/support until John publishes the final URL.
+   * Placeholder default is https://cosmas.ai/cosmabot/support until John publishes the final URL.
    */
   readonly VITE_SUPPORT_URL?: string;
 }
