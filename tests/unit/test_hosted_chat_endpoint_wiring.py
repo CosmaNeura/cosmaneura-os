@@ -351,8 +351,10 @@ def test_hosted_tools_dispatch_posts_to_prod_endpoint(monkeypatch, kind):
     assert tool_calls == [{"tool": "list_selected_sources"}]
 
 
-def test_hosted_tools_dispatch_cosmascode_constructor_unchanged(monkeypatch):
-    envelope, _ctx = _prepare_tools_envelope("base")
+@pytest.mark.parametrize("kind", ["base", "compact", "connector", "delivery"])
+def test_hosted_tools_dispatch_cosmascode_constructor_unchanged(monkeypatch, kind):
+    envelope, _ctx = _prepare_tools_envelope(kind)
+    connector_cls = _connector_class(kind)
     calls: list[httpx.Request] = []
     seen: dict[str, object] = {}
 
@@ -363,19 +365,19 @@ def test_hosted_tools_dispatch_cosmascode_constructor_unchanged(monkeypatch):
             200,
             json=tool_answer(
                 content={
-                    "answer": "Invented CosmasCode tools reply.",
+                    "answer": f"Invented CosmasCode {kind} tools reply.",
                     "source_ids": ["invented-source"],
                 }
             ),
         )
 
-    real = GPT41ToolsConnector
+    real = connector_cls
 
     def capturing(credential, **kwargs):
         seen["kwargs"] = dict(kwargs)
         return real(credential, **kwargs)
 
-    monkeypatch.setattr(model_work, "GPT41ToolsConnector", capturing)
+    monkeypatch.setattr(model_work, connector_cls.__name__, capturing)
     monkeypatch.setattr(model_work.team, "runtime_settings", _runtime(COSMASCODE_LLM_ENDPOINT))
     claim = model_work.ModelClaim(
         str(uuid4()),
@@ -387,13 +389,14 @@ def test_hosted_tools_dispatch_cosmascode_constructor_unchanged(monkeypatch):
         envelope,
     )
     result = model_work.dispatch_claim(claim, transport=httpx.MockTransport(respond))
-    assert "Invented CosmasCode tools reply." in result.content
+    assert f"Invented CosmasCode {kind} tools reply." in result.content
     assert "endpoint" not in seen["kwargs"]
     assert str(calls[0].url) == ENDPOINT
 
 
-def test_hosted_tools_unusable_endpoint_fails_closed_without_http(monkeypatch):
-    envelope, _ctx = _prepare_tools_envelope("base")
+@pytest.mark.parametrize("kind", ["base", "compact", "connector", "delivery"])
+def test_hosted_tools_unusable_endpoint_fails_closed_without_http(monkeypatch, kind):
+    envelope, _ctx = _prepare_tools_envelope(kind)
     calls: list[httpx.Request] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
@@ -420,6 +423,7 @@ def test_hosted_tools_unusable_endpoint_fails_closed_without_http(monkeypatch):
     assert calls == []
 
 
+@pytest.mark.parametrize("kind", ["base", "compact", "connector", "delivery"])
 @pytest.mark.parametrize(
     "bad",
     [
@@ -430,20 +434,21 @@ def test_hosted_tools_unusable_endpoint_fails_closed_without_http(monkeypatch):
         *[(endpoint + "/chat/completions") for endpoint in LOOKALIKE_ENDPOINTS[:8]],
     ],
 )
-def test_tools_connector_refuses_unreviewed_chat_urls(bad):
+def test_tools_connector_refuses_unreviewed_chat_urls(kind, bad):
     with pytest.raises(ValueError, match="Exact Azure OpenAI v1 endpoint required"):
-        GPT41ToolsConnector(lambda: "invented", endpoint=bad)
+        _connector_class(kind)(lambda: "invented", endpoint=bad)
 
 
+@pytest.mark.parametrize("kind", ["base", "compact", "connector", "delivery"])
 @pytest.mark.parametrize("endpoint", LOOKALIKE_ENDPOINTS)
-def test_reviewed_endpoint_and_tools_url_pattern_refuse_lookalikes_together(endpoint):
+def test_reviewed_endpoint_and_tools_url_pattern_refuse_lookalikes_together(kind, endpoint):
     assert not reviewed_hosted_llm_endpoint(endpoint)
     with pytest.raises(ValueError, match="hosted_chat_endpoint_refused"):
         hosted_chat_completions_url(endpoint)
     chat = endpoint + "/chat/completions"
     assert not re.fullmatch(REVIEWED_HOSTED_CHAT_COMPLETIONS_URL_PATTERN, chat)
     with pytest.raises(ValueError, match="Exact Azure OpenAI v1 endpoint required"):
-        GPT41ToolsConnector(lambda: "invented", endpoint=chat)
+        _connector_class(kind)(lambda: "invented", endpoint=chat)
 
 
 def test_model_deployment_and_api_surface_unchanged_in_both_modes():

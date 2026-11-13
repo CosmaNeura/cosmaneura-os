@@ -73,6 +73,17 @@ def _hosted_review_profile_kind(settings: Settings) -> str | None:
     )
 
 
+def _incomplete_production_review(settings: Settings, kind: str | None) -> bool:
+    """True when beta.cosmas.ai appears but the profile is not exclusive review.
+
+    Staging CORS never includes beta (VM render pins one web_origin). An
+    almost-review profile must not silently fall through to CosmasCode.
+    """
+    from cosmas_os.production_review_profile import REVIEW_WEB_ORIGIN
+
+    return REVIEW_WEB_ORIGIN in settings.allowed_origins and kind != "review"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -513,7 +524,10 @@ class Settings(BaseSettings):
             return False
         # Production-review (#356 VM / beta.cosmas.ai) requires the production
         # pattern; every other hosted profile stays CosmasCode-only.
-        if _hosted_review_profile_kind(self) == "review":
+        kind = _hosted_review_profile_kind(self)
+        if _incomplete_production_review(self, kind):
+            return False
+        if kind == "review":
             return _production_openai_endpoint(self.workspace_llm_endpoint)
         return self.workspace_llm_endpoint == COSMASCODE_LLM_ENDPOINT
 
@@ -725,7 +739,13 @@ class Settings(BaseSettings):
         if self.workspace_llm_backend == "azure_gpt41":
             kind = _hosted_review_profile_kind(self)
             prod_ep = _production_openai_endpoint(self.workspace_llm_endpoint)
-            if kind == "review" and not prod_ep:
+            if _incomplete_production_review(self, kind):
+                # beta.cosmas.ai present but not exclusive review — refuse both
+                # CosmasCode and the production endpoint (no silent CosmasCode).
+                errors.append(
+                    "Incomplete production-review profile refuses Workspace GPT-4.1"
+                )
+            elif kind == "review" and not prod_ep:
                 # Unset defaults to CosmasCode; production-review never accepts it.
                 errors.append(
                     "Production-review requires the production Azure OpenAI endpoint"

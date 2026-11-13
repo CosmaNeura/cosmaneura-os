@@ -160,10 +160,91 @@ def test_staging_refuses_production_openai_endpoint():
         config.validate_runtime_configuration()
 
 
+def test_staging_shared_staging_cosmascode_validates_with_ai():
+    # Live staging path: shared_staging + CosmasCode + native origins in CORS.
+    staging_issuer = "https://pleasant-invented.clerk.accounts.dev"
+    origins = "https://staging.cosmas.ai,app://cosmas,capacitor://localhost"
+    config = staging_hosted(
+        clerk_session_policy="shared_staging",
+        clerk_audience="",
+        clerk_issuer=staging_issuer,
+        clerk_jwks_url=staging_issuer + "/.well-known/jwks.json",
+        cors_allowed_origins=origins,
+        clerk_authorized_parties=origins,
+        workspace_apple_hosted_transport_enabled=True,
+        workspace_desktop_hosted_transport_enabled=True,
+        workspace_llm_endpoint=COSMASCODE_LLM_ENDPOINT,
+    )
+    assert (
+        classify_review_profile(
+            policy="shared_staging",
+            web_origin=None,
+            cors=origins,
+            issuer=staging_issuer,
+        )
+        == "staging"
+    )
+    config.validate_runtime_configuration()
+    assert config.workspace_available
+    assert config.workspace_llm_available
+
+
 def test_non_review_hosted_refuses_production_openai_endpoint():
     config = _ai_on(workspace_llm_endpoint=PROD_ENDPOINT)
     assert not config.workspace_llm_available
     with pytest.raises(RuntimeError, match="Non-production profiles refuse the production"):
+        config.validate_runtime_configuration()
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        # Wrong issuer (beta first, audience) → kind None
+        {
+            "cors_allowed_origins": "https://beta.cosmas.ai",
+            "clerk_authorized_parties": "https://beta.cosmas.ai",
+            "clerk_session_policy": "audience",
+            "clerk_issuer": "https://identity.example.invalid",
+            "clerk_jwks_url": "https://identity.example.invalid/.well-known/jwks.json",
+        },
+        # Beta not first in CORS
+        {
+            "cors_allowed_origins": "capacitor://localhost,https://beta.cosmas.ai",
+            "clerk_authorized_parties": "capacitor://localhost,https://beta.cosmas.ai",
+            "clerk_session_policy": "audience",
+            "clerk_issuer": REVIEW_ISSUER,
+            "clerk_jwks_url": REVIEW_ISSUER + "/.well-known/jwks.json",
+            "workspace_apple_hosted_transport_enabled": True,
+        },
+        # Beta plus staging
+        {
+            "cors_allowed_origins": "https://beta.cosmas.ai,https://staging.cosmas.ai",
+            "clerk_authorized_parties": "https://beta.cosmas.ai,https://staging.cosmas.ai",
+            "clerk_session_policy": "audience",
+            "clerk_issuer": REVIEW_ISSUER,
+            "clerk_jwks_url": REVIEW_ISSUER + "/.well-known/jwks.json",
+        },
+        # shared_staging plus beta
+        {
+            "cors_allowed_origins": "https://beta.cosmas.ai",
+            "clerk_authorized_parties": "https://beta.cosmas.ai",
+            "clerk_session_policy": "shared_staging",
+            "clerk_audience": "",
+            "clerk_issuer": "https://pleasant-invented.clerk.accounts.dev",
+            "clerk_jwks_url": (
+                "https://pleasant-invented.clerk.accounts.dev/.well-known/jwks.json"
+            ),
+        },
+    ],
+)
+@pytest.mark.parametrize(
+    "endpoint",
+    [COSMASCODE_LLM_ENDPOINT, PROD_ENDPOINT],
+)
+def test_almost_review_beta_profile_refuses_both_endpoints(profile, endpoint):
+    config = _ai_on(workspace_llm_endpoint=endpoint, **profile)
+    assert not config.workspace_llm_available
+    with pytest.raises(RuntimeError, match="Incomplete production-review profile"):
         config.validate_runtime_configuration()
 
 
