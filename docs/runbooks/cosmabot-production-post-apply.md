@@ -57,7 +57,7 @@ After a successful first apply of `#356` with reviewed inputs that set
 | ACR / storage / PE / DNS zones / Log Analytics | As planned; private |
 | Azure OpenAI account | Classic Cognitive Services `kind = "OpenAI"` (see §7) |
 | Deployment | `gpt-4.1-dzus` (DataZoneStandard capacity **1**) |
-| Runtime LLM | **Off.** Profile `WORKSPACE_LLM_BACKEND=disabled`; `routes_runtime_traffic=false` |
+| Runtime LLM | Foundation profile: `WORKSPACE_LLM_BACKEND=disabled`; `routes_runtime_traffic=false`. **Runnable** start contradicts that — see §9 (b) |
 | Secrets on the VM | **None** until a separate secrets / release ticket |
 | DNS | **Unchanged.** Hostnames in the profile are placeholders only |
 
@@ -142,7 +142,9 @@ From `#356` `infra/beta/vm/prod/profile/runtime-public.json`:
 - `DATA_MODE=synthetic`
 - `AUTH_MODE=clerk_jwt`
 - `COSMAS_ENV=early_adopter_beta`
-- `WORKSPACE_LLM_BACKEND=disabled` (no LLM traffic until a later cutover)
+- `#356` first-setup profile: `WORKSPACE_LLM_BACKEND=disabled` (no LLM
+  traffic in the foundation plan). The VM runtime entrypoint on `main`
+  still requires AI on with `WORKSPACE_LLM_API_KEY` — see §9 (b)
 - `REAL_PATIENT_RECORDING_ENABLED=false`
 - Eight standalone backend switches stay explicit `'false'`
   (`infra/standalone/README.md`):  
@@ -186,8 +188,10 @@ Also plan for the optional App Store delete mount name
 `ACCOUNT_DELETE_CLERK_SECRET_KEY` (host file same name) once `#377` lands —
 still **name only** in tickets and chat.
 
-`WORKSPACE_LLM_API_KEY` is **not** in the first-apply profile. It belongs only
-to the later LLM cutover.
+`WORKSPACE_LLM_API_KEY` is **not** in the `#356` first-apply profile. The VM
+runtime entrypoint on `main` still requires that **name** before API/worker
+start (see §9 (b)). John pastes only the **prod** account key under that name
+— never the shared CosmasCode key.
 
 ### Clerk public values John sends (non-secret)
 
@@ -204,8 +208,8 @@ With first-apply `enable_azure_openai: true`:
   network disabled, private endpoint + `privatelink.openai.azure.com`
 - Deployment name: `gpt-4.1-dzus`
 - Model: `gpt-4.1` version `2025-04-14`, DataZoneStandard capacity **1**
-- Runtime: **no traffic** until cutover (`WORKSPACE_LLM_BACKEND=disabled`,
-  `routes_runtime_traffic=false`)
+- Foundation: `routes_runtime_traffic=false`; profile AI off. Runnable start
+  still needs AI on under current VM entrypoint — §9 (b)
 - Shared / staging / CosmasCode model account keys must **never** be loaded
   into prod
 
@@ -214,7 +218,7 @@ Data Zone US) — already expressed as opt-in inputs for first apply; confirm
 again if a day-2 tool is used instead.
 
 After apply, John should rotate the provider-generated OpenAI account keys
-before any cutover that loads a key into Key Vault (`#356` README).
+before loading `WORKSPACE_LLM_API_KEY` into Key Vault (`#356` README).
 
 ---
 
@@ -291,23 +295,13 @@ query string is required by `GPT41Connector`.
 or recreate.* This runbook confirms that mismatch for the **default pin** and
 for non-standalone `workspace_llm_available`.
 
-### What must change (later cutover ticket — not this PR, no model change)
+### What must change (later cutover / app tickets — not `#356`, no model change)
 
-1. Keep the `#356` classic OpenAI account (recommended) **or** John decides to
-   recreate as a Foundry/`services.ai` resource (extra cost / new plan).
-2. App / profile cutover must set:
-   - `WORKSPACE_LLM_ENDPOINT=https://<prod-account-subdomain>.openai.azure.com/openai/v1`
-     (append `/openai/v1`; bare cognitive base URL is invalid for the app)
-   - `WORKSPACE_LLM_BACKEND=azure_gpt41`
-   - `WORKSPACE_LLM_USDZ_ENABLED=true` and deployment `gpt-4.1-dzus` (or remove
-     an overriding pin)
-   - `standalone_model_origin_allowlist` to the matching origin
-   - Prod account key only (never the shared cosmascode key)
-3. If production ever uses the non-standalone `workspace_llm_available` path,
-   that property's hardcoded cosmascode `services.ai` equality
-   (`src/cosmas_os/config.py` line 449) must be widened or replaced in an
-   **app** ticket — still without changing the model.
-4. Until that cutover, leave `WORKSPACE_LLM_BACKEND=disabled`.
+See **§9 Decisions for John (a)** and **(b)**. Do not “fix” the CosmasCode
+pin or the AI-off first-setup profile inside `#356`. Keep the `#356` classic
+OpenAI account (recommended) **or** John separately decides to recreate as
+Foundry/`services.ai` (new cost plan). Never load the shared CosmasCode key
+into prod.
 
 ---
 
@@ -326,8 +320,10 @@ Mirror the staging pointer-switch post-checks (`release-r7` step 15 shape):
    (`docs/beta/HUMAN_DEPLOYMENT_EVIDENCE.md`).
 5. Confirm the **eight** backend switches are `'false'` in the rendered public
    environment (`infra/standalone/README.md` list in §4).
-6. Confirm `DATA_MODE=synthetic`, `REAL_PATIENT_RECORDING_ENABLED=false`,
-   `WORKSPACE_LLM_BACKEND=disabled`.
+6. Confirm `DATA_MODE=synthetic` and `REAL_PATIENT_RECORDING_ENABLED=false`.
+   LLM flags: see §9 (b) — the `#356` first-setup profile says disabled, but
+   the VM runtime entrypoint on `main` refuses that profile; first successful
+   start follows the order in §9 (b).
 7. Optional synthetic smoke: fake reviewer user, no real patients.
 8. Health unit / probe reports application ok (staging used `cosmabot-health`).
 
@@ -339,7 +335,7 @@ Mirror the staging pointer-switch post-checks (`release-r7` step 15 shape):
 | After apply, before DNS/public traffic | Keep state; destroy only with a **new** yes from John (vault/disks/storage delete-protection). |
 | After a release pointer switch (staging pattern) | Point `/etc/cosmabot/active-release` back at the previous release directory and run that release's `start.sh`. Do not delete the new release dir until John says so. |
 | DNS | Remove or grey-cloud the A/CNAME records John added; staging DNS stays untouched. |
-| LLM | Leave backend `disabled`; do not load `WORKSPACE_LLM_API_KEY`. |
+| LLM | Do not load the shared CosmasCode key. Rollback of a failed pointer switch does not require destroying the prod OpenAI account. |
 
 Trial ports / side-by-side release directories (staging used 54120/54122) must
 not take public traffic until the pointer switch. Public traffic moves only
@@ -347,31 +343,166 @@ when the active-release pointer changes.
 
 ---
 
-## 9. Gaps and decisions for John
+## 9. Decisions for John
 
-1. **Merge `#377` before** mounting `ACCOUNT_DELETE_CLERK_SECRET_KEY` on beta;
-   until then account delete fails closed (`account deletion is not configured`).
-2. **Secrets ticket** still owns the runnable Key Vault load/verify/cleanup
-   script and host 0400 install (`#356` explicitly split this out).
-3. **Endpoint kind:** confirm classic `*.openai.azure.com` at cutover (this
-   runbook's recommendation) vs recreate as `services.ai` Foundry — cost and
-   a new plan if recreating.
-4. **Non-standalone pin** at `src/cosmas_os/config.py` line 449 blocks using
-   the prod classic endpoint on that code path until an app ticket changes it.
-5. **Runtime acceptance** of `DATABASE_PASSWORD` / `POSTGRES_PASSWORD` /
+These are **owner decisions**. Do **not** fix them in `#356`. Do **not** change
+app/runtime code in this docs PR. No model change.
+
+### (a) Hosted AI availability is pinned to the shared CosmasCode endpoint
+
+**Confirm from `main`:**
+
+| File | Lines | Behavior |
+| --- | --- | --- |
+| `src/cosmas_os/config.py` | 237–238 | Defaults: `workspace_llm_backend="disabled"`; `workspace_llm_endpoint="https://cosmascode.services.ai.azure.com/openai/v1"` |
+| `src/cosmas_os/config.py` | 444–451 | `workspace_llm_available`: for non-`standalone_clerk_synthetic` envs (includes hosted `early_adopter_beta`), returns true only when backend is `azure_gpt41` **and** endpoint equals **exactly** `https://cosmascode.services.ai.azure.com/openai/v1` **and** deployment is reviewed **and** `workspace_llm_api_key` is set |
+| `src/cosmas_os/config.py` | 658–659 | If backend ≠ `disabled` and `workspace_llm_available` is false → runtime configuration error (“Workspace GPT-4.1 requires…”) |
+| `src/cosmas_os/adapters/gpt41.py` | 31, 170 | Default chat URL is CosmasCode `services.ai`; connector **constructor** accepts either `*.openai.azure.com` or `*.services.ai.azure.com` with `/openai/v1/chat/completions` |
+| `src/cosmas_os/config.py` | 912 | Standalone validator already accepts either host kind with `/openai/v1` |
+
+**Contradiction with the plan / `#356`:** production creates a **separate**
+classic OpenAI account (`kind = "OpenAI"` → `*.openai.azure.com`), with
+`routes_runtime_traffic=false` and profile `WORKSPACE_LLM_BACKEND=disabled`.
+When AI is later turned on for hosted `early_adopter_beta`, lines 448–451 still
+refuse any endpoint other than CosmasCode. Shared CosmasCode key must never be
+loaded into prod.
+
+**Smallest fix (new small app PR — not `#356`, not this docs PR):**
+
+1. Widen the non-standalone branch of `workspace_llm_available` (lines 448–451)
+   so a configured production endpoint is allowed — for example require
+   `workspace_llm_endpoint` to match the same host regex already used at line
+   912 (`*.openai.azure.com|*.services.ai.azure.com` + `/openai/v1`), keep the
+   reviewed deployment + non-empty `workspace_llm_api_key` checks, and keep
+   CosmasCode working for existing live users.
+2. Optionally add an explicit reviewed allowlist (one production origin) rather
+   than “any matching host,” if John wants a tighter pin.
+3. Do **not** change the model (`gpt-4.1` / `gpt-4.1-dzus`).
+4. Do **not** recreate the `#356` OpenAI resource unless John separately
+   chooses Foundry for a `services.ai` hostname.
+
+**Which PR:** a new small **app** PR on `main` (suggested title shape:
+“Allow configured production Azure OpenAI endpoint for hosted LLM
+availability”). Not `#356`. Not the secrets ticket. Not this runbook PR.
+
+**Tests that PR must include (mutation-killing):**
+
+| Mutation | Test that must fail if undone |
+| --- | --- |
+| Keep only CosmasCode equality at lines 448–451 | Hosted `early_adopter_beta` with `WORKSPACE_LLM_ENDPOINT=https://<prod>.openai.azure.com/openai/v1`, backend `azure_gpt41`, reviewed deployment, and key → `workspace_llm_available` is true |
+| Drop CosmasCode from the allowlist | Existing CosmasCode endpoint still yields `workspace_llm_available` true (live users) |
+| Accept an invented host / missing `/openai/v1` | `workspace_llm_available` false + `validate_runtime_configuration` refuses |
+| Backend `disabled` with a key/endpoint present | Still unavailable / refused as today |
+| Invert line 658 guard | Runtime errors when backend is on but availability is false |
+| Change model name / drop `gpt-4.1-dzus` review when USDZ on | Existing deployment review tests still pin the model |
+
+CI jobs: same backend shards that already collect `tests/unit/test_hosted_workspace_config.py`,
+`tests/unit/test_workspace_llm_deployment.py`, and a new focused unit module for
+the allowlist matrix.
+
+### (b) VM runtime refuses start unless AI is on with its key; `#356` first-setup has AI off
+
+**Confirm from `main` vs `#356` profile:**
+
+| File | Lines | Behavior |
+| --- | --- | --- |
+| `infra/beta/vm/runtime/entrypoint.py` | 20–35 (`BASE`) | Hosted synthetic profile **requires** `WORKSPACE_LLM_BACKEND=azure_gpt41` (among other fixed keys) |
+| `infra/beta/vm/runtime/entrypoint.py` | 118–119 | Any public env that differs from `BASE` → `Refused("hosted_synthetic_profile_required")` |
+| `infra/beta/vm/runtime/entrypoint.py` | 158–159 | If `WORKSPACE_LLM_API_KEY` is missing from `secret_names` → `Refused("model_credential_required")` |
+| `infra/beta/vm/runtime/README.md` | ~26–28 | Selected model remains mandatory for this runtime |
+| `#356` `infra/beta/vm/prod/profile/runtime-public.json` | 11–13, 16–22 | First-setup: `WORKSPACE_LLM_BACKEND=disabled`, `WORKSPACE_LLM_USDZ_ENABLED=false`; `secret_names` has **no** `WORKSPACE_LLM_API_KEY` |
+
+So: as coded today, the **VM staging/prod runtime entrypoint will not start**
+on the `#356` first-setup profile. Settings alone would allow `disabled` (line
+658 only errors when backend ≠ disabled), but the entrypoint refuses earlier.
+
+**Decision fork for John (pick one; neither is done in `#356` or this PR):**
+
+1. **Recommended for first successful `/ready` with current entrypoint:** turn
+   AI **on** for the first prod start (after decision (a) lands), using the
+   **prod** account key name only. Treat `#356`'s `disabled` profile as
+   “resources only / no traffic in the foundation plan,” not as a runnable
+   API profile.
+2. **Alternative:** a separate small **runtime** PR that allows
+   `WORKSPACE_LLM_BACKEND=disabled` and omits `WORKSPACE_LLM_API_KEY` for a
+   first-start profile (must kill mutations on `BASE` / `model_credential_required`).
+   Then LLM cutover stays a later ticket. Still not `#356`.
+
+**Exact order of operations for a first successful start (path 1, current code):**
+
+Do not paste secret **values** into tickets or chat — **names only** below.
+
+1. **Land decision (a) app PR** and merge it. Without it, hosted
+   `workspace_llm_available` still requires CosmasCode (lines 448–451), so a
+   prod endpoint cannot pass Settings even if the entrypoint BASE is satisfied.
+2. **John applies `#356`** (separate yes / plan hashes). Resources that must
+   exist before app start:
+   - RG `rg-cosmabot-prod-eus2-01`, VM, data disk, Key Vault, storage, ACR, PE
+   - Azure OpenAI account + deployment name `gpt-4.1-dzus` (if
+     `enable_azure_openai: true` in that apply)
+3. **Host prep:** bootstrap data disk; Docker/IMDS guard; empty postgres/redis
+   dirs (see §3). Still no public traffic.
+4. **John sets passwords himself** in a mode-600 file on the VM (never via Run
+   Command). Names that must later exist as mode-0400 host files /
+   Key Vault secrets:
+   - `DATABASE_PASSWORD` / KV `DATABASE-PASSWORD`
+   - `POSTGRES_PASSWORD` / KV `POSTGRES-PASSWORD`
+   - `REDIS_PASSWORD` / KV `REDIS-PASSWORD`
+   - `CLERK_SECRET_KEY` / KV `CLERK-SECRET-KEY`
+   - `CLERK_ACCOUNT_DELETION_SECRET` / KV `CLERK-ACCOUNT-DELETION-SECRET`
+   - `HUMAN_DEPLOY_EVIDENCE_REF` / KV `HUMAN-DEPLOY-EVIDENCE-REF`
+   - `WORKSPACE_LLM_API_KEY` (prod OpenAI account key only — **not** in the
+     `#356` first-setup `secret_names` list; required by entrypoint lines
+     158–159 once AI is on)
+5. **John pastes into Key Vault** (secrets ticket path; names only): the six
+   foundation names above, then the prod `WORKSPACE_LLM_API_KEY` after he
+   rotates the provider-generated OpenAI keys (per `#356` README). Optional
+   later: `ACCOUNT_DELETE_CLERK_SECRET_KEY` after `#377` merges.
+6. **Flags flip** in the **runnable** runtime profile (away from `#356`
+   first-setup):
+   - `WORKSPACE_LLM_BACKEND`: `disabled` → `azure_gpt41`
+   - `WORKSPACE_LLM_ENDPOINT`: set to
+     `https://<prod-account-subdomain>.openai.azure.com/openai/v1`
+     (append `/openai/v1`; bare cognitive base URL is invalid)
+   - `WORKSPACE_LLM_USDZ_ENABLED`: `true` (or set deployment explicitly to
+     `gpt-4.1-dzus`)
+   - `WORKSPACE_LLM_DEPLOYMENT`: `gpt-4.1-dzus` when using the Data Zone
+     deployment created by `#356`
+   - `secret_names`: include `WORKSPACE_LLM_API_KEY` (and the other required
+     names)
+   - Keep `DATA_MODE=synthetic`, `REAL_PATIENT_RECORDING_ENABLED=false`, and
+     the eight backend switches `'false'`
+7. **Install secrets** onto host 0400 files; render release; `start.sh data` →
+   `prepare` → `run` (John yes at each gate).
+8. **When `/ready` can pass:** after Postgres/Redis are up, forward-only
+   prepare has succeeded, API/worker processes have loaded the mounted secrets
+   (including `WORKSPACE_LLM_API_KEY`), public env matches entrypoint `BASE`
+   (AI on), Settings `workspace_llm_available` is true under decision (a), and
+   DNS points at the prod IP (or local/container checks are used before DNS).
+   `/version.json` then proves the reviewed commit.
+
+**If John picks path 2 instead:** steps 1 and 6’s AI-on flips wait until a
+later LLM cutover; `/ready` can pass earlier **only after** the runtime PR
+that allows AI-off is merged. `#356` itself still must not be edited for that.
+
+### Other gaps (unchanged)
+
+1. **Merge `#377` before** mounting `ACCOUNT_DELETE_CLERK_SECRET_KEY` on beta.
+2. **Secrets ticket** owns the runnable Key Vault load/verify/cleanup script
+   and host 0400 install.
+3. **Endpoint kind:** classic `*.openai.azure.com` (recommended) vs recreate
+   as Foundry — see §7.
+4. **Runtime acceptance** of `DATABASE_PASSWORD` / `POSTGRES_PASSWORD` /
    `REDIS_PASSWORD` on the prod entrypoint is still called out as unverified
-   in `356-guard-hardening.md` — prove on the prod VM before admitting
+   in the `#356` guard-hardening notes — prove on the prod VM before admitting
    testers.
-6. **OpenAI in first apply vs day-2:** `#356` first-apply-only tooling expects
-   opt-in in the same apply; a false first apply cannot add OpenAI without a
-   separately reviewed day-2 tool.
-7. **TestFlight / App Store upload** remain blocked until Alfred's go + John's
-   direct yes (Fri 20 target is readiness only).
-8. Staging runbook sources named in the ticket
-   (`tickets/2026-11-10-staging-release-facts.md`,
-   `cosmabot-staging-deploy-plan` §§11–12, `t-r7/POINTER_SWITCH_STEP_LIST.md`)
-   were not in this repository checkout; this doc mirrors the staging
-   `release-r7` pointer-switch list and in-repo host/runtime READMEs instead.
+5. **OpenAI in first apply vs day-2:** `#356` first-apply-only tooling expects
+   opt-in in the same apply.
+6. **TestFlight / App Store upload** remain blocked until Alfred's go + John's
+   direct yes.
+7. Staging ticket files named in the original ask were not in this repository
+   checkout; this doc mirrors the staging `release-r7` pointer-switch list and
+   in-repo host/runtime READMEs instead.
 
 ---
 
@@ -379,13 +510,16 @@ when the active-release pointer changes.
 
 - [ ] `#356` applied; RG/VM/IP recorded
 - [ ] John typed yes on plan/summary hashes before apply (already done that day)
+- [ ] Decision (a) app PR merged **before** turning hosted AI on against the prod endpoint
+- [ ] Decision (b) path chosen (AI-on first start vs runtime PR for AI-off)
 - [ ] Production Clerk public values received; secrets pasted by name into KV
 - [ ] Mode-600 password file on VM (John); not via Run Command
 - [ ] Host bootstrap + Docker/IMDS guard reviewed
 - [ ] Postgres 16 + Redis up on data disk
+- [ ] Runnable profile flags flipped per §9 (b) if using current VM entrypoint
+- [ ] `WORKSPACE_LLM_API_KEY` name present only with the **prod** account key (never CosmasCode)
 - [ ] Synthetic app render/deploy for beta hostnames
 - [ ] `#377` merged before delete-key mount (pending)
 - [ ] DNS A/CNAME published, proxy off
 - [ ] `/ready`, `/version.json`, smoke, eight switches false
-- [ ] LLM still disabled; no shared model key in prod
 - [ ] Staging untouched
