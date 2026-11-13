@@ -32,14 +32,9 @@ REVIEW_ACCOUNT_DELETE_KV_NAME = REVIEW_ACCOUNT_DELETE_HOST_KEY
 OPTIONAL_PRIVATE_NAMES = MODEL_PRIVATE_NAMES | GOOGLE_PRIVATE_NAMES | MICROSOFT_PRIVATE_NAMES
 
 _SHARED_BOUND = False
-# Populated by _bind_shared_predicate (inside main's guarded path).
-STAGING_WEB_ORIGIN = None
-REVIEW_WEB_ORIGIN = None
-REVIEW_CLERK_ISSUER = None
-STAGING_SESSION_POLICY = None
-REVIEW_SESSION_POLICY = None
-classify_review_profile = None
-classify_account_delete_profile = None
+# Shared predicate names are intentionally absent until _bind_shared_predicate
+# runs (or __getattr__ lazy-binds them). Assigning None here would make
+# __getattr__ dead code — attribute access would return None without binding.
 
 
 class Refused(Exception):
@@ -52,9 +47,9 @@ def _bind_shared_predicate() -> None:
     global STAGING_WEB_ORIGIN, REVIEW_WEB_ORIGIN, REVIEW_CLERK_ISSUER
     global STAGING_SESSION_POLICY, REVIEW_SESSION_POLICY
     global classify_review_profile, classify_account_delete_profile
-    if _SHARED_BOUND and classify_review_profile is not None:
+    if _SHARED_BOUND and "classify_review_profile" in globals() and classify_review_profile is not None:
         return
-    from cosmas_os.production_review_profile import (
+    from cosmas_os.production_review_profile import (  # noqa: I001
         REVIEW_CLERK_ISSUER as _issuer,
         REVIEW_SESSION_POLICY as _review_policy,
         REVIEW_WEB_ORIGIN as _review_web,

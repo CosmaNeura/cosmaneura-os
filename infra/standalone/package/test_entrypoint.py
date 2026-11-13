@@ -326,6 +326,27 @@ def test_staging_padded_non_delete_private_value_still_boots(mounted):
     assert environment["CLERK_SESSION_POLICY"] == entrypoint.STAGING_SESSION_POLICY
 
 
+def test_lazy_getattr_binds_shared_constants_before_main(monkeypatch):
+    """__getattr__ must bind when names are absent — None stubs made it dead code."""
+    for name in (
+        "STAGING_WEB_ORIGIN",
+        "REVIEW_WEB_ORIGIN",
+        "REVIEW_CLERK_ISSUER",
+        "STAGING_SESSION_POLICY",
+        "REVIEW_SESSION_POLICY",
+        "classify_review_profile",
+        "classify_account_delete_profile",
+    ):
+        if name in entrypoint.__dict__:
+            delattr(entrypoint, name)
+    monkeypatch.setattr(entrypoint, "_SHARED_BOUND", False)
+    assert "STAGING_WEB_ORIGIN" not in entrypoint.__dict__
+    assert entrypoint.STAGING_WEB_ORIGIN == "https://staging.cosmas.ai"
+    assert callable(entrypoint.classify_review_profile)
+    assert entrypoint.classify_account_delete_profile is entrypoint.classify_review_profile
+    assert entrypoint._SHARED_BOUND is True
+
+
 def test_main_isolated_import_failure_exits_78(tmp_path, monkeypatch, capsys):
     """python -I image-like layout: missing shared predicate → fixed refusal 78."""
     app = tmp_path / "app"
@@ -339,7 +360,18 @@ def test_main_isolated_import_failure_exits_78(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(entrypoint.os, "geteuid", lambda: 23017)
     monkeypatch.setattr(entrypoint.sys, "argv", ["entrypoint.py", "51887"])
     monkeypatch.setattr(entrypoint, "_SHARED_BOUND", False)
-    monkeypatch.setattr(entrypoint, "classify_review_profile", None)
+    # Clear any prior bind so main() must import from the empty image src.
+    for name in (
+        "STAGING_WEB_ORIGIN",
+        "REVIEW_WEB_ORIGIN",
+        "REVIEW_CLERK_ISSUER",
+        "STAGING_SESSION_POLICY",
+        "REVIEW_SESSION_POLICY",
+        "classify_review_profile",
+        "classify_account_delete_profile",
+    ):
+        if name in entrypoint.__dict__:
+            delattr(entrypoint, name)
     # Force re-bind from the empty image src, not the installed package.
     monkeypatch.setattr(entrypoint.sys, "path", [str(src)])
     # main() clears os.environ; restore so later tests still have PATH.
