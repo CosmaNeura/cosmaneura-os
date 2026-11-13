@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Review CosmaBot production foundation: name guards, monthly cost estimate, OpenTofu plan.
-# First-apply-only. Does not apply. Requires John's az login for the plan portion.
+# First-apply-only by default. Pass --recover for the separately reviewed partial-apply
+# recovery path. Does not apply. Requires John's az login for the plan portion.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -15,18 +16,22 @@ provider_mirror="${PROVIDER_MIRROR:-}"
 source_sha256=""
 lock_sha256=""
 skip_plan=0
+recover=0
 
 usage() {
   cat <<EOF
 Usage: $0 --subscription-id UUID --inputs PATH --private-dir PATH
           --source-sha256 HEX --lock-sha256 HEX
-          [--tofu PATH] [--provider-mirror PATH] [--cost-only]
+          [--tofu PATH] [--provider-mirror PATH] [--cost-only] [--recover]
 
-First-apply-only review. Prints the checked-in monthly cost estimate (labeled
-with price dates), refuses staging names, then runs the encrypted local
+First-apply-only review by default. Prints the checked-in monthly cost estimate
+(labeled with price dates), refuses staging names, then runs the encrypted local
 OpenTofu plan for rg-cosmabot-prod-eus2-01.
 
---private-dir must be a fresh absolute directory outside the repo.
+--private-dir must be a fresh absolute directory outside the repo (first apply).
+With --recover, --private-dir must already exist and hold the encrypted state
+plus passphrase from the partial first apply; the plan is written to
+plans/recover-<UTC>.tfplan and never overwrites plans/first.tfplan.
 --source-sha256 / --lock-sha256 must be operator-supplied (from a prior
 fingerprint review), not self-trusted.
 --subscription-id must equal inputs.subscription_id.
@@ -53,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --source-sha256) source_sha256="${2:-}"; shift 2 ;;
     --lock-sha256) lock_sha256="${2:-}"; shift 2 ;;
     --cost-only) skip_plan=1; shift ;;
+    --recover) recover=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -176,7 +182,11 @@ fi
 [[ -n "$provider_mirror" && -d "$provider_mirror" ]] || die "pass --provider-mirror to the verified azurerm mirror"
 command -v "$tofu_bin" >/dev/null || die "OpenTofu not found; pass --tofu"
 command -v az >/dev/null || die "az CLI required; run az login to John's tenant first"
-[[ ! -e "$private_dir" ]] || die "private directory must be fresh (path must not exist yet)"
+if [[ "$recover" -eq 1 ]]; then
+  [[ -d "$private_dir" ]] || die "recovery --private-dir must already exist with encrypted state"
+else
+  [[ ! -e "$private_dir" ]] || die "private directory must be fresh (path must not exist yet)"
+fi
 
 python3 - "$inputs" "$prod_dir" "$subscription_id" <<'PY'
 import json, sys
@@ -194,20 +204,34 @@ if sub.lower() != sys.argv[3].lower():
 print("Reviewed inputs cleared production name guards; subscription id matches.")
 PY
 
-python3 "$foundation_dir/bootstrap_local.py" prepare \
-  --private-dir "$private_dir" \
-  --inputs "$inputs" \
-  --source-sha256 "$source_sha256" \
-  --lock-sha256 "$lock_sha256" \
-  --tofu "$tofu_bin" \
+prepare_args=(
+  prepare
+  --private-dir "$private_dir"
+  --inputs "$inputs"
+  --source-sha256 "$source_sha256"
+  --lock-sha256 "$lock_sha256"
+  --tofu "$tofu_bin"
   --provider-mirror "$provider_mirror"
+)
+plan_args=(plan --private-dir "$private_dir")
+if [[ "$recover" -eq 1 ]]; then
+  prepare_args+=(--recover)
+  plan_args+=(--recover)
+fi
 
-plan_json="$(python3 "$foundation_dir/bootstrap_local.py" plan --private-dir "$private_dir")"
-python3 - "$plan_json" "$private_dir" <<'PY'
+python3 "$foundation_dir/bootstrap_local.py" "${prepare_args[@]}"
+
+plan_json="$(python3 "$foundation_dir/bootstrap_local.py" "${plan_args[@]}")"
+summary_file="plan-summary.json"
+if [[ "$recover" -eq 1 ]]; then
+  summary_file="recover-plan-summary.json"
+fi
+python3 - "$plan_json" "$private_dir" "$summary_file" "$recover" <<'PY'
 import json, sys
 from pathlib import Path
 result = json.loads(sys.argv[1])
-summary = json.loads((Path(sys.argv[2]) / "plan-summary.json").read_text())
+summary = json.loads((Path(sys.argv[2]) / sys.argv[3]).read_text())
+recover = sys.argv[4] == "1"
 print("")
 print("=== Sanitised plan summary ===")
 print(json.dumps(summary, sort_keys=True, indent=2))
@@ -215,8 +239,13 @@ print("")
 print(f"enable_azure_openai (effective): {summary.get('enable_azure_openai')}")
 print(f"plan_sha256: {result['plan_sha256']}")
 print(f"summary_sha256: {result['summary_sha256']}")
-print("Review complete. Plan saved under the private directory. Nothing was applied.")
-print("First-apply-only. After John's yes, bind an approval file (0600, outside the repo) to:")
+if recover:
+    print("Recovery review complete. Plan saved under plans/recover-<UTC>.tfplan.")
+    print("Nothing was applied. plans/first.tfplan was not overwritten.")
+    print("After John's yes on this recovery plan hash, bind an approval file (0600, outside the repo) to:")
+else:
+    print("Review complete. Plan saved under the private directory. Nothing was applied.")
+    print("First-apply-only. After John's yes, bind an approval file (0600, outside the repo) to:")
 print(f"  plan_sha256={result['plan_sha256']}")
 print(f"  summary_sha256={result['summary_sha256']}")
 print("Then follow the Apply section in infra/beta/vm/prod/README.md.")
