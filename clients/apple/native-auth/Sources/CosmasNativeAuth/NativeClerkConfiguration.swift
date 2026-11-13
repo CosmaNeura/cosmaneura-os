@@ -6,6 +6,35 @@ public enum NativeIdentityProfile: String, Sendable {
     case operationalStaging = "operational-staging-v1"
     /// Synthetic simulator builds only. Device sign-in stays on operationalBeta.
     case simulatorStaging = "simulator-staging-v1"
+    /// Production-review / App Store candidate on clerk.beta.cosmas.ai.
+    /// Live Infos remain operationalBeta on clerk.cosmas.ai.
+    case operationalProduction = "operational-production-v1"
+
+    /// Exact Clerk frontend hosts allowed for this profile. Empty means the
+    /// profile uses the development `.clerk.accounts.dev` rule instead.
+    /// No wildcards, suffixes, or ambient config — one explicit set per profile.
+    public var allowedClerkHosts: Set<String> {
+        switch self {
+        case .operationalBeta:
+            return ["clerk.cosmas.ai", "clerk.staging.cosmas.ai"]
+        case .operationalProduction:
+            return ["clerk.beta.cosmas.ai"]
+        case .simulatorStaging:
+            return ["clerk.staging.cosmas.ai"]
+        case .synthetic, .operationalStaging:
+            return []
+        }
+    }
+
+    /// Live publishable keys for dedicated production Clerk instances.
+    public var requiresLivePublishableKey: Bool {
+        switch self {
+        case .operationalBeta, .operationalProduction:
+            return true
+        case .synthetic, .operationalStaging, .simulatorStaging:
+            return false
+        }
+    }
 }
 
 public enum NativeWorkspaceOrigin: String, Sendable {
@@ -46,7 +75,11 @@ public struct NativeClerkAccountConfiguration: Sendable, Equatable {
     // are isolated; public SDK reconfiguration still requires fresh sign-in.
     public var keychainService: String {
         let base = bundleIdentifier + ".clerk"
-        let realm = profile == .operationalStaging ? base + "." + String(frontendOrigin.dropFirst(8)) : base
+        // Staging and production-review qualify by exact Clerk host so sibling
+        // instances never share credentials. Live operationalBeta keeps the
+        // unqualified legacy service name byte-identical.
+        let qualifiesOrigin = profile == .operationalStaging || profile == .operationalProduction
+        let realm = qualifiesOrigin ? base + "." + String(frontendOrigin.dropFirst(8)) : base
         return storageNamespace.map { realm + "." + $0 } ?? realm
     }
 
@@ -62,7 +95,7 @@ public struct NativeClerkAccountConfiguration: Sendable, Equatable {
                 throw NativeAuthError.unavailable
             }
         } else {
-            prefix = profile == .operationalBeta ? "pk_live_" : "pk_test_"
+            prefix = profile.requiresLivePublishableKey ? "pk_live_" : "pk_test_"
         }
         guard publishableKey.hasPrefix(prefix), publishableKey.utf8.count <= 1024,
               workspaceOrigin.accepts(bundleIdentifier: bundleIdentifier, profile: profile),
@@ -72,11 +105,10 @@ public struct NativeClerkAccountConfiguration: Sendable, Equatable {
               host.range(of: "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$", options: .regularExpression) != nil,
               frontendOrigin == "https://" + host, url.user == nil, url.password == nil,
               url.query == nil, url.fragment == nil else { throw NativeAuthError.unavailable }
-        if profile == .simulatorStaging {
-            guard host == "clerk.staging.cosmas.ai" else { throw NativeAuthError.unavailable }
-        } else if profile == .operationalBeta {
-            // Production Infos pin live Clerk to clerk.cosmas.ai (matches Python packaging).
-            guard host == "clerk.cosmas.ai" else { throw NativeAuthError.unavailable }
+        let allowedHosts = profile.allowedClerkHosts
+        if !allowedHosts.isEmpty {
+            // Explicit per-profile allow-list (https origin already required above).
+            guard allowedHosts.contains(host) else { throw NativeAuthError.unavailable }
         } else {
             guard host.hasSuffix(".clerk.accounts.dev") else { throw NativeAuthError.unavailable }
         }

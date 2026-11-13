@@ -22,11 +22,10 @@ baseline, not a new qualified build.
   `tracked_equivalent` mapping; do not evolve both copies independently.
 - Vendored ClerkKit 1.5.5: `native-plugins/cosmas-native-auth/vendor`, with its MIT
   LICENSE and SDK source retained.
-- Capacitor/Cordova 8.5.0: frozen scaffold still records the historical remote
-  pin in Package.resolved. Owned builds use
-  `clients/apple/vendor/capacitor-swift-pm-8.5.0` (revision
-  `4f71d0b979f2f957326f04353eca7604ee937e1e`); portable composition copies that
-  mirror and retires the remote binary zip download.
+- Capacitor/Cordova 8.5.1: scaffold Package.resolved and CapApp-SPM pins are
+  `8.5.1` (revision `6afa7424fd2fcd8ca1e577478e8a00af284b7e82`). Owned builds
+  use `clients/apple/vendor/capacitor-swift-pm-8.5.1`; portable composition
+  copies that mirror and retires the remote binary zip download.
 - Legacy `CosmaneuraScribe*` package names identify the already-consumed generic
   components. Keep their names and attribution; they are not Scribe server code.
 
@@ -38,7 +37,7 @@ Xcode source/config paths resolved in the recovery audit. Generated
 
 `scripts/compose-portable-iphone.py` builds a fresh iPhone project input from
 this frozen app scaffold plus the authoritative `clients/apple` and
-`clients/capture` implementations, including the owned Capacitor 8.5.0 mirror.
+`clients/capture` implementations, including the owned Capacitor 8.5.1 mirror.
 It reads those owners and this scaffold only. It does not modify this
 directory, compile, sign, or install. Prefer
 `scripts/prepare-owned-iphone-candidate.py` on a Mac for the full owned

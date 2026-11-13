@@ -184,6 +184,17 @@ import CosmasNativeAuth
     }
 
     private func openInitialWorkspace() {
+        #if DEBUG
+        // Synthetic Simulator XCUITest: skip practice-host boot that quarantines
+        // on missing Clerk/real config ("Your workspace could not continue") so
+        // CosmasBridgeViewController can load IOSPCMCapacitorPlugin. Launch-arg
+        // gated; Release compiles this branch out with CosmasSyntheticDemoSurface.
+        if Bundle.main.bundleIdentifier == "com.cosmasos.synthetic",
+           ProcessInfo.processInfo.arguments.contains(CosmasSyntheticDemoSurface.skipLaunchArgument) {
+            openWorkspace()
+            return
+        }
+        #endif
         #if canImport(CosmasWorkspaceAuthPlugin) && canImport(CosmasNativeAuth)
         do {
             let scene = NativePracticeSceneTransition(prepareAccountRealm: { [weak self] in
@@ -571,9 +582,17 @@ import CosmasNativeAuth
 @MainActor final class CosmasSyntheticDemoSurface: UIViewController {
     /// Optional XCUITest opt-in; Debug synthetic also enables without it.
     static let launchArgument = "-COSMAS_UI_TEST_FIXTURES"
+    /// Skip the invented demo surface and open the real Capacitor workspace /
+    /// native plugin path (IOSPCMCapacitorPlugin). Used by the mic-permission
+    /// Simulator XCUITest; Release builds never compile this type.
+    static let skipLaunchArgument = "-COSMAS_SKIP_SYNTHETIC_DEMO"
+    /// After the real bridge loads IOSPCMCapacitorPlugin, trigger start-recording
+    /// through that loaded plugin (not a ViewController-local permission call).
+    static let startCaptureLaunchArgument = "-COSMAS_UI_TEST_START_CAPTURE"
 
     static var isEnabled: Bool {
         Bundle.main.bundleIdentifier == "com.cosmasos.synthetic"
+            && !ProcessInfo.processInfo.arguments.contains(skipLaunchArgument)
     }
 
     /// Proof hook for unit tests: this type exists only under DEBUG.

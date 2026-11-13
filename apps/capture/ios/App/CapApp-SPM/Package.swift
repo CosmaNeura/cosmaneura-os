@@ -12,7 +12,7 @@ let package = Package(
     ],
     dependencies: [
         .package(name: "CosmasNativeAuthQualification", path: "../../../native-plugins/cosmas-native-auth"),
-        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0"),
+        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.1"),
         .package(name: "CosmaneuraScribeCapacitorIosPcm", path: "../../../native-plugins/ios-pcm-capacitor"),
         .package(name: "CosmaneuraScribeCapacitorSecureQueue", path: "../../../native-plugins/secure-queue")
     ],

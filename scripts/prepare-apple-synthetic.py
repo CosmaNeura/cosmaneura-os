@@ -62,6 +62,11 @@ STAGING_CLERK_HOST = "clerk.staging.cosmas.ai"
 STAGING_API_ORIGIN = "https://api.staging.cosmas.ai"
 # Web addresses the synthetic simulator may follow. Clerk and API hosts use the
 # same name with the clerk. and api. labels. Synthetic data mode stays required.
+# beta.cosmas.ai is the production-review Clerk/API web set. CTO DECISION_LOG
+# 12 Nov 2026 10:05/10:12 ET: simulator admit clerk.beta / api.beta ONLY for
+# operational-production-v1 under --installation-profile production; refuse for
+# every other profile. Live Infos are operational-beta-v1 on
+# clerk.staging.cosmas.ai, with clerk.cosmas.ai also admitted.
 ALLOWED_SYNTHETIC_WEB_HOSTS = ("staging.cosmas.ai", "beta.cosmas.ai")
 FORBIDDEN_COSMA_HOSTS = frozenset({
     "cosmas.ai",
@@ -73,6 +78,11 @@ FORBIDDEN_COSMA_HOSTS = frozenset({
 # Runtime profile for the synthetic simulator only. Device builds keep the
 # identity file's own profile and the com.cosmasos.beta.ios callback.
 SIMULATOR_RUNTIME_PROFILE = "simulator-staging-v1"
+PRODUCTION_NATIVE_PROFILE = "operational-production-v1"
+BETA_NATIVE_PROFILE = "operational-beta-v1"
+PRODUCTION_INSTALLATION_PROFILE = "production"
+BETA_CLERK_HOST = "clerk.beta.cosmas.ai"
+BETA_API_ORIGIN = "https://api.beta.cosmas.ai"
 PRODUCTION_SIGN_IN_HOSTS = frozenset({
     "clerk.cosmaneura.com",
     "app.cosmaneura.com",
@@ -88,9 +98,14 @@ PRODUCTION_SIGN_IN_REFUSAL = (
 )
 SYNTHETIC_DATA_REFUSAL = "Simulator staging native auth requires synthetic data mode."
 SIMULATOR_STAGING_REFUSAL = (
-    "Simulator staging native auth requires hosted services, "
-    "frontend origin and publishable-key host clerk.staging.cosmas.ai or clerk.beta.cosmas.ai, "
-    "and API origin https://api.staging.cosmas.ai or https://api.beta.cosmas.ai."
+    "Simulator staging native auth requires hosted services and synthetic data. "
+    "Shared staging uses clerk.staging.cosmas.ai with https://api.staging.cosmas.ai. "
+    "clerk.beta.cosmas.ai / https://api.beta.cosmas.ai is admitted only for "
+    "operational-production-v1 under --installation-profile production "
+    "(CTO DECISION_LOG 12 Nov 2026 10:05 ET). "
+    "operational-beta-v1 admits clerk.cosmas.ai and clerk.staging.cosmas.ai; "
+    "clerk.cosmas.ai alone cannot satisfy this simulator allow-list, while "
+    "clerk.staging.cosmas.ai with api.staging.cosmas.ai can (shared staging pair)."
 )
 RECOVERY_UI = Path(__file__).parents[1] / "clients/apple/startup-recovery"
 RECOVERY_INPUTS = {
@@ -318,17 +333,33 @@ def _forbidden_sign_in_host(host: str | None) -> bool:
     return host == "cosmaneura.com" or host.endswith(".cosmaneura.com")
 
 
-def _allowed_simulator_auth(frontend: str | None, api_origin: object) -> bool:
-    pairs = {(f"clerk.{host}", f"https://api.{host}") for host in ALLOWED_SYNTHETIC_WEB_HOSTS}
-    pairs.add((STAGING_CLERK_HOST, STAGING_API_ORIGIN))
-    return (frontend, api_origin) in pairs
+def _allowed_simulator_auth(frontend: str | None, api_origin: object, *, identity_profile: str | None) -> bool:
+    """Host pairs the simulator may follow, gated by native identity profile.
+
+    clerk.beta.cosmas.ai / api.beta.cosmas.ai stays on the pair list (CTO) but is
+    admitted only for operational-production-v1. Shared staging stays on
+    clerk.staging.cosmas.ai. operational-beta-v1 on clerk.cosmas.ai never matches;
+    operational-beta-v1 on clerk.staging.cosmas.ai with api.staging matches the
+    staging pair (shipped builds).
+    """
+    staging_pair = (STAGING_CLERK_HOST, STAGING_API_ORIGIN)
+    production_pair = (BETA_CLERK_HOST, BETA_API_ORIGIN)
+    if (frontend, api_origin) == staging_pair:
+        return True
+    if (frontend, api_origin) == production_pair:
+        return identity_profile == PRODUCTION_NATIVE_PROFILE
+    return False
 
 
 def authorize_simulator_staging_native_auth(identity: dict, selected_data_mode: str, *, hosted_workspace: bool) -> None:
-    """Allow native sign-in on the synthetic simulator only for staging.cosmas.ai or beta.cosmas.ai.
+    """Authorize synthetic-simulator native sign-in after identity load.
 
-    The identity profile name is not a substitute for the host check. operational-beta-v1
-    and a staging profile are both accepted when the hosts and data mode match.
+    After the installation-profile fence: operational-beta-v1 admits
+    clerk.cosmas.ai and clerk.staging.cosmas.ai (CTO DECISION_LOG 12 Nov 2026
+    10:12 ET). clerk.cosmas.ai cannot satisfy this allow-list;
+    clerk.staging.cosmas.ai with api.staging.cosmas.ai can. clerk.beta.cosmas.ai
+    / api.beta.cosmas.ai is admitted only when the loaded identity is
+    operational-production-v1 (requires --installation-profile production).
     """
     record = identity.get("identity") if isinstance(identity, dict) else None
     if not isinstance(record, dict):
@@ -343,8 +374,9 @@ def authorize_simulator_staging_native_auth(identity: dict, selected_data_mode: 
     if selected_data_mode != "synthetic":
         raise ValueError(SYNTHETIC_DATA_REFUSAL)
     frontend = _https_host(record.get("frontendOrigin"))
+    profile = record.get("profile") if isinstance(record.get("profile"), str) else None
     if (not hosted_workspace or frontend != publishable_key_host(record.get("publishableKey"))
-            or not _allowed_simulator_auth(frontend, record.get("apiOrigin"))):
+            or not _allowed_simulator_auth(frontend, record.get("apiOrigin"), identity_profile=profile)):
         raise ValueError(SIMULATOR_STAGING_REFUSAL)
 
 
@@ -414,8 +446,11 @@ def prepare(
     data_mode: str | None = None,
     native_source_access_group: str | None = None,
     allow_simulator_staging_native_auth: bool = False,
+    installation_profile: str | None = None,
 ) -> Path:
-    identity = _identity.load(native_identity_config, "apple", workspace_api_origin)
+    identity = _identity.load(
+        native_identity_config, "apple", workspace_api_origin,
+        installation_profile=installation_profile)
     operational = identity is not None
     data_mode = _identity.data_mode(identity, data_mode)
     simulator_staging_auth = False
@@ -775,8 +810,26 @@ def main() -> None:
     parser.add_argument("--native-identity-config", type=Path, help="Explicit public operational identity; stages a device-only project")
     parser.add_argument("--native-source-access-group", help="Exact signing-team private bundle Keychain group for builds compiled without provisioning")
     parser.add_argument("--data-mode", choices=("synthetic", "authorized_beta"), help="Explicit hosted data classification; synthetic for staging with a real identity")
-    parser.add_argument("--allow-simulator-staging-native-auth", action="store_true",
-                        help="Enable native sign-in on the synthetic simulator variant for clerk.staging.cosmas.ai or clerk.beta.cosmas.ai and synthetic data only")
+    parser.add_argument(
+        "--installation-profile",
+        choices=("production", "beta", "staging"),
+        help=(
+            "Closed installation profile for identity load. Only 'production' "
+            "admits operational-production-v1 on clerk.beta.cosmas.ai / "
+            "api.beta.cosmas.ai. Omit, 'beta', or 'staging' refuse that profile."
+        ),
+    )
+    parser.add_argument(
+        "--allow-simulator-staging-native-auth", action="store_true",
+        help=(
+            "Enable native sign-in on the synthetic simulator variant with "
+            "synthetic data only. Shared staging: clerk.staging.cosmas.ai. "
+            "clerk.beta.cosmas.ai / api.beta.cosmas.ai only with "
+            "operational-production-v1 and --installation-profile production. "
+            "operational-beta-v1 admits clerk.cosmas.ai and clerk.staging.cosmas.ai; "
+            "clerk.staging + api.staging satisfies the shared staging pair."
+        ),
+    )
     args = parser.parse_args()
     try:
         project = prepare(args.scribe_source, args.web_dist, args.output, args.verification_variant,
@@ -787,7 +840,8 @@ def main() -> None:
                           args.scheduling_google_client_id, args.scheduling_google_callback_uri,
                           args.microsoft_connection_tenant_id, args.microsoft_connection_client_id, args.microsoft_connection_callback_uri,
                           args.google_connection_client_id, args.google_connection_callback_uri, args.native_identity_config, args.data_mode,
-                          args.native_source_access_group, args.allow_simulator_staging_native_auth)
+                          args.native_source_access_group, args.allow_simulator_staging_native_auth,
+                          args.installation_profile)
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     print(f"Prepared synthetic Apple project: {project}")

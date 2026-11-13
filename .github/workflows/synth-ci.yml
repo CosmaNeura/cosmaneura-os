@@ -7,11 +7,12 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_dispatch:
 
 concurrency:
-  group: synth-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -22,6 +23,22 @@ env:
   NODE_VERSION: "24"
 
 jobs:
+  ci-mode:
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.decide.outputs.full }}
+    steps:
+      - id: decide
+        env:
+          LIGHT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true && !contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+        run: |
+          set -euo pipefail
+          if [ "${LIGHT}" = "true" ]; then
+            echo "full=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "full=true" >> "$GITHUB_OUTPUT"
+          fi
+
   python-quality:
     name: python-lint-type
     runs-on: ubuntu-latest
@@ -39,6 +56,8 @@ jobs:
 
   python-tests:
     name: python-tests-migrate (${{ matrix.suite }})
+    needs: [ci-mode]
+    if: needs.ci-mode.outputs.full != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -336,7 +355,7 @@ jobs:
           bash infra/beta/tests/deployment-guards.sh
       - name: Enrollment configuration contract
         run: |
-          node --test infra/enrollment/render.test.mjs infra/enrollment/verify-staging-hosts.test.mjs web/scripts/enrollment-hosting.test.mjs infra/enrollment/workspaces/render.test.mjs
+          node --test infra/enrollment/render.test.mjs infra/enrollment/verify-staging-hosts.test.mjs web/scripts/enrollment-hosting.test.mjs infra/enrollment/workspaces/render.test.mjs clients/shared/native-clerk-host-drift.test.mjs
           python3 -m unittest discover -s infra/enrollment/runtime/tests -p test_dns.py -v
       - name: Standalone host render node tests
         run: node --test infra/standalone/render.test.mjs infra/standalone/render-beta.test.mjs
@@ -475,8 +494,40 @@ jobs:
   synth-gate:
     name: synth-ci-gate
     runs-on: ubuntu-latest
-    needs: [python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey]
+    if: always()
+    needs: [ci-mode, python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey]
     steps:
+      - name: Require every needed job succeeded
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = []
+          for name, meta in sorted(needs.items()):
+              result = meta.get("result")
+              print(f"{name}: {result}")
+              if result != "success":
+                  failed.append(f"{name}={result}")
+          if failed:
+              print(
+                  "Gate failed because needed jobs were not all success: "
+                  + ", ".join(failed),
+                  file=sys.stderr,
+              )
+              print(
+                  "A light draft run is red by design: add label ci:full "
+                  "or mark the pull request ready for review for a full run.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print("All needed jobs succeeded")
+          PY
       - name: Confirm all synth gates passed
         run: |
           echo "python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey all green"

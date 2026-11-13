@@ -23,7 +23,7 @@ let package = Package(
     .package(path: "../ios-pcm-capture"),
     .package(
       name: "capacitor-swift-pm",
-      path: "../../../apple/vendor/capacitor-swift-pm-8.5.0"
+      path: "../../../apple/vendor/capacitor-swift-pm-8.5.1"
     ),
   ],
   targets: [

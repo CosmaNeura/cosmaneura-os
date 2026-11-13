@@ -20,14 +20,15 @@ test('separate Scribe helpers do not block CosmaBot; its own helpers and profile
   assert.equal(isDesktopProfileProcess('/Applications/Other.app/Contents/MacOS/Other', profile), false);
 });
 
-async function fixture(t) {
+async function fixture(t, sourceHost = 'clerk.staging.cosmas.ai') {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'cosmas-identity-transition-'));
   t.after(() => rm(root, {recursive: true, force: true}));
   const identity = (host, shared = false) => ({version: 1, profile: shared ? 'operational-staging-v1' : 'operational-beta-v1',
     client: 'desktop', apiOrigin: 'https://api.example.invalid',
     publishableKey: (shared ? 'pk_test_' : 'pk_live_') + Buffer.from(host + '$').toString('base64'),
     frontendOrigin: 'https://' + host, organizationId: shared ? 'org_shared' : 'org_original', audience: shared ? '' : 'cosmas-api'});
-  const sourceIdentity = identity('identity.example.invalid'), targetIdentity = identity('invented.clerk.accounts.dev', true);
+  // Default shipped beta source host (CTO DECISION_LOG 12 Nov 2026 10:12 ET).
+  const sourceIdentity = identity(sourceHost), targetIdentity = identity('invented.clerk.accounts.dev', true);
   const config = {mode: 'hosted-beta-authenticated', dataMode: 'synthetic', apiOrigin: sourceIdentity.apiOrigin, nativeIdentity: sourceIdentity,
     installation: {version: 1, profile: 'beta', bundleIdentifier: 'com.cosmasos.beta.desktop', storageGeneration: 1,
       electronVersion: '43.4.1', rendererPartition: 'persist:cosmasos-operational-beta', authHelperBundleIdentifier: 'com.cosmasos.beta.desktop.auth'}};
@@ -102,4 +103,44 @@ test('linked marker and nonprivate profile cannot be used to rewrite other files
   await rm(f.filename); await writeFile(f.filename, f.original, {mode: 0o600});
   await chmod(f.profile, 0o755); await assert.rejects(f.change('apply'));
   assert.deepEqual(await readFile(f.filename), f.original);
+});
+
+function betaSource(host, apiOrigin = 'https://api.example.invalid') {
+  return {
+    version: 1, profile: 'operational-beta-v1', client: 'desktop', apiOrigin,
+    publishableKey: 'pk_live_' + Buffer.from(host + '$').toString('base64'),
+    frontendOrigin: 'https://' + host, organizationId: 'org_original', audience: 'cosmas-api',
+  };
+}
+
+test('transition accepts operational-beta-v1 source on clerk.staging.cosmas.ai', async t => {
+  const f = await fixture(t, 'clerk.staging.cosmas.ai');
+  assert.equal(f.plan.sourceIdentity.frontendOrigin, 'https://clerk.staging.cosmas.ai');
+  assert.equal((await f.change('plan')).status, 'ready');
+});
+
+test('transition accepts operational-beta-v1 source on clerk.cosmas.ai', async t => {
+  const f = await fixture(t, 'clerk.cosmas.ai');
+  assert.equal(f.plan.sourceIdentity.frontendOrigin, 'https://clerk.cosmas.ai');
+  assert.equal((await f.change('plan')).status, 'ready');
+});
+
+test('transition refuses clerk.beta, unknown hosts, and production without installation profile', async t => {
+  const f = await fixture(t);
+  const stagingTarget = f.plan.targetIdentity;
+  for (const bad of [
+    betaSource('clerk.beta.cosmas.ai', 'https://api.beta.cosmas.ai'),
+    betaSource('invented.example.invalid'),
+    {
+      version: 1, profile: 'operational-production-v1', client: 'desktop',
+      apiOrigin: 'https://api.beta.cosmas.ai',
+      publishableKey: 'pk_live_' + Buffer.from('clerk.beta.cosmas.ai$').toString('base64'),
+      frontendOrigin: 'https://clerk.beta.cosmas.ai',
+      organizationId: 'org_invented_production', audience: 'cosmas-os-beta-api',
+    },
+  ]) {
+    await assert.rejects(f.change('plan', {
+      plan: {...f.plan, sourceIdentity: bad, targetIdentity: stagingTarget, transitionId: randomUUID()},
+    }));
+  }
 });

@@ -23,7 +23,13 @@ class ExplicitSettings(Settings):
 
 
 class HostSettingsContract(unittest.TestCase):
-    def rendered(self, policy: str, features: bool = False, host: str = "staging") -> dict:
+    def rendered(
+        self,
+        policy: str,
+        features: bool = False,
+        host: str = "staging",
+        capture_tools: bool = False,
+    ) -> dict:
         program = """
 import {readFile} from 'node:fs/promises';
 import {render} from './infra/standalone/render.mjs';
@@ -34,16 +40,25 @@ if(process.argv[1]==='shared_staging'){
   input.identity.publishableKey='pk_test_'+Buffer.from('invented-own-practice.clerk.accounts.dev$').toString('base64');
 }
 const webHost=process.argv[3]==='beta'?'beta.cosmas.ai':'staging.cosmas.ai';
-if(process.argv[2]==='features'){
+if(process.argv[2]==='features'||process.argv[2]==='capture_tools'){
   input.resource_scope='owned-cosmabot-vm-instance';input.web_origin='https://'+webHost;input.api_origin='https://api.'+webHost;
   input.identity.apiOrigin=input.api_origin;input.tls.hostnames=[webHost,'api.'+webHost];
   input.beta_features={model:{origin:'https://invented-owned-chief.openai.azure.com',endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'},
     google:{client_id:'invented-client.apps.googleusercontent.com',callback_uri:input.api_origin+'/connections/google/callback',return_origin:input.web_origin}};
 }
+if(process.argv[2]==='capture_tools'){
+  input.syntheticBetaCaptureAndTools=true;
+  input.core_capture_origin='https://staging-app.cosmaneura.com';
+  input.core_web_origin='https://staging-app.cosmaneura.com';
+  input.core_capture_scope='api://invented-core-audience/.default';
+  input.core_capture_managed_identity_client_id='00000000-0000-4000-8000-0000000000aa';
+  input.core_capture_upload_host='inventedcaptureacct.blob.core.windows.net';
+}
 const files=render(input);console.log(JSON.stringify({environment:files['api-public.json'],contract:files['host-preparation.json']}));
 """
+        mode = "capture_tools" if capture_tools else ("features" if features else "base")
         result = subprocess.run(
-            ["node", "--input-type=module", "-e", program, policy, "features" if features else "base", host],
+            ["node", "--input-type=module", "-e", program, policy, mode, host],
             cwd=ROOT,
             env={"PATH": os.environ["PATH"]},
             text=True,
@@ -61,6 +76,14 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
                 self.assertEqual(set(public) - {key.upper() for key in Settings.model_fields}, set())
                 booleans = {key.upper() for key, field in Settings.model_fields.items() if field.annotation is bool}
                 self.assertEqual(booleans - set(public), set())
+                self.assertEqual(public["WORKSPACE_CAPTURE_PROXY_ENABLED"], "false")
+                self.assertEqual(public["GOOGLE_CONNECTION_BROKER_ENABLED"], "false")
+                self.assertEqual(public["WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED"], "false")
+                self.assertEqual(public["WORKSPACE_ENROLLMENT_MANAGED"], "false")
+                self.assertEqual(public["COSMAS_EHR_REAL_DATA_ENABLED"], "false")
+                self.assertEqual(public["WORKSPACE_RX_SANDBOX_ENABLED"], "false")
+                self.assertEqual(public["REAL_PATIENT_RECORDING_ENABLED"], "false")
+                self.assertEqual(public["WORKSPACE_EFAX_SANDBOX_ENABLED"], "false")
                 self.assertEqual(contract["database"]["schema_revision"], EXPECTED_SCHEMA_REVISION)
                 # Invented process-only values; no file, account or database is opened.
                 database = contract["database"]
@@ -132,6 +155,155 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
         refused = ExplicitSettings(**switched, **private)
         with self.assertRaises(RuntimeError):
             refused.validate_runtime_configuration()
+
+    def test_standalone_refuses_workspace_enrollment_managed_true_and_accepts_false(self):
+        for policy in ("audience", "shared_staging"):
+            with self.subTest(policy=policy):
+                rendered = self.rendered(policy)
+                public = rendered["environment"]
+                contract = rendered["contract"]
+                database = contract["database"]
+                password = secrets.token_urlsafe(32)
+                private = {
+                    "database_url": (
+                        f"postgresql+psycopg://{database['role']}:{password}"
+                        f"@127.0.0.1:{database['port']}/{database['name']}"
+                    ),
+                    "human_deploy_evidence_ref": "invented preparation fixture, not deployment approval",
+                }
+                accepted = ExplicitSettings(
+                    **{key.lower(): value for key, value in public.items()}, **private
+                )
+                self.assertFalse(accepted.workspace_enrollment_managed)
+                accepted.validate_runtime_configuration()
+                switched = {key.lower(): value for key, value in public.items()}
+                switched["workspace_enrollment_managed"] = True
+                refused = ExplicitSettings(**switched, **private)
+                errors = refused.runtime_configuration_errors()
+                self.assertTrue(
+                    any(
+                        "WORKSPACE_ENROLLMENT_MANAGED must remain false" in item
+                        for item in errors
+                    ),
+                    errors,
+                )
+                with self.assertRaises(RuntimeError):
+                    refused.validate_runtime_configuration()
+
+    def test_synthetic_beta_capture_tools_opt_in_matches_runtime_and_keeps_real_patient_off(self):
+        import base64
+
+        from cosmas_os.ports.agent_connectors import CONNECTOR_TOOL_NAMES
+        from cosmas_os.ports.agent_delivery_tools import DELIVERY_TOOL_NAMES
+        from cosmas_os.ports.agent_tools import TOOL_NAMES
+
+        output = self.rendered("audience", capture_tools=True, host="staging")
+        public, contract = output["environment"], output["contract"]
+        self.assertEqual(public["WORKSPACE_AGENT_TOOLS_ENABLED"], "true")
+        self.assertEqual(public["WORKSPACE_CAPTURE_BACKEND"], "core")
+        self.assertEqual(public["WORKSPACE_CAPTURE_NOTES_ENABLED"], "true")
+        self.assertEqual(public["WORKSPACE_CAPTURE_PROXY_ENABLED"], "true")
+        self.assertEqual(public["WORKSPACE_CAPTURE_PROXY_ORIGIN"], "https://api.staging.cosmas.ai")
+        self.assertEqual(public["CORE_CAPTURE_ORIGIN"], "https://staging-app.cosmaneura.com")
+        self.assertEqual(public["CORE_WEB_ORIGIN"], "https://staging-app.cosmaneura.com")
+        self.assertEqual(
+            public["CORE_CAPTURE_UPLOAD_HOST"],
+            "inventedcaptureacct.blob.core.windows.net",
+        )
+        # #361 renders REAL_PATIENT_RECORDING_ENABLED explicitly false; opt-in never flips it.
+        self.assertEqual(public["REAL_PATIENT_RECORDING_ENABLED"], "false")
+        for flag in (
+            "GOOGLE_CONNECTION_BROKER_ENABLED",
+            "WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED",
+            "WORKSPACE_ENROLLMENT_MANAGED",
+            "COSMAS_EHR_REAL_DATA_ENABLED",
+            "WORKSPACE_RX_SANDBOX_ENABLED",
+            "WORKSPACE_EFAX_SANDBOX_ENABLED",
+        ):
+            self.assertEqual(public[flag], "false", flag)
+        self.assertFalse(contract["optional_runtime_features"]["real_patient_recording_process_switch"])
+        self.assertTrue(contract["optional_runtime_features"]["capture_and_agent_tools"])
+        self.assertEqual(
+            contract["optional_runtime_features"]["capture_content"],
+            "live microphone audio on a synthetic-only host; never relabelled as invented",
+        )
+        self.assertEqual(contract["platform_connections"][0]["kind"], "core_staging_capture")
+        # Sibling platform paths stay dark with capture/tools opted in.
+        for flag in (
+            "WORKSPACE_CORE_CONNECTION_ENABLED",
+            "WORKSPACE_CORE_RECORD_ENABLED",
+            "WORKSPACE_SESSION_PREP_ENABLED",
+            "WORKSPACE_ATHENA_CONNECTION_ENABLED",
+            "WORKSPACE_PREP_ENABLED",
+            "WORKSPACE_PREP_WORK_ENABLED",
+            "WORKSPACE_ROUTINES_ENABLED",
+            "WORKSPACE_CAPTURE_CORRECTIONS_ENABLED",
+            "WORKSPACE_CAPTURE_RECOVERY_ENABLED",
+            "WORKSPACE_CAPTURE_SOURCE_ENABLED",
+            "WORKSPACE_CAPTURE_LONG_VISITS_ENABLED",
+        ):
+            self.assertEqual(public[flag], "false", flag)
+        database = contract["database"]
+        private = {
+            "database_url": f"postgresql+psycopg://{database['role']}:invented-password@127.0.0.1:{database['port']}/{database['name']}",
+            "human_deploy_evidence_ref": "invented capture-tools preparation only",
+            "workspace_llm_api_key": "invented-model-key",
+            "google_connection_client_secret": "invented-google-secret",
+            "google_connection_encryption_key": base64.urlsafe_b64encode(b"x" * 32).decode(),
+        }
+        settings = ExplicitSettings(**{key.lower(): value for key, value in public.items()}, **private)
+        settings.validate_runtime_configuration()
+        self.assertTrue(settings.workspace_capture_available)
+        self.assertTrue(settings.workspace_agent_tools_enabled)
+        self.assertFalse(settings.real_patient_recording_enabled)
+        self.assertFalse(settings.workspace_core_connection_available)
+        self.assertFalse(settings.workspace_core_record_enabled)
+        self.assertFalse(settings.workspace_session_prep_enabled)
+        self.assertFalse(settings.workspace_athena_connection_enabled)
+        self.assertFalse(settings.workspace_prep_enabled)
+        self.assertFalse(settings.workspace_routines_enabled)
+        self.assertFalse(settings.workspace_capture_corrections_enabled)
+        self.assertFalse(settings.workspace_capture_recovery_enabled)
+        self.assertFalse(settings.workspace_capture_source_enabled)
+        self.assertFalse(settings.workspace_capture_long_visits_enabled)
+        # Tool families reachable when agent tools are on (agent_tools.py:217-225,
+        # model_work.py:790-800). Base tools are local; connector/delivery families
+        # can touch real Google/Microsoft account content when those overlays are on.
+        self.assertEqual(
+            TOOL_NAMES,
+            (
+                "list_selected_sources",
+                "read_selected_source",
+                "read_saved_teammate_draft",
+                "read_current_operation_status",
+            ),
+        )
+        self.assertEqual(
+            CONNECTOR_TOOL_NAMES,
+            ("propose_research_query", "execute_reviewed_research", "read_research_result"),
+        )
+        self.assertEqual(DELIVERY_TOOL_NAMES, ("execute_reviewed_delivery", "read_delivery_status"))
+        self.assertTrue(settings.workspace_google_message_available)
+        self.assertEqual(
+            contract["optional_runtime_features"]["google_content"],
+            "actual consenting account content; never relabelled as invented",
+        )
+        # Process guard still refuses turning real-patient recording on via env.
+        # #361 already renders REAL_PATIENT_RECORDING_ENABLED=false in public; drop it
+        # before forcing True so ExplicitSettings does not see duplicate kwargs.
+        refused = ExplicitSettings(
+            **{
+                key.lower(): value
+                for key, value in public.items()
+                if key != "REAL_PATIENT_RECORDING_ENABLED"
+            },
+            **private,
+            real_patient_recording_enabled=True,
+        )
+        self.assertTrue(
+            any("REAL_PATIENT_RECORDING_ENABLED must remain false" in item
+                for item in refused.runtime_configuration_errors())
+        )
 
 
 if __name__ == "__main__":

@@ -71,6 +71,25 @@
       IOSPCMBridgeCore.confirmProcessCaptureIdle()
     }
 
+    /// Shared mic-permission gate for `start` (and DEBUG synthetic XCUITest).
+    @MainActor private func requestStartRecordingMicPermission() async -> Bool {
+      await AVAudioApplication.requestRecordPermission()
+    }
+
+    #if DEBUG
+    /// Synthetic Simulator XCUITest only. Confirms `load()` built the Capacitor
+    /// transport, then uses the same permission entry as `start`. Returns a
+    /// marker token for accessibility (`granted` / `denied` / `skipped`).
+    /// Not registered in `pluginMethods`; omitted from Release/TestFlight.
+    @MainActor @nonobjc public func uiTestStartRecordingThroughLoadedPlugin() async -> String {
+      guard Bundle.main.bundleIdentifier == "com.cosmasos.synthetic",
+            ProcessInfo.processInfo.arguments.contains("-COSMAS_UI_TEST_START_CAPTURE"),
+            transport != nil else { return "skipped" }
+      let allowed = await requestStartRecordingMicPermission()
+      return allowed ? "granted" : "denied"
+    }
+    #endif
+
     @objc public func getAppState(_ call: CAPPluginCall) {
       perform(call) { transport in
         ["state": await transport.getAppState()]
@@ -112,7 +131,7 @@
         let ticket = try NativeCaptureStartGate.startTicket()
         guard Bundle.main.bundleIdentifier == "com.cosmasos.beta.ios",
               !call.options.keys.contains("authority"),
-              await AVAudioApplication.requestRecordPermission() else {
+              await requestStartRecordingMicPermission() else {
           throw IOSPCMCapacitorErrorCode.captureFailed
         }
         let token = try await NativeCaptureStartGate.consume(owner: ticket) { permit in

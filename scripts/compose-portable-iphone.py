@@ -6,28 +6,40 @@ clients/apple and clients/capture. This entry does not read an external
 snapshot, modify the scaffold, sign, or compile.
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
+import importlib.util
 import json
 import plistlib
 import re
 import shutil
 from pathlib import Path
 
+_profile_spec = importlib.util.spec_from_file_location(
+    "native_iphone_auth_profile", Path(__file__).with_name("native_iphone_auth_profile.py"))
+_profile = importlib.util.module_from_spec(_profile_spec)
+assert _profile_spec is not None and _profile_spec.loader is not None
+_profile_spec.loader.exec_module(_profile)
+PRODUCTION_INSTALLATION_PROFILE = _profile.PRODUCTION_INSTALLATION_PROFILE
+INSTALLATION_PROFILES = _profile.INSTALLATION_PROFILES
+production_native_auth_stamp = _profile.production_native_auth_stamp
+
 IMPLEMENTATION_OWNERS = ("clients/apple", "clients/capture")
 SUPPORTING_CLIENT = "clients/shared"
 APP_SCAFFOLD = "apps/capture"
 PROVENANCE_NAME = "SOURCE_PROVENANCE.json"
-OWNED_CAPACITOR_VENDOR = "clients/apple/vendor/capacitor-swift-pm-8.5.0"
+OWNED_CAPACITOR_VENDOR = "clients/apple/vendor/capacitor-swift-pm-8.5.1"
 COMPOSED_CAPACITOR_VENDOR = "native-plugins/capacitor-swift-pm"
 REMOTE_CAPACITOR_PACKAGE_URL = "https://github.com/ionic-team/capacitor-swift-pm.git"
 OWNED_CAPACITOR_RELEASE_SHA256 = {
-    "Capacitor.xcframework.zip": "357220fe6dad73cb78bc1dc83e16e89d59c3d7dac8f9b17545a5be64bba25130",
-    "Cordova.xcframework.zip": "a3dc72b5a559948d548f0ee2926b989492acc1023a0c86a1bf85477587f83a10",
+    "Capacitor.xcframework.zip": "c6ca2c8eb19a51e984320c1747bd9a18e4e8a39afad7524d4d8d0c0403944eb4",
+    "Cordova.xcframework.zip": "bee4a9362e93e8205be4dd43c0bec3e49ff77645b9f132a22bc8db01f4809563",
 }
 OWNED_CAPACITOR_FRAMEWORK_INFO_SHA256 = {
     "Capacitor.xcframework/Info.plist": "713105ab60c0f696453457049eee406997bbe4435b8c48ae877101303c5272fe",
-    "Cordova.xcframework/Info.plist": "25ef8fe4b91042eaeb5a52cafa72ad1327ac35b194f265ffc53ab269a1d8a452",
+    "Cordova.xcframework/Info.plist": "2fe83c683373324422f11eb3934495303236cf65f867f22f1f3666eb8640fb46",
 }
 # Package manifests rewritten from remote Capacitor URL to the owned local path.
 CAPACITOR_LOCALIZATION_TARGETS = (
@@ -38,7 +50,10 @@ CAPACITOR_LOCALIZATION_TARGETS = (
 )
 # The frozen 1107 manifest cannot name later owned implementations. Place only
 # these reviewed additions; never glob an SDK, external checkout or generated app.
+# ClerkKeychainCredentials.swift is required by the owned ClerkKitWorkspaceDriver
+# overlay (clearStoredCredentials) but is absent from the frozen 1107 provenance.
 NATIVE_PRACTICE_ADDITIONS = (
+    "Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift",
     "Sources/CosmasNativeAuth/NativePracticeProfile.swift",
     "Sources/CosmasNativeAuth/NativePracticeActivationOwner.swift",
     "Sources/CosmasNativeAuth/NativePracticeConnectionContracts.swift",
@@ -47,6 +62,7 @@ NATIVE_PRACTICE_ADDITIONS = (
     "Sources/CosmasNativeAuth/NativePracticeSelectionStore.swift",
     "Bridge/CosmasNativePracticeConnectionPlugin.swift",
     "Bridge/NativePracticeConnectionController.swift",
+    "Tests/CosmasNativeAuthTests/ClerkKeychainCredentialsTests.swift",
     "Tests/CosmasNativeAuthTests/NativePracticeProfileTests.swift",
     "Tests/CosmasNativeAuthTests/NativePracticeBootstrapTests.swift",
     "Tests/CosmasNativeAuthTests/NativePracticeConnectionContractTests.swift",
@@ -214,10 +230,20 @@ def refuse_non_true_export_compliance(info: dict) -> None:
     )
 
 
-def _apply_owned_usage_descriptions(
-    repository: Path, output: Path, placed: list[dict[str, object]]
+def _derive_owned_info_plist(
+    repository: Path,
+    output: Path,
+    placed: list[dict[str, object]],
+    *,
+    installation_profile: str | None = None,
 ) -> None:
-    """Derive reviewed permission copy without changing the frozen scaffold Info.plist."""
+    """Derive owned Info.plist once from the frozen scaffold.
+
+    Always applies reviewed microphone/speech usage copy. When the production
+    installation profile is selected, also stamps CosmasNativeAuth Clerk/API
+    origins (auth stays disabled until owned prepare supplies a validated key).
+    One composition record and one bindings branch recompute both steps.
+    """
     info_path = "ios/App/App/Info.plist"
     destination = output / APP_SCAFFOLD / info_path
     if not destination.is_file() or destination.is_symlink():
@@ -236,24 +262,43 @@ def _apply_owned_usage_descriptions(
     refuse_non_true_export_compliance(info)
     info["NSMicrophoneUsageDescription"] = REVIEWED_MICROPHONE_USAGE
     info["NSSpeechRecognitionUsageDescription"] = REVIEWED_SPEECH_USAGE
+    production = installation_profile == PRODUCTION_INSTALLATION_PROFILE
+    if production:
+        info = production_native_auth_stamp(info)
     destination.write_bytes(plistlib.dumps(info, sort_keys=False))
     record = next(item for item in placed if item["path"] == info_path)
     derivation_path = "scripts/compose-portable-iphone.py"
+    auth_profile_path = "scripts/native_iphone_auth_profile.py"
     derivation = _regular_file(repository, repository / derivation_path)
+    auth_profile = _regular_file(repository, repository / auth_profile_path)
+    note = (
+        "Derived microphone and speech usage descriptions from the frozen scaffold Info.plist."
+    )
+    if production:
+        note += (
+            " Production installation profile also stamped clerk.beta.cosmas.ai / "
+            "api.beta.cosmas.ai origins with CosmasNativeAuth.enabled=false until a "
+            "validated publishable key is supplied at owned prepare "
+            "(profile operational-production-v1)."
+        )
+    else:
+        note += (
+            " Export-compliance key intentionally not set by this script; owner decision pending."
+        )
     record.update(
         {
-            "role": "derived-usage-description",
+            "role": "derived-owned-info-plist",
             "sha256": _digest(destination),
             "scaffold_input_sha256": original_sha256,
             "derivation_source": derivation_path,
             "derivation_source_sha256": _digest(derivation),
-            "wiring_note": (
-                "Derived microphone and speech usage descriptions; frozen scaffold "
-                "Info.plist unchanged. Export-compliance key intentionally not set by "
-                "this script; owner decision pending."
-            ),
+            "auth_profile_source": auth_profile_path,
+            "auth_profile_source_sha256": _digest(auth_profile),
+            "production_native_auth": production,
+            "wiring_note": note,
         }
     )
+
 
 
 def _add_owned_app_privacy(repository: Path, output: Path, placed: list[dict[str, object]]) -> None:
@@ -339,16 +384,18 @@ def _localize_capacitor_package_text(text: str, local_path: str) -> str:
     """Replace remote or clients-tree Capacitor pins with the composed local path."""
     if local_path in text and text.count(f'path: "{local_path}"') == 1 and REMOTE_CAPACITOR_PACKAGE_URL not in text:
         raise ValueError("Capacitor package already names the composed local path.")
-    clients_vendor = "../../../apple/vendor/capacitor-swift-pm-8.5.0"
+    clients_vendor = "../../../apple/vendor/capacitor-swift-pm-8.5.1"
     replacement = f'.package(name: "capacitor-swift-pm", path: "{local_path}")'
+    # Reviewed apps/capture remote pin is exact 8.5.1; composition rewrites
+    # that pin to the owned 8.5.1 local mirror path (drift back to 8.5.0 fails).
     candidates = [
-        f'.package(url: "{REMOTE_CAPACITOR_PACKAGE_URL}", exact: "8.5.0")',
+        f'.package(url: "{REMOTE_CAPACITOR_PACKAGE_URL}", exact: "8.5.1")',
         f'.package(name: "capacitor-swift-pm", path: "{clients_vendor}")',
     ]
     multiline_remote = re.compile(
         r'\.package\(\s*url:\s*"'
         + re.escape(REMOTE_CAPACITOR_PACKAGE_URL)
-        + r'"\s*,\s*exact:\s*"8\.5\.0"\s*\)',
+        + r'"\s*,\s*exact:\s*"8\.5\.1"\s*\)',
         re.MULTILINE,
     )
     multiline_clients = re.compile(
@@ -385,11 +432,11 @@ def _add_owned_capacitor_vendor(repository: Path, output: Path, placed: list[dic
     manifest_path = vendor / "SOURCE_MANIFEST.json"
     manifest = json.loads(_regular_file(repository, manifest_path).read_text(encoding="utf-8"))
     if (
-        manifest.get("version") != "8.5.0"
-        or manifest.get("upstream_revision") != "4f71d0b979f2f957326f04353eca7604ee937e1e"
+        manifest.get("version") != "8.5.1"
+        or manifest.get("upstream_revision") != "6afa7424fd2fcd8ca1e577478e8a00af284b7e82"
         or manifest.get("remote_binary_targets_retired") is not True
     ):
-        raise ValueError("Owned Capacitor vendor manifest is not the reviewed 8.5.0 mirror.")
+        raise ValueError("Owned Capacitor vendor manifest is not the reviewed 8.5.1 mirror.")
     assets = {
         item["name"]: item["sha256"]
         for item in manifest.get("release_assets", [])
@@ -427,7 +474,7 @@ def _add_owned_capacitor_vendor(repository: Path, output: Path, placed: list[dic
                 "owner": "clients/apple",
                 "sha256": _digest(destination),
                 "authoritative_counterpart": f"{OWNED_CAPACITOR_VENDOR}/{relative}",
-                "wiring_note": "Owned Capacitor 8.5.0 mirror; remote binary zip downloads retired.",
+                "wiring_note": "Owned Capacitor 8.5.1 mirror; remote binary zip downloads retired.",
             }
         )
 
@@ -508,7 +555,12 @@ def _add_owned_capacitor_vendor(repository: Path, output: Path, placed: list[dic
         raise ValueError("Composed iPhone inputs still name the remote Capacitor package.")
 
 
-def compose(repository: Path, output: Path) -> Path:
+def compose(
+    repository: Path,
+    output: Path,
+    *,
+    installation_profile: str | None = None,
+) -> Path:
     """Copy the frozen scaffold and overlay owned client implementations."""
     repository = repository.resolve()
     output = output.resolve()
@@ -623,7 +675,10 @@ def compose(repository: Path, output: Path) -> Path:
         if public.exists():
             raise ValueError("Generated web assets do not belong in this source composition.")
         _add_owned_app_privacy(repository, output, placed)
-        _apply_owned_usage_descriptions(repository, output, placed)
+        if installation_profile is not None and installation_profile not in INSTALLATION_PROFILES:
+            raise ValueError("Use the production, beta, or staging installation profile.")
+        _derive_owned_info_plist(
+            repository, output, placed, installation_profile=installation_profile)
         _add_owned_capacitor_vendor(repository, output, placed)
         manifest = {
             "purpose": "portable-iphone-project-inputs",
@@ -644,6 +699,10 @@ def compose(repository: Path, output: Path) -> Path:
             "project": f"{APP_SCAFFOLD}/ios/App/App.xcodeproj",
             "files": placed,
         }
+        if installation_profile == PRODUCTION_INSTALLATION_PROFILE:
+            # Omit this key for default/beta/staging so those manifests stay
+            # free of a production-only field; production records it explicitly.
+            manifest["installation_profile"] = installation_profile
         (output / "composition.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     except Exception:
         _discard(output, repository)
@@ -655,9 +714,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", type=Path, default=Path(__file__).parents[1])
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--installation-profile",
+        choices=sorted(INSTALLATION_PROFILES),
+        help=(
+            "Optional closed installation profile. Only 'production' stamps "
+            "CosmasNativeAuth with clerk.beta.cosmas.ai / api.beta.cosmas.ai "
+            "(operational-production-v1) for App Store / production-review; "
+            "that is not the live clerk.cosmas.ai beta path and is not a "
+            "practice-account realm. Omit, 'beta', or 'staging' keep auth "
+            "disabled on compose."
+        ),
+    )
     args = parser.parse_args()
     try:
-        project = compose(args.repository, args.output)
+        project = compose(
+            args.repository, args.output, installation_profile=args.installation_profile)
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     print(f"Prepared portable iPhone project inputs: {project}")

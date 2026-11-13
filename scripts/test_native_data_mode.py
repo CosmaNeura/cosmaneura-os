@@ -39,8 +39,8 @@ class NativeDataMode(unittest.TestCase):
         self.identity = {
             "version": 1, "profile": "operational-beta-v1", "client": "desktop",
             "apiOrigin": "https://api.example.invalid",
-            "frontendOrigin": "https://identity.example.invalid",
-            "publishableKey": "pk_live_" + base64.b64encode(b"identity.example.invalid$").decode(),
+            "frontendOrigin": "https://clerk.cosmas.ai",
+            "publishableKey": "pk_live_" + base64.b64encode(b"clerk.cosmas.ai$").decode(),
             "organizationId": "org_invented_mode_test", "audience": "cosmas-beta-api",
         }
 

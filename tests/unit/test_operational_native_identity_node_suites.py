@@ -1,0 +1,76 @@
+"""CI wrappers for Node identity suites that synth-ci would otherwise miss.
+
+Runs in synth-ci job python-tests-migrate (backend-4). Missing `node` raises
+AssertionError (fail, never skip).
+
+B11 mutation note: dropping any listed suite from NODE_SUITES, or commenting out
+the subprocess.run check, lets host-allow-list / drift / transition regressions
+leave CI green. Keep the tuple and returncode assertion intact.
+
+synthetic-iphone-sim-identity.test.mjs is already spawned by
+tests/unit/test_synthetic_iphone_sim_identity.py in python-tests-migrate
+(backend-2); do not duplicate it here.
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+
+# Suites proving operational-beta-v1 dual-host set (JS/Python/Swift parity),
+# desktop/renderer/release fences, workspace identity, and transition hosts.
+NODE_SUITES = (
+    "clients/shared/operational-native-identity.test.mjs",
+    "clients/shared/native-clerk-host-drift.test.mjs",
+    "clients/desktop/native-identity-config.test.mjs",
+    "clients/desktop/installation-state.test.mjs",
+    "scripts/build-native-renderer.test.mjs",
+    "scripts/package-desktop-release.test.mjs",
+    "scripts/prepare-workspace-identity.test.mjs",
+    "scripts/transition-desktop-identity.test.mjs",
+)
+
+
+def _require_node() -> str:
+    found = shutil.which("node")
+    if found is None:
+        raise AssertionError("node is required for operational native identity Node suites")
+    return found
+
+
+@pytest.mark.parametrize("relative", NODE_SUITES)
+def test_operational_native_identity_node_suite(relative: str) -> None:
+    node = _require_node()
+    path = ROOT / relative
+    assert path.is_file(), relative
+    result = subprocess.run(
+        [node, "--test", str(path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert result.returncode == 0, f"{relative}\n{result.stdout}\n{result.stderr}"
+
+
+def test_node_suites_tuple_covers_shipped_beta_and_parity() -> None:
+    """Source pin: CI must keep fence + drift + transition suites in the wrapper list."""
+    text = Path(__file__).read_text(encoding="utf-8")
+    assert "native-clerk-host-drift.test.mjs" in text
+    assert "transition-desktop-identity.test.mjs" in text
+    assert "build-native-renderer.test.mjs" in text
+    assert "package-desktop-release.test.mjs" in text
+    assert "prepare-workspace-identity.test.mjs" in text
+    assert "installation-state.test.mjs" in text
+    drift = (ROOT / "clients/shared/native-clerk-host-drift.test.mjs").read_text(encoding="utf-8")
+    assert "OPERATIONAL_BETA_CLERK_HOSTS" in drift
+    assert "must not be a named drift exception" in drift
+    assert "clerk.staging.cosmas.ai" in (
+        ROOT / "scripts/transition-desktop-identity.test.mjs"
+    ).read_text(encoding="utf-8")

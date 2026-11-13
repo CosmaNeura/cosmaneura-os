@@ -36,6 +36,15 @@ _practice_spec.loader.exec_module(_practice)
 PRACTICE_KEY = _practice.PRACTICE_KEY
 native_practice_configuration = _practice.native_practice_configuration
 
+_auth_profile_spec = importlib.util.spec_from_file_location(
+    "native_iphone_auth_profile", Path(__file__).with_name("native_iphone_auth_profile.py"))
+_auth_profile = importlib.util.module_from_spec(_auth_profile_spec)
+_auth_profile_spec.loader.exec_module(_auth_profile)
+INSTALLATION_PROFILES = _auth_profile.INSTALLATION_PROFILES
+PRODUCTION_INSTALLATION_PROFILE = _auth_profile.PRODUCTION_INSTALLATION_PROFILE
+apply_installation_profile_to_configured_info = _auth_profile.apply_installation_profile_to_configured_info
+production_native_auth_stamp = _auth_profile.production_native_auth_stamp
+
 
 def digest(path):
     with path.open("rb") as stream:
@@ -242,20 +251,27 @@ def composition_bindings(repository, source, blueprint):
                     raise ValueError("Localized Capacitor Package.swift differs from the owned rewrite.")
             if "https://github.com/ionic-team/capacitor-swift-pm.git" in destination.read_text(encoding="utf-8"):
                 raise ValueError("Localized Capacitor inputs still name the remote package URL.")
-        elif item["role"] == "derived-usage-description":
+        elif item["role"] == "derived-owned-info-plist":
             counterpart = "apps/capture/" + item["path"]
             original = git(repository, "show", source["commit"] + ":" + counterpart)
-            if hashlib.sha256(original).hexdigest() != item["scaffold_input_sha256"]:
-                raise ValueError("Derived usage description lost its frozen scaffold Info.plist input.")
+            auth_profile_source = item.get("auth_profile_source")
+            if (not isinstance(auth_profile_source, str) or auth_profile_source == ""
+                    or hashlib.sha256(original).hexdigest() != item["scaffold_input_sha256"]):
+                raise ValueError("Owned Info.plist derivation lost its frozen scaffold Info.plist input.")
             if digest(repository / item["derivation_source"]) != item["derivation_source_sha256"]:
-                raise ValueError("Derived usage description drifted from the committed composer.")
+                raise ValueError("Owned Info.plist derivation drifted from the committed composer.")
+            if digest(repository / auth_profile_source) != item.get("auth_profile_source_sha256"):
+                raise ValueError("Owned Info.plist derivation drifted from native_iphone_auth_profile.py.")
             compose = load_module(repository, "compose-portable-iphone")
             expected = plistlib.loads(original)
+            compose.refuse_non_true_export_compliance(expected)
             expected["NSMicrophoneUsageDescription"] = compose.REVIEWED_MICROPHONE_USAGE
             expected["NSSpeechRecognitionUsageDescription"] = compose.REVIEWED_SPEECH_USAGE
+            if item.get("production_native_auth") is True:
+                expected = production_native_auth_stamp(expected)
             if plistlib.loads(destination.read_bytes()) != expected:
                 raise ValueError(
-                    "Derived usage description differs from the reviewed microphone and speech rewrite."
+                    "Owned Info.plist derivation differs from the reviewed usage and auth rewrite."
                 )
         elif item["role"] in {"app-scaffold", "scaffold-package-wiring"}:
             counterpart = "apps/capture/" + item["path"]
@@ -299,6 +315,22 @@ def arguments(argv=None):
     retained.add_argument("--retained-ipa", type=Path, help="Original existing CosmaBot app IPA; reads only its public Info")
     retained.add_argument("--retained-info", type=Path, help="Original existing CosmaBot public Info.plist")
     parser.add_argument("--native-practice-config", type=Path, help="Optional explicit public native Info dictionary JSON")
+    parser.add_argument(
+        "--installation-profile",
+        choices=sorted(INSTALLATION_PROFILES),
+        help=(
+            "Optional closed installation profile. "
+            "'production' selects operational-production-v1 on clerk.beta.cosmas.ai / "
+            "api.beta.cosmas.ai, stamps those origins, and enables CosmasNativeAuth only "
+            "with a validated pk_live_ key encoding clerk.beta.cosmas.ai; it is not a "
+            "practice-account realm. "
+            "'staging' admits clerk.staging.cosmas.ai (pk_live_) or a strict "
+            "*.clerk.accounts.dev host (pk_test_) with api.staging.cosmas.ai and refuses "
+            "production origins. "
+            "'beta' (or omit) keeps the live operational-beta-v1 / clerk.cosmas.ai path "
+            "and refuses operational-production-v1 / clerk.beta.cosmas.ai."
+        ),
+    )
     parser.add_argument("--node", type=Path, required=True, help="Existing local Node 24 executable; no downloads")
     parser.add_argument("--include-desktop-renderer", action="store_true")
     parser.add_argument("--output", type=Path, required=True, help="Fresh local candidate directory")
@@ -340,22 +372,35 @@ def prepare(args):
     previous_path = os.environ.get("PATH")
     os.environ["PATH"] = str(node.parent) + os.pathsep + (previous_path or "")
     try:
-        identity = identity_module.load(inputs / "apple-identity.json", "apple")
+        # Installation-profile fence at load: omitted/beta refuse operational-production-v1.
+        identity = identity_module.load(
+            inputs / "apple-identity.json", "apple",
+            installation_profile=args.installation_profile)
         # Check retained custody before creating output or invoking a compiler.
         scaffold_info = plistlib.loads((repository / "apps/capture/ios/App/App/Info.plist").read_bytes())
-        configured_info(scaffold_info, old_info, identity, practice, navigation.validate_google)
+        custody = configured_info(scaffold_info, old_info, identity, practice, navigation.validate_google)
+        # Early Infos installation-profile fence (reachable before stages) so F17 /
+        # omitted-or-beta production-review refusal does not require a renderer build.
+        apply_installation_profile_to_configured_info(
+            copy.deepcopy(custody), args.installation_profile, identity=identity)
         output.mkdir(mode=0o700)
         (output / ".incomplete").write_text("Owned iPhone candidate preparation incomplete\n")
         env = dict(os.environ)
         stages = []
         for client in clients:
-            stages.append(stage(repository, output, client + "-renderer", [str(node),
+            renderer_command = [str(node),
                 str(repository / "scripts/build-native-renderer.mjs"), "--inputs", str(inputs),
-                "--client", client, "--output", str(output / (client + "-renderer"))], env))
+                "--client", client, "--output", str(output / (client + "-renderer"))]
+            if args.installation_profile:
+                renderer_command.extend(["--installation-profile", args.installation_profile])
+            stages.append(stage(repository, output, client + "-renderer", renderer_command, env))
         blueprint = output / "iphone-project"
-        stages.append(stage(repository, output, "iphone-composition", [sys.executable,
+        compose_command = [sys.executable,
             str(repository / "scripts/compose-portable-iphone.py"), "--repository", str(repository),
-            "--output", str(blueprint)], env))
+            "--output", str(blueprint)]
+        if args.installation_profile:
+            compose_command.extend(["--installation-profile", args.installation_profile])
+        stages.append(stage(repository, output, "iphone-composition", compose_command, env))
         composition, bindings = composition_bindings(repository, source, blueprint)
         candidate = output / "iphone-configured-candidate"
         shutil.copytree(blueprint, candidate)
@@ -363,6 +408,8 @@ def prepare(args):
         info_path = app / "Info.plist"
         before = plistlib.loads(info_path.read_bytes())
         info = configured_info(before, old_info, identity, practice, navigation.validate_google)
+        info = apply_installation_profile_to_configured_info(
+            info, args.installation_profile, identity=identity)
         info_path.write_bytes(plistlib.dumps(info, sort_keys=False))
         shutil.copytree(output / "apple-renderer/dist", app / "public")
         transport = public_json(app / "public/cosmas-workspace-build.json")
@@ -395,8 +442,11 @@ def prepare(args):
             "blueprint": blueprint.name, "candidate": candidate.name,
             "composition_sha256": digest(blueprint / "composition.json"),
             "candidate_inventory_sha256": digest(output / "candidate-inventory.json"),
+            "installation_profile": args.installation_profile,
             "configuration_delta": ["public legacy identity/source/Google fields", "explicit optional native practice config",
-                                    "generated web assets", "exact API CSP"],
+                                    "generated web assets", "exact API CSP",
+                                    *(["production CosmasNativeAuth origin stamp"]
+                                      if args.installation_profile == PRODUCTION_INSTALLATION_PROFILE else [])],
             "network_denied_for_build_stages": True, "native_compiled": False,
             "signed": False, "installed": False, "published": False, "deployed": False,
             "distribution_number_assigned": False, "physical_or_provider_journey_qualified": False,

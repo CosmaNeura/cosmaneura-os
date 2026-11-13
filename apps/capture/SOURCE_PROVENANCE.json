@@ -28,8 +28,8 @@
   "native_current_source_build_qualification": "PENDING: recovered project is not legacycomposer rawsource; new composition/release needs explicit publicinputs and generated web assets",
   "dependencies": {
     "Capacitor": {
-      "version": "8.5.0",
-      "revision": "4f71d0b979f2f957326f04353eca7604ee937e1e"
+      "version": "8.5.1",
+      "revision": "6afa7424fd2fcd8ca1e577478e8a00af284b7e82"
     },
     "ClerkKit": {
       "version": "1.5.5",
@@ -267,7 +267,7 @@
     {
       "path": "ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved",
       "release_sha256": "f623778485c6b79a847647dc1a50c490e8401e3a768073f318fab16fe1db5169",
-      "repository_sha256": "f623778485c6b79a847647dc1a50c490e8401e3a768073f318fab16fe1db5169",
+      "repository_sha256": "79ea9d4f32158f6f5d6107ecfa7f6129635b50a91892fdffa6d224467c3292b1",
       "bytes": 315,
       "treatment": "exact-released-source",
       "tracked_equivalent": null,
@@ -285,7 +285,7 @@
     {
       "path": "ios/App/CapApp-SPM/Package.swift",
       "release_sha256": "cd364f3eb7fce30813db7efc27f400dfa81db2458f7980254748dcf48d2337ad",
-      "repository_sha256": "cd364f3eb7fce30813db7efc27f400dfa81db2458f7980254748dcf48d2337ad",
+      "repository_sha256": "ecec58e8c0eb06aee5fb22c3218182524be263ef250dbe10097f317b0902a3f8",
       "bytes": 1362,
       "treatment": "exact-released-source",
       "tracked_equivalent": null,
@@ -529,7 +529,7 @@
     {
       "path": "native-plugins/cosmas-native-auth/Package.swift",
       "release_sha256": "da72bc23864440736c8ee719d0b2be0ffb4414d5fa3456913582f682bd527e72",
-      "repository_sha256": "da72bc23864440736c8ee719d0b2be0ffb4414d5fa3456913582f682bd527e72",
+      "repository_sha256": "cd9bd435ca95990a1c2f1a80d42aec4974e2b2c5f43321fd68bb9a11cfe1b83c",
       "bytes": 1457,
       "treatment": "exact-released-source",
       "tracked_equivalent": {
@@ -2912,20 +2912,20 @@
     {
       "path": "native-plugins/ios-pcm-capacitor/Package.swift",
       "release_sha256": "20ac6ca73b3559bb067a96d630bf1a5121303170b2940195219651b134eb09c1",
-      "repository_sha256": "20ac6ca73b3559bb067a96d630bf1a5121303170b2940195219651b134eb09c1",
+      "repository_sha256": "c1fc3f972f8b0ccc138058f4391c2443cfd53549ae041da1ac701ef842e159dc",
       "bytes": 1529,
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/capture/native-configured/ios-pcm-capacitor/Package.swift",
         "sha256": "20ac6ca73b3559bb067a96d630bf1a5121303170b2940195219651b134eb09c1",
-        "status": "byte-identical"
+        "status": "differs"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
     {
       "path": "native-plugins/ios-pcm-capacitor/README.md",
       "release_sha256": "cf3eb875d22ed63a1c2490557c8a07d088812d35a1f3efde5f33f72352eae669",
-      "repository_sha256": "cf3eb875d22ed63a1c2490557c8a07d088812d35a1f3efde5f33f72352eae669",
+      "repository_sha256": "364756cc5afbacf627a499eea31e908f144313f301c112ae112cf36ec0dd32d1",
       "bytes": 5456,
       "treatment": "exact-released-source",
       "tracked_equivalent": null,
@@ -2978,7 +2978,7 @@
     {
       "path": "native-plugins/ios-pcm-capacitor/Tests/contract.test.mjs",
       "release_sha256": "67a0334705de10a044f77fe7e0e55fbbcfe5ba0c6846d0fc66ab8f26dc06b3db",
-      "repository_sha256": "67a0334705de10a044f77fe7e0e55fbbcfe5ba0c6846d0fc66ab8f26dc06b3db",
+      "repository_sha256": "b13a4fa4cbc43d13ce10fd4862bc4df1f4d515c1cf755e02cf33e48be80a0377",
       "bytes": 3544,
       "treatment": "exact-released-source",
       "tracked_equivalent": null,
@@ -2987,7 +2987,7 @@
     {
       "path": "native-plugins/ios-pcm-capacitor/package.json",
       "release_sha256": "fdebd8c803d3f7548f4f60420a657bbd2d7bd4f47c3bb7a8113fbbc97da913d3",
-      "repository_sha256": "fdebd8c803d3f7548f4f60420a657bbd2d7bd4f47c3bb7a8113fbbc97da913d3",
+      "repository_sha256": "fbdd7b09b080798fb151e9d7ee03724abfc81c2487267f2cc258872e9d842f10",
       "bytes": 970,
       "treatment": "exact-released-source",
       "tracked_equivalent": null,
@@ -3068,8 +3068,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/capture/native-configured/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift",
-        "sha256": "4d274e92a316772d67b0b3fe3658c1cf55f7155bfde2e01610e152989431e395",
-        "status": "byte-identical"
+        "sha256": "08ea87b138d73336fda3c1ed17daace57f3cba2fbbe6deb13baaff3535548eff",
+        "status": "differs"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -3094,8 +3094,8 @@
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/capture/native-configured/ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift",
-        "sha256": "8a16ff1283d0c8c9e2ee339ee6c445b04d220d1442b644e8fdfeb0dda2c7fbc9",
-        "status": "byte-identical"
+        "sha256": "be0ec5f1a91eaee29c328ba827fa0e74ad32b5ed331a79c97dacaafaca1e56a7",
+        "status": "differs"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
@@ -3558,7 +3558,7 @@
     {
       "path": "native-plugins/secure-queue/CosmaneuraScribeCapacitorSecureQueue.podspec",
       "release_sha256": "bcf7c19e27c11994a1d673abf2c8bed0099ab114e8eaa3272ce347072946110c",
-      "repository_sha256": "bcf7c19e27c11994a1d673abf2c8bed0099ab114e8eaa3272ce347072946110c",
+      "repository_sha256": "cd63f7d01e6a54e0bb9d97a7a60c6200d8502283229d193a5150a5cddfc886fe",
       "bytes": 648,
       "treatment": "exact-released-source",
       "tracked_equivalent": null,
@@ -3567,20 +3567,20 @@
     {
       "path": "native-plugins/secure-queue/Package.swift",
       "release_sha256": "c57d7b6d7dbc1f81a88990e92288ef770103d8fc42ad20de21513be39a8306ef",
-      "repository_sha256": "c57d7b6d7dbc1f81a88990e92288ef770103d8fc42ad20de21513be39a8306ef",
+      "repository_sha256": "659e8eeccb1ce27834679749198d0953ec7f10fcafd97bd7f83812e1b56af5cb",
       "bytes": 994,
       "treatment": "exact-released-source",
       "tracked_equivalent": {
         "path": "clients/capture/native-configured/secure-queue/Package.swift",
         "sha256": "c57d7b6d7dbc1f81a88990e92288ef770103d8fc42ad20de21513be39a8306ef",
-        "status": "byte-identical"
+        "status": "differs"
       },
       "source_ownership": "authoritative-clients-source; recovered copy frozen"
     },
     {
       "path": "native-plugins/secure-queue/README.md",
       "release_sha256": "2460c17756525771cc1d8006ef20b6205085549ae0730dccda8255fb720243f2",
-      "repository_sha256": "2460c17756525771cc1d8006ef20b6205085549ae0730dccda8255fb720243f2",
+      "repository_sha256": "f27c144d132d6b86f73d64c8a0eb999d1cf7edce67055e9d79008595c3a1576b",
       "bytes": 5065,
       "treatment": "exact-released-source",
       "tracked_equivalent": null,
@@ -3806,7 +3806,7 @@
     {
       "path": "native-plugins/secure-queue/package.json",
       "release_sha256": "cbc4f20781d558d1912d1ccb491297545d0277aba0033f67d2bb7f25afdd1606",
-      "repository_sha256": "cbc4f20781d558d1912d1ccb491297545d0277aba0033f67d2bb7f25afdd1606",
+      "repository_sha256": "3d374b7e9316d9d46ac9c19a7e2e6288883f940f77ab94d38d9c404274d01fc6",
       "bytes": 1202,
       "treatment": "exact-released-source",
       "tracked_equivalent": null,
@@ -3833,7 +3833,7 @@
     {
       "path": "native-plugins/secure-queue/tests/native-security.test.mjs",
       "release_sha256": "b9bc0d21e25c1141d646ab36c17c7504c79fa7715ac26da11f771df7c9a9359e",
-      "repository_sha256": "b9bc0d21e25c1141d646ab36c17c7504c79fa7715ac26da11f771df7c9a9359e",
+      "repository_sha256": "5c988fe55db5a171e9409d140851efc0bd8a1fcd090d2414dd3b3d700da06d83",
       "bytes": 11303,
       "treatment": "exact-released-source",
       "tracked_equivalent": null,

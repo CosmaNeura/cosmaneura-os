@@ -100,8 +100,15 @@ def main():
     web, output = (value.resolve() for value in (args.web_dist, args.output))
     root = Path(__file__).resolve().parents[1]
     hosted = args.hosted_api_origin is not None
-    identity = _identity.load(args.native_identity_config, "desktop", args.hosted_api_origin)
+    identity = _identity.load(
+        args.native_identity_config, "desktop", args.hosted_api_origin,
+        installation_profile=args.installation_profile)
     operational = identity is not None
+    if operational and identity["identity"]["profile"] == "operational-production-v1":
+        parser.error(
+            "Desktop production identity (operational-production-v1) is not supported; "
+            "use operational-beta-v1 on clerk.cosmas.ai or clerk.staging.cosmas.ai "
+            "(CTO DECISION_LOG 12 Nov 2026 10:12 ET).")
     if operational and (not hosted or args.installation_profile != "beta" or args.installation_root is not None):
         parser.error("Operational desktop composition requires hosted API, the beta installation profile and default private storage.")
     try:

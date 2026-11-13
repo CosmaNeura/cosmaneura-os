@@ -4,8 +4,8 @@ import {validateOperationalReleaseProfile} from './package-desktop-release.mjs';
 import {INDEPENDENT_CORE_CAPTURE_OPT_IN,REVIEWED_CORE_CAPTURE_ORIGIN,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 
 const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
-  apiOrigin: 'https://api.example.invalid', frontendOrigin: 'https://identity.example.invalid',
-  publishableKey: 'pk_live_' + Buffer.from('identity.example.invalid$').toString('base64'),
+  apiOrigin: 'https://api.example.invalid', frontendOrigin: 'https://clerk.cosmas.ai',
+  publishableKey: 'pk_live_' + Buffer.from('clerk.cosmas.ai$').toString('base64'),
   organizationId: 'org_invented_practice', audience: 'invented-cosmabot-api'};
 const info = {CFBundleIdentifier: 'com.cosmasos.beta.desktop', CFBundleShortVersionString: '0.1.143', CFBundleVersion: '1103'};
 const uploadOrigin = identity.apiOrigin;

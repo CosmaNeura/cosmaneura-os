@@ -5,7 +5,7 @@ import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.
 import {validateOperationalReleaseProfile} from './package-desktop-release.mjs';
 
 const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
-  frontendOrigin:'https://identity.example.invalid',publishableKey:'pk_live_'+btoa('identity.example.invalid$'),
+  frontendOrigin:'https://clerk.cosmas.ai',publishableKey:'pk_live_'+btoa('clerk.cosmas.ai$'),
   organizationId:'org_invented_profile_test',audience:'cosmas-beta-api'};
 const options={webOrigin:'https://workspace.example.invalid',coreWebOrigin:'https://core.example.invalid',
   captureUploadOrigins:['https://uploads.example.invalid']};

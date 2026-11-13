@@ -98,7 +98,16 @@ def main():
     authenticated = configuration.get("mode") in {"local-synthetic-authenticated", "hosted-beta-authenticated"}
     hosted = configuration.get("mode") == "hosted-beta-authenticated"
     operational = hosted and (configuration.get("dataMode") == "authorized_beta" or "nativeIdentity" in configuration)
-    identity = _identity.validate(configuration.get("nativeIdentity"), "desktop", configuration.get("apiOrigin")) if operational else None
+    installation_profile = (configuration.get("installation") or {}).get("profile")
+    identity = (
+        _identity.validate(
+            configuration.get("nativeIdentity"), "desktop", configuration.get("apiOrigin"),
+            installation_profile=installation_profile)
+        if operational else None)
+    if operational and identity["identity"]["profile"] == "operational-production-v1":
+        parser.error(
+            "Desktop production identity (operational-production-v1) is not supported; "
+            "refuse at package time (CTO DECISION_LOG 12 Nov 2026 10:05 ET).")
     if operational and args.verification_variant or not operational and configuration.get("nativeIdentity") is not None:
         parser.error("Operational identity cannot be combined with a synthetic package.")
     if hosted:

@@ -10,9 +10,9 @@ test("pins one exact JavaScript and Swift Capacitor boundary", async () => {
   const manifest = JSON.parse(await source("../package.json"));
   const swiftPackage = await source("../Package.swift");
 
-  assert.equal(manifest.peerDependencies["@capacitor/core"], "8.5.0");
-  assert.equal(manifest.peerDependencies["@capacitor/ios"], "8.5.0");
-  assert.match(swiftPackage, /exact:\s+"8\.5\.0"/u);
+  assert.equal(manifest.peerDependencies["@capacitor/core"], "8.5.1");
+  assert.equal(manifest.peerDependencies["@capacitor/ios"], "8.5.1");
+  assert.match(swiftPackage, /exact:\s+"8\.5\.1"/u);
   assert.match(swiftPackage, /\.package\(path:\s+"\.\.\/ios-pcm-capture"\)/u);
 });
 

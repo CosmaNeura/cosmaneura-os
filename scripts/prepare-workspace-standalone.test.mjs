@@ -9,8 +9,8 @@ import {workspaceIdentityInputs} from './prepare-workspace-identity.mjs';
 import {STANDALONE_FEATURE_PROFILE,validateBetaFeatureManifest} from '../clients/shared/beta-feature-profile.mjs';
 
 const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
-  publishableKey:'pk_live_'+Buffer.from('identity.example.invalid$').toString('base64'),
-  frontendOrigin:'https://identity.example.invalid',organizationId:'org_invented_standalone',audience:'cosmabot-standalone-api'};
+  publishableKey:'pk_live_'+Buffer.from('clerk.cosmas.ai$').toString('base64'),
+  frontendOrigin:'https://clerk.cosmas.ai',organizationId:'org_invented_standalone',audience:'cosmabot-standalone-api'};
 const options={webOrigin:'https://workspace.example.invalid',coreWebOrigin:'',captureUploadOrigins:[],dataMode:'synthetic',featureProfile:STANDALONE_FEATURE_PROFILE};
 const script=fileURLToPath(new URL('./prepare-workspace-identity.mjs',import.meta.url));
 

@@ -7,7 +7,21 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {resolveHostedWorkspace} from '../clients/shared/hosted-workspace-config.mjs';
-import {validateOperationalNativeIdentity, validateOperationalNativeDataMode} from '../clients/desktop/native-identity-config.mjs';
+import {
+  SYNTHETIC_IPHONE_SIM_PROFILE,
+  validateSyntheticIphoneSimIdentity,
+} from '../clients/shared/synthetic-iphone-sim-identity.mjs';
+import {
+  PRODUCTION_INSTALLATION_PROFILE,
+  BETA_INSTALLATION_PROFILE,
+  STAGING_INSTALLATION_PROFILE,
+  loadOperationalNativeIdentity,
+  validateOperationalNativeDataMode,
+} from '../clients/desktop/native-identity-config.mjs';
+
+const INSTALLATION_PROFILES = new Set([
+  PRODUCTION_INSTALLATION_PROFILE, BETA_INSTALLATION_PROFILE, STAGING_INSTALLATION_PROFILE,
+]);
 
 const source = fileURLToPath(new URL('../', import.meta.url));
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -46,19 +60,36 @@ async function flatJson(path) {
 }
 
 export function nativeRendererArguments(args) {
-  const values = {}, names = new Set(['--inputs', '--client', '--output']);
+  const values = {}, required = new Set(['--inputs', '--client', '--output']);
+  const optional = new Set(['--installation-profile']);
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i], value = args[i + 1];
-    if (!names.has(key) || !value || value.startsWith('--') || Object.hasOwn(values, key)) {
-      throw new Error('Specify --inputs, --client desktop|apple, and --output exactly once');
+    if ((!required.has(key) && !optional.has(key)) || !value || value.startsWith('--')
+        || Object.hasOwn(values, key)) {
+      throw new Error(
+        'Specify --inputs, --client desktop|apple, and --output exactly once; '
+        + 'optional --installation-profile production|beta|staging');
     }
     values[key] = value;
   }
-  if (Object.keys(values).length !== names.size) throw new Error('All native renderer arguments are required');
-  return {inputs: values['--inputs'], client: values['--client'], output: values['--output']};
+  if (![...required].every(key => Object.hasOwn(values, key))) {
+    throw new Error('All native renderer arguments are required');
+  }
+  if (Object.hasOwn(values, '--installation-profile')
+      && !INSTALLATION_PROFILES.has(values['--installation-profile'])) {
+    throw new Error('Use the production, beta, or staging installation profile');
+  }
+  return {
+    inputs: values['--inputs'],
+    client: values['--client'],
+    output: values['--output'],
+    installationProfile: values['--installation-profile'],
+  };
 }
 
-export async function buildNativeRenderer({inputs, client, output}, {build} = {}) {
+export async function buildNativeRenderer(
+  {inputs, client, output, installationProfile}, {build} = {},
+) {
   if (!['desktop', 'apple'].includes(client)) throw new Error('Select the desktop or apple renderer');
   if (Object.keys(process.env).some(key => key.startsWith('VITE_'))) {
     throw new Error('Remove ambient VITE settings; select the retained public client inputs explicitly');
@@ -74,7 +105,14 @@ export async function buildNativeRenderer({inputs, client, output}, {build} = {}
   const identityName = client + '-identity.json', envName = client + '-build-env.json';
   const identityInput = await flatJson(join(inputRoot, identityName));
   const envInput = await flatJson(join(inputRoot, envName));
-  const identity = validateOperationalNativeIdentity(identityInput.value, client, identityInput.value.apiOrigin);
+  // Test-only synthetic-iphone-sim-v1 is validated separately so the three
+  // operational profiles in operational-native-identity.mjs stay untouched.
+  // Renderer (desktop) and simulator (apple) paths both refuse
+  // operational-production-v1 unless --installation-profile production is set.
+  const identity = identityInput.value?.profile === SYNTHETIC_IPHONE_SIM_PROFILE
+    ? validateSyntheticIphoneSimIdentity(identityInput.value, client, identityInput.value.apiOrigin)
+    : loadOperationalNativeIdentity(
+      identityInput.value, client, identityInput.value.apiOrigin, installationProfile);
   const env = envInput.value;
   const profile = resolveBetaFeatureProfile({
     VITE_WORKSPACE_FEATURE_PROFILE: env.VITE_WORKSPACE_FEATURE_PROFILE,

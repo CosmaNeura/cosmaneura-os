@@ -45,8 +45,13 @@ class Settings(BaseSettings):
     clerk_session_policy: Literal["audience", "shared_staging", "enrollment_default"] = "audience"
     clerk_organization_id: str | None = None
     clerk_authorized_parties: str = ""
-    # Backend API secret for self-serve account deletion only. Never logged or committed.
+    # Legacy Backend secret name; CosmaBot account delete does not read it.
+    # Standalone entrypoint refuses CLERK_SECRET_KEY so sign-in stays JWKS-only.
     clerk_secret_key: SecretStr | None = None
+    # Dedicated Backend secret for self-serve account deletion only. Never logged
+    # or committed. Staging standalone may mount ACCOUNT_DELETE_CLERK_SECRET_KEY;
+    # production standalone profiles refuse it.
+    account_delete_clerk_secret_key: SecretStr | None = None
     beta_box_id: str | None = None
 
     clinic_approval_ref: str | None = None
@@ -222,6 +227,9 @@ class Settings(BaseSettings):
     # Must equal the client VITE_CAPTURE_UPLOAD_ORIGINS / hosted API origin — never
     # a Core or Scribe blob host (browser→blob would need Cosmas CORS).
     workspace_capture_proxy_origin: str = ""
+    # Exact Core-issued Azure blob hostname for CosmaBot API→blob PUT
+    # (`<account>.blob.core.windows.net`, lowercase). Empty when capture opt-in is off.
+    core_capture_upload_host: str = ""
     # Separate activation and caller configuration for Core's prepared artifact.
     workspace_session_prep_enabled: bool = False
     core_session_prep_scope: str = ""
@@ -795,6 +803,11 @@ class Settings(BaseSettings):
         if (not self.allowed_origins
                 or not all(self._is_workspace_origin(origin) for origin in self.allowed_origins)):
             errors.append("Standalone origins must match its explicit workspace transports")
+        # Not an *_enabled flag; refuse managed admission on standalone explicitly.
+        if self.workspace_enrollment_managed:
+            errors.append(
+                "WORKSPACE_ENROLLMENT_MANAGED must remain false in standalone configuration"
+            )
         enabled_allowlist = {"workspace_enabled", "workspace_authenticated_enabled",
             "workspace_draft_recovery_required"}
         if real_clerk:
@@ -819,6 +832,7 @@ class Settings(BaseSettings):
             "core_capture_origin", "core_capture_scope",
             "core_capture_managed_identity_client_id", "core_web_origin",
             "workspace_capture_proxy_enabled", "workspace_capture_proxy_origin",
+            "core_capture_upload_host",
         }
         for name in type(self).model_fields:
             value = getattr(self, name)
@@ -882,6 +896,8 @@ class Settings(BaseSettings):
                 or proxy_host.endswith(".blob.core.windows.net")
                 or proxy_host.endswith(".cosmaneura.com")):
             return ["Standalone Core capture requires CosmaBot API proxy origin for uploads"]
+        if not re.fullmatch(r"[a-z0-9]{3,24}\.blob\.core\.windows\.net", self.core_capture_upload_host or ""):
+            return ["Standalone Core capture requires exact CORE_CAPTURE_UPLOAD_HOST"]
         return []
 
     def _standalone_model_errors(self) -> list[str]:
