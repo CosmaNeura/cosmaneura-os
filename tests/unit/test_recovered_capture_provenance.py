@@ -97,7 +97,19 @@ EXPECTED_APP_PRIVACY = {
         {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
             "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
-        }
+        },
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
+        },
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"],
+        },
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
+            "NSPrivacyAccessedAPITypeReasons": ["E174.1"],
+        },
     ],
 }
 SYNTHETIC_MICROPHONE_USAGE = (
@@ -564,6 +576,35 @@ def test_portable_iphone_requires_every_reviewed_native_practice_addition_before
 
 def test_owned_privacy_manifest_declares_reviewed_coverage():
     assert plistlib.loads(OWNED_PRIVACY.read_bytes()) == EXPECTED_APP_PRIVACY
+
+
+def test_owned_privacy_manifest_declares_precautionary_file_timestamp_c617():
+    """App PrivacyInfo keeps precautionary FileTimestamp/C617.1 even though iOS compiles fstat out.
+
+    Apple lists fstat/fstatat under NSPrivacyAccessedAPICategoryFileTimestamp
+    (https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
+    NativeCaptureProcessFence.swift ships via CosmasWorkspaceAuthPlugin → CapApp-SPM → App,
+    but every fstat/fstatat call site is under #if os(macOS) and is compiled out on iOS.
+    C617.1 remains as a precautionary app-level declaration for that shared Bridge source.
+    """
+    raw = OWNED_PRIVACY.read_bytes()
+    privacy = plistlib.loads(raw)
+    assert privacy == EXPECTED_APP_PRIVACY
+    assert _portable().REVIEWED_APP_PRIVACY == privacy
+
+    accessed = privacy["NSPrivacyAccessedAPITypes"]
+    file_timestamp = [
+        entry
+        for entry in accessed
+        if entry.get("NSPrivacyAccessedAPIType")
+        == "NSPrivacyAccessedAPICategoryFileTimestamp"
+    ]
+    assert len(file_timestamp) == 1
+    assert file_timestamp[0]["NSPrivacyAccessedAPITypeReasons"] == ["C617.1"]
+    # XML must stay parseable as a property list (not only as opaque bytes).
+    assert raw.lstrip().startswith(b"<?xml")
+    assert b"NSPrivacyAccessedAPICategoryFileTimestamp" in raw
+    assert b"C617.1" in raw
 
 
 def test_scaffold_info_plist_stays_frozen_export_key_left_for_owner_decision():

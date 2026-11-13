@@ -107,7 +107,9 @@ def test_synth_ci_draft_light_fail_closed_contract():
     jobs = data["jobs"]
     assert "ci-mode" in jobs
     ci_mode = jobs["ci-mode"]
-    assert ci_mode["runs-on"] == "ubuntu-latest"
+    assert ci_mode["runs-on"] == "ubuntu-24.04"
+    for job_key, job in jobs.items():
+        assert job["runs-on"] == "ubuntu-24.04", job_key
     assert ci_mode["outputs"]["full"] == "${{ steps.decide.outputs.full }}"
     decide = ci_mode["steps"][0]
     assert decide["id"] == "decide"
