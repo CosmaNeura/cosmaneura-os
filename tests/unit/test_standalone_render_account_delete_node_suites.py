@@ -29,6 +29,7 @@ NODE_SUITES = (
     "infra/standalone/render-goldens.test.mjs",
     "infra/standalone/render-beta.test.mjs",
     "infra/standalone/render.test.mjs",
+    "infra/standalone/account-delete-profile-matrix.test.mjs",
 )
 
 
@@ -58,12 +59,15 @@ def test_standalone_render_account_delete_node_suite(relative: str) -> None:
 
 
 def test_node_suites_tuple_covers_capture_tools_goldens_and_review() -> None:
-    """Source pin: CI must keep fingerprint and review-name suites in the wrapper."""
-    text = Path(__file__).read_text(encoding="utf-8")
-    assert "render-capture-tools.test.mjs" in text
-    assert "render-goldens.test.mjs" in text
-    assert "render-beta.test.mjs" in text
-    assert "render.test.mjs" in text
+    """Set pin: dropping a suite from NODE_SUITES fails this assertion."""
+    required = {
+        "infra/standalone/render-capture-tools.test.mjs",
+        "infra/standalone/render-goldens.test.mjs",
+        "infra/standalone/render-beta.test.mjs",
+        "infra/standalone/render.test.mjs",
+        "infra/standalone/account-delete-profile-matrix.test.mjs",
+    }
+    assert set(NODE_SUITES) >= required
     assert "MAIN_OWNED_STAGING_FINGERPRINT" in (
         ROOT / "infra/standalone/render-capture-tools.test.mjs"
     ).read_text(encoding="utf-8")
@@ -77,6 +81,7 @@ def test_node_suites_tuple_covers_capture_tools_goldens_and_review() -> None:
     assert "key_vault_secret_names" in beta
     assert "ACCOUNT_DELETE_CLERK_SECRET_KEY" in beta
     assert "CLERK_ACCOUNT_DELETION_SECRET" in beta
+    assert "api.clerk.com" in beta
     assert "account-delete-clerk-secret-key" in (
         ROOT / "infra/standalone/render.test.mjs"
     ).read_text(encoding="utf-8")

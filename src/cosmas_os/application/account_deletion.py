@@ -39,6 +39,8 @@ class AccountDeletionError(DomainError):
 
 
 class ClerkUserDeletionPort(Protocol):
+    def require_user(self, subject: str) -> dict: ...
+
     def delete_user(self, subject: str) -> None: ...
 
 
@@ -165,6 +167,12 @@ def delete_own_account(
     if clerk is None and clerk_subjects:
         # Fail closed before any local wipe or Clerk HTTP call.
         raise AccountDeletionError(NOT_CONFIGURED)
+
+    # Confirm every Clerk subject exists under this Backend secret before any
+    # local mutation. A 404 / wrong-instance key must not tombstone locally.
+    if clerk is not None:
+        for subject in clerk_subjects:
+            clerk.require_user(subject)
 
     try:
         for binding in bindings:

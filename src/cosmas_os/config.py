@@ -50,10 +50,11 @@ class Settings(BaseSettings):
     clerk_secret_key: SecretStr | None = None
     # Dedicated Backend secret for self-serve account deletion only. Never logged
     # or committed. Staging mounts ACCOUNT_DELETE_CLERK_SECRET_KEY (KV secret
-    # account-delete-clerk-secret-key). Production-review maps #356's
-    # CLERK_ACCOUNT_DELETION_SECRET into that same env name via standalone
-    # render/entrypoint. Other audience profiles refuse it. Absence still fails
-    # closed ("account deletion is not configured").
+    # account-delete-clerk-secret-key). Production-review maps #356's host key
+    # CLERK_ACCOUNT_DELETION_SECRET (vault object CLERK-ACCOUNT-DELETION-SECRET)
+    # into that same env name via standalone render/entrypoint. Other audience
+    # profiles refuse it. Absence still fails closed
+    # ("account deletion is not configured").
     account_delete_clerk_secret_key: SecretStr | None = None
     beta_box_id: str | None = None
 

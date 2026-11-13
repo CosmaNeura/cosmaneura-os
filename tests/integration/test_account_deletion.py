@@ -37,10 +37,27 @@ PATH = "/account/delete"
 class FakeClerkUsers:
     def __init__(self) -> None:
         self.deleted: list[str] = []
+        self.looked_up: list[str] = []
+        self.get_status: dict[str, int] = {}
+        self.delete_status: dict[str, int] = {}
+        self.block_network = False
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
-        if request.method == "DELETE" and request.url.path.startswith("/v1/users/"):
-            subject = request.url.path.rsplit("/", 1)[-1]
+        if self.block_network:
+            raise httpx.ConnectError("invented-clerk-egress-blocked", request=request)
+        if not request.url.path.startswith("/v1/users/"):
+            return httpx.Response(500, json={"error": "unexpected"})
+        subject = request.url.path.rsplit("/", 1)[-1]
+        if request.method == "GET":
+            self.looked_up.append(subject)
+            status = self.get_status.get(subject, 200)
+            if status == 404:
+                return httpx.Response(404, json={"error": "not_found"})
+            return httpx.Response(200, json={"id": subject, "object": "user"})
+        if request.method == "DELETE":
+            status = self.delete_status.get(subject, 200)
+            if status == 404:
+                return httpx.Response(404, json={"error": "not_found"})
             self.deleted.append(subject)
             return httpx.Response(200, json={"id": subject, "deleted": True})
         return httpx.Response(500, json={"error": "unexpected"})
@@ -211,6 +228,7 @@ def test_confirm_deletes_caller_clerk_and_personal_data_without_touching_peer(de
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     assert response.json() == {"status": "deleted"}
+    assert deletion.clerk_transport.looked_up == ["user_delete_peer"]
     assert deletion.clerk_transport.deleted == ["user_delete_peer"]
 
     peer = session.get(Principal, deletion.people["peer"])
@@ -320,16 +338,21 @@ def _snapshot_account_rows(session, box_id: str, principal_id: str, binding_id: 
 
 @pytest.mark.parametrize(
     "secret_value",
-    [None, ""],
-    ids=["account_delete_clerk_secret_unset", "account_delete_clerk_secret_empty_string"],
+    [None, "", "   ", "\t\n"],
+    ids=[
+        "account_delete_clerk_secret_unset",
+        "account_delete_clerk_secret_empty_string",
+        "account_delete_clerk_secret_spaces",
+        "account_delete_clerk_secret_tabs_newlines",
+    ],
 )
 def test_hosted_delete_fails_closed_without_clerk_secret(
     deletion, session, monkeypatch, secret_value
 ):
-    """Absent ACCOUNT_DELETE_CLERK_SECRET_KEY fails closed with the same message.
+    """Absent or whitespace-only ACCOUNT_DELETE_CLERK_SECRET_KEY fails closed.
 
     Profile-agnostic: staging and production-review may allow the secret *name*,
-    but with the key unset/empty delete still returns exactly
+    but with the key unset/empty/whitespace delete still returns exactly
     "account deletion is not configured" and mutates nothing.
     """
 
@@ -423,8 +446,57 @@ def test_staging_delete_succeeds_when_account_delete_clerk_secret_present(
     assert response.headers.get("cache-control") == "no-store"
     assert response.json() == {"status": "deleted"}
     assert constructions == [fake_secret]
+    assert deletion.clerk_transport.looked_up == ["user_delete_peer"]
     assert deletion.clerk_transport.deleted == ["user_delete_peer"]
 
     peer = session.get(Principal, deletion.people["peer"])
     session.refresh(peer)
     assert peer.state == PrincipalState.TOMBSTONED.value
+
+
+def test_clerk_404_on_require_user_does_not_tombstone_locally(deletion, session):
+    """Wrong-instance / missing Clerk user must not report deleted or wipe local rows."""
+    deletion.clerk_transport.get_status["user_delete_peer"] = 404
+    before = _snapshot_account_rows(
+        session, deletion.box, deletion.people["peer"], deletion.bindings["peer"].id
+    )
+    response = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert response.status_code == 503
+    assert response.headers.get("cache-control") == "no-store"
+    assert response.json() == {"detail": "account deletion is temporarily unavailable"}
+    assert deletion.clerk_transport.looked_up == ["user_delete_peer"]
+    assert deletion.clerk_transport.deleted == []
+    after = _snapshot_account_rows(
+        session, deletion.box, deletion.people["peer"], deletion.bindings["peer"].id
+    )
+    assert after == before
+    peer = session.get(Principal, deletion.people["peer"])
+    session.refresh(peer)
+    assert peer.state == PrincipalState.ACTIVE.value
+
+
+def test_clerk_egress_blocked_leaves_local_account_rows_unchanged(deletion, session):
+    """Egress-blocked Clerk call must roll back; no half-changed local rows."""
+    deletion.clerk_transport.block_network = True
+    before = _snapshot_account_rows(
+        session, deletion.box, deletion.people["peer"], deletion.bindings["peer"].id
+    )
+    response = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert response.status_code == 503
+    assert response.headers.get("cache-control") == "no-store"
+    assert response.json() == {"detail": "account deletion is temporarily unavailable"}
+    assert deletion.clerk_transport.deleted == []
+    after = _snapshot_account_rows(
+        session, deletion.box, deletion.people["peer"], deletion.bindings["peer"].id
+    )
+    assert after == before
+    peer = session.get(Principal, deletion.people["peer"])
+    session.refresh(peer)
+    assert peer.state == PrincipalState.ACTIVE.value
+    still_signed_in = deletion.client.get("/account/identity", headers=deletion.headers("peer"))
+    assert still_signed_in.status_code == 200
+    assert still_signed_in.json()["state"] == "allowed"

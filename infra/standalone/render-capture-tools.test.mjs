@@ -21,6 +21,11 @@ function ownedBeta({host='staging.cosmas.ai',microsoft=false,staging=false}={}){
     value.identity_policy='shared_staging';value.identity.profile='operational-staging-v1';
     value.identity.audience='';value.identity.frontendOrigin='https://invented-own-practice.clerk.accounts.dev';
     value.identity.publishableKey='pk_test_'+Buffer.from('invented-own-practice.clerk.accounts.dev$').toString('base64');
+  }else if(host==='beta.cosmas.ai'){
+    value.identity.profile='operational-production-v1';
+    value.identity.frontendOrigin='https://clerk.beta.cosmas.ai';
+    value.identity.publishableKey='pk_live_'+Buffer.from('clerk.beta.cosmas.ai$').toString('base64');
+    value.identity.audience='cosmas-os-beta-api';
   }
   value.beta_features={model:{origin:'https://invented-owned-chief.openai.azure.com',
     endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'},

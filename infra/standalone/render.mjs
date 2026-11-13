@@ -33,6 +33,35 @@ const publicUuid=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3
 const syntheticWebHosts=['staging.cosmas.ai','beta.cosmas.ai'];
 const ownedSyntheticHosts=new Set(syntheticWebHosts.flatMap(host=>[host,`api.${host}`]));
 const platformHosts=new Set(['cosmas.ai','www.cosmas.ai','app.cosmas.ai','api.cosmas.ai','bot.cosmas.ai',...ownedSyntheticHosts]);
+// Parity with entrypoint.classify_account_delete_profile (exclusive review).
+export const STAGING_WEB_ORIGIN='https://staging.cosmas.ai';
+export const REVIEW_WEB_ORIGIN='https://beta.cosmas.ai';
+export const REVIEW_CLERK_ISSUER='https://clerk.beta.cosmas.ai';
+export const STAGING_SESSION_POLICY='shared_staging';
+export const REVIEW_SESSION_POLICY='audience';
+export const ACCOUNT_DELETE_ENV_NAME='ACCOUNT_DELETE_CLERK_SECRET_KEY';
+export const REVIEW_ACCOUNT_DELETE_HOST_KEY='CLERK_ACCOUNT_DELETION_SECRET';
+export const REVIEW_ACCOUNT_DELETE_VAULT_OBJECT='CLERK-ACCOUNT-DELETION-SECRET';
+export const STAGING_ACCOUNT_DELETE_VAULT_SECRET='account-delete-clerk-secret-key';
+
+export function classifyAccountDeleteProfile({web_origin,identity_policy,cors_origins=[],issuer=''}={}){
+  // Ordered CORS list: when web_origin is omitted (entrypoint runtime), the first
+  // origin must equal REVIEW_WEB_ORIGIN — never admit on mere membership.
+  const corsList=(cors_origins||[]).map(item=>String(item).trim()).filter(Boolean);
+  const origins=new Set(corsList);
+  if(web_origin)origins.add(web_origin);
+  const hasStaging=origins.has(STAGING_WEB_ORIGIN);
+  const hasReview=origins.has(REVIEW_WEB_ORIGIN);
+  if(hasStaging&&hasReview)return null;
+  if(identity_policy===STAGING_SESSION_POLICY&&hasReview)return null;
+  const reviewWeb=web_origin==null
+    ?(corsList.length>0&&corsList[0]===REVIEW_WEB_ORIGIN)
+    :web_origin===REVIEW_WEB_ORIGIN;
+  if(identity_policy===REVIEW_SESSION_POLICY&&reviewWeb&&hasReview&&!hasStaging
+    &&issuer===REVIEW_CLERK_ISSUER)return 'review';
+  if(identity_policy===STAGING_SESSION_POLICY||hasStaging)return 'staging';
+  return null;
+}
 
 function captureToolsOptIn(value){
   if(!Object.hasOwn(value,CAPTURE_TOOLS_OPT_IN))return false;
@@ -114,6 +143,9 @@ export function validateInput(value){
   const features=betaFeatures(value);
   const ownedPair=syntheticWebHosts.some(host=>value.web_origin===`https://${host}`&&value.api_origin===`https://api.${host}`);
   if(ownedVm&&(features.profile!=='independent-beta-v1'||!ownedPair))refuse('exact_owned_cosmabot_routes_required');
+  // Production-review host cannot use shared_staging (exclusive review predicate).
+  if(value.web_origin===REVIEW_WEB_ORIGIN&&value.identity_policy===STAGING_SESSION_POLICY)
+    refuse('production_review_requires_audience_policy');
   if(typeof value.instance_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.instance_id))refuse('instance_uuid_required');
   if(typeof value.box_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.box_id)||value.box_id===value.instance_id)refuse('distinct_fresh_box_uuid_required');
   if(!/^[0-9a-f]{40}$/.test(value.source_commit))refuse('source_commit_required');
@@ -122,11 +154,17 @@ export function validateInput(value){
   const issuer=origin(value.identity?.frontendOrigin);
   if(issuer.endsWith('.invalid')||issuer.endsWith('.localhost')||[web,api].includes(issuer))refuse('separate_explicit_clerk_issuer_required');
   const staging=value.identity_policy==='shared_staging';
+  const reviewHost=value.web_origin===REVIEW_WEB_ORIGIN;
+  const expectedIdentityProfile=staging?'operational-staging-v1'
+    :(reviewHost?'operational-production-v1':'operational-beta-v1');
   const audience=value.identity?.audience;
   if(!['audience','shared_staging'].includes(value.identity_policy)||
-    value.identity?.profile!==(staging?'operational-staging-v1':'operational-beta-v1')||
+    value.identity?.profile!==expectedIdentityProfile||
     value.identity?.apiOrigin!==value.api_origin||
     typeof audience!=='string'||(staging?audience!=='':!/^[\x21-\x7e]{1,255}$/.test(audience)))refuse('explicit_matching_identity_policy_required');
+  // Exclusive review: beta.cosmas.ai + audience also requires clerk.beta issuer.
+  if(reviewHost&&!staging&&value.identity.frontendOrigin!==REVIEW_CLERK_ISSUER)
+    refuse('production_review_requires_clerk_beta_issuer');
   if(captureEnabled)requireCaptureToolsInputs(value,features,ownedVm);
   // Audience identifies the reviewed receiving application. The exact issuer,
   // organization and Box bind the practice; storage remains instance-specific.
@@ -302,33 +340,33 @@ export function render(input){
       content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
       real_patient_recording_process_switch:false}];
   }
-  // Allow ACCOUNT_DELETE_CLERK_SECRET_KEY by name on staging and production-review
-  // (beta.cosmas.ai). Staging keeps KV secret account-delete-clerk-secret-key plus
-  // vault identity. Production-review maps KV/host name CLERK_ACCOUNT_DELETION_SECRET
-  // (#356) into the same app env var — names only, no vault URI, no secret values.
-  // Parity with entrypoint.account_delete_profile: shared_staging policy OR
-  // staging web origin OR review web origin — never issuer alone.
-  const STAGING_WEB_ORIGIN='https://staging.cosmas.ai';
-  const REVIEW_WEB_ORIGIN='https://beta.cosmas.ai';
-  const STAGING_SESSION_POLICY='shared_staging';
-  const stagingHost=value.web_origin===STAGING_WEB_ORIGIN;
-  const reviewHost=value.web_origin===REVIEW_WEB_ORIGIN;
-  const stagingProfile=value.identity_policy===STAGING_SESSION_POLICY||stagingHost;
-  const accountDeleteProfile=stagingProfile||reviewHost;
+  // Exclusive account-delete profiles (parity with entrypoint.classify_account_delete_profile).
+  // Staging: KV secret account-delete-clerk-secret-key + vault identity (#375).
+  // Review: host key CLERK_ACCOUNT_DELETION_SECRET (vault object
+  // CLERK-ACCOUNT-DELETION-SECRET per #356 README) → env ACCOUNT_DELETE_CLERK_SECRET_KEY.
+  const corsOrigins=parties.split(',').map(item=>item.trim()).filter(Boolean);
+  const deleteKind=classifyAccountDeleteProfile({
+    web_origin:value.web_origin,identity_policy:value.identity_policy,
+    cors_origins:corsOrigins,issuer:value.identity.frontendOrigin,
+  });
+  const stagingProfile=deleteKind==='staging';
+  const reviewProfile=deleteKind==='review';
+  const accountDeleteProfile=stagingProfile||reviewProfile;
   if(accountDeleteProfile){
-    contract.private_environment.optional_exact_names=['ACCOUNT_DELETE_CLERK_SECRET_KEY'];
+    contract.private_environment.optional_exact_names=[ACCOUNT_DELETE_ENV_NAME];
   }
   if(stagingProfile){
     // Names only — never secret values. Staging KV refs stay staging-only (#375).
     contract.private_environment.key_vault_secret_names={
-      ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key',
+      [ACCOUNT_DELETE_ENV_NAME]:STAGING_ACCOUNT_DELETE_VAULT_SECRET,
     };
     contract.private_environment.key_vault_name='kv-cbot-stg-stg0925c1';
     contract.private_environment.key_vault_uri='https://kv-cbot-stg-stg0925c1.vault.azure.net/';
-  }else if(reviewHost){
-    // Join: KV/host name CLERK_ACCOUNT_DELETION_SECRET → env ACCOUNT_DELETE_CLERK_SECRET_KEY.
+  }else if(reviewProfile){
+    // Join: host key CLERK_ACCOUNT_DELETION_SECRET → env ACCOUNT_DELETE_CLERK_SECRET_KEY.
+    // Vault object name (hyphens) is CLERK-ACCOUNT-DELETION-SECRET; not written here.
     contract.private_environment.key_vault_secret_names={
-      ACCOUNT_DELETE_CLERK_SECRET_KEY:'CLERK_ACCOUNT_DELETION_SECRET',
+      [ACCOUNT_DELETE_ENV_NAME]:REVIEW_ACCOUNT_DELETE_HOST_KEY,
     };
   }
   if(ownedVm){
@@ -352,8 +390,9 @@ export function render(input){
       '*.cosmaneura.com',...platformHosts],
     network_namespace:'Dedicated host; never the main platform host or its network/deployment identity',
     qualification:'Service configuration alone does not enforce destination allowlisting; demonstrate host egress policy before release.'};
-  if(stagingProfile){
+  if(accountDeleteProfile){
     // Account delete uses Clerk Backend API; JWKS-only issuer egress is not enough.
+    // Declared for staging and production-review alike (contract only; no deploy).
     firewall.api_egress.push({protocol:'https',hostname:'api.clerk.com',tcp_port:443,
       path:'/v1/users/',redirects_allowed:false,purpose:'account_delete_clerk_backend'});
     firewall.dns='Only the exact configured Clerk issuer, Clerk Backend API, and any declared optional model/Google hostnames; qualify resolver enforcement separately.';
@@ -394,8 +433,8 @@ export function render(input){
     });
   }
   if(value.beta_features!==undefined){
-    // Keep main's capture/Microsoft wording; staging adds Clerk Backend API only.
-    if(stagingProfile){
+    // Keep main's capture/Microsoft wording; account-delete profiles add Clerk Backend API.
+    if(accountDeleteProfile){
       firewall.dns=captureEnabled
         ?`Only the exact configured Clerk issuer, Clerk Backend API, optional own model, selected Google/Microsoft API hostnames, ${coreHost} Core capture, IMDS token host, and ${value.core_capture_upload_host} Core capture upload blob; qualify resolver enforcement separately.`
         :'Only the exact configured Clerk issuer, Clerk Backend API, optional own model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';

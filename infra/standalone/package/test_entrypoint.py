@@ -191,17 +191,43 @@ def test_staging_web_origin_alone_may_mount_account_delete_clerk_secret(mounted)
     assert "CLERK_SECRET_KEY" not in environment
 
 
+def _review_public(values):
+    real_profile(values, "audience")
+    values.update(
+        CLERK_ISSUER=entrypoint.REVIEW_CLERK_ISSUER,
+        CLERK_JWKS_URL=entrypoint.REVIEW_CLERK_ISSUER.rstrip("/") + "/.well-known/jwks.json",
+        STANDALONE_CLERK_ISSUER_ALLOWLIST=entrypoint.REVIEW_CLERK_ISSUER,
+        CLERK_AUDIENCE="cosmas-os-beta-api",
+        CORS_ALLOWED_ORIGINS=entrypoint.REVIEW_WEB_ORIGIN,
+        CLERK_AUTHORIZED_PARTIES=entrypoint.REVIEW_WEB_ORIGIN,
+    )
+
+
+def test_review_requires_clerk_beta_issuer_to_mount_account_delete(mounted):
+    """Exclusive review: audience + beta CORS + clerk.beta issuer admits the env name."""
+    public, private, values, secrets = mounted
+    _review_public(values)
+    public.write_text(json.dumps(values))
+    private.write_text(json.dumps({**secrets, "CLERK_SECRET_KEY": "invented"}))
+    with pytest.raises(entrypoint.Refused):
+        entrypoint.load_configuration(public, private)
+    private.write_text(json.dumps({
+        **secrets,
+        entrypoint.ACCOUNT_DELETE_ENV_NAME: "sk_live_invented_review_delete",
+    }))
+    environment = entrypoint.load_configuration(public, private)
+    assert environment[entrypoint.ACCOUNT_DELETE_ENV_NAME] == "sk_live_invented_review_delete"
+    assert "CLERK_SECRET_KEY" not in environment
+    assert entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY not in environment
+
+
 @pytest.mark.parametrize(
     "issuer",
-    [
-        "https://clerk.staging.cosmas.ai",
-        "https://clerk.cosmas.ai",
-        "https://clerk.beta.cosmas.ai",
-    ],
-    ids=["clerk_staging_issuer", "clerk_prod_issuer", "clerk_beta_issuer"],
+    ["https://clerk.staging.cosmas.ai", "https://clerk.cosmas.ai"],
+    ids=["clerk_staging_issuer", "clerk_prod_issuer"],
 )
-def test_review_web_origin_alone_may_mount_account_delete_clerk_secret(mounted, issuer):
-    """REVIEW_WEB_ORIGIN (beta.cosmas.ai) admits the delete name; issuer never decides."""
+def test_review_refuses_account_delete_when_issuer_is_not_clerk_beta(mounted, issuer):
+    """Issuer alone never admits; wrong issuer on beta refuses the delete name."""
     public, private, values, secrets = mounted
     real_profile(values, "audience")
     values.update(
@@ -212,61 +238,83 @@ def test_review_web_origin_alone_may_mount_account_delete_clerk_secret(mounted, 
         CORS_ALLOWED_ORIGINS=entrypoint.REVIEW_WEB_ORIGIN,
         CLERK_AUTHORIZED_PARTIES=entrypoint.REVIEW_WEB_ORIGIN,
     )
-    assert values["CLERK_SESSION_POLICY"] == "audience"
-    assert values["CORS_ALLOWED_ORIGINS"] == entrypoint.REVIEW_WEB_ORIGIN
     public.write_text(json.dumps(values))
-    # CLERK_SECRET_KEY stays refused even on the production-review host.
-    private.write_text(json.dumps({**secrets, "CLERK_SECRET_KEY": "invented"}))
+    private.write_text(json.dumps({
+        **secrets,
+        entrypoint.ACCOUNT_DELETE_ENV_NAME: "sk_live_must_refuse_wrong_issuer",
+    }))
     with pytest.raises(entrypoint.Refused):
         entrypoint.load_configuration(public, private)
-    private.write_text(json.dumps({
-        **secrets,
-        "ACCOUNT_DELETE_CLERK_SECRET_KEY": "sk_live_invented_review_delete",
-    }))
-    environment = entrypoint.load_configuration(public, private)
-    assert environment["ACCOUNT_DELETE_CLERK_SECRET_KEY"] == "sk_live_invented_review_delete"
-    assert "CLERK_SECRET_KEY" not in environment
-    assert entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME not in environment
 
 
-def test_review_remaps_clerk_account_deletion_secret_into_account_delete_env(mounted):
-    """Production-review maps CLERK_ACCOUNT_DELETION_SECRET → ACCOUNT_DELETE_CLERK_SECRET_KEY."""
+def test_review_remaps_host_key_into_account_delete_env(mounted):
+    """Production-review maps host key CLERK_ACCOUNT_DELETION_SECRET → env name."""
     public, private, values, secrets = mounted
-    real_profile(values, "audience")
-    values.update(
-        CLERK_ISSUER="https://clerk.beta.cosmas.ai",
-        CLERK_JWKS_URL="https://clerk.beta.cosmas.ai/.well-known/jwks.json",
-        STANDALONE_CLERK_ISSUER_ALLOWLIST="https://clerk.beta.cosmas.ai",
-        CLERK_AUDIENCE="cosmas-os-beta-api",
-        CORS_ALLOWED_ORIGINS=entrypoint.REVIEW_WEB_ORIGIN,
-        CLERK_AUTHORIZED_PARTIES=entrypoint.REVIEW_WEB_ORIGIN,
-    )
+    _review_public(values)
     public.write_text(json.dumps(values))
     private.write_text(json.dumps({
         **secrets,
-        entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME: "sk_live_invented_from_kv_alias",
+        entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY: "sk_live_invented_from_host_key",
     }))
     environment = entrypoint.load_configuration(public, private)
-    assert environment[entrypoint.ACCOUNT_DELETE_ENV_NAME] == "sk_live_invented_from_kv_alias"
-    assert entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME not in environment
-    # Both names together refuse (no ambiguous dual mount).
+    assert environment[entrypoint.ACCOUNT_DELETE_ENV_NAME] == "sk_live_invented_from_host_key"
+    assert entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY not in environment
     private.write_text(json.dumps({
         **secrets,
         entrypoint.ACCOUNT_DELETE_ENV_NAME: "sk_live_invented_env",
-        entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME: "sk_live_invented_alias",
+        entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY: "sk_live_invented_alias",
     }))
     with pytest.raises(entrypoint.Refused):
         entrypoint.load_configuration(public, private)
 
 
+def test_review_loads_without_account_delete_key(mounted):
+    """Review profile with the key absent still loads; delete stays fail-closed at the API."""
+    public, private, values, secrets = mounted
+    _review_public(values)
+    public.write_text(json.dumps(values))
+    private.write_text(json.dumps(secrets))
+    environment = entrypoint.load_configuration(public, private)
+    assert entrypoint.ACCOUNT_DELETE_ENV_NAME not in environment
+    assert entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY not in environment
+
+
+def test_review_refuses_empty_or_whitespace_host_key_alias(mounted):
+    """Empty or whitespace-only host-key alias is refused (same as untrimmed secrets)."""
+    public, private, values, secrets = mounted
+    _review_public(values)
+    public.write_text(json.dumps(values))
+    for bad in ("", "   ", "\t"):
+        private.write_text(json.dumps({
+            **secrets,
+            entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY: bad,
+        }))
+        with pytest.raises(entrypoint.Refused):
+            entrypoint.load_configuration(public, private)
+
+
+def test_private_whitespace_account_delete_secret_is_refused(mounted):
+    """Untrimmed ACCOUNT_DELETE_CLERK_SECRET_KEY values are refused at the entrypoint."""
+    public, private, values, secrets = mounted
+    real_profile(values, entrypoint.STAGING_SESSION_POLICY)
+    public.write_text(json.dumps(values))
+    for bad in (" sk_test_pad ", "\tsk_test", "sk_test\n"):
+        private.write_text(json.dumps({
+            **secrets,
+            entrypoint.ACCOUNT_DELETE_ENV_NAME: bad,
+        }))
+        with pytest.raises(entrypoint.Refused):
+            entrypoint.load_configuration(public, private)
+
+
 def test_staging_refuses_clerk_account_deletion_secret_alias(mounted):
-    """Staging keeps #375 behavior: only ACCOUNT_DELETE_CLERK_SECRET_KEY, not the #356 alias."""
+    """Staging keeps #375 behavior: only ACCOUNT_DELETE_CLERK_SECRET_KEY, not the host key."""
     public, private, values, secrets = mounted
     real_profile(values, entrypoint.STAGING_SESSION_POLICY)
     public.write_text(json.dumps(values))
     private.write_text(json.dumps({
         **secrets,
-        entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME: "sk_test_must_refuse_on_staging",
+        entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY: "sk_test_must_refuse_on_staging",
     }))
     with pytest.raises(entrypoint.Refused):
         entrypoint.load_configuration(public, private)
@@ -276,6 +324,21 @@ def test_staging_refuses_clerk_account_deletion_secret_alias(mounted):
     }))
     environment = entrypoint.load_configuration(public, private)
     assert environment[entrypoint.ACCOUNT_DELETE_ENV_NAME] == "sk_test_invented_staging_unchanged"
+
+
+@pytest.mark.parametrize("profile", ["review", "staging"], ids=["review", "staging"])
+def test_host_key_in_public_json_is_refused_on_review_and_staging(mounted, profile):
+    """CLERK_ACCOUNT_DELETION_SECRET must never appear in the public mount."""
+    public, private, values, secrets = mounted
+    if profile == "review":
+        _review_public(values)
+    else:
+        real_profile(values, entrypoint.STAGING_SESSION_POLICY)
+    values[entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY] = "sk_test_must_not_be_public"
+    public.write_text(json.dumps(values))
+    private.write_text(json.dumps(secrets))
+    with pytest.raises(entrypoint.Refused):
+        entrypoint.load_configuration(public, private)
 
 
 def test_audience_non_review_origin_still_refuses_account_delete(mounted):
@@ -299,7 +362,7 @@ def test_audience_non_review_origin_still_refuses_account_delete(mounted):
         entrypoint.load_configuration(public, private)
     private.write_text(json.dumps({
         **secrets,
-        entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME: "sk_test_must_refuse_outside_review_alias",
+        entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY: "sk_test_must_refuse_outside_review_alias",
     }))
     with pytest.raises(entrypoint.Refused):
         entrypoint.load_configuration(public, private)

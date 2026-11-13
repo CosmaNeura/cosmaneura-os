@@ -75,6 +75,28 @@ class ClerkProvisioningPort:
         except Exception as exc:
             raise EnrollmentError("provisioning_identity_unavailable", "Practice identity setup can be retried safely.", 503) from exc
 
+    def require_user(self, subject: str) -> dict:
+        """Confirm the Clerk user exists under this Backend secret before delete.
+
+        A 404 means this key cannot see the subject (wrong instance or already
+        gone). Callers must treat that as an error so local rows are not
+        tombstoned while the login remains on another Clerk instance.
+        """
+        if not isinstance(subject, str) or not subject.startswith("user_") or len(subject) > 255:
+            raise EnrollmentError(
+                "provisioning_identity_unavailable",
+                "Practice identity setup can be retried safely.",
+                503,
+            )
+        value = self.request("GET", "/users/" + quote(subject, safe=""), missing=True)
+        if value is None:
+            raise EnrollmentError(
+                "provisioning_identity_unavailable",
+                "Practice identity setup can be retried safely.",
+                503,
+            )
+        return value
+
     def delete_user(self, subject: str) -> None:
         """Remove the Clerk login. Idempotent for an already-deleted user."""
         if not isinstance(subject, str) or not subject.startswith("user_") or len(subject) > 255:
