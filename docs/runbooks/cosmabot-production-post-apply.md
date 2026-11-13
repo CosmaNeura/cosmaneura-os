@@ -21,17 +21,17 @@ stays untouched. Synthetic data only.
 
 ## Pending prerequisites (app / recover — not this PR)
 
-`#377` and `#381` must be merged **before** the AI-on first start in decision
-§9 (b). `#383` is required **before** any Sitting 1 recover apply of a partial
-foundation (not an AI-on gate).
+`#377` and `#381` are **Merged** on `main` (required for AI-on first start in
+§9 (b)). `#383` is still required **before** any Sitting 1 recover apply of a
+partial foundation (not an AI-on gate).
 
 | PR | What it does | Status |
 | --- | --- | --- |
-| [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) | **Prerequisite for account-delete on prod.** Production on the `#356` VM runs `infra/beta/vm/runtime/entrypoint.py` (`runtime.secret_names` + host-file contract). `#377` adds the `CLERK_ACCOUNT_DELETION_SECRET` host-key mapping for that contract (vault `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET` → app `ACCOUNT_DELETE_CLERK_SECRET_KEY`). Also allows the process env name on production-review. No Key Vault write, no deploy from this docs ticket. | **Pending** (draft; merge before delete-secret mount / AI-on first start) |
-| [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381) | **Decision (a) decided (CTO, 13 Nov).** Allows the exact production host pattern `https://oai-cbot-prd-[a-z0-9]{6,10}.openai.azure.com/openai/v1` and wires hosted chat (text and tools, including streaming) to the configured endpoint. Unusable configured endpoint → fail closed, never silent CosmasCode fallback. No endpoint set (staging) → unchanged. Model, deployment, and API version unchanged. | **Pending** (open; merge before AI-on first start) |
+| [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) | **Account-delete on prod.** Production on the `#356` VM runs `infra/beta/vm/runtime/entrypoint.py` (`runtime.secret_names` + host-file contract). `#377` adds the `CLERK_ACCOUNT_DELETION_SECRET` host-key mapping for that contract (vault `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET` → app `ACCOUNT_DELETE_CLERK_SECRET_KEY`). Also allows the process env name on production-review. | **Merged** |
+| [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381) | **Decision (a) decided (CTO, 13 Nov).** Allows the exact production host pattern `https://oai-cbot-prd-[a-z0-9]{6,10}.openai.azure.com/openai/v1` and wires hosted chat (text and tools, including streaming) to the configured endpoint. Unusable configured endpoint → fail closed, never silent CosmasCode fallback. No endpoint set (staging) → unchanged. Model, deployment, and API version unchanged. | **Merged** |
 | [`#383`](https://github.com/CosmaNeura/cosmaneura-os/pull/383) | **Prod foundation `--recover` mode.** CTO-approved recovery path when Sitting 1 first apply is partial (existing encrypted state / passphrase reused in place; ADD-ONLY; only `rg-cosmabot-prod-eus2-01` may pre-exist). Without `--recover`, first-apply refusals stay unchanged. Merge and use before a recover plan/apply; not a substitute for `#377` / `#381`. | **Pending** (draft; required before Sitting 1 recover apply) |
 
-Do not merge or apply those from this docs ticket. Agents may drive them to
+Do not merge or apply `#383` from this docs ticket. Agents may drive it to
 green while John is in a sitting or between sittings; John merges.
 
 ---
@@ -60,7 +60,7 @@ Times are planning envelopes; slip only if John is filming.
 
 | Who | Work | ~Duration |
 | --- | --- | --- |
-| Agents | Keep this runbook draft green (`ci:full`); watch [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377), [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381), and [`#383`](https://github.com/CosmaNeura/cosmaneura-os/pull/383) | ongoing |
+| Agents | Keep this runbook draft green (`ci:full`); watch [`#383`](https://github.com/CosmaNeura/cosmaneura-os/pull/383) (`#377` / `#381` already Merged) | ongoing |
 | Agents | Prep `#356` / `#383` review packet on John's Mac path (hashes, opt-in inputs with `enable_azure_openai: true`; recover plan if partial) — **do not apply** | 30–45 min |
 | Agents | List secret **names** and Clerk public fields John will need (below) | 10 min |
 
@@ -85,7 +85,7 @@ Hands-on only. Exact order:
 | --- | --- |
 | Agents | Read-only verify RG/VM/IP/OpenAI names; draft DNS record text (do not publish) |
 | Agents | **BLOCKED** — prod host-bootstrap retarget (staging unit is `infra/beta/vm/runtime/cosmabot-staging.service`). Do not invent a transport or rename in place. Wait for a **named** ticket/PR that owns the prod unit/receipt retarget. |
-| Agents | Advance [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) and [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381) toward green; do not merge without John |
+| Agents | Advance [`#383`](https://github.com/CosmaNeura/cosmaneura-os/pull/383) toward green; do not merge without John (`#377` / `#381` already Merged) |
 | Agents | Prepare Key Vault **names** checklist and mode-600 password-file instructions for Sitting 2 (John loads; agents never rotate or load vault secrets) |
 | Agents | No Run Command with secrets; no staging changes |
 
@@ -93,12 +93,12 @@ Hands-on only. Exact order:
 
 | # | John does | ~Min | Gate |
 | --- | --- | --- | ---: |
-| 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from John's own `/32`, set via `--file` (file must have **no trailing newline**). **John only, §4.1:** paste Step A fence → **pause** → rotate/load fence → **pause** → Step B fence (names/tags only) **inside this window**. Every `az keyvault secret set` uses `--output none` (never print the secret value). Then restore `publicNetworkAccess=Disabled` and empty `ipRules`. **If interrupted:** restore Disabled + empty `ipRules` first, then verify by printing the whole `ipRules` list (§4.3). Agents never rotate or load. | 25 | **"yes, KV secrets loaded and public access disabled"** |
+| 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from John's own `/32`. **John only, §4.1:** paste Step A → **pause** → umask-077 regenerate into `$KEYFILE` (no display, no history) → Fence 2 load (`--output none`) → **pause** → Step B → `rm -f "$KEYFILE"` **inside this window**. Never print the key. Then restore `publicNetworkAccess=Disabled` and empty `ipRules`. **If interrupted:** restore Disabled + empty `ipRules` first (§4.3). Agents never rotate or load. | 25 | **"yes, KV secrets loaded and public access disabled"** |
 | 2 | On the new VM as root: create distinct DB/Postgres/Redis passwords in a **mode-600** file he owns. **Never** via Azure Run Command | 10 | **"yes, mode-600 password file is on the host"** |
 | 3 | Type **yes** to format the new empty data disk (prod IDs only) | 5 | **"yes, format the new empty data disk"** |
 | 4 | Publish Cloudflare DNS (proxy **off**): `beta.cosmas.ai` A, `api.beta.cosmas.ai` A → public IP; `clerk.beta.cosmas.ai` CNAME from Clerk | 10 | — |
 | 5 | Decide §9 (b) path (recommended: AI-on first start after endpoint-allow PR) and type **yes** for agents to continue host prep / data services after this sitting | 5 | **"yes, continue host prep"** |
-| 6 | Optional: merge `#377` and/or `#381` when green (both required before AI-on first start) | 5 | Owner merge only |
+| 6 | Optional: merge `#383` when green (recover path only; `#377` / `#381` already Merged) | 5 | Owner merge only |
 
 ### After 14:30 ET — agents (same day if John said yes)
 
@@ -112,7 +112,7 @@ Not John's hands-on. Still synthetic; still no staging. **One order** (same as �
 3. Deploy-time STOP checks: §4.1 (remaining host/post-start proofs) and §4.2
    (bundle API origins). On any mismatch: **STOP and roll back** — do not flip
    AI-on flags, do not start API/worker with model traffic.
-4. When `#377` + `#381` are merged, checks pass, and John chose AI-on: flip
+4. When checks pass and John chose AI-on (`#377` + `#381` already Merged): flip
    runnable profile flags per §9 (b), including
    `WORKSPACE_LLM_BACKEND=azure_gpt41`, `WORKSPACE_LLM_USDZ_ENABLED=true`,
    and `WORKSPACE_LLM_API_KEY` in `secret_names` (**prod** account only).
@@ -244,175 +244,218 @@ the shell (do **not** put placeholder assignments inside Fence 1):
 
 - `PROD_KV_NAME` must match `^kv-cbot-prd-[a-z0-9]+$`
 - `RG=rg-cosmabot-prod-eus2-01`
+- `KEYFILE` = a private local path for the rotated key file (mode 0600 via
+  `umask 077`; **no trailing newline**)
 
-Write the rotated OpenAI key to a local file with **no trailing newline**
-(for example `printf '%s' "$KEY" > /path/to/rotated-key-file`). Never paste
-the secret value into chat. Every `az keyvault secret set` must use
-`--output none` so the secret value is never printed.
+**Hard rule:** no step may print the production AI key or put it in shell
+history. Never assign the key to a shell variable. Never use `printf` /
+`echo` with the key. Every `az keyvault secret set` must use `--output none`.
+Step A STOP reasons go to **stderr** so they are not captured into
+`ACCOUNT_ID`. On any Step A failure, clear `ACCOUNT_ID`.
+
+`ACCOUNT_ID` must match the full resource-id shape ending
+`/accounts/oai-cbot-prd-[a-z0-9]{6,10}` in Fence 1, Fence 2, and Step B.
 
 **Fence 1 — Step A** (resolve exactly one prod OpenAI account; print the
-account resource id — not a secret). PASS and STOP are both explicit:
+account resource id on stdout only — not a secret). STOP on stderr; PASS only
+after a shape-valid id:
 
 ```bash
 cosmabot_llm_kv_step_a_resolve_account() {
   command -v az >/dev/null || {
-    echo "STOP: Step A needs az"
+    echo "STOP: Step A needs az" >&2
     return 1
   }
   command -v jq >/dev/null || {
-    echo "STOP: Step A needs jq"
+    echo "STOP: Step A needs jq" >&2
     return 1
   }
   test -n "${PROD_KV_NAME:-}" || {
-    echo "STOP: Step A PROD_KV_NAME unset - export applied vault name first"
+    echo "STOP: Step A PROD_KV_NAME unset - export applied vault name first" >&2
     return 1
   }
   test -n "${RG:-}" || {
-    echo "STOP: Step A RG unset - export rg-cosmabot-prod-eus2-01 first"
+    echo "STOP: Step A RG unset - export rg-cosmabot-prod-eus2-01 first" >&2
     return 1
   }
   printf '%s' "$PROD_KV_NAME" | grep -Eq '^kv-cbot-prd-[a-z0-9]+$' || {
-    echo "STOP: Step A PROD_KV_NAME must match kv-cbot-prd-<suffix>"
+    echo "STOP: Step A PROD_KV_NAME must match kv-cbot-prd-<suffix>" >&2
     return 1
   }
   OAI_COUNT=$(az cognitiveservices account list \
     --resource-group "$RG" \
     --query "length([?kind=='OpenAI'])" -o tsv) || {
-    echo "STOP: Step A cognitiveservices list failed"
+    echo "STOP: Step A cognitiveservices list failed" >&2
     return 1
   }
   test "$OAI_COUNT" = "1" || {
-    echo "STOP: Step A expected exactly one OpenAI account in RG"
+    echo "STOP: Step A expected exactly one OpenAI account in RG" >&2
     return 1
   }
   OAI_NAME=$(az cognitiveservices account list \
     --resource-group "$RG" \
     --query "[?kind=='OpenAI'].name | [0]" -o tsv) || {
-    echo "STOP: Step A OpenAI name query failed"
+    echo "STOP: Step A OpenAI name query failed" >&2
     return 1
   }
   printf '%s' "$OAI_NAME" | grep -Eq '^oai-cbot-prd-[a-z0-9]{6,10}$' || {
-    echo "STOP: Step A OpenAI name is not oai-cbot-prd-<suffix>"
+    echo "STOP: Step A OpenAI name is not oai-cbot-prd-<suffix>" >&2
     return 1
   }
-  ACCOUNT_ID=$(az cognitiveservices account show \
+  RID=$(az cognitiveservices account show \
     --resource-group "$RG" \
     --name "$OAI_NAME" \
     --query id -o tsv) || {
-    echo "STOP: Step A account id query failed"
+    echo "STOP: Step A account id query failed" >&2
     return 1
   }
-  test -n "$ACCOUNT_ID" || {
-    echo "STOP: Step A account id empty"
+  printf '%s' "$RID" | grep -Eq '/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
+    echo "STOP: Step A ACCOUNT_ID shape invalid" >&2
     return 1
   }
-  printf '%s\n' "$ACCOUNT_ID"
+  printf '%s\n' "$RID"
 }
 ACCOUNT_ID=$(cosmabot_llm_kv_step_a_resolve_account) || {
-  echo "STOP: Step A failed - no usable oai-cbot-prd account id"
+  echo "STOP: Step A failed - no usable oai-cbot-prd account id" >&2
+  ACCOUNT_ID=
   false
 }
-test -n "$ACCOUNT_ID" || {
-  echo "STOP: Step A failed - empty ACCOUNT_ID"
+printf '%s' "${ACCOUNT_ID:-}" | grep -Eq '/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
+  echo "STOP: Step A ACCOUNT_ID shape invalid after capture" >&2
+  ACCOUNT_ID=
   false
 }
 echo "PASS: Step A resolved account resource id"
 echo "source-account tag value (account resource id, not a secret): $ACCOUNT_ID"
 ```
 
-**Pause here.** Do not paste Fence 3 yet. Rotate the provider key on that
-OpenAI account. Put the new key in a local file on the operator Mac with
-**no trailing newline** (never paste the secret value into chat). Then paste
-Fence 2 only.
-
-**Fence 2 — load** (John only; replace the file path). Refuses an empty
-`ACCOUNT_ID`. `--output none` so the secret value is never printed:
+**Pause here.** Do not paste Fence 3 yet. Rotate the provider key with this
+**exact** no-display command (umask 077 subshell; key never on screen or in
+history; no trailing newline). Export `KEYFILE` first:
 
 ```bash
-test -n "${ACCOUNT_ID:-}" || {
-  echo "STOP: Fence 2 ACCOUNT_ID empty - run Fence 1 first"
-  false
-}
-test -n "${PROD_KV_NAME:-}" || {
-  echo "STOP: Fence 2 PROD_KV_NAME unset"
-  false
-}
-printf '%s' "$PROD_KV_NAME" | grep -Eq '^kv-cbot-prd-[a-z0-9]+$' || {
-  echo "STOP: Fence 2 PROD_KV_NAME must match kv-cbot-prd-<suffix>"
-  false
-}
-test -f /path/to/rotated-key-file || {
-  echo "STOP: Fence 2 rotated key file missing"
-  false
-}
-az keyvault secret set \
-  --vault-name "$PROD_KV_NAME" \
-  --name WORKSPACE-LLM-API-KEY \
-  --file /path/to/rotated-key-file \
-  --tags "source-account=${ACCOUNT_ID}" \
-  --output none || {
-  echo "STOP: Fence 2 secret set failed"
-  false
-}
-echo "PASS: Fence 2 WORKSPACE-LLM-API-KEY set (value not printed)"
+KEYFILE="${HOME}/.cosmabot-ephemeral/workspace-llm-api-key"
+mkdir -p "$(dirname "$KEYFILE")"
+( umask 077; az cognitiveservices account keys regenerate \
+  --resource-group "$RG" \
+  --name "${ACCOUNT_ID##*/}" \
+  --key-name key1 \
+  --query key1 -o tsv | tr -d '\n' > "$KEYFILE" )
 ```
 
-**Pause here.** Confirm the set command exited 0 and printed PASS. Then paste
-Fence 3.
+Confirm the rotate command exited 0 and `$KEYFILE` exists with mode 0600.
+Never `cat` / `echo` / `printf` the file contents. Then paste Fence 2 only.
 
-**Fence 3 — Step B** (metadata only; never `az keyvault secret show`):
+**Fence 2 — load** (John only; uses `$KEYFILE`). Wrapped in a function so
+every guard uses `|| return 1` and PASS cannot print after a STOP.
+`--output none` so the secret value is never printed:
+
+```bash
+cosmabot_llm_kv_fence2_load() {
+  test -n "${ACCOUNT_ID:-}" || {
+    echo "STOP: Fence 2 ACCOUNT_ID empty - run Fence 1 first" >&2
+    return 1
+  }
+  printf '%s' "$ACCOUNT_ID" | grep -Eq '/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
+    echo "STOP: Fence 2 ACCOUNT_ID shape invalid" >&2
+    return 1
+  }
+  test -n "${PROD_KV_NAME:-}" || {
+    echo "STOP: Fence 2 PROD_KV_NAME unset" >&2
+    return 1
+  }
+  printf '%s' "$PROD_KV_NAME" | grep -Eq '^kv-cbot-prd-[a-z0-9]+$' || {
+    echo "STOP: Fence 2 PROD_KV_NAME must match kv-cbot-prd-<suffix>" >&2
+    return 1
+  }
+  test -n "${KEYFILE:-}" || {
+    echo "STOP: Fence 2 KEYFILE unset" >&2
+    return 1
+  }
+  test -f "$KEYFILE" || {
+    echo "STOP: Fence 2 KEYFILE missing" >&2
+    return 1
+  }
+  az keyvault secret set \
+    --vault-name "$PROD_KV_NAME" \
+    --name WORKSPACE-LLM-API-KEY \
+    --file "$KEYFILE" \
+    --tags "source-account=${ACCOUNT_ID}" \
+    --output none || {
+    echo "STOP: Fence 2 secret set failed" >&2
+    return 1
+  }
+  echo "PASS: Fence 2 WORKSPACE-LLM-API-KEY set (value not printed)"
+  return 0
+}
+cosmabot_llm_kv_fence2_load || {
+  echo "STOP: Fence 2 failed" >&2
+  false
+}
+```
+
+**Pause here.** Confirm Fence 2 printed PASS. Then paste Fence 3.
+
+**Fence 3 — Step B** (metadata only; never `az keyvault secret show`). After
+PASS, remove `$KEYFILE`:
 
 ```bash
 cosmabot_llm_kv_step_b_verify_tag() {
   command -v az >/dev/null || {
-    echo "STOP: Step B needs az"
+    echo "STOP: Step B needs az" >&2
     return 1
   }
   command -v jq >/dev/null || {
-    echo "STOP: Step B needs jq"
+    echo "STOP: Step B needs jq" >&2
     return 1
   }
   test -n "${ACCOUNT_ID:-}" || {
-    echo "STOP: Step B ACCOUNT_ID empty"
+    echo "STOP: Step B ACCOUNT_ID empty" >&2
+    return 1
+  }
+  printf '%s' "$ACCOUNT_ID" | grep -Eq '/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
+    echo "STOP: Step B ACCOUNT_ID shape invalid" >&2
     return 1
   }
   test -n "${PROD_KV_NAME:-}" || {
-    echo "STOP: Step B PROD_KV_NAME unset"
+    echo "STOP: Step B PROD_KV_NAME unset" >&2
     return 1
   }
   META_JSON=$(az keyvault secret list \
     --vault-name "$PROD_KV_NAME" \
     --query "[?name=='WORKSPACE-LLM-API-KEY'].{name:name,id:id,tags:tags}" -o json) || {
-    echo "STOP: Step B secret list failed"
+    echo "STOP: Step B secret list failed" >&2
     return 1
   }
   test "$(printf '%s' "$META_JSON" | jq -er 'length')" = "1" || {
-    echo "STOP: Step B expected exactly one WORKSPACE-LLM-API-KEY"
+    echo "STOP: Step B expected exactly one WORKSPACE-LLM-API-KEY" >&2
     return 1
   }
   test "$(printf '%s' "$META_JSON" | jq -er '.[0].name')" = "WORKSPACE-LLM-API-KEY" || {
-    echo "STOP: Step B secret name mismatch"
+    echo "STOP: Step B secret name mismatch" >&2
     return 1
   }
   TAGGED=$(printf '%s' "$META_JSON" | jq -er '.[0].tags["source-account"] // empty') || {
-    echo "STOP: Step B source-account tag read failed"
+    echo "STOP: Step B source-account tag read failed" >&2
     return 1
   }
   test -n "$TAGGED" || {
-    echo "STOP: Step B source-account tag empty"
+    echo "STOP: Step B source-account tag empty" >&2
     return 1
   }
   test "$TAGGED" = "$ACCOUNT_ID" || {
-    echo "STOP: Step B source-account tag does not match Step A id"
+    echo "STOP: Step B source-account tag does not match Step A id" >&2
     return 1
   }
   echo "PASS: Step B source-account tag matches Step A"
   return 0
 }
 cosmabot_llm_kv_step_b_verify_tag || {
-  echo "STOP: Step B failed - close vault per section 4.3"
+  echo "STOP: Step B failed - close vault per section 4.3" >&2
   false
 }
+rm -f "${KEYFILE:-}"
+KEYFILE=
 ```
 
 Then restore `publicNetworkAccess=Disabled` and empty `ipRules` (Sitting 2
@@ -489,11 +532,17 @@ cosmabot_stop_llm_http_status() {
     echo "STOP: HTTP proof mktemp failed"
     return 1
   }
+  _prev_exit=$(trap -p EXIT)
+  _prev_int=$(trap -p INT)
+  _prev_term=$(trap -p TERM)
   trap 'rm -f "$HDR"' EXIT INT TERM
   set +x
   { printf 'api-key: '; cat "$KEYFILE"; printf '\n'; } >"$HDR" || {
     echo "STOP: HTTP proof header file write failed"
     rm -f "$HDR"
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
@@ -504,9 +553,15 @@ cosmabot_stop_llm_http_status() {
     "${ENDPOINT}/chat/completions") || {
     echo "STOP: HTTP proof curl failed"
     rm -f "$HDR"
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   rm -f "$HDR"
+  eval "${_prev_exit:-trap - EXIT}"
+  eval "${_prev_int:-trap - INT}"
+  eval "${_prev_term:-trap - TERM}"
   test "$STATUS" = "200" || {
     echo "STOP: HTTP proof status was $STATUS (want 200; 401 means foreign key) - roll back AI-on"
     return 1
@@ -546,7 +601,9 @@ false-stop a real `CosmaBot.app`).
 
 **iPhone scan scope (H-B):** scan **only** `Info.plist` (via `plutil` exact
 extracts) and the embedded web assets directory `$APP/public` (Capacitor
-`webDir`). Do **not** scan the whole `.app` tree or Mach-O binaries.
+`webDir`). Do **not** scan the whole `.app` tree or Mach-O binaries. Also
+fixed-string-check the expected Clerk publishable key under `$APP/public` so
+an embedded-web staging key cannot slip past the plist-only check.
 
 Confirmed in-repo artifact names (`scripts/prepare-workspace-identity.mjs`,
 `docs/beta/WEB_RELEASE.md`, `apps/capture/ios/App/App/capacitor.config.json`):
@@ -554,7 +611,7 @@ Confirmed in-repo artifact names (`scripts/prepare-workspace-identity.mjs`,
 | File | Path | Keys checked |
 | --- | --- | --- |
 | `Info.plist` | inside reviewed `.app` | `CosmasNativeIdentity.apiOrigin`, `.frontendOrigin`, `.publishableKey` |
-| `$APP/public` | Capacitor web assets only | staging API origin forms (scan) |
+| `$APP/public` | Capacitor web assets only | staging API origin forms + expected `pk_live_` (fixed-string) |
 | `web-build-arguments.json` | prepare output / `/protected/ephemeral/…` | `VITE_WORKSPACE_HOSTED_API_ORIGIN`, `VITE_CLERK_PUBLISHABLE_KEY` |
 | `web-build-env.json` | same prepare output | `VITE_API_BASE`, `VITE_WORKSPACE_HOSTED_API_ORIGIN`, `VITE_CLERK_PUBLISHABLE_KEY` |
 
@@ -635,7 +692,7 @@ cosmabot_scan_forbidden_origins() {
     echo "STOP: https://enrollment-api.staging. under $root"
     return 1
   fi
-  if _hit 'https://api\.[^/[:space:]]+\.staging\.'; then
+  if _hit 'https://api\.[a-z0-9.-]+\.staging\.'; then
     echo "STOP: https://api.<x>.staging. under $root"
     return 1
   fi
@@ -695,6 +752,17 @@ cosmabot_stop_iphone_api_origin() {
     return 1
   }
   cosmabot_scan_forbidden_origins "$WEB_ASSETS" || return 1
+  if command -v rg >/dev/null 2>&1; then
+    rg -aF --no-ignore --hidden -q "$EXPECTED_CLERK_PUBLISHABLE_KEY" "$WEB_ASSETS" || {
+      echo "STOP: iPhone public web assets missing expected publishable key (fixed-string)"
+      return 1
+    }
+  else
+    /usr/bin/grep -rF "$EXPECTED_CLERK_PUBLISHABLE_KEY" "$WEB_ASSETS" >/dev/null || {
+      echo "STOP: iPhone public web assets missing expected publishable key (fixed-string)"
+      return 1
+    }
+  fi
   echo "PASS: iPhone Info.plist + public web assets OK"
   return 0
 }
@@ -985,28 +1053,40 @@ cosmabot_verify_kv_closed || {
 
 Do not continue Sitting 2 secret work until that verify passes.
 
-### 4.4 Mac-side fence syntax proof (H-A)
+### 4.4 Mac-side fence syntax proof
 
-Every pasteable Mac-side fence in §4.1–§4.3 must parse under both `bash -n`
-and `zsh -n` (and under zsh with `interactivecomments` unset). Proof commands
-and results are recorded when this runbook revision is authored; re-run after
-editing those fences:
+Every pasteable bash fence in §4.1–§4.3 (nine fences: Step A, rotate,
+Fence 2 load, Step B, host-files, HTTP status, bundle-checks, baseline,
+kv-closed) must parse under `bash -n` and `zsh -n`. Real evidence that a
+pasted interactive zsh prompt will not treat `#` as a comment is that the
+fences contain **no `#` comment lines** (parameter expansions like
+`${var#prefix}` are fine). Do **not** claim that `zsh -n` honours a parent
+`unsetopt interactivecomments` — `zsh -n` always treats `#` as a comment
+inside a file. Proof commands (re-run after editing fences):
 
 ```text
 bash -n fence1-step-a.sh
+bash -n fence-rotate.sh
 bash -n fence2-load.sh
 bash -n fence3-step-b.sh
+bash -n fence-host-files.sh
+bash -n fence-http-status.sh
 bash -n fence-bundle-checks.sh
+bash -n fence-baseline.sh
 bash -n fence-kv-closed.sh
-zsh -f -c 'unsetopt interactivecomments; zsh -n fence1-step-a.sh'
-zsh -f -c 'unsetopt interactivecomments; zsh -n fence2-load.sh'
-zsh -f -c 'unsetopt interactivecomments; zsh -n fence3-step-b.sh'
-zsh -f -c 'unsetopt interactivecomments; zsh -n fence-bundle-checks.sh'
-zsh -f -c 'unsetopt interactivecomments; zsh -n fence-kv-closed.sh'
+zsh -n fence1-step-a.sh
+zsh -n fence-rotate.sh
+zsh -n fence2-load.sh
+zsh -n fence3-step-b.sh
+zsh -n fence-host-files.sh
+zsh -n fence-http-status.sh
+zsh -n fence-bundle-checks.sh
+zsh -n fence-baseline.sh
+zsh -n fence-kv-closed.sh
 ```
 
-Author proof results for this revision (all exit 0): listed in the PR body and
-agent report for the commit that added §4.4.
+Author proof results for this revision (all exit 0): listed in the PR body /
+agent artifact for the Round 6 commit.
 
 ---
 
@@ -1021,9 +1101,8 @@ Created in Sitting 1 apply when `enable_azure_openai: true`:
   `WORKSPACE-LLM-API-KEY` with `source-account=<account id>` (Sitting 2 / §4.1)
 - Shared CosmasCode / staging keys must never enter prod
 
-Runnable traffic needs `#381` merged + §9 (b) flag flips including
-`WORKSPACE_LLM_USDZ_ENABLED=true` (and `#377` before delete-key mount / AI-on
-first start prerequisites).
+Runnable traffic needs §9 (b) flag flips including
+`WORKSPACE_LLM_USDZ_ENABLED=true` (`#381` and `#377` already Merged).
 
 ---
 
@@ -1060,14 +1139,15 @@ with no endpoint unchanged). Model/deployment/API version unchanged.
 - Partial first apply: use [`#383`](https://github.com/CosmaNeura/cosmaneura-os/pull/383)
   `--recover` (not a fresh first-apply) before continuing Sitting 1
 
-### Evidence (`main`)
+### Evidence (`main`, post-`#381` / `#377`)
 
 | Location | Expectation |
 | --- | --- |
-| `src/cosmas_os/config.py` 238 | Default CosmasCode `services.ai` endpoint |
-| `src/cosmas_os/config.py` 449 | Hosted availability **equals** CosmasCode only |
-| `src/cosmas_os/config.py` 912 | Standalone accepts either host + `/openai/v1` |
-| `src/cosmas_os/adapters/gpt41.py` 31, 170 | Default CosmasCode; constructor accepts either |
+| `src/cosmas_os/config.py` 310–311 | Default backend `disabled`; endpoint CosmasCode |
+| `src/cosmas_os/config.py` 517–536 | `workspace_llm_available`: production-review requires `#381` prod pattern; other hosted profiles stay CosmasCode-only |
+| `src/cosmas_os/config.py` 743–761 | Backend on but unavailable / wrong profile → runtime refuse |
+| `src/cosmas_os/config.py` 1017–1022 | Standalone accepts either host + `/openai/v1` |
+| `src/cosmas_os/adapters/gpt41.py` 31, 171 | Default CosmasCode; constructor accepts either |
 | `scripts/prepare-operational-startup.py` 258–259 | Both host forms in binding allow-list |
 
 API surface: Azure OpenAI **v1** path (`/openai/v1/...`), not `?api-version=`.
@@ -1106,18 +1186,17 @@ docs PR. No model change.
 
 ### (a) Hosted production endpoint — **decided (CTO, 13 Nov)**
 
-**Pre-decision evidence on `main` (why `#381` exists):**
+**Evidence on `main` after `#381` Merged:**
 
 | File | Lines | Behavior |
 | --- | --- | --- |
-| `src/cosmas_os/config.py` | 237–238 | Default backend `disabled`; endpoint CosmasCode |
-| `src/cosmas_os/config.py` | 444–451 (pre-`#381`) | Non-standalone `workspace_llm_available` required **exact** CosmasCode endpoint |
-| `src/cosmas_os/config.py` | 658–659 | Backend on but unavailable → runtime refuse |
-| `src/cosmas_os/adapters/gpt41.py` | 31, 170 | Default CosmasCode; constructor accepts either host |
-| `src/cosmas_os/config.py` | 912 | Standalone already accepts either host |
+| `src/cosmas_os/config.py` | 310–311 | Default backend `disabled`; endpoint CosmasCode |
+| `src/cosmas_os/config.py` | 517–536 | Production-review requires the `#381` prod endpoint; other hosted profiles stay CosmasCode-only |
+| `src/cosmas_os/config.py` | 743–761 | Backend on but unavailable / wrong profile → runtime refuse |
+| `src/cosmas_os/adapters/gpt41.py` | 31, 171 | Default CosmasCode; constructor accepts either host |
+| `src/cosmas_os/config.py` | 1017–1022 | Standalone accepts either host |
 
-**Decision:** [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381)
-(`grok/prod-openai-endpoint-allow`):
+**Decision (Merged):** [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381)
 
 1. Allows the exact production host pattern
    `https://oai-cbot-prd-[a-z0-9]{6,10}.openai.azure.com/openai/v1` (and keeps
@@ -1129,9 +1208,9 @@ docs PR. No model change.
 4. With no endpoint set (staging) → nothing changes.
 5. Model, deployment name, and API version unchanged.
 
-Once `#381` is merged and the production endpoint is configured, production
-chat uses production's own AI account. Do **not** recreate the `#356` OpenAI
-resource for this.
+With `#381` Merged and the production endpoint configured, production chat uses
+production's own AI account. Do **not** recreate the `#356` OpenAI resource for
+this.
 
 ### (b) VM runtime refuses start unless AI is on with its key; `#356` profile is AI-off
 
@@ -1140,33 +1219,32 @@ resource for this.
 | File | Lines | Behavior |
 | --- | --- | --- |
 | `infra/beta/vm/runtime/entrypoint.py` | 20–35 | `BASE` requires `WORKSPACE_LLM_BACKEND=azure_gpt41` |
-| `infra/beta/vm/runtime/entrypoint.py` | 118–119 | Diff from `BASE` → `hosted_synthetic_profile_required` |
-| `infra/beta/vm/runtime/entrypoint.py` | 158–159 | Missing `WORKSPACE_LLM_API_KEY` in `secret_names` → `model_credential_required` |
+| `infra/beta/vm/runtime/entrypoint.py` | 164–165 | Diff from `BASE` → `hosted_synthetic_profile_required` |
+| `infra/beta/vm/runtime/entrypoint.py` | 210–211 | Missing `WORKSPACE_LLM_API_KEY` in `secret_names` → `model_credential_required` |
 | `#356` profile `runtime-public.json` | 11–13, 16–22 | `disabled`; no `WORKSPACE_LLM_API_KEY` |
 
-**Prerequisites before AI-on first start:** merge
-[`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381) **and**
-[`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377)
-(`CLERK_ACCOUNT_DELETION_SECRET` mapping for
+**Prerequisites before AI-on first start:** [`#381`](https://github.com/CosmaNeura/cosmaneura-os/pull/381)
+and [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) are
+**Merged** (`CLERK_ACCOUNT_DELETION_SECRET` mapping for
 `infra/beta/vm/runtime/entrypoint.py` host-file contract).
 
 **Fork:**
 
-1. **Recommended today:** AI-on first start only after `#381` + `#377` merge;
+1. **Recommended today:** AI-on first start with `#381` + `#377` Merged;
    treat `#356` disabled profile as foundation-only.
 2. **Alternative:** separate runtime PR allowing AI-off first start (not `#356`).
 
 **Order for first `/ready` (path 1) — same clock as §1 (Sitting 2 before
 After-14:30 host work):**
 
-1. Merge `#381` (§9 (a) decided) **and** `#377` (VM-runtime delete host-key
-   mapping + production-review name allowance).
+1. `#381` (§9 (a) decided) **and** `#377` (VM-runtime delete host-key mapping
+   + production-review name allowance) are already **Merged**.
 2. Sitting 1: apply `#356` (RG, VM, OpenAI `gpt-4.1-dzus`).
 3. Sitting 2: John sets mode-600 passwords; pastes KV names including vault
    `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET`
-   (#356 README line 191); §4.1 Step A print account id → rotate/load vault
-   `WORKSPACE-LLM-API-KEY` with `source-account=<id>` → Step B list/compare
-   before closing the vault.
+   (#356 README line 191); §4.1 Step A print account id → umask-077 rotate into
+   `$KEYFILE` → Fence 2 load (`--output none`) → Step B list/compare → remove
+   `$KEYFILE` before closing the vault.
 4. Host prep (agents after Sitting 2 yes) — prod bootstrap retarget **BLOCKED**
    until a named ticket/PR exists. Matches §1 After 14:30 step 1.
 5. **Install** mode-0400 secret files — **BLOCKED** until a named
@@ -1208,15 +1286,15 @@ After-14:30 host work):**
 
 ## 10. Today's checklist (Fri 13 Nov)
 
-- [ ] Agents: runbook PR green; `#377`, `#381`, and `#383` watched
+- [ ] Agents: runbook PR green; `#383` watched (`#377` / `#381` Merged)
 - [ ] Sitting 1: plan-hash yes → `#356` apply **or** `#383` `--recover` → IP recorded → Clerk public values sent
 - [ ] Between: agent prep only (no secrets, no staging); bootstrap retarget **BLOCKED** until named ticket/PR
-- [ ] Sitting 2: §4.1 Fence 1 Step A → pause → Fence 2 load (`--output none`) → pause → Fence 3 Step B → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
+- [ ] Sitting 2: §4.1 Fence 1 Step A → pause → umask-077 rotate into `$KEYFILE` → Fence 2 load (`--output none`) → pause → Fence 3 Step B → `rm -f "$KEYFILE"` → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
 - [ ] §4.3 if interrupted: restore Disabled + empty `ipRules`, print whole list, verify
 - [ ] After 14:30 (= §9 (b) steps 4–9): install (BLOCKED) → checks → flag flip → render/start
-- [ ] §4.1: split fences; `--output none` on secret set; PASS/STOP explicit; bash -n + zsh -n proof; HTTP 200 with header file + trap cleanup
-- [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode bound to `clerk.beta.cosmas.ai`; web `-F` key check; staging API forms only; baseline **Pending**
-- [ ] `#377` **and** `#381` merged before AI-on first start; `#383` merged before any recover apply
+- [ ] §4.1: stderr STOPs; ACCOUNT_ID shape; Fence 2 function; `--output none`; no key on screen/history; bash -n + zsh -n proof; HTTP trap restore
+- [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode + `$APP/public` `-F` key; web `-F` key; staging host class `[a-z0-9.-]+`; baseline **Pending**
+- [ ] `#377` / `#381` Merged; `#383` merged before any recover apply
 - [ ] Account-delete vault `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET` (#356 README line 191)
 - [ ] Flags: `WORKSPACE_LLM_BACKEND=azure_gpt41`, `WORKSPACE_LLM_USDZ_ENABLED=true` → `/ready` + `version.json`
 - [ ] Eight switches false; synthetic only; staging untouched; no CosmasCode key in prod; never print secret values
