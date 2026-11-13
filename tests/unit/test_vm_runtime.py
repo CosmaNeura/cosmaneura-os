@@ -322,6 +322,17 @@ def use_web_host(config, host):
     environment = config["runtime"]["environment"]
     environment["CORS_ALLOWED_ORIGINS"] = web
     environment["CLERK_AUTHORIZED_PARTIES"] = web
+    # Exclusive production-review (#381): beta.cosmas.ai + audience issuer +
+    # production OpenAI host. Staging keeps CosmasCode (Settings default).
+    if host == "beta.cosmas.ai":
+        environment["CLERK_SESSION_POLICY"] = "audience"
+        environment["CLERK_ISSUER"] = "https://clerk.beta.cosmas.ai"
+        environment["CLERK_JWKS_URL"] = (
+            "https://clerk.beta.cosmas.ai/.well-known/jwks.json"
+        )
+        environment["WORKSPACE_LLM_ENDPOINT"] = (
+            "https://oai-cbot-prd-abcd1234.openai.azure.com/openai/v1"
+        )
     return config
 
 
@@ -452,6 +463,93 @@ def test_environment_ignores_operator_env_and_uses_verified_tls(installed, monke
     assert values["DATA_MODE"] == "synthetic"
     assert values["AZURE_CLIENT_ID"] == config["runtime"]["runtime_identity_client_id"]
     assert "POSTGRES_PASSWORD" not in values and ADMIN not in values.values()
+
+
+def _review_runtime_environment(environment: dict) -> None:
+    """Exclusive production-review public fields for classify_review_profile."""
+    environment.update(
+        {
+            "CLERK_SESSION_POLICY": "audience",
+            "CORS_ALLOWED_ORIGINS": "https://beta.cosmas.ai",
+            "CLERK_AUTHORIZED_PARTIES": "https://beta.cosmas.ai",
+            "CLERK_ISSUER": "https://clerk.beta.cosmas.ai",
+            "CLERK_JWKS_URL": "https://clerk.beta.cosmas.ai/.well-known/jwks.json",
+            "CLERK_AUDIENCE": "cosmas-os-beta-api",
+        }
+    )
+
+
+def test_review_host_key_maps_to_account_delete_and_boots(installed):
+    """Production-review: CLERK_ACCOUNT_DELETION_SECRET → ACCOUNT_DELETE_CLERK_SECRET_KEY."""
+    config, root, _ = installed
+    use_web_host(config, "beta.cosmas.ai")
+    _review_runtime_environment(config["runtime"]["environment"])
+    config["runtime"]["secret_names"] = [
+        "HUMAN_DEPLOY_EVIDENCE_REF",
+        "WORKSPACE_LLM_API_KEY",
+        entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY,
+    ]
+    for service in ("api", "worker"):
+        private(root / service / entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY, "sk_live_invented_review_host")
+    values = entrypoint.load_environment(config["runtime"], root / "api")
+    assert values[entrypoint.ACCOUNT_DELETE_ENV_NAME] == "sk_live_invented_review_host"
+    assert entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY not in values
+
+
+def test_review_padded_host_key_strips_whitespace_only_is_absent(installed):
+    config, root, _ = installed
+    use_web_host(config, "beta.cosmas.ai")
+    _review_runtime_environment(config["runtime"]["environment"])
+    config["runtime"]["secret_names"] = [
+        "HUMAN_DEPLOY_EVIDENCE_REF",
+        "WORKSPACE_LLM_API_KEY",
+        entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY,
+    ]
+    private(root / "api" / entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY, " sk_live_pad ")
+    values = entrypoint.load_environment(config["runtime"], root / "api")
+    assert values[entrypoint.ACCOUNT_DELETE_ENV_NAME] == "sk_live_pad"
+    path = root / "api" / entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY
+    path.chmod(0o600)
+    private(path, "   \t  ")
+    values = entrypoint.load_environment(config["runtime"], root / "api")
+    assert entrypoint.ACCOUNT_DELETE_ENV_NAME not in values
+    assert entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY not in values
+
+
+def test_staging_refuses_account_delete_host_key(installed):
+    """Staging / non-review: host key refused the same way as standalone."""
+    config, root, _ = installed
+    # Fixture is staging.cosmas.ai — classify → staging.
+    config["runtime"]["secret_names"] = [
+        "HUMAN_DEPLOY_EVIDENCE_REF",
+        "WORKSPACE_LLM_API_KEY",
+        entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY,
+    ]
+    private(root / "api" / entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY, "sk_test_must_refuse")
+    with pytest.raises(entrypoint.Refused, match="secret_environment_names"):
+        entrypoint.load_environment(config["runtime"], root / "api")
+
+
+def test_non_review_audience_refuses_account_delete_host_key(installed):
+    config, root, _ = installed
+    # Invented non-staging/non-beta CORS keeps classify → None.
+    config["runtime"]["environment"].update(
+        {
+            "CLERK_SESSION_POLICY": "audience",
+            "CORS_ALLOWED_ORIGINS": "https://workspace.invented-practice.test",
+            "CLERK_AUTHORIZED_PARTIES": "https://workspace.invented-practice.test",
+            "CLERK_ISSUER": "https://clerk.cosmas.ai",
+            "CLERK_JWKS_URL": "https://clerk.cosmas.ai/.well-known/jwks.json",
+        }
+    )
+    config["runtime"]["secret_names"] = [
+        "HUMAN_DEPLOY_EVIDENCE_REF",
+        "WORKSPACE_LLM_API_KEY",
+        entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY,
+    ]
+    private(root / "api" / entrypoint.REVIEW_ACCOUNT_DELETE_HOST_KEY, "sk_live_must_refuse")
+    with pytest.raises(entrypoint.Refused, match="secret_environment_names"):
+        entrypoint.load_environment(config["runtime"], root / "api")
 
 
 @pytest.mark.parametrize("role", ["prepare", "api", "worker"])

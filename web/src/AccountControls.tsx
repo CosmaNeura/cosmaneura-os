@@ -1,5 +1,6 @@
 import {useState,type ReactNode} from 'react';
 import {ACCOUNT_DELETE_CONFIRM,accountDeletionApi} from './account-deletion-api';
+import {AccountPublicLinks} from './AccountPublicLinks';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {WorkspaceDialog} from './WorkspaceDialog';
 
@@ -35,6 +36,7 @@ export function AccountControls({identity,onSignOut,clearNativeCredentials,extra
   return <>
     <div className="row account-controls" aria-label="Account">
       {extras}
+      <AccountPublicLinks/>
       <button type="button" className="button secondary" disabled={busy} onClick={()=>void onSignOut()}>Log out</button>
       <button type="button" className="button secondary" disabled={busy} onClick={()=>{setFailed(false);setConfirming(true);}}>Delete account</button>
     </div>

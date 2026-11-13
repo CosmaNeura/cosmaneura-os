@@ -1,4 +1,5 @@
 import { SignIn } from "@clerk/react";
+import { AccountPublicLinks } from "./AccountPublicLinks";
 
 /** Clerk hash route for the built-in password reset step (SignIn routing="hash"). */
 export const CLERK_FORGOT_PASSWORD_HASH = "#/forgot-password";
@@ -11,6 +12,7 @@ export function BetaSignIn() {
   return (
     <div className="beta-sign-in" data-testid="beta-sign-in">
       <SignIn routing="hash" withSignUp={false} transferable={false} />
+      <AccountPublicLinks />
       <p className="beta-sign-in-help">
         <button
           type="button"

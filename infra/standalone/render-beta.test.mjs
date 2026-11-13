@@ -99,11 +99,13 @@ test('existing owned VM scope admits only retained CosmaBot routes and cannot cr
   assert.equal(contract.existing_proxy.old_services_and_data_retained,true);
   assert.equal(contract.existing_proxy.cutover_and_rollback_qualified,false);
   assert.equal(contract.deployment_authorized,false);
+  // Staging mapping must stay byte-identical to #375 (vault secret + vault identity).
   assert.deepEqual(contract.private_environment.optional_exact_names,['ACCOUNT_DELETE_CLERK_SECRET_KEY']);
   assert.equal(contract.private_environment.key_vault_name,'kv-cbot-stg-stg0925c1');
   assert.deepEqual(contract.private_environment.key_vault_secret_names,{
     ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key',
   });
+  assert.equal(contract.private_environment.key_vault_uri,'https://kv-cbot-stg-stg0925c1.vault.azure.net/');
   const clerkEgress=files['network-requirements.json'].api_egress.find(item=>item.hostname==='api.clerk.com');
   assert.deepEqual(clerkEgress,{
     protocol:'https',hostname:'api.clerk.com',tcp_port:443,
@@ -160,11 +162,25 @@ test('owned beta.cosmas.ai stays synthetic and every other host stays refused',(
   assert.equal(files['host-preparation.json'].deployment_authorized,false);
   assert.equal(files['clients/web-build-env.json'].VITE_WORKSPACE_DATA_MODE,'synthetic');
   assert.equal(env.CORS_ALLOWED_ORIGINS,['https://beta.cosmas.ai','app://cosmas','capacitor://localhost'].join(','));
-  // Production / beta profile: no account-delete Key Vault mapping; exact_names unchanged.
+  assert.equal(env.CLERK_ISSUER,'https://clerk.beta.cosmas.ai');
+  // Production-review: host key map + api.clerk.com egress. No staging vault URI.
   const privateEnv=files['host-preparation.json'].private_environment;
-  assert.equal(Object.hasOwn(privateEnv,'optional_exact_names'),false);
-  assert.equal(Object.hasOwn(privateEnv,'key_vault_secret_names'),false);
-  assert.ok(!files['network-requirements.json'].api_egress.some(item=>item.hostname==='api.clerk.com'));
+  assert.deepEqual(privateEnv.optional_exact_names,['ACCOUNT_DELETE_CLERK_SECRET_KEY']);
+  assert.deepEqual(privateEnv.key_vault_secret_names,{
+    ACCOUNT_DELETE_CLERK_SECRET_KEY:'CLERK_ACCOUNT_DELETION_SECRET',
+  });
+  assert.equal(Object.hasOwn(privateEnv,'key_vault_name'),false);
+  assert.equal(Object.hasOwn(privateEnv,'key_vault_uri'),false);
+  assert.notEqual(privateEnv.key_vault_secret_names.ACCOUNT_DELETE_CLERK_SECRET_KEY,'account-delete-clerk-secret-key');
+  const clerkEgress=files['network-requirements.json'].api_egress.find(item=>item.hostname==='api.clerk.com');
+  assert.deepEqual(clerkEgress,{
+    protocol:'https',hostname:'api.clerk.com',tcp_port:443,
+    path:'/v1/users/',redirects_allowed:false,purpose:'account_delete_clerk_backend',
+  });
+  assert.equal(
+    files['network-requirements.json'].dns,
+    'Only the exact configured Clerk issuer, Clerk Backend API, optional own model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.',
+  );
   for(const extra of ['data_mode','cosmas_env','phi']){
     const switched=candidate({owned:true,host:'beta.cosmas.ai'});
     switched[extra]='authorized_beta';

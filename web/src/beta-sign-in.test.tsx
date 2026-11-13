@@ -28,6 +28,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
   window.location.hash = "";
+  vi.unstubAllEnvs();
 });
 
 it("mounts Clerk SignIn with signup closed and transferable signup off", async () => {
@@ -50,4 +51,34 @@ it("Forgot password jumps into Clerk hash reset without opening signup", async (
   await act(async () => button.click());
   expect(window.location.hash).toBe(CLERK_FORGOT_PASSWORD_HASH);
   expect(signInProps.every(props => props.withSignUp === false)).toBe(true);
+});
+
+it("renders Privacy Policy and Support under BetaSignIn when configured", async () => {
+  vi.stubEnv("VITE_WORKSPACE_HOSTED_CLIENT", "web");
+  vi.stubEnv("VITE_PRIVACY_POLICY_URL", "https://cosmas.ai/cosmabot/privacy");
+  vi.stubEnv("VITE_SUPPORT_URL", "https://cosmas.ai/cosmabot/support");
+  await act(async () => root.render(<BetaSignIn />));
+  const links = [...host.querySelectorAll<HTMLAnchorElement>(".beta-sign-in .account-public-links a")];
+  expect(links.map(link => link.textContent)).toEqual(["Privacy Policy", "Support"]);
+  expect(links[0].href).toBe("https://cosmas.ai/cosmabot/privacy");
+  expect(links[1].href).toBe("https://cosmas.ai/cosmabot/support");
+  expect(host.querySelector('[data-testid="clerk-sign-in-mock"]')).toBeTruthy();
+});
+
+it("keeps Clerk SignIn and hides public links under BetaSignIn when env is unset", async () => {
+  vi.stubEnv("VITE_WORKSPACE_HOSTED_CLIENT", "web");
+  vi.stubEnv("VITE_PRIVACY_POLICY_URL", undefined);
+  vi.stubEnv("VITE_SUPPORT_URL", undefined);
+  await act(async () => root.render(<BetaSignIn />));
+  expect(host.querySelectorAll(".account-public-links a")).toHaveLength(0);
+  expect(host.querySelector('[data-testid="clerk-sign-in-mock"]')).toBeTruthy();
+});
+
+it("keeps Clerk SignIn and hides public links under BetaSignIn on Mac desktop", async () => {
+  vi.stubEnv("VITE_WORKSPACE_HOSTED_CLIENT", "desktop");
+  vi.stubEnv("VITE_PRIVACY_POLICY_URL", "https://cosmas.ai/cosmabot/privacy");
+  vi.stubEnv("VITE_SUPPORT_URL", "https://cosmas.ai/cosmabot/support");
+  await act(async () => root.render(<BetaSignIn />));
+  expect(host.querySelectorAll(".account-public-links a")).toHaveLength(0);
+  expect(host.querySelector('[data-testid="clerk-sign-in-mock"]')).toBeTruthy();
 });

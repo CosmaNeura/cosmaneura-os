@@ -43,6 +43,14 @@ const webHost=process.argv[3]==='beta'?'beta.cosmas.ai':'staging.cosmas.ai';
 if(process.argv[2]==='features'||process.argv[2]==='capture_tools'){
   input.resource_scope='owned-cosmabot-vm-instance';input.web_origin='https://'+webHost;input.api_origin='https://api.'+webHost;
   input.identity.apiOrigin=input.api_origin;input.tls.hostnames=[webHost,'api.'+webHost];
+  // Exclusive production-review on beta.cosmas.ai requires operational-production-v1
+  // and clerk.beta issuer (render.mjs validateInput).
+  if(webHost==='beta.cosmas.ai'){
+    input.identity.profile='operational-production-v1';
+    input.identity.frontendOrigin='https://clerk.beta.cosmas.ai';
+    input.identity.publishableKey='pk_live_'+Buffer.from('clerk.beta.cosmas.ai$').toString('base64');
+    input.identity.audience='cosmas-os-beta-api';
+  }
   input.beta_features={model:{origin:'https://invented-owned-chief.openai.azure.com',endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'},
     google:{client_id:'invented-client.apps.googleusercontent.com',callback_uri:input.api_origin+'/connections/google/callback',return_origin:input.web_origin}};
 }
