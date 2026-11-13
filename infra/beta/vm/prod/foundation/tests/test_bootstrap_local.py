@@ -7,6 +7,7 @@ import os
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1310,6 +1311,21 @@ class RecoveryMode(unittest.TestCase):
                 },
                 "after_unknown",
             ),
+            (
+                "other_subscription_no_rg_segment",
+                self._create(
+                    "azurerm_private_endpoint",
+                    {
+                        "name": "pe",
+                        "resource_group_name": rg,
+                        "x": (
+                            "/subscriptions/99999999-0000-4000-8000-000000000009"
+                            "/providers/Microsoft.Network/dnszones"
+                        ),
+                    },
+                ),
+                "outside",
+            ),
         ]
         for label, change, needle in cases:
             with self.subTest(label=label), self.assertRaises(bootstrap.Refused) as err:
@@ -1318,6 +1334,160 @@ class RecoveryMode(unittest.TestCase):
         with self.assertRaises(bootstrap.Refused) as empty:
             self._gate([])
         self.assertIn("no create actions", str(empty.exception).lower())
+
+    def test_assert_recover_accepts_realistic_pe_after_unknown(self):
+        """Accepting side of the after_unknown fence (next to subnet_id refusal)."""
+        rg = bootstrap.RESOURCE_GROUP
+        sub = self.inputs["subscription_id"]
+        base = f"/subscriptions/{sub}/resourceGroups/{rg}"
+        change = {
+            "address": "module.azure_openai.azurerm_private_endpoint.openai[0]",
+            "type": "azurerm_private_endpoint",
+            "name": "openai",
+            "change": {
+                "actions": ["create"],
+                "after": {
+                    "name": "pe-cbot-prod-openai-eus2-01",
+                    "resource_group_name": rg,
+                    "location": "eastus2",
+                    "subnet_id": (
+                        f"{base}/providers/Microsoft.Network/virtualNetworks/"
+                        "vnet-cosmabot-prod-eus2-01/subnets/snet-private-endpoints"
+                    ),
+                    "private_service_connection": [
+                        {
+                            "name": "psc-openai",
+                            "private_connection_resource_id": (
+                                f"{base}/providers/Microsoft.CognitiveServices/"
+                                "accounts/oai-cbot-prod-eus2-01"
+                            ),
+                            "subresource_names": ["account"],
+                            "is_manual_connection": False,
+                        }
+                    ],
+                    "private_dns_zone_group": [
+                        {
+                            "name": "openai",
+                            "private_dns_zone_ids": [
+                                f"{base}/providers/Microsoft.Network/privateDnsZones/"
+                                "privatelink.openai.azure.com"
+                            ],
+                        }
+                    ],
+                },
+                "after_unknown": {
+                    "id": True,
+                    "network_interface": True,
+                    "custom_dns_configs": True,
+                    "private_dns_zone_configs": True,
+                    "private_dns_zone_group": [{"id": True}],
+                    "private_service_connection": [{"private_ip_address": True}],
+                },
+            },
+        }
+        self.assertEqual(self._gate([change])["azurerm_private_endpoint"], 1)
+        # Computed identity outputs must also be allowed unknown.
+        identity = self._create(
+            "azurerm_user_assigned_identity",
+            {"name": "id", "resource_group_name": rg},
+        )
+        identity["change"]["after_unknown"] = {
+            "id": True,
+            "client_id": True,
+            "principal_id": True,
+            "tenant_id": True,
+        }
+        self.assertEqual(self._gate([identity])["azurerm_user_assigned_identity"], 1)
+
+    def test_assert_recover_parent_arm_id_rg_resolution(self):
+        rg = bootstrap.RESOURCE_GROUP
+        sub = self.inputs["subscription_id"]
+        base = f"/subscriptions/{sub}/resourceGroups/{rg}"
+        cases = [
+            (
+                "azurerm_virtual_machine_extension",
+                {
+                    "name": "AzureMonitorLinuxAgent",
+                    "virtual_machine_id": f"{base}/providers/Microsoft.Compute/virtualMachines/vm",
+                    "publisher": bootstrap.MONITOR_AGENT_PUBLISHER,
+                    "type": bootstrap.MONITOR_AGENT_TYPE,
+                },
+            ),
+            (
+                "azurerm_monitor_data_collection_rule_association",
+                {
+                    "name": "cosmabot-health",
+                    "target_resource_id": f"{base}/providers/Microsoft.Compute/virtualMachines/vm",
+                    "data_collection_rule_id": (
+                        f"{base}/providers/Microsoft.Insights/dataCollectionRules/dcr"
+                    ),
+                },
+            ),
+            (
+                "azurerm_virtual_machine_data_disk_attachment",
+                {
+                    "managed_disk_id": f"{base}/providers/Microsoft.Compute/disks/data",
+                    "virtual_machine_id": f"{base}/providers/Microsoft.Compute/virtualMachines/vm",
+                    "lun": 0,
+                },
+            ),
+            (
+                "azurerm_subnet_network_security_group_association",
+                {
+                    "subnet_id": f"{base}/providers/Microsoft.Network/virtualNetworks/v/subnets/s",
+                    "network_security_group_id": (
+                        f"{base}/providers/Microsoft.Network/networkSecurityGroups/nsg"
+                    ),
+                },
+            ),
+            (
+                "azurerm_storage_container",
+                {
+                    "name": "box-artifacts",
+                    "storage_account_id": (
+                        f"{base}/providers/Microsoft.Storage/storageAccounts/st"
+                    ),
+                },
+            ),
+            (
+                "azurerm_cognitive_deployment",
+                {
+                    "name": "gpt-4.1-dzus",
+                    "cognitive_account_id": (
+                        f"{base}/providers/Microsoft.CognitiveServices/accounts/oai"
+                    ),
+                },
+            ),
+        ]
+        for rtype, after in cases:
+            with self.subTest(rtype=rtype):
+                self.assertEqual(self._gate([self._create(rtype, after)])[rtype], 1)
+        # terraform_data is accepted without an Azure RG or parent ARM id.
+        self.assertEqual(
+            self._gate([self._create("terraform_data", {"input": "cosmabot-prod-foundation"})])[
+                "terraform_data"
+            ],
+            1,
+        )
+        # Parent ARM id in another RG is still refused.
+        with self.assertRaises(bootstrap.Refused) as err:
+            self._gate(
+                [
+                    self._create(
+                        "azurerm_virtual_machine_extension",
+                        {
+                            "name": "AzureMonitorLinuxAgent",
+                            "virtual_machine_id": (
+                                f"/subscriptions/{sub}/resourceGroups/rg-other-eus2-01"
+                                "/providers/Microsoft.Compute/virtualMachines/vm"
+                            ),
+                            "publisher": bootstrap.MONITOR_AGENT_PUBLISHER,
+                            "type": bootstrap.MONITOR_AGENT_TYPE,
+                        },
+                    )
+                ]
+            )
+        self.assertIn("outside", str(err.exception).lower())
 
     def test_assert_recover_nested_arm_id_shapes(self):
         rg = bootstrap.RESOURCE_GROUP
@@ -1489,7 +1659,174 @@ class RecoveryMode(unittest.TestCase):
         self.assertEqual(bootstrap.digest(self.folder / "encryption.passphrase"), passphrase_sha)
         self.assertEqual([argv[1] for argv in calls], ["init", "plan", "show"])
         self.assertTrue((self.folder / "manifest.first-apply.json").is_file())
-        self.assertTrue(any((self.folder / "state").glob("foundation.tfstate.pre-recover-*")))
+        backups = json.loads((self.folder / "manifest.json").read_text())["recover_backups"]
+        backup = Path(backups["state_pre_recover"])
+        state = self.folder / "state/foundation.tfstate"
+        self.assertTrue(backup.is_file())
+        self.assertEqual(stat.S_IMODE(backup.stat().st_mode), 0o600)
+        self.assertEqual(backup.read_bytes(), state.read_bytes())
+        self.assertEqual(backups["state_pre_recover_sha256"], bootstrap.digest(backup))
+        self.assertEqual(backups["state_sha256_at_prepare"], bootstrap.digest(state))
+
+    def test_recover_state_guards_and_second_prepare_without_first_apply(self):
+        self._seed_recoverable_private_dir()
+        self._recover_prepare()
+        state = self.folder / "state/foundation.tfstate"
+        manifest = json.loads((self.folder / "manifest.json").read_text())
+        backups = dict(manifest["recover_backups"])
+        # Missing state_sha256_at_prepare
+        bad_manifest = dict(manifest)
+        bad_backups = dict(backups)
+        bad_backups.pop("state_sha256_at_prepare", None)
+        bad_manifest["recover_backups"] = bad_backups
+        (self.folder / "manifest.json").write_text(json.dumps(bad_manifest))
+        (self.folder / "manifest.json").chmod(0o600)
+        with patch.object(bootstrap, "owner_context", return_value=self.context), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(self.folder, recover=True)
+        self.assertIn("state_sha256_at_prepare", str(err.exception).lower())
+        # Restore manifest; state changed since prepare (pre-plan check)
+        (self.folder / "manifest.json").write_text(json.dumps(manifest))
+        (self.folder / "manifest.json").chmod(0o600)
+        bootstrap.replace_private(
+            state,
+            bootstrap.json_bytes(
+                {
+                    "encryption_version": "v0",
+                    "encrypted_data": "invented-ciphertext-envelope-mutated",
+                    "meta": {},
+                }
+            ),
+        )
+        with patch.object(bootstrap, "owner_context", return_value=self.context), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(self.folder, recover=True)
+        self.assertIn("changed since prepare", str(err.exception).lower())
+        # Re-seed for mid-plan and post-write checks
+        shutil.rmtree(self.folder)
+        self._seed_recoverable_private_dir()
+        self._recover_prepare()
+        plan_json = self._pe_nic_plan_json()
+
+        def _mutate_state(tag: str) -> None:
+            bootstrap.replace_private(
+                self.folder / "state/foundation.tfstate",
+                bootstrap.json_bytes(
+                    {
+                        "encryption_version": "v0",
+                        "encrypted_data": f"invented-ciphertext-envelope-{tag}",
+                        "meta": {},
+                    }
+                ),
+            )
+
+        def run_mutate_after_plan(argv, **kwargs):
+            if argv[1] == "init":
+                data = self.folder / "tofu-data"
+                data.mkdir(mode=0o700, exist_ok=True)
+                bootstrap.write_private(
+                    data / "terraform.tfstate",
+                    bootstrap.json_bytes(
+                        {
+                            "backend": {
+                                "type": "local",
+                                "config": {
+                                    "path": str(self.folder / "state/foundation.tfstate"),
+                                    "workspace_dir": str(self.folder / "workspaces"),
+                                },
+                            }
+                        }
+                    ),
+                )
+            elif argv[1] == "plan":
+                out = Path(argv[-1].split("=", 1)[1])
+                bootstrap.write_private(
+                    out,
+                    bootstrap.json_bytes(
+                        {
+                            "encryption_version": "v0",
+                            "encrypted_data": "invented-recover-plan",
+                            "meta": {},
+                        }
+                    ),
+                )
+                # Mutate state after tofu plan so the mid-plan re-check refuses.
+                _mutate_state("mid-plan")
+            elif argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"ok", b"")
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run_mutate_after_plan
+        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261113T170000Z"), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(self.folder, recover=True)
+        self.assertIn("plan modified state", str(err.exception).lower())
+        self.assertFalse((self.folder / "plans/recover-20261113T170000Z.tfplan").exists())
+
+        shutil.rmtree(self.folder)
+        self._seed_recoverable_private_dir()
+        self._recover_prepare()
+        original_write = bootstrap.write_private
+
+        def write_and_mutate(path, data):
+            original_write(path, data)
+            if Path(path).name.startswith("recover-plan-result-"):
+                _mutate_state("post-write")
+
+        def run_ok(argv, **kwargs):
+            if argv[1] == "init":
+                data = self.folder / "tofu-data"
+                data.mkdir(mode=0o700, exist_ok=True)
+                bootstrap.write_private(
+                    data / "terraform.tfstate",
+                    bootstrap.json_bytes(
+                        {
+                            "backend": {
+                                "type": "local",
+                                "config": {
+                                    "path": str(self.folder / "state/foundation.tfstate"),
+                                    "workspace_dir": str(self.folder / "workspaces"),
+                                },
+                            }
+                        }
+                    ),
+                )
+            elif argv[1] == "plan":
+                out = Path(argv[-1].split("=", 1)[1])
+                original_write(
+                    out,
+                    bootstrap.json_bytes(
+                        {
+                            "encryption_version": "v0",
+                            "encrypted_data": "invented-recover-plan",
+                            "meta": {},
+                        }
+                    ),
+                )
+            elif argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"ok", b"")
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run_ok
+        ), patch.object(bootstrap, "write_private", side_effect=write_and_mutate), patch.object(
+            bootstrap, "utc_plan_stamp", return_value="20261113T180000Z"
+        ), self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.plan(self.folder, recover=True)
+        self.assertIn("after writing recover artifacts", str(err.exception).lower())
+
+        # Second prepare without manifest.first-apply.json
+        shutil.rmtree(self.folder)
+        self._seed_recoverable_private_dir()
+        self._recover_prepare()
+        (self.folder / "manifest.first-apply.json").unlink()
+        with self.assertRaises(bootstrap.Refused) as err:
+            self._recover_prepare()
+        self.assertIn("manifest.first-apply.json", str(err.exception).lower())
 
     def test_recover_plan_refuses_non_add_only_and_leaves_no_approval_artifact(self):
         self._seed_recoverable_private_dir()
@@ -1955,6 +2292,41 @@ class RecoveryMode(unittest.TestCase):
         with patch.object(subprocess, "Popen") as popen, self.assertRaises(bootstrap.Refused) as err:
             bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval, recover=True)
         self.assertIn("recover-<utc>", str(err.exception).lower())
+        popen.assert_not_called()
+
+    def test_recover_apply_rechecks_pre_recover_backup(self):
+        self._seed_recoverable_private_dir()
+        self._recover_prepare()
+        plan_sha, summary, _plan_json, _plan_path = self._write_recover_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        manifest = json.loads((self.folder / "manifest.json").read_text())
+        backup = Path(manifest["recover_backups"]["state_pre_recover"])
+        # Missing backup file
+        backup.unlink()
+        with patch.object(subprocess, "Popen") as popen, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval, recover=True)
+        self.assertIn("pre-recover state backup is missing", str(err.exception).lower())
+        popen.assert_not_called()
+        # Restore then tamper sha256 binding
+        bootstrap.write_private(
+            backup,
+            bootstrap.json_bytes(
+                {
+                    "encryption_version": "v0",
+                    "encrypted_data": "invented-ciphertext-envelope",
+                    "meta": {},
+                }
+            ),
+        )
+        bad = dict(manifest)
+        bad_backups = dict(manifest["recover_backups"])
+        bad_backups["state_pre_recover_sha256"] = "0" * 64
+        bad["recover_backups"] = bad_backups
+        (self.folder / "manifest.json").write_text(json.dumps(bad))
+        (self.folder / "manifest.json").chmod(0o600)
+        with patch.object(subprocess, "Popen") as popen, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval, recover=True)
+        self.assertIn("pre-recover state backup sha256", str(err.exception).lower())
         popen.assert_not_called()
 
 

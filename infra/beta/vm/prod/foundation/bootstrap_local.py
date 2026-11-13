@@ -91,15 +91,33 @@ APPLY_RECOVERY = (
 RECOVER_PLAN_NAME = re.compile(r"^recover-\d{8}T\d{6}Z\.tfplan$")
 RECOVER_SUMMARY_NAME = re.compile(r"^recover-plan-summary-\d{8}T\d{6}Z\.json$")
 RECOVER_RESULT_NAME = re.compile(r"^recover-plan-result-\d{8}T\d{6}Z\.json$")
+ARM_SUBSCRIPTION_RE = re.compile(r"/subscriptions/([^/]+)", re.IGNORECASE)
 ARM_RESOURCE_GROUP_RE = re.compile(
     r"/subscriptions/([^/]+)/resourceGroups/([^/]+)",
     re.IGNORECASE,
 )
 # Derived from name_guards.STAGING (parity-tested); refuse embedding this RG name.
 STAGING_RG_NEEDLE = STAGING["resource_group"].lower()
-RELEVANT_UNKNOWN_ID_KEY = re.compile(
-    r"(^|_)(id|ids)$|(^|_)scope$|resource_id|resource_ids|subnet_id|virtual_network_id",
-    re.IGNORECASE,
+# Configured reference inputs only. Never refuse the resource's own computed id,
+# principal_id, client_id, tenant_id, virtual_machine_id, or role_definition_id.
+RELEVANT_UNKNOWN_REFERENCE_KEYS = frozenset(
+    {
+        "subnet_id",
+        "virtual_network_id",
+        "private_connection_resource_id",
+        "private_dns_zone_ids",
+        "scope",
+        "target_resource_id",
+        "data_collection_rule_id",
+        "managed_disk_id",
+        "network_security_group_id",
+        "storage_account_id",
+        "cognitive_account_id",
+        "network_interface_ids",
+        "identity_ids",
+        "public_ip_address_id",
+        "workspace_resource_id",
+    }
 )
 EXTRA_FINGERPRINT = (
     PROD / "name_guards.py",
@@ -667,8 +685,8 @@ def _iter_unknown_true_keys(value, prefix: str = ""):
             yield from _iter_unknown_true_keys(item, f"{prefix}[{index}]")
 
 
-def _relevant_unknown_id_key(key: str) -> bool:
-    return RELEVANT_UNKNOWN_ID_KEY.search(key) is not None
+def _relevant_unknown_reference_key(key: str) -> bool:
+    return key in RELEVANT_UNKNOWN_REFERENCE_KEYS
 
 
 def _change_resource_group(change: dict) -> str | None:
@@ -688,8 +706,25 @@ def _change_resource_group(change: dict) -> str | None:
     return None
 
 
+def _in_prod_rg_arm_ids(after) -> list[str]:
+    found: list[str] = []
+    for raw in _string_candidates(after):
+        for match in ARM_RESOURCE_GROUP_RE.finditer(raw):
+            if match.group(2).lower() == RESOURCE_GROUP.lower():
+                found.append(raw)
+    return found
+
+
 def _assert_arm_ids_in_prod_rg(after, *, subscription_id: str, address: str) -> None:
     for raw in _string_candidates(after):
+        for match in ARM_SUBSCRIPTION_RE.finditer(raw):
+            sub = match.group(1)
+            if sub.lower() != subscription_id.lower():
+                raise Refused(
+                    "Recovery plan ARM id is outside "
+                    f"{RESOURCE_GROUP} in subscription {subscription_id}: "
+                    f"{address} -> /subscriptions/{sub}"
+                )
         for match in ARM_RESOURCE_GROUP_RE.finditer(raw):
             sub, rg = match.group(1), match.group(2)
             if sub.lower() != subscription_id.lower() or rg.lower() != RESOURCE_GROUP.lower():
@@ -705,9 +740,9 @@ def _assert_no_unknown_id_fields(change: dict) -> None:
     if after_unknown is None:
         return
     for path, key in _iter_unknown_true_keys(after_unknown):
-        if _relevant_unknown_id_key(key):
+        if _relevant_unknown_reference_key(key):
             raise Refused(
-                "Recovery plan has after_unknown id/scope field "
+                "Recovery plan has after_unknown configured reference "
                 f"(refused until known): {change.get('address') or change.get('type')} {path}"
             )
 
@@ -767,15 +802,23 @@ def assert_recover_add_only(plan_json: dict, *, subscription_id: str) -> Counter
             raise Refused("Recovery plan must be ADD-ONLY; destroy actions are refused")
         if actions != ["create"]:
             raise Refused(f"Recovery plan must be ADD-ONLY; refused actions {actions}")
-        rg = _change_resource_group(change)
-        if rg is None or rg.lower() != RESOURCE_GROUP.lower():
-            raise Refused(
-                "Recovery plan resource is outside "
-                f"{RESOURCE_GROUP}: {change.get('address') or rtype}"
+        address_label = str(change.get("address") or rtype)
+        if rtype != "terraform_data":
+            _assert_arm_ids_in_prod_rg(
+                after, subscription_id=subscription_id, address=address_label
             )
-        _assert_arm_ids_in_prod_rg(
-            after, subscription_id=subscription_id, address=str(change.get("address") or rtype)
-        )
+            rg = _change_resource_group(change)
+            if rg is None:
+                if not _in_prod_rg_arm_ids(after):
+                    raise Refused(
+                        "Recovery plan resource is outside "
+                        f"{RESOURCE_GROUP}: {address_label}"
+                    )
+            elif rg.lower() != RESOURCE_GROUP.lower():
+                raise Refused(
+                    "Recovery plan resource is outside "
+                    f"{RESOURCE_GROUP}: {address_label}"
+                )
         candidates = [
             str(change.get("address") or ""),
             str(change.get("name") or ""),
@@ -1018,7 +1061,7 @@ def plan_recover(folder: Path) -> dict:
     if first_result_sha is not None and digest(first_result) != first_result_sha:
         raise Refused("Recovery plan must not overwrite first-apply plan-result.json")
     if digest(state_path) != expected_state_sha:
-        raise Refused("Recovery plan modified state/foundation.tfstate")
+        raise Refused("Recovery plan left state/foundation.tfstate changed after writing recover artifacts")
     assert result is not None
     return result
 
@@ -1176,6 +1219,20 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bo
     tofu = Path(manifest["tofu"])
     if digest(tofu) != manifest["tofu_sha256"]:
         raise Refused("Pinned OpenTofu executable changed")
+    if recover:
+        backups = manifest.get("recover_backups") or {}
+        backup_value = backups.get("state_pre_recover")
+        backup_sha = backups.get("state_pre_recover_sha256")
+        if not isinstance(backup_value, str) or not backup_value:
+            raise Refused("Recovery apply requires state_pre_recover backup path")
+        if not isinstance(backup_sha, str) or not backup_sha:
+            raise Refused("Recovery apply requires state_pre_recover_sha256")
+        backup_path = Path(backup_value)
+        if not backup_path.is_file():
+            raise Refused("Recovery pre-recover state backup is missing")
+        secure_file(backup_path)
+        if digest(backup_path) != backup_sha:
+            raise Refused("Recovery pre-recover state backup sha256 mismatch")
     version = command([str(tofu), "version", "-json"], env=clean_environment())
     if version.returncode or json.loads(version.stdout).get("terraform_version") != TOFU_VERSION:
         raise Refused("OpenTofu must be the pinned version 1.12.5")
