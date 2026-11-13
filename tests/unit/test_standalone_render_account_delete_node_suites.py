@@ -76,3 +76,7 @@ def test_node_suites_tuple_covers_capture_tools_goldens_and_review() -> None:
     assert "optional_exact_names" in beta
     assert "key_vault_secret_names" in beta
     assert "ACCOUNT_DELETE_CLERK_SECRET_KEY" in beta
+    assert "CLERK_ACCOUNT_DELETION_SECRET" in beta
+    assert "account-delete-clerk-secret-key" in (
+        ROOT / "infra/standalone/render.test.mjs"
+    ).read_text(encoding="utf-8")

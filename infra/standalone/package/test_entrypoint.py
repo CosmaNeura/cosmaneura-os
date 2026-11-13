@@ -226,6 +226,56 @@ def test_review_web_origin_alone_may_mount_account_delete_clerk_secret(mounted, 
     environment = entrypoint.load_configuration(public, private)
     assert environment["ACCOUNT_DELETE_CLERK_SECRET_KEY"] == "sk_live_invented_review_delete"
     assert "CLERK_SECRET_KEY" not in environment
+    assert entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME not in environment
+
+
+def test_review_remaps_clerk_account_deletion_secret_into_account_delete_env(mounted):
+    """Production-review maps CLERK_ACCOUNT_DELETION_SECRET → ACCOUNT_DELETE_CLERK_SECRET_KEY."""
+    public, private, values, secrets = mounted
+    real_profile(values, "audience")
+    values.update(
+        CLERK_ISSUER="https://clerk.beta.cosmas.ai",
+        CLERK_JWKS_URL="https://clerk.beta.cosmas.ai/.well-known/jwks.json",
+        STANDALONE_CLERK_ISSUER_ALLOWLIST="https://clerk.beta.cosmas.ai",
+        CLERK_AUDIENCE="cosmas-os-beta-api",
+        CORS_ALLOWED_ORIGINS=entrypoint.REVIEW_WEB_ORIGIN,
+        CLERK_AUTHORIZED_PARTIES=entrypoint.REVIEW_WEB_ORIGIN,
+    )
+    public.write_text(json.dumps(values))
+    private.write_text(json.dumps({
+        **secrets,
+        entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME: "sk_live_invented_from_kv_alias",
+    }))
+    environment = entrypoint.load_configuration(public, private)
+    assert environment[entrypoint.ACCOUNT_DELETE_ENV_NAME] == "sk_live_invented_from_kv_alias"
+    assert entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME not in environment
+    # Both names together refuse (no ambiguous dual mount).
+    private.write_text(json.dumps({
+        **secrets,
+        entrypoint.ACCOUNT_DELETE_ENV_NAME: "sk_live_invented_env",
+        entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME: "sk_live_invented_alias",
+    }))
+    with pytest.raises(entrypoint.Refused):
+        entrypoint.load_configuration(public, private)
+
+
+def test_staging_refuses_clerk_account_deletion_secret_alias(mounted):
+    """Staging keeps #375 behavior: only ACCOUNT_DELETE_CLERK_SECRET_KEY, not the #356 alias."""
+    public, private, values, secrets = mounted
+    real_profile(values, entrypoint.STAGING_SESSION_POLICY)
+    public.write_text(json.dumps(values))
+    private.write_text(json.dumps({
+        **secrets,
+        entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME: "sk_test_must_refuse_on_staging",
+    }))
+    with pytest.raises(entrypoint.Refused):
+        entrypoint.load_configuration(public, private)
+    private.write_text(json.dumps({
+        **secrets,
+        entrypoint.ACCOUNT_DELETE_ENV_NAME: "sk_test_invented_staging_unchanged",
+    }))
+    environment = entrypoint.load_configuration(public, private)
+    assert environment[entrypoint.ACCOUNT_DELETE_ENV_NAME] == "sk_test_invented_staging_unchanged"
 
 
 def test_audience_non_review_origin_still_refuses_account_delete(mounted):
@@ -244,6 +294,12 @@ def test_audience_non_review_origin_still_refuses_account_delete(mounted):
     private.write_text(json.dumps({
         **secrets,
         "ACCOUNT_DELETE_CLERK_SECRET_KEY": "sk_test_must_refuse_outside_review",
+    }))
+    with pytest.raises(entrypoint.Refused):
+        entrypoint.load_configuration(public, private)
+    private.write_text(json.dumps({
+        **secrets,
+        entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME: "sk_test_must_refuse_outside_review_alias",
     }))
     with pytest.raises(entrypoint.Refused):
         entrypoint.load_configuration(public, private)

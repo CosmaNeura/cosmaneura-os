@@ -16,7 +16,11 @@ MICROSOFT_PRIVATE_NAMES = {"MICROSOFT_CONNECTION_CLIENT_SECRET", "MICROSOFT_CONN
 # Optional private name for hosted account delete on staging and the
 # production-review host (beta.cosmas.ai). Other audience profiles refuse it.
 # CLERK_SECRET_KEY stays refused on every profile.
-ACCOUNT_DELETE_PRIVATE_NAMES = {"ACCOUNT_DELETE_CLERK_SECRET_KEY"}
+ACCOUNT_DELETE_ENV_NAME = "ACCOUNT_DELETE_CLERK_SECRET_KEY"
+ACCOUNT_DELETE_PRIVATE_NAMES = {ACCOUNT_DELETE_ENV_NAME}
+# Production-review (#356) Key Vault / host file name. Remapped to
+# ACCOUNT_DELETE_ENV_NAME before Settings. Staging never accepts this alias.
+REVIEW_ACCOUNT_DELETE_KV_NAME = "CLERK_ACCOUNT_DELETION_SECRET"
 OPTIONAL_PRIVATE_NAMES = MODEL_PRIVATE_NAMES | GOOGLE_PRIVATE_NAMES | MICROSOFT_PRIVATE_NAMES
 # Must match render.mjs accountDeleteProfile (policy, staging web origin, or
 # production-review web origin). Issuer alone never admits the delete secret.
@@ -29,6 +33,10 @@ class Refused(Exception):
     """Do not include configuration values or underlying exceptions in output."""
 
 
+def _cors_origins(cors_allowed_origins: str | None) -> set[str]:
+    return {part.strip() for part in (cors_allowed_origins or "").split(",") if part.strip()}
+
+
 def account_delete_profile(checked) -> bool:
     """True for staging policy/origin or production-review beta.cosmas.ai origin.
 
@@ -36,12 +44,34 @@ def account_delete_profile(checked) -> bool:
     STAGING_WEB_ORIGIN in CORS origins, or REVIEW_WEB_ORIGIN in CORS origins.
     Issuer is never an admit branch. Audience without those origins refuses.
     """
-    origins = {part.strip() for part in (checked.cors_allowed_origins or "").split(",") if part.strip()}
+    origins = _cors_origins(checked.cors_allowed_origins)
     return (
         checked.clerk_session_policy == STAGING_SESSION_POLICY
         or STAGING_WEB_ORIGIN in origins
         or REVIEW_WEB_ORIGIN in origins
     )
+
+
+def review_account_delete_host(public: dict) -> bool:
+    """True when public CORS includes beta.cosmas.ai (production-review)."""
+    return REVIEW_WEB_ORIGIN in _cors_origins(public.get("CORS_ALLOWED_ORIGINS"))
+
+
+def remap_review_account_delete_private(private: dict, *, review: bool) -> dict:
+    """Map review KV/host name into ACCOUNT_DELETE_CLERK_SECRET_KEY (names only).
+
+    Staging and non-review profiles refuse CLERK_ACCOUNT_DELETION_SECRET.
+    Both names together are refused. Values are never logged.
+    """
+    has_alias = REVIEW_ACCOUNT_DELETE_KV_NAME in private
+    has_env = ACCOUNT_DELETE_ENV_NAME in private
+    if not has_alias:
+        return private
+    if not review or has_env:
+        raise Refused()
+    remapped = dict(private)
+    remapped[ACCOUNT_DELETE_ENV_NAME] = remapped.pop(REVIEW_ACCOUNT_DELETE_KV_NAME)
+    return remapped
 
 
 def unique(pairs):
@@ -89,8 +119,11 @@ def load_configuration(public_path=PUBLIC, private_path=PRIVATE):
     public = read_json(public_path, private=False)
     private = read_json(private_path, private=True)
     # Staging and production-review (beta.cosmas.ai) may optionally carry
-    # ACCOUNT_DELETE_CLERK_SECRET_KEY by name. Other profiles refuse it.
+    # ACCOUNT_DELETE_CLERK_SECRET_KEY by name. Production-review may instead
+    # mount CLERK_ACCOUNT_DELETION_SECRET (#356 KV/host name), remapped below.
     # CLERK_SECRET_KEY is never an allowed private name.
+    review = review_account_delete_host(public)
+    private = remap_review_account_delete_private(private, review=review)
     candidate_optional = OPTIONAL_PRIVATE_NAMES | ACCOUNT_DELETE_PRIVATE_NAMES
     if (not PRIVATE_NAMES.issubset(private) or set(private) - PRIVATE_NAMES - candidate_optional
             or (PRIVATE_NAMES | candidate_optional).intersection(public)):

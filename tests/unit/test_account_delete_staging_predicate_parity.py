@@ -32,6 +32,7 @@ def test_account_delete_staging_constants_match_render_mjs():
     """Python and JS must share the same origin and policy constants."""
     entry = ENTRYPOINT.read_text(encoding="utf-8")
     render = RENDER.read_text(encoding="utf-8")
+    entrypoint = _load_entrypoint()
 
     assert f'STAGING_WEB_ORIGIN = "{EXPECTED_STAGING_ORIGIN}"' in entry
     assert f'REVIEW_WEB_ORIGIN = "{EXPECTED_REVIEW_ORIGIN}"' in entry
@@ -39,6 +40,10 @@ def test_account_delete_staging_constants_match_render_mjs():
     assert f"const STAGING_WEB_ORIGIN='{EXPECTED_STAGING_ORIGIN}'" in render
     assert f"const REVIEW_WEB_ORIGIN='{EXPECTED_REVIEW_ORIGIN}'" in render
     assert f"const STAGING_SESSION_POLICY='{EXPECTED_POLICY}'" in render
+    assert entrypoint.ACCOUNT_DELETE_ENV_NAME == "ACCOUNT_DELETE_CLERK_SECRET_KEY"
+    assert entrypoint.REVIEW_ACCOUNT_DELETE_KV_NAME == "CLERK_ACCOUNT_DELETION_SECRET"
+    assert "ACCOUNT_DELETE_CLERK_SECRET_KEY:'CLERK_ACCOUNT_DELETION_SECRET'" in render
+    assert "ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key'" in render
 
     # Issuer-only admission is forbidden in both copies.
     assert "STAGING_CLERK_ISSUER" not in entry
@@ -59,19 +64,21 @@ def test_account_delete_staging_constants_match_render_mjs():
         r"const accountDeleteProfile=stagingProfile\|\|reviewHost;",
         render,
     )
-    # Production-review gets the key name only; KV refs stay inside stagingProfile.
+    # Env name allowed on both profiles; staging and review KV secret names differ.
     assert "if(accountDeleteProfile){" in render
     assert "optional_exact_names=['ACCOUNT_DELETE_CLERK_SECRET_KEY']" in render
-    # First stagingProfile block after accountDeleteProfile is KV-only (no optional_exact_names).
     after_admit = render.split("const accountDeleteProfile=stagingProfile||reviewHost;")[1]
-    first_staging = after_admit.split("if(stagingProfile){")[1].split("if(ownedVm)")[0]
-    assert "key_vault_secret_names" in first_staging
-    assert "optional_exact_names" not in first_staging
+    first_staging = after_admit.split("if(stagingProfile){")[1].split("}else if(reviewHost){")[0]
+    assert "ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key'" in first_staging
     assert "key_vault_name" in first_staging
-    # Review host must not share the staging KV URI string inside the admit name block.
-    name_only = after_admit.split("if(accountDeleteProfile){")[1].split("if(stagingProfile){")[0]
-    assert "optional_exact_names" in name_only
-    assert "key_vault" not in name_only
+    assert "optional_exact_names" not in first_staging
+    review_map = after_admit.split("}else if(reviewHost){")[1].split("if(ownedVm)")[0]
+    assert "ACCOUNT_DELETE_CLERK_SECRET_KEY:'CLERK_ACCOUNT_DELETION_SECRET'" in review_map
+    assert "account-delete-clerk-secret-key" not in review_map
+    assert "key_vault_name" not in review_map
+    assert "key_vault_uri" not in review_map
+    # Join pin: env name and #356 KV name meet in render key_vault_secret_names.
+    assert "ACCOUNT_DELETE_CLERK_SECRET_KEY:'CLERK_ACCOUNT_DELETION_SECRET'" in render
 
 
 def test_account_delete_staging_predicate_ast_has_no_issuer_branch():

@@ -303,8 +303,9 @@ export function render(input){
       real_patient_recording_process_switch:false}];
   }
   // Allow ACCOUNT_DELETE_CLERK_SECRET_KEY by name on staging and production-review
-  // (beta.cosmas.ai). Staging alone keeps Key Vault name references; production-
-  // review gets the key-name allowance only (no KV fields, no secret values).
+  // (beta.cosmas.ai). Staging keeps KV secret account-delete-clerk-secret-key plus
+  // vault identity. Production-review maps KV/host name CLERK_ACCOUNT_DELETION_SECRET
+  // (#356) into the same app env var — names only, no vault URI, no secret values.
   // Parity with entrypoint.account_delete_profile: shared_staging policy OR
   // staging web origin OR review web origin — never issuer alone.
   const STAGING_WEB_ORIGIN='https://staging.cosmas.ai';
@@ -318,12 +319,17 @@ export function render(input){
     contract.private_environment.optional_exact_names=['ACCOUNT_DELETE_CLERK_SECRET_KEY'];
   }
   if(stagingProfile){
-    // Names only — never secret values. Staging KV refs stay staging-only.
+    // Names only — never secret values. Staging KV refs stay staging-only (#375).
     contract.private_environment.key_vault_secret_names={
       ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key',
     };
     contract.private_environment.key_vault_name='kv-cbot-stg-stg0925c1';
     contract.private_environment.key_vault_uri='https://kv-cbot-stg-stg0925c1.vault.azure.net/';
+  }else if(reviewHost){
+    // Join: KV/host name CLERK_ACCOUNT_DELETION_SECRET → env ACCOUNT_DELETE_CLERK_SECRET_KEY.
+    contract.private_environment.key_vault_secret_names={
+      ACCOUNT_DELETE_CLERK_SECRET_KEY:'CLERK_ACCOUNT_DELETION_SECRET',
+    };
   }
   if(ownedVm){
     contract.resource_identity.host_name='vm-cosmabot-staging-eus2-lab01';
