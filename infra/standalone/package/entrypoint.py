@@ -17,8 +17,10 @@ MICROSOFT_PRIVATE_NAMES = {"MICROSOFT_CONNECTION_CLIENT_SECRET", "MICROSOFT_CONN
 # profiles refuse it. CLERK_SECRET_KEY stays refused on every profile.
 ACCOUNT_DELETE_PRIVATE_NAMES = {"ACCOUNT_DELETE_CLERK_SECRET_KEY"}
 OPTIONAL_PRIVATE_NAMES = MODEL_PRIVATE_NAMES | GOOGLE_PRIVATE_NAMES | MICROSOFT_PRIVATE_NAMES
-STAGING_CLERK_ISSUER = "https://clerk.staging.cosmas.ai"
+# Must match render.mjs stagingHost / stagingProfile (policy or staging web origin).
+# Issuer alone never admits the delete secret.
 STAGING_WEB_ORIGIN = "https://staging.cosmas.ai"
+STAGING_SESSION_POLICY = "shared_staging"
 
 
 class Refused(Exception):
@@ -26,12 +28,14 @@ class Refused(Exception):
 
 
 def staging_account_delete_profile(checked) -> bool:
-    """True only for the CosmaBot staging identity/host profile."""
-    issuer = (checked.clerk_issuer or "").rstrip("/")
+    """True only for CosmaBot staging policy or staging.cosmas.ai origin.
+
+    Parity with render.mjs stagingHost / stagingProfile: shared_staging policy
+    or STAGING_WEB_ORIGIN in CORS origins. Issuer is never an admit branch.
+    """
     origins = {part.strip() for part in (checked.cors_allowed_origins or "").split(",") if part.strip()}
     return (
-        checked.clerk_session_policy == "shared_staging"
-        or issuer == STAGING_CLERK_ISSUER
+        checked.clerk_session_policy == STAGING_SESSION_POLICY
         or STAGING_WEB_ORIGIN in origins
     )
 

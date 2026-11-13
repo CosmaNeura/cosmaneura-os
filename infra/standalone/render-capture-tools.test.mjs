@@ -89,7 +89,8 @@ function assertNoRealPatientOn(files){
 // Off-path must stay byte-identical to origin/main after #361 (eight Settings
 // bools rendered explicitly false). Values match render-goldens.test.mjs.
 const MAIN_DEDICATED_FINGERPRINT='a8157eea72ab7be14aca790f5e4fa27a7f3ea839a4d34682dce2cb4c448f372f';
-const MAIN_OWNED_STAGING_FINGERPRINT='b0b47a2286076fd6dd61dd11e2b3c0d8b5da209e8ea9808ccd62559bde9c54fc';
+// Updated for T-REL-7c staging ACCOUNT_DELETE KV/egress/DNS contract on owned staging.
+const MAIN_OWNED_STAGING_FINGERPRINT='a2e8726ce2de6ea44208d8d73b69ac039243884b71e922222ee680ba1a0e8c7f';
 
 test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const baseline=render(structuredClone(sample));
@@ -199,14 +200,20 @@ test('opt-in on declares Core capture egress, IMDS token path, platform connecti
   assert.ok(network.deny.includes('*.cosmaneura.com except staging-app.cosmaneura.com Core capture origin'));
   assert.equal(network.deny.includes('169.254.0.0/16 metadata and link-local'),false);
   assert.ok(network.deny.includes(`169.254.0.0/16 metadata and link-local except ${IMDS_HOST}${IMDS_PATH}`));
-  assert.match(network.dns,/staging-app\.cosmaneura\.com Core capture/);
-  assert.match(network.dns,/IMDS token host/);
-  assert.match(network.dns,new RegExp(`${CORE_UPLOAD_HOST.replaceAll('.','\\.')} Core capture upload blob`));
+  assert.equal(
+    network.dns,
+    `Only the exact configured Clerk issuer, Clerk Backend API, optional own model, selected Google/Microsoft API hostnames, staging-app.cosmaneura.com Core capture, IMDS token host, and ${CORE_UPLOAD_HOST} Core capture upload blob; qualify resolver enforcement separately.`,
+  );
+  const clerkEgress=network.api_egress.find(item=>item.hostname==='api.clerk.com');
+  assert.deepEqual(clerkEgress,{
+    protocol:'https',hostname:'api.clerk.com',tcp_port:443,
+    path:'/v1/users/',redirects_allowed:false,purpose:'account_delete_clerk_backend',
+  });
   const evidence=files['host-preparation.json'].required_evidence.find(item=>item.startsWith('Host firewall and DNS'));
-  assert.match(evidence,/Core capture staging-app\.cosmaneura\.com/);
-  assert.match(evidence,/IMDS token endpoint/);
-  assert.match(evidence,new RegExp(`Core capture upload blob ${CORE_UPLOAD_HOST.replaceAll('.','\\.')}`));
-  assert.match(evidence,/runtime pins that upload host exactly on https:443/);
+  assert.equal(
+    evidence,
+    `Host firewall and DNS qualification: only declared Clerk JWKS, Clerk Backend API, optional own model, selected Google/Microsoft, Core capture staging-app.cosmaneura.com, IMDS token endpoint, and Core capture upload blob ${CORE_UPLOAD_HOST}; runtime pins that upload host exactly on https:443; no other providers`,
+  );
   assert.equal(files['api-public.json'].CORE_CAPTURE_UPLOAD_HOST,CORE_UPLOAD_HOST);
   assert.deepEqual(files['host-preparation.json'].platform_connections,[{
     kind:'core_staging_capture',origin:REVIEWED_CORE_CAPTURE_ORIGIN,web_origin:REVIEWED_CORE_CAPTURE_ORIGIN,

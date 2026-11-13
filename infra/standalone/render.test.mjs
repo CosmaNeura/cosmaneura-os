@@ -114,7 +114,15 @@ test('staging session policy must be explicitly matched to existing development 
   assert.equal(privateEnv.key_vault_name,'kv-cbot-stg-stg0925c1');
   assert.equal(privateEnv.key_vault_uri,'https://kv-cbot-stg-stg0925c1.vault.azure.net/');
   assert.equal(privateEnv.values_in_package,false);
-  assert.ok(files['network-requirements.json'].api_egress.some(item=>item.hostname==='api.clerk.com'));
+  const clerkEgress=files['network-requirements.json'].api_egress.find(item=>item.hostname==='api.clerk.com');
+  assert.deepEqual(clerkEgress,{
+    protocol:'https',hostname:'api.clerk.com',tcp_port:443,
+    path:'/v1/users/',redirects_allowed:false,purpose:'account_delete_clerk_backend',
+  });
+  assert.equal(
+    files['network-requirements.json'].dns,
+    'Only the exact configured Clerk issuer, Clerk Backend API, and any declared optional model/Google hostnames; qualify resolver enforcement separately.',
+  );
   const wrongAudience=structuredClone(candidate);wrongAudience.identity.audience='invented-cosmabot-application-api';
   assert.throws(()=>render(wrongAudience));
   delete candidate.identity_policy;assert.throws(()=>render(candidate));

@@ -93,7 +93,20 @@ test('existing owned VM scope admits only retained CosmaBot routes and cannot cr
   assert.deepEqual(contract.private_environment.key_vault_secret_names,{
     ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key',
   });
-  assert.ok(files['network-requirements.json'].api_egress.some(item=>item.hostname==='api.clerk.com'));
+  const clerkEgress=files['network-requirements.json'].api_egress.find(item=>item.hostname==='api.clerk.com');
+  assert.deepEqual(clerkEgress,{
+    protocol:'https',hostname:'api.clerk.com',tcp_port:443,
+    path:'/v1/users/',redirects_allowed:false,purpose:'account_delete_clerk_backend',
+  });
+  assert.equal(
+    files['network-requirements.json'].dns,
+    'Only the exact configured Clerk issuer, Clerk Backend API, optional own model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.',
+  );
+  const evidence=contract.required_evidence.find(item=>item.startsWith('Host firewall and DNS'));
+  assert.equal(
+    evidence,
+    'Host firewall and DNS qualification: only declared Clerk JWKS, Clerk Backend API, optional own model and selected Google/Microsoft API egress; no metadata or other providers',
+  );
 });
 
 test('owned beta.cosmas.ai stays synthetic and every other host stays refused',()=>{

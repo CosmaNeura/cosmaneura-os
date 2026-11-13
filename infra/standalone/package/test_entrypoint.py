@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from tests.unit import test_standalone_runtime as offline
-from tests.unit.test_standalone_beta_features import google_values, model_values, microsoft_values
+from tests.unit.test_standalone_beta_features import google_values, microsoft_values, model_values
 
 spec = importlib.util.spec_from_file_location("standalone_package_entrypoint", Path(__file__).with_name("entrypoint.py"))
 assert spec and spec.loader
@@ -139,11 +139,13 @@ def test_production_profile_refuses_account_delete_and_clerk_secret_keys(mounted
             entrypoint.load_configuration(public, private)
 
 
-@pytest.mark.parametrize("policy", ["shared_staging"])
-def test_staging_profile_may_mount_account_delete_clerk_secret(mounted, monkeypatch, policy):
-    """Staging may optionally carry ACCOUNT_DELETE_CLERK_SECRET_KEY; CLERK_SECRET_KEY stays refused."""
+def test_shared_staging_policy_alone_may_mount_account_delete_clerk_secret(mounted, monkeypatch):
+    """shared_staging policy alone admits the delete secret; origin need not be staging."""
     public, private, values, secrets = mounted
-    real_profile(values, policy)
+    real_profile(values, entrypoint.STAGING_SESSION_POLICY)
+    assert values["CLERK_SESSION_POLICY"] == entrypoint.STAGING_SESSION_POLICY
+    assert entrypoint.STAGING_WEB_ORIGIN not in values["CORS_ALLOWED_ORIGINS"]
+    assert "clerk.staging.cosmas.ai" not in values["CLERK_ISSUER"]
     public.write_text(json.dumps(values))
     private.write_text(json.dumps({**secrets, "CLERK_SECRET_KEY": "invented"}))
     with pytest.raises(entrypoint.Refused):
@@ -160,18 +162,21 @@ def test_staging_profile_may_mount_account_delete_clerk_secret(mounted, monkeypa
     assert "CLERK_SECRET_KEY" not in environment
 
 
-def test_staging_host_origin_may_mount_account_delete_clerk_secret(mounted):
-    """Owned staging.cosmas.ai (audience + clerk.staging issuer) may mount the delete secret."""
+def test_staging_web_origin_alone_may_mount_account_delete_clerk_secret(mounted):
+    """STAGING_WEB_ORIGIN alone admits the delete secret under audience policy."""
     public, private, values, secrets = mounted
     real_profile(values, "audience")
+    # Non-staging issuer pins the origin branch alone (issuer must not be required).
     values.update(
-        CLERK_ISSUER="https://clerk.staging.cosmas.ai",
-        CLERK_JWKS_URL="https://clerk.staging.cosmas.ai/.well-known/jwks.json",
-        STANDALONE_CLERK_ISSUER_ALLOWLIST="https://clerk.staging.cosmas.ai",
+        CLERK_ISSUER="https://clerk.cosmas.ai",
+        CLERK_JWKS_URL="https://clerk.cosmas.ai/.well-known/jwks.json",
+        STANDALONE_CLERK_ISSUER_ALLOWLIST="https://clerk.cosmas.ai",
         CLERK_AUDIENCE="cosmas-os-beta-api",
-        CORS_ALLOWED_ORIGINS="https://staging.cosmas.ai",
-        CLERK_AUTHORIZED_PARTIES="https://staging.cosmas.ai",
+        CORS_ALLOWED_ORIGINS=entrypoint.STAGING_WEB_ORIGIN,
+        CLERK_AUTHORIZED_PARTIES=entrypoint.STAGING_WEB_ORIGIN,
     )
+    assert values["CLERK_SESSION_POLICY"] == "audience"
+    assert values["CORS_ALLOWED_ORIGINS"] == entrypoint.STAGING_WEB_ORIGIN
     public.write_text(json.dumps(values))
     private.write_text(json.dumps({
         **secrets,
@@ -180,6 +185,48 @@ def test_staging_host_origin_may_mount_account_delete_clerk_secret(mounted):
     environment = entrypoint.load_configuration(public, private)
     assert environment["ACCOUNT_DELETE_CLERK_SECRET_KEY"] == "sk_live_invented_staging_delete"
     assert "CLERK_SECRET_KEY" not in environment
+
+
+@pytest.mark.parametrize(
+    "issuer",
+    [
+        "https://clerk.staging.cosmas.ai",
+        "https://clerk.cosmas.ai",
+    ],
+    ids=["clerk_staging_issuer", "clerk_prod_issuer"],
+)
+def test_audience_beta_origin_refuses_account_delete_even_with_staging_issuer(
+    mounted, issuer
+):
+    """beta.cosmas.ai + audience refuses the delete key; issuer alone never admits."""
+    public, private, values, secrets = mounted
+    real_profile(values, "audience")
+    values.update(
+        CLERK_ISSUER=issuer,
+        CLERK_JWKS_URL=issuer.rstrip("/") + "/.well-known/jwks.json",
+        STANDALONE_CLERK_ISSUER_ALLOWLIST=issuer,
+        CLERK_AUDIENCE="cosmas-os-beta-api",
+        CORS_ALLOWED_ORIGINS="https://beta.cosmas.ai",
+        CLERK_AUTHORIZED_PARTIES="https://beta.cosmas.ai",
+    )
+    public.write_text(json.dumps(values))
+    private.write_text(json.dumps({
+        **secrets,
+        "ACCOUNT_DELETE_CLERK_SECRET_KEY": "sk_test_must_refuse_on_beta",
+    }))
+    with pytest.raises(entrypoint.Refused):
+        entrypoint.load_configuration(public, private)
+
+
+def test_account_delete_clerk_secret_in_public_file_is_refused(mounted):
+    """ACCOUNT_DELETE_CLERK_SECRET_KEY must never appear in the public mount."""
+    public, private, values, secrets = mounted
+    real_profile(values, entrypoint.STAGING_SESSION_POLICY)
+    values["ACCOUNT_DELETE_CLERK_SECRET_KEY"] = "sk_test_must_not_be_public"
+    public.write_text(json.dumps(values))
+    private.write_text(json.dumps(secrets))
+    with pytest.raises(entrypoint.Refused):
+        entrypoint.load_configuration(public, private)
 
 
 def test_refuses_fifo_symlink_hardlink_and_oversize_before_parsing(mounted, tmp_path):

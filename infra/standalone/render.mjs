@@ -305,8 +305,12 @@ export function render(input){
   // Staging-only: allow ACCOUNT_DELETE_CLERK_SECRET_KEY by Key Vault reference.
   // Production / beta.cosmas.ai profiles leave private_environment byte-for-byte
   // unchanged (no new keys on that object).
-  const stagingHost=value.web_origin==='https://staging.cosmas.ai';
-  const stagingProfile=value.identity_policy==='shared_staging'||stagingHost;
+  // Parity with entrypoint.staging_account_delete_profile: policy OR staging
+  // web origin only — never issuer alone.
+  const STAGING_WEB_ORIGIN='https://staging.cosmas.ai';
+  const STAGING_SESSION_POLICY='shared_staging';
+  const stagingHost=value.web_origin===STAGING_WEB_ORIGIN;
+  const stagingProfile=value.identity_policy===STAGING_SESSION_POLICY||stagingHost;
   if(stagingProfile){
     contract.private_environment.optional_exact_names=['ACCOUNT_DELETE_CLERK_SECRET_KEY'];
     // Names only — never secret values. John pastes the Clerk Secret key into KV.
@@ -382,7 +386,7 @@ export function render(input){
     // Keep main's capture/Microsoft wording; staging adds Clerk Backend API only.
     if(stagingProfile){
       firewall.dns=captureEnabled
-        ?`Only the exact configured Clerk issuer, Clerk Backend API, selected Google/Microsoft API hostnames, ${coreHost} Core capture, IMDS token host, and ${value.core_capture_upload_host} Core capture upload blob; qualify resolver enforcement separately.`
+        ?`Only the exact configured Clerk issuer, Clerk Backend API, optional own model, selected Google/Microsoft API hostnames, ${coreHost} Core capture, IMDS token host, and ${value.core_capture_upload_host} Core capture upload blob; qualify resolver enforcement separately.`
         :'Only the exact configured Clerk issuer, Clerk Backend API, optional own model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
       contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
         (captureEnabled
