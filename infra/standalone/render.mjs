@@ -302,18 +302,23 @@ export function render(input){
       content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
       real_patient_recording_process_switch:false}];
   }
-  // Staging-only: allow ACCOUNT_DELETE_CLERK_SECRET_KEY by Key Vault reference.
-  // Production / beta.cosmas.ai profiles leave private_environment byte-for-byte
-  // unchanged (no new keys on that object).
-  // Parity with entrypoint.staging_account_delete_profile: policy OR staging
-  // web origin only — never issuer alone.
+  // Allow ACCOUNT_DELETE_CLERK_SECRET_KEY by name on staging and production-review
+  // (beta.cosmas.ai). Staging alone keeps Key Vault name references; production-
+  // review gets the key-name allowance only (no KV fields, no secret values).
+  // Parity with entrypoint.account_delete_profile: shared_staging policy OR
+  // staging web origin OR review web origin — never issuer alone.
   const STAGING_WEB_ORIGIN='https://staging.cosmas.ai';
+  const REVIEW_WEB_ORIGIN='https://beta.cosmas.ai';
   const STAGING_SESSION_POLICY='shared_staging';
   const stagingHost=value.web_origin===STAGING_WEB_ORIGIN;
+  const reviewHost=value.web_origin===REVIEW_WEB_ORIGIN;
   const stagingProfile=value.identity_policy===STAGING_SESSION_POLICY||stagingHost;
-  if(stagingProfile){
+  const accountDeleteProfile=stagingProfile||reviewHost;
+  if(accountDeleteProfile){
     contract.private_environment.optional_exact_names=['ACCOUNT_DELETE_CLERK_SECRET_KEY'];
-    // Names only — never secret values. John pastes the Clerk Secret key into KV.
+  }
+  if(stagingProfile){
+    // Names only — never secret values. Staging KV refs stay staging-only.
     contract.private_environment.key_vault_secret_names={
       ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key',
     };

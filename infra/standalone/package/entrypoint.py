@@ -13,13 +13,15 @@ PRIVATE_NAMES = {"DATABASE_URL", "HUMAN_DEPLOY_EVIDENCE_REF"}
 MODEL_PRIVATE_NAMES = {"WORKSPACE_LLM_API_KEY"}
 GOOGLE_PRIVATE_NAMES = {"GOOGLE_CONNECTION_CLIENT_SECRET", "GOOGLE_CONNECTION_ENCRYPTION_KEY"}
 MICROSOFT_PRIVATE_NAMES = {"MICROSOFT_CONNECTION_CLIENT_SECRET", "MICROSOFT_CONNECTION_ENCRYPTION_KEY"}
-# Staging-only optional private name for hosted account delete. Production
-# profiles refuse it. CLERK_SECRET_KEY stays refused on every profile.
+# Optional private name for hosted account delete on staging and the
+# production-review host (beta.cosmas.ai). Other audience profiles refuse it.
+# CLERK_SECRET_KEY stays refused on every profile.
 ACCOUNT_DELETE_PRIVATE_NAMES = {"ACCOUNT_DELETE_CLERK_SECRET_KEY"}
 OPTIONAL_PRIVATE_NAMES = MODEL_PRIVATE_NAMES | GOOGLE_PRIVATE_NAMES | MICROSOFT_PRIVATE_NAMES
-# Must match render.mjs stagingHost / stagingProfile (policy or staging web origin).
-# Issuer alone never admits the delete secret.
+# Must match render.mjs accountDeleteProfile (policy, staging web origin, or
+# production-review web origin). Issuer alone never admits the delete secret.
 STAGING_WEB_ORIGIN = "https://staging.cosmas.ai"
+REVIEW_WEB_ORIGIN = "https://beta.cosmas.ai"
 STAGING_SESSION_POLICY = "shared_staging"
 
 
@@ -27,16 +29,18 @@ class Refused(Exception):
     """Do not include configuration values or underlying exceptions in output."""
 
 
-def staging_account_delete_profile(checked) -> bool:
-    """True only for CosmaBot staging policy or staging.cosmas.ai origin.
+def account_delete_profile(checked) -> bool:
+    """True for staging policy/origin or production-review beta.cosmas.ai origin.
 
-    Parity with render.mjs stagingHost / stagingProfile: shared_staging policy
-    or STAGING_WEB_ORIGIN in CORS origins. Issuer is never an admit branch.
+    Parity with render.mjs accountDeleteProfile: shared_staging policy,
+    STAGING_WEB_ORIGIN in CORS origins, or REVIEW_WEB_ORIGIN in CORS origins.
+    Issuer is never an admit branch. Audience without those origins refuses.
     """
     origins = {part.strip() for part in (checked.cors_allowed_origins or "").split(",") if part.strip()}
     return (
         checked.clerk_session_policy == STAGING_SESSION_POLICY
         or STAGING_WEB_ORIGIN in origins
+        or REVIEW_WEB_ORIGIN in origins
     )
 
 
@@ -84,8 +88,9 @@ def load_configuration(public_path=PUBLIC, private_path=PRIVATE):
 
     public = read_json(public_path, private=False)
     private = read_json(private_path, private=True)
-    # Staging may optionally carry ACCOUNT_DELETE_CLERK_SECRET_KEY; production
-    # never may. CLERK_SECRET_KEY is never an allowed private name.
+    # Staging and production-review (beta.cosmas.ai) may optionally carry
+    # ACCOUNT_DELETE_CLERK_SECRET_KEY by name. Other profiles refuse it.
+    # CLERK_SECRET_KEY is never an allowed private name.
     candidate_optional = OPTIONAL_PRIVATE_NAMES | ACCOUNT_DELETE_PRIVATE_NAMES
     if (not PRIVATE_NAMES.issubset(private) or set(private) - PRIVATE_NAMES - candidate_optional
             or (PRIVATE_NAMES | candidate_optional).intersection(public)):
@@ -116,9 +121,9 @@ def load_configuration(public_path=PUBLIC, private_path=PRIVATE):
             expected_private.update(GOOGLE_PRIVATE_NAMES)
         if checked.workspace_microsoft_connection_enabled:
             expected_private.update(MICROSOFT_PRIVATE_NAMES)
-    staging = staging_account_delete_profile(checked)
+    allowed = account_delete_profile(checked)
     if ACCOUNT_DELETE_PRIVATE_NAMES.intersection(private):
-        if not staging:
+        if not allowed:
             raise Refused()
         expected_private.update(ACCOUNT_DELETE_PRIVATE_NAMES)
     if set(private) != expected_private:

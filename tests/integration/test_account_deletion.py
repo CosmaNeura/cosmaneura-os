@@ -326,7 +326,12 @@ def _snapshot_account_rows(session, box_id: str, principal_id: str, binding_id: 
 def test_hosted_delete_fails_closed_without_clerk_secret(
     deletion, session, monkeypatch, secret_value
 ):
-    """Staging without ACCOUNT_DELETE_CLERK_SECRET_KEY must refuse delete without mutating anything."""
+    """Absent ACCOUNT_DELETE_CLERK_SECRET_KEY fails closed with the same message.
+
+    Profile-agnostic: staging and production-review may allow the secret *name*,
+    but with the key unset/empty delete still returns exactly
+    "account deletion is not configured" and mutates nothing.
+    """
 
     api.app.dependency_overrides.pop(api._clerk_user_deletion_port, None)
     monkeypatch.setattr(
@@ -362,6 +367,7 @@ def test_hosted_delete_fails_closed_without_clerk_secret(
     assert response.headers.get("cache-control") == "no-store"
     body = response.json()
     assert body == {"detail": NOT_CONFIGURED}
+    assert NOT_CONFIGURED == "account deletion is not configured"
     assert body["detail"] == "account deletion is not configured"
     text = response.text.lower()
     assert "traceback" not in text

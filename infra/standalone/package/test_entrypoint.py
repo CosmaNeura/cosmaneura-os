@@ -128,10 +128,14 @@ def test_refuses_extra_private_inputs_and_duplicate_json_fields(mounted):
         entrypoint.load_configuration(public, private)
 
 
-def test_production_profile_refuses_account_delete_and_clerk_secret_keys(mounted):
-    """Audience / non-staging profiles keep both Clerk secret names refused."""
+def test_audience_without_review_or_staging_refuses_account_delete_and_clerk_secret(
+    mounted,
+):
+    """Audience on an invented origin keeps both Clerk secret names refused."""
     public, private, values, secrets = mounted
     real_profile(values, "audience")
+    assert entrypoint.STAGING_WEB_ORIGIN not in values["CORS_ALLOWED_ORIGINS"]
+    assert entrypoint.REVIEW_WEB_ORIGIN not in values["CORS_ALLOWED_ORIGINS"]
     public.write_text(json.dumps(values))
     for name in ("CLERK_SECRET_KEY", "ACCOUNT_DELETE_CLERK_SECRET_KEY"):
         private.write_text(json.dumps({**secrets, name: "invented-private-test-value"}))
@@ -192,13 +196,12 @@ def test_staging_web_origin_alone_may_mount_account_delete_clerk_secret(mounted)
     [
         "https://clerk.staging.cosmas.ai",
         "https://clerk.cosmas.ai",
+        "https://clerk.beta.cosmas.ai",
     ],
-    ids=["clerk_staging_issuer", "clerk_prod_issuer"],
+    ids=["clerk_staging_issuer", "clerk_prod_issuer", "clerk_beta_issuer"],
 )
-def test_audience_beta_origin_refuses_account_delete_even_with_staging_issuer(
-    mounted, issuer
-):
-    """beta.cosmas.ai + audience refuses the delete key; issuer alone never admits."""
+def test_review_web_origin_alone_may_mount_account_delete_clerk_secret(mounted, issuer):
+    """REVIEW_WEB_ORIGIN (beta.cosmas.ai) admits the delete name; issuer never decides."""
     public, private, values, secrets = mounted
     real_profile(values, "audience")
     values.update(
@@ -206,13 +209,41 @@ def test_audience_beta_origin_refuses_account_delete_even_with_staging_issuer(
         CLERK_JWKS_URL=issuer.rstrip("/") + "/.well-known/jwks.json",
         STANDALONE_CLERK_ISSUER_ALLOWLIST=issuer,
         CLERK_AUDIENCE="cosmas-os-beta-api",
-        CORS_ALLOWED_ORIGINS="https://beta.cosmas.ai",
-        CLERK_AUTHORIZED_PARTIES="https://beta.cosmas.ai",
+        CORS_ALLOWED_ORIGINS=entrypoint.REVIEW_WEB_ORIGIN,
+        CLERK_AUTHORIZED_PARTIES=entrypoint.REVIEW_WEB_ORIGIN,
+    )
+    assert values["CLERK_SESSION_POLICY"] == "audience"
+    assert values["CORS_ALLOWED_ORIGINS"] == entrypoint.REVIEW_WEB_ORIGIN
+    public.write_text(json.dumps(values))
+    # CLERK_SECRET_KEY stays refused even on the production-review host.
+    private.write_text(json.dumps({**secrets, "CLERK_SECRET_KEY": "invented"}))
+    with pytest.raises(entrypoint.Refused):
+        entrypoint.load_configuration(public, private)
+    private.write_text(json.dumps({
+        **secrets,
+        "ACCOUNT_DELETE_CLERK_SECRET_KEY": "sk_live_invented_review_delete",
+    }))
+    environment = entrypoint.load_configuration(public, private)
+    assert environment["ACCOUNT_DELETE_CLERK_SECRET_KEY"] == "sk_live_invented_review_delete"
+    assert "CLERK_SECRET_KEY" not in environment
+
+
+def test_audience_non_review_origin_still_refuses_account_delete(mounted):
+    """Audience + non-staging/non-review origin keeps refusing the delete key."""
+    public, private, values, secrets = mounted
+    real_profile(values, "audience")
+    values.update(
+        CLERK_ISSUER="https://clerk.cosmas.ai",
+        CLERK_JWKS_URL="https://clerk.cosmas.ai/.well-known/jwks.json",
+        STANDALONE_CLERK_ISSUER_ALLOWLIST="https://clerk.cosmas.ai",
+        CLERK_AUDIENCE="cosmas-os-beta-api",
+        CORS_ALLOWED_ORIGINS="https://cosmas.ai",
+        CLERK_AUTHORIZED_PARTIES="https://cosmas.ai",
     )
     public.write_text(json.dumps(values))
     private.write_text(json.dumps({
         **secrets,
-        "ACCOUNT_DELETE_CLERK_SECRET_KEY": "sk_test_must_refuse_on_beta",
+        "ACCOUNT_DELETE_CLERK_SECRET_KEY": "sk_test_must_refuse_outside_review",
     }))
     with pytest.raises(entrypoint.Refused):
         entrypoint.load_configuration(public, private)

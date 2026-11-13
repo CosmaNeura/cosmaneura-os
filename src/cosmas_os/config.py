@@ -49,8 +49,9 @@ class Settings(BaseSettings):
     # Standalone entrypoint refuses CLERK_SECRET_KEY so sign-in stays JWKS-only.
     clerk_secret_key: SecretStr | None = None
     # Dedicated Backend secret for self-serve account deletion only. Never logged
-    # or committed. Staging standalone may mount ACCOUNT_DELETE_CLERK_SECRET_KEY;
-    # production standalone profiles refuse it.
+    # or committed. Staging and production-review (beta.cosmas.ai) standalone may
+    # mount ACCOUNT_DELETE_CLERK_SECRET_KEY by name; other audience profiles refuse
+    # it. Absence still fails closed ("account deletion is not configured").
     account_delete_clerk_secret_key: SecretStr | None = None
     beta_box_id: str | None = None
 

@@ -117,10 +117,12 @@ test('owned beta.cosmas.ai stays synthetic and every other host stays refused',(
   assert.equal(files['host-preparation.json'].deployment_authorized,false);
   assert.equal(files['clients/web-build-env.json'].VITE_WORKSPACE_DATA_MODE,'synthetic');
   assert.equal(env.CORS_ALLOWED_ORIGINS,['https://beta.cosmas.ai','app://cosmas','capacitor://localhost'].join(','));
-  // Production / beta profile: no account-delete Key Vault mapping; exact_names unchanged.
+  // Production-review: key-name allowance only. No Key Vault fields, no api.clerk.com egress.
   const privateEnv=files['host-preparation.json'].private_environment;
-  assert.equal(Object.hasOwn(privateEnv,'optional_exact_names'),false);
+  assert.deepEqual(privateEnv.optional_exact_names,['ACCOUNT_DELETE_CLERK_SECRET_KEY']);
   assert.equal(Object.hasOwn(privateEnv,'key_vault_secret_names'),false);
+  assert.equal(Object.hasOwn(privateEnv,'key_vault_name'),false);
+  assert.equal(Object.hasOwn(privateEnv,'key_vault_uri'),false);
   assert.ok(!files['network-requirements.json'].api_egress.some(item=>item.hostname==='api.clerk.com'));
   for(const extra of ['data_mode','cosmas_env','phi']){
     const switched=candidate({owned:true,host:'beta.cosmas.ai'});
