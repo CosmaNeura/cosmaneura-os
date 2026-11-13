@@ -39,6 +39,20 @@ _RUNTIME_VALIDATORS = (
     "public.research_source_valid(jsonb)",
 )
 
+# STABLE SECURITY DEFINER helpers the runtime may EXECUTE after PUBLIC revoke.
+# Never include delete_patient_keyed_records — confirm stays admin-command only.
+_RUNTIME_EXECUTE_EXTRA = (
+    "public.delete_patient_keyed_records_plan(uuid)",
+    "public.patient_deletion_collect_file_keys(jsonb)",
+    "public.patient_deletion_patient_box(uuid)",
+)
+
+_RUNTIME_NO_TABLE_RIGHTS = (
+    "patient_deletion_admin_bindings",
+    "patient_deletion_in_progress",
+    "patient_deletion_pending_files",
+)
+
 
 class DatabasePreparationError(RuntimeError):
     """Fail-closed preparation error whose text is always credential-free."""
@@ -77,7 +91,9 @@ def _safe_url(value: str, *, label: str) -> URL:
     return parsed
 
 
-def _validate_boundaries(admin_url: str, runtime_url: str, *, require_verify_full: bool) -> tuple[URL, URL]:
+def _validate_boundaries(
+    admin_url: str, runtime_url: str, *, require_verify_full: bool
+) -> tuple[URL, URL]:
     admin = _safe_url(admin_url, label="administrator database URL")
     runtime = _safe_url(runtime_url, label="runtime database URL")
     if (
@@ -234,16 +250,40 @@ def _run_forward_migrations(connection: Connection, config_path: Path) -> None:
 def _runtime_validator_oids(connection: Connection) -> list[int] | None:
     oids = []
     for signature in _RUNTIME_VALIDATORS:
-        row = connection.execute(
-            text("SELECT oid, NOT prosecdef AND provolatile = 'i' AND prokind = 'f' "
-                 "AND NOT proretset AND prorettype IN ('boolean'::regtype, 'text'::regtype) AS safe "
-                 "FROM pg_proc WHERE oid = to_regprocedure(:signature)"),
-            {"signature": signature},
-        ).mappings().one_or_none()
+        row = (
+            connection.execute(
+                text(
+                    "SELECT oid, NOT prosecdef AND provolatile = 'i' AND prokind = 'f' "
+                    "AND NOT proretset AND prorettype IN ('boolean'::regtype, 'text'::regtype) AS safe "
+                    "FROM pg_proc WHERE oid = to_regprocedure(:signature)"
+                ),
+                {"signature": signature},
+            )
+            .mappings()
+            .one_or_none()
+        )
         if row is None or not row["safe"]:
             return None
         oids.append(row["oid"])
     return oids
+
+
+def _runtime_allowed_execute_oids(connection: Connection) -> list[int] | None:
+    """Validator oids plus patient-deletion plan/file helpers granted to runtime."""
+
+    oids = _runtime_validator_oids(connection)
+    if oids is None:
+        return None
+    allowed = list(oids)
+    for signature in _RUNTIME_EXECUTE_EXTRA:
+        row = connection.execute(
+            text("SELECT oid FROM pg_proc WHERE oid = to_regprocedure(:signature)"),
+            {"signature": signature},
+        ).scalar_one_or_none()
+        if row is None:
+            continue
+        allowed.append(int(row))
+    return allowed
 
 
 def _apply_runtime_privileges(connection: Connection, runtime: URL) -> None:
@@ -273,6 +313,11 @@ def _apply_runtime_privileges(connection: Connection, runtime: URL) -> None:
         f"GRANT UPDATE (consumed_at) ON TABLE public.practice_owner_reservations TO {quoted_role}",
         f"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.alembic_version FROM {quoted_role}",
         f"GRANT SELECT ON TABLE public.alembic_version TO {quoted_role}",
+        # Patient-deletion control tables: never grant to runtime (H1). Re-running
+        # prep must leave these with zero rights after the blanket table grant.
+        f"REVOKE ALL ON TABLE public.patient_deletion_admin_bindings FROM {quoted_role}",
+        f"REVOKE ALL ON TABLE public.patient_deletion_in_progress FROM {quoted_role}",
+        f"REVOKE ALL ON TABLE public.patient_deletion_pending_files FROM {quoted_role}",
         f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_admin} IN SCHEMA public "
         "REVOKE ALL PRIVILEGES ON TABLES FROM PUBLIC",
         f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_admin} IN SCHEMA public "
@@ -293,6 +338,12 @@ def _apply_runtime_privileges(connection: Connection, runtime: URL) -> None:
         raise DatabasePreparationError("required runtime validators are missing or unsafe")
     for signature in _RUNTIME_VALIDATORS:
         connection.execute(text(f"GRANT EXECUTE ON FUNCTION {signature} TO {quoted_role}"))
+    for signature in _RUNTIME_EXECUTE_EXTRA:
+        if connection.execute(
+            text("SELECT to_regprocedure(:signature) IS NOT NULL"),
+            {"signature": signature},
+        ).scalar_one():
+            connection.execute(text(f"GRANT EXECUTE ON FUNCTION {signature} TO {quoted_role}"))
 
 
 def _sqlstate(error: DBAPIError) -> str | None:
@@ -323,23 +374,27 @@ def _verify_runtime_role(runtime_url: str, runtime: URL) -> dict[str, Any]:
     engine = create_engine(runtime_url, pool_pre_ping=True)
     try:
         with engine.connect() as connection:
-            attributes = connection.execute(
-                text(
-                    "SELECT r.rolsuper, r.rolcreatedb, r.rolcreaterole, r.rolreplication, "
-                    "r.rolbypassrls, "
-                    "has_database_privilege(current_user, current_database(), 'CREATE') AS db_create, "
-                    "has_database_privilege(current_user, current_database(), 'TEMPORARY') AS db_temp, "
-                    "has_schema_privilege(current_user, 'public', 'CREATE') AS schema_create, "
-                    "has_schema_privilege(current_user, 'public', 'USAGE') AS schema_usage, "
-                    "has_table_privilege(current_user, 'public.audit_events', 'INSERT') AS audit_insert, "
-                    "has_table_privilege(current_user, 'public.audit_events', 'UPDATE') AS audit_update, "
-                    "has_table_privilege(current_user, 'public.audit_events', 'DELETE') AS audit_delete, "
-                    "has_table_privilege(current_user, 'public.audit_events', 'TRUNCATE') AS audit_truncate, "
-                    "has_table_privilege(current_user, 'public.alembic_version', 'SELECT') AS version_select, "
-                    "has_table_privilege(current_user, 'public.alembic_version', 'UPDATE') AS version_update "
-                    "FROM pg_roles r WHERE r.rolname = current_user"
+            attributes = (
+                connection.execute(
+                    text(
+                        "SELECT r.rolsuper, r.rolcreatedb, r.rolcreaterole, r.rolreplication, "
+                        "r.rolbypassrls, "
+                        "has_database_privilege(current_user, current_database(), 'CREATE') AS db_create, "
+                        "has_database_privilege(current_user, current_database(), 'TEMPORARY') AS db_temp, "
+                        "has_schema_privilege(current_user, 'public', 'CREATE') AS schema_create, "
+                        "has_schema_privilege(current_user, 'public', 'USAGE') AS schema_usage, "
+                        "has_table_privilege(current_user, 'public.audit_events', 'INSERT') AS audit_insert, "
+                        "has_table_privilege(current_user, 'public.audit_events', 'UPDATE') AS audit_update, "
+                        "has_table_privilege(current_user, 'public.audit_events', 'DELETE') AS audit_delete, "
+                        "has_table_privilege(current_user, 'public.audit_events', 'TRUNCATE') AS audit_truncate, "
+                        "has_table_privilege(current_user, 'public.alembic_version', 'SELECT') AS version_select, "
+                        "has_table_privilege(current_user, 'public.alembic_version', 'UPDATE') AS version_update "
+                        "FROM pg_roles r WHERE r.rolname = current_user"
+                    )
                 )
-            ).mappings().one()
+                .mappings()
+                .one()
+            )
             revision = connection.execute(
                 text("SELECT version_num FROM public.alembic_version")
             ).scalar_one()
@@ -355,19 +410,42 @@ def _verify_runtime_role(runtime_url: str, runtime: URL) -> dict[str, Any]:
                     "NOT has_table_privilege(current_user, format('%I.%I', schemaname, tablename), 'TRIGGER')"
                     "), false) "
                     "FROM pg_tables WHERE schemaname = 'public' "
-                    "AND tablename NOT IN ('alembic_version', 'audit_events', 'practice_owner_reservations')"
+                    "AND tablename NOT IN ("
+                    "'alembic_version', 'audit_events', 'practice_owner_reservations', "
+                    "'patient_deletion_admin_bindings', 'patient_deletion_in_progress', "
+                    "'patient_deletion_pending_files')"
                 )
             ).scalar_one()
-            runtime_dml = runtime_dml and connection.execute(text(
-                "SELECT has_table_privilege(current_user,'public.practice_owner_reservations','SELECT') "
-                "AND has_column_privilege(current_user,'public.practice_owner_reservations','consumed_at','UPDATE') "
-                "AND NOT has_table_privilege(current_user,'public.practice_owner_reservations','INSERT') "
-                "AND NOT has_table_privilege(current_user,'public.practice_owner_reservations','DELETE') "
-                "AND NOT has_table_privilege(current_user,'public.practice_owner_reservations','UPDATE') "
-                "AND NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='public.practice_owner_reservations'::regclass "
-                "AND attnum>0 AND NOT attisdropped AND attname<>'consumed_at' "
-                "AND has_column_privilege(current_user,attrelid,attname,'UPDATE'))"
-            )).scalar_one()
+            runtime_dml = (
+                runtime_dml
+                and connection.execute(
+                    text(
+                        "SELECT has_table_privilege(current_user,'public.practice_owner_reservations','SELECT') "
+                        "AND has_column_privilege(current_user,'public.practice_owner_reservations','consumed_at','UPDATE') "
+                        "AND NOT has_table_privilege(current_user,'public.practice_owner_reservations','INSERT') "
+                        "AND NOT has_table_privilege(current_user,'public.practice_owner_reservations','DELETE') "
+                        "AND NOT has_table_privilege(current_user,'public.practice_owner_reservations','UPDATE') "
+                        "AND NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='public.practice_owner_reservations'::regclass "
+                        "AND attnum>0 AND NOT attisdropped AND attname<>'consumed_at' "
+                        "AND has_column_privilege(current_user,attrelid,attname,'UPDATE'))"
+                    )
+                ).scalar_one()
+            )
+            deletion_control_locked = connection.execute(
+                text(
+                    "SELECT coalesce(bool_and("
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'SELECT') AND "
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'INSERT') AND "
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'UPDATE') AND "
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'DELETE') AND "
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'TRUNCATE') AND "
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'REFERENCES') AND "
+                    "NOT has_table_privilege(current_user, format('public.%I', t), 'TRIGGER')"
+                    "), false) FROM unnest(CAST(:tables AS text[])) AS t"
+                ),
+                {"tables": list(_RUNTIME_NO_TABLE_RIGHTS)},
+            ).scalar_one()
+            runtime_dml = runtime_dml and bool(deletion_control_locked)
             runtime_sequences = connection.execute(
                 text(
                     "SELECT coalesce(bool_and("
@@ -377,14 +455,19 @@ def _verify_runtime_role(runtime_url: str, runtime: URL) -> dict[str, Any]:
                     "), true) FROM pg_sequences WHERE schemaname = 'public'"
                 )
             ).scalar_one()
-            validator_oids = _runtime_validator_oids(connection)
-            runtime_functions = validator_oids is not None and connection.execute(
-                text("SELECT coalesce(bool_and(has_function_privilege(current_user,p.oid,'EXECUTE') "
-                     "= (p.oid = ANY(CAST(:allowed AS oid[])))), false) "
-                     "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
-                     "WHERE n.nspname = 'public'"),
-                {"allowed": validator_oids},
-            ).scalar_one()
+            allowed_oids = _runtime_allowed_execute_oids(connection)
+            runtime_functions = (
+                allowed_oids is not None
+                and connection.execute(
+                    text(
+                        "SELECT coalesce(bool_and(has_function_privilege(current_user,p.oid,'EXECUTE') "
+                        "= (p.oid = ANY(CAST(:allowed AS oid[])))), false) "
+                        "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                        "WHERE n.nspname = 'public'"
+                    ),
+                    {"allowed": allowed_oids},
+                ).scalar_one()
+            )
             owned_objects = connection.execute(
                 text(
                     "SELECT count(*) FROM pg_class c "
@@ -422,7 +505,11 @@ def _verify_runtime_role(runtime_url: str, runtime: URL) -> dict[str, Any]:
     )
     return {
         "revision": revision,
-        "non_admin": non_admin and privilege_contract and runtime_dml and runtime_sequences and runtime_functions,
+        "non_admin": non_admin
+        and privilege_contract
+        and runtime_dml
+        and runtime_sequences
+        and runtime_functions,
         "ddl_denied": _operation_is_denied(
             runtime_url,
             "CREATE TABLE public.cosmas_runtime_ddl_probe (id integer)",

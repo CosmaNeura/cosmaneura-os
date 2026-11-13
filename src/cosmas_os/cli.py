@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 from pydantic import ValidationError
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from cosmas_os.config import settings
@@ -17,6 +18,32 @@ app = typer.Typer(help="Cosmas OS local synthetic CLI")
 
 def _session() -> Session:
     return make_session_factory(make_engine())()
+
+
+def _require_admin_database_url() -> str:
+    """Return the admin command's database URL, never the runtime URL."""
+
+    admin_url = os.environ.get("COSMAS_ADMIN_DATABASE_URL", "").strip()
+    runtime_env = os.environ.get("DATABASE_URL", "").strip()
+    runtime_url = runtime_env or settings.database_url.strip()
+    if (
+        not admin_url
+        or admin_url == runtime_env
+        or admin_url == runtime_url
+        or admin_url == settings.database_url.strip()
+    ):
+        typer.echo("admin database identity is not configured", err=True)
+        raise typer.Exit(1)
+    try:
+        admin_name = make_url(admin_url).username
+        runtime_name = make_url(runtime_url).username
+    except Exception:
+        typer.echo("admin database identity is not configured", err=True)
+        raise typer.Exit(1) from None
+    if not admin_name or admin_name == runtime_name:
+        typer.echo("admin database identity is not configured", err=True)
+        raise typer.Exit(1)
+    return admin_url
 
 
 @app.command("seed-synth")
@@ -88,6 +115,7 @@ def bootstrap_beta_identity_cmd(
     try:
         if reserve_first_owner:
             from cosmas_os.application.practice_setup import reserve_first_owner as reserve
+
             reserve(session, settings, manifest)
             typer.echo("reviewed first-owner reservation complete; no owner access granted")
         else:
@@ -101,11 +129,15 @@ def bootstrap_beta_identity_cmd(
 def bootstrap_standalone_synthetic_practice_cmd(
     manifest_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
     phase: str = typer.Option(..., "--phase"),
-    confirm_reviewed_synthetic_only: bool = typer.Option(False, "--confirm-reviewed-synthetic-only"),
+    confirm_reviewed_synthetic_only: bool = typer.Option(
+        False, "--confirm-reviewed-synthetic-only"
+    ),
 ) -> None:
     """Host-only reserve/seed of a fresh invented practice in an owned empty DB."""
     if not confirm_reviewed_synthetic_only or phase not in {"reserve", "seed"}:
-        raise typer.BadParameter("reviewed synthetic confirmation and reserve/seed phase are required")
+        raise typer.BadParameter(
+            "reviewed synthetic confirmation and reserve/seed phase are required"
+        )
     from cosmas_os.application.standalone_practice import (
         StandalonePracticeError,
         StandalonePracticeManifest,
@@ -115,7 +147,11 @@ def bootstrap_standalone_synthetic_practice_cmd(
 
     repository_root = Path(__file__).resolve().parents[2]
     resolved = manifest_path.resolve()
-    if manifest_path.is_symlink() or resolved == repository_root or repository_root in resolved.parents:
+    if (
+        manifest_path.is_symlink()
+        or resolved == repository_root
+        or repository_root in resolved.parents
+    ):
         raise typer.BadParameter("use a protected manifest outside the repository")
     try:
         descriptor = os.open(resolved, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
@@ -123,9 +159,14 @@ def bootstrap_standalone_synthetic_practice_cmd(
         raise typer.BadParameter("manifest must be a protected regular file") from None
     with os.fdopen(descriptor, "rb") as opened:
         info = os.fstat(opened.fileno())
-        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077
-                or info.st_size > 32768):
-            raise typer.BadParameter("manifest must be a regular file, at most 32768 bytes and mode 0600 or stricter")
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) & 0o077
+            or info.st_size > 32768
+        ):
+            raise typer.BadParameter(
+                "manifest must be a regular file, at most 32768 bytes and mode 0600 or stricter"
+            )
         encoded = opened.read(32768)
         after = os.fstat(opened.fileno())
         if after.st_size != info.st_size or len(encoded) != info.st_size:
@@ -697,6 +738,69 @@ def verify_beta_offboarding_acceptance_cmd(
         if session is not None:
             session.close()
     typer.echo(evidence.sanitized_json())
+
+
+@app.command("delete-patient-records")
+def delete_patient_records_cmd(
+    patient_link_id: str = typer.Argument(..., help="Internal patient id"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    confirm: bool = typer.Option(False, "--confirm"),
+) -> None:
+    """Count or delete one patient's records. The practice owner is the admin."""
+
+    from cosmas_os.application.patient_deletion import delete_patient_records, storage_roots
+    from cosmas_os.application.services import Container
+    from cosmas_os.domain.rules import AuthorizationError, DomainError
+
+    _CLI_REFUSALS = frozenset(
+        {
+            "deletion role not configured",
+            "admin authority required",
+            "patient not found",
+            "invalid patient id",
+            "confirm required",
+            "database delete completed; stored files pending; rerun finishes them",
+            "schema not classified for patient deletion",
+        }
+    )
+    if dry_run == confirm:
+        # Need exactly one of --dry-run or --confirm. Default (neither) refuses.
+        typer.echo("confirm required", err=True)
+        raise typer.Exit(1)
+
+    admin_url = _require_admin_database_url()
+    engine = None
+    session = None
+    try:
+        engine = make_engine(admin_url)
+        session = make_session_factory(engine)()
+        container = Container(session)
+        # Actor comes from patient_deletion_admin_bindings for session_user.
+        report = delete_patient_records(
+            session,
+            patient_link_id=patient_link_id,
+            confirm=confirm,
+            blob=container.blob,
+            file_roots=storage_roots(container.blob),
+        )
+    except AuthorizationError:
+        typer.echo("admin authority required", err=True)
+        raise typer.Exit(1) from None
+    except DomainError as exc:
+        reason = str(exc)
+        typer.echo(
+            reason if reason in _CLI_REFUSALS else "patient records could not be deleted", err=True
+        )
+        raise typer.Exit(1) from None
+    except Exception:
+        typer.echo("patient records could not be deleted", err=True)
+        raise typer.Exit(1) from None
+    finally:
+        if session is not None:
+            session.close()
+        if engine is not None:
+            engine.dispose()
+    typer.echo(json.dumps(report, sort_keys=True))
 
 
 if __name__ == "__main__":

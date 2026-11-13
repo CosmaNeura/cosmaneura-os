@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy import event, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
 
 from cosmas_os.adapters.core_capture_admission import HttpCoreCaptureAdmission
@@ -2443,9 +2444,39 @@ app.add_middleware(EhrReadBoundary)
 allowed_headers.append("X-Cosmas-Ehr-Read")
 
 
+from cosmas_os.api.patient_deletion_routes import router as patient_deletion_router  # noqa: E402
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: E402
 from cosmas_os.standalone_runtime import StandaloneRequestBoundary  # noqa: E402
 
+app.include_router(patient_deletion_router(get_session=get_session, identity=_identity))
+
+
+class _PatientDeletionNoStoreMiddleware:
+    """Pure ASGI wrapper — do not use BaseHTTPMiddleware (breaks deadline send probes)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path") or ""
+        if not (path.startswith("/admin/patients/") and path.endswith("/records")):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            # All statuses, including unhandled 500s from outer exception handlers.
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["Cache-Control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+app.add_middleware(_PatientDeletionNoStoreMiddleware)
 app.add_middleware(StandaloneRequestBoundary, runtime=lambda: settings)
 app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
 allowed_headers.append("X-Cosmas-Workspace-Protocol")

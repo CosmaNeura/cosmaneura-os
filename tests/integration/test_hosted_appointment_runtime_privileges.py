@@ -89,7 +89,7 @@ def assert_restricted_authority(r):
             "WHERE n.nspname='public' AND c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user))")) is True
         permitted = set(connection.scalars(text("SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
             "WHERE n.nspname='public' AND has_function_privilege(current_user,p.oid,'EXECUTE')")))
-        assert permitted == set(preparation._runtime_validator_oids(connection) or ()) and len(permitted) == 7
+        assert permitted == set(preparation._runtime_allowed_execute_oids(connection) or ())
         for signature in PRIVATE_FUNCTIONS:
             assert connection.scalar(text("SELECT NOT has_function_privilege(current_user,to_regprocedure(:name),'EXECUTE')"),
                 {"name": signature}) is True

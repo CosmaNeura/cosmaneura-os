@@ -67,6 +67,63 @@ def test_database_preparation_is_idempotent_and_proves_denials() -> None:
                               "UPDATE public.practice_owner_reservations SET subject='forged' WHERE false"):
                 with pytest.raises(DBAPIError), runtime_engine.begin() as connection:
                     connection.execute(text(statement))
+            # H1: runtime has zero rights on patient-deletion control tables after
+            # prep runs twice. Re-running must not restore DML.
+            with runtime_engine.connect() as connection:
+                locked = connection.execute(
+                    text(
+                        "SELECT coalesce(bool_and("
+                        "NOT has_table_privilege(current_user, format('public.%I', t), 'SELECT') AND "
+                        "NOT has_table_privilege(current_user, format('public.%I', t), 'INSERT') AND "
+                        "NOT has_table_privilege(current_user, format('public.%I', t), 'UPDATE') AND "
+                        "NOT has_table_privilege(current_user, format('public.%I', t), 'DELETE') AND "
+                        "NOT has_table_privilege(current_user, format('public.%I', t), 'TRUNCATE') AND "
+                        "NOT has_table_privilege(current_user, format('public.%I', t), 'REFERENCES') AND "
+                        "NOT has_table_privilege(current_user, format('public.%I', t), 'TRIGGER')"
+                        "), false) FROM unnest(ARRAY["
+                        "'patient_deletion_admin_bindings',"
+                        "'patient_deletion_in_progress',"
+                        "'patient_deletion_pending_files'"
+                        "]::text[]) AS t"
+                    )
+                ).scalar_one()
+                assert locked is True
+                plan_ok = connection.execute(
+                    text(
+                        "SELECT has_function_privilege("
+                        "current_user,"
+                        "'public.delete_patient_keyed_records_plan(uuid)',"
+                        "'EXECUTE')"
+                    )
+                ).scalar_one()
+                delete_ok = connection.execute(
+                    text(
+                        "SELECT has_function_privilege("
+                        "current_user,"
+                        "'public.delete_patient_keyed_records(uuid)',"
+                        "'EXECUTE')"
+                    )
+                ).scalar_one()
+                assert plan_ok is True
+                assert delete_ok is False
+            for statement in (
+                "UPDATE public.patient_deletion_admin_bindings "
+                "SET principal_id = principal_id WHERE false",
+                "INSERT INTO public.patient_deletion_admin_bindings "
+                "(db_role, principal_id, box_id) VALUES "
+                "('forged', '00000000-0000-4000-8000-000000000001'::uuid, "
+                "'00000000-0000-4000-8000-000000000002'::uuid)",
+                "INSERT INTO public.patient_deletion_in_progress "
+                "(txid, patient_link_id) VALUES "
+                "(txid_current(), '00000000-0000-4000-8000-000000000001'::uuid)",
+                "INSERT INTO public.patient_deletion_pending_files "
+                "(patient_link_id, box_id, kind, relative_path) VALUES "
+                "('00000000-0000-4000-8000-000000000001'::uuid, "
+                "'00000000-0000-4000-8000-000000000002'::uuid, "
+                "'uploads', 'forged/front.png')",
+            ):
+                with pytest.raises(DBAPIError), runtime_engine.begin() as connection:
+                    connection.execute(text(statement))
         finally:
             runtime_engine.dispose()
     finally:

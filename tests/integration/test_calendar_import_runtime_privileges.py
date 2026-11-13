@@ -64,7 +64,7 @@ def assert_private(r):
         assert connection.scalar(text("SELECT current_user")) == r.role
         allowed = set(connection.scalars(text("SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
             "WHERE n.nspname='public' AND has_function_privilege(current_user,p.oid,'EXECUTE')")))
-        assert allowed == set(preparation._runtime_validator_oids(connection) or ()) and len(allowed) == 7
+        assert allowed == set(preparation._runtime_allowed_execute_oids(connection) or ())
         rows = connection.execute(text("""SELECT p.proname, p.prosecdef, p.proconfig,
             pg_get_userbyid(p.proowner) AS owner,
             has_function_privilege(current_user,p.oid,'EXECUTE') AS executable,

@@ -38,9 +38,7 @@ _DATABASE_NAME = re.compile(r"^cosmabot_standalone_[a-z0-9_]+$")
 _ROLE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,62}$")
 
 RUNTIME_TABLE_PRIVILEGES = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"})
-RUNTIME_FORBIDDEN_TABLE_PRIVILEGES = frozenset(
-    {"CREATE", "REFERENCES", "TRIGGER", "TRUNCATE"}
-)
+RUNTIME_FORBIDDEN_TABLE_PRIVILEGES = frozenset({"CREATE", "REFERENCES", "TRIGGER", "TRUNCATE"})
 
 # Tables where the blanket DML grant must be narrowed again to match
 # database_preparation._apply_runtime_privileges.
@@ -51,6 +49,9 @@ _RUNTIME_RESTRICTED_AFTER_GRANT = (
     "GRANT UPDATE (consumed_at) ON TABLE public.practice_owner_reservations TO {runtime}",
     "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.alembic_version FROM {runtime}",
     "GRANT SELECT ON TABLE public.alembic_version TO {runtime}",
+    "REVOKE ALL ON TABLE public.patient_deletion_admin_bindings FROM {runtime}",
+    "REVOKE ALL ON TABLE public.patient_deletion_in_progress FROM {runtime}",
+    "REVOKE ALL ON TABLE public.patient_deletion_pending_files FROM {runtime}",
 )
 
 
@@ -267,9 +268,7 @@ def _safe_standalone_migrator_url(value: str) -> URL:
         if parsed.password is not None:
             raise StandaloneDatabaseError("peer migrator URL must omit the password")
         if not set(parsed.query) <= {"host", "port"}:
-            raise StandaloneDatabaseError(
-                "peer migrator URL has unsupported query parameters"
-            )
+            raise StandaloneDatabaseError("peer migrator URL has unsupported query parameters")
         peer_socket_port(parsed)
         return parsed
     # TCP / private-Box migrator still uses a password URL.
@@ -284,9 +283,7 @@ def _validate_standalone_boundaries(
     runtime_url: str,
     instance_id: str | UUID,
 ) -> tuple[URL, URL, str, str]:
-    migrator, runtime_role = assert_standalone_migrate_roles(
-        admin_url, runtime_url, instance_id
-    )
+    migrator, runtime_role = assert_standalone_migrate_roles(admin_url, runtime_url, instance_id)
     admin = _safe_standalone_migrator_url(admin_url)
     try:
         runtime = _safe_url(runtime_url, label="runtime database URL")
@@ -325,9 +322,7 @@ def _validate_standalone_boundaries(
         if admin.password is None or runtime.password is None:
             raise StandaloneDatabaseError("database URL is incomplete")
         if admin.password == runtime.password:
-            raise StandaloneDatabaseError(
-                "runtime credential must differ from the administrator"
-            )
+            raise StandaloneDatabaseError("runtime credential must differ from the administrator")
     return admin, runtime, migrator, runtime_role
 
 
@@ -337,9 +332,7 @@ def _repair_runtime_owned_objects(connection: Any, migrator: str, runtime: str) 
         {"role": runtime},
     ).scalar_one()
     if exists:
-        connection.execute(
-            text(f"REASSIGN OWNED BY {runtime} TO {migrator}")
-        )
+        connection.execute(text(f"REASSIGN OWNED BY {runtime} TO {migrator}"))
 
 
 def _current_schema_revision(connection: Any) -> str | None:
@@ -407,15 +400,11 @@ def prepare_standalone_database(
     admin_engine = create_engine(admin_url, pool_pre_ping=True)
     try:
         with admin_engine.connect() as connection:
-            identity = connection.execute(
-                text("SELECT current_user, session_user")
-            ).one()
+            identity = connection.execute(text("SELECT current_user, session_user")).one()
             connected_user, session_user = str(identity[0]), str(identity[1])
             if (connected_user, session_user) != (migrator, migrator):
                 raise StandaloneDatabaseError("migrate_must_use_migration_user")
-            connection.execute(
-                text("SELECT pg_advisory_lock(hashtext(:key))"), {"key": _LOCK_KEY}
-            )
+            connection.execute(text("SELECT pg_advisory_lock(hashtext(:key))"), {"key": _LOCK_KEY})
             connection.commit()
             try:
                 with connection.begin():
@@ -423,18 +412,14 @@ def prepare_standalone_database(
                     try:
                         _ensure_unprivileged_role(connection, runtime)
                         schema_before = _current_schema_revision(connection)
-                        shipped_head = _run_standalone_forward_migrations(
-                            connection, config_path
-                        )
+                        shipped_head = _run_standalone_forward_migrations(connection, config_path)
                         if shipped_head != expected_head:
                             raise StandaloneDatabaseError(
                                 "migration graph does not have a single head"
                             )
                         schema_after = _current_schema_revision(connection)
                         if schema_after != expected_head:
-                            raise StandaloneDatabaseError(
-                                "schema is not at the expected head"
-                            )
+                            raise StandaloneDatabaseError("schema is not at the expected head")
                         _apply_runtime_privileges(connection, runtime)
                         for statement in runtime_grant_sql(instance_id):
                             connection.execute(text(statement))

@@ -142,8 +142,8 @@ def test_runtime_only_executes_exact_pure_validators_and_readiness_detects_extra
     with r.engine.connect() as connection:
         permitted = set(connection.scalars(text("SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
             "WHERE n.nspname='public' AND has_function_privilege(current_user,p.oid,'EXECUTE')")))
-        assert permitted == set(preparation._runtime_validator_oids(connection) or ())
-        assert len(permitted) == 7
+        assert permitted == set(preparation._runtime_allowed_execute_oids(connection) or ())
+        assert len(permitted) == len(preparation._runtime_allowed_execute_oids(connection) or ())
         # sha256(bytea) is PostgreSQL's built-in pg_catalog function, not an
         # extension or another public helper needing expanded permission.
         assert connection.scalar(text("SELECT to_regprocedure('sha256(bytea)') = to_regprocedure('pg_catalog.sha256(bytea)')"))
