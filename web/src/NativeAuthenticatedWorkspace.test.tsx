@@ -72,6 +72,18 @@ describe("native workspace session", () => {
     const button = [...container.querySelectorAll("button")].find(item => item.textContent?.startsWith(label));
     expect(button, label).toBeDefined(); await act(async () => button!.click());
   }
+  it('shows Privacy Policy and Support on the signed-out StatusScreen when configured',async()=>{
+    vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','apple');
+    vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://cosmas.ai/cosmabot/privacy');
+    vi.stubEnv('VITE_SUPPORT_URL','https://cosmas.ai/cosmabot/support');
+    await render(harness(signedOut));
+    expect(container.textContent).toContain('Sign in to CosmaBot');
+    const links=[...container.querySelectorAll<HTMLAnchorElement>('.account-public-links a')];
+    expect(links.map(link=>link.textContent)).toEqual(['Privacy Policy','Support']);
+    expect(links[0].href).toBe('https://cosmas.ai/cosmabot/privacy');
+    expect(links[1].href).toBe('https://cosmas.ai/cosmabot/support');
+    expect([...container.querySelectorAll('button')].some(button=>button.textContent==='Sign in')).toBe(true);
+  });
   it('keeps beta account controls unchanged when a registered practice plugin has no complete host',async()=>{
     const native=harness(),practice=practiceHarness(false);
     await act(async()=>root.render(<NativeAuthenticatedWorkspace plugin={native.plugin} available practicePlugin={practice} practiceConnectionAvailable/>));

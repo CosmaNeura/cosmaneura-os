@@ -3,7 +3,6 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {AccountControls} from './AccountControls';
 import {ACCOUNT_DELETE_CONFIRM,accountDeletionApi} from './account-deletion-api';
-import {DEFAULT_PRIVACY_POLICY_URL,DEFAULT_SUPPORT_URL} from './account-public-links';
 
 vi.mock('./account-deletion-api',async original=>{
   const module=await original<typeof import('./account-deletion-api')>();
@@ -39,27 +38,28 @@ afterEach(async()=>{
 });
 
 it('shows Privacy Policy and Support with configured URLs on the Account screen',async()=>{
-  vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://policy.example.invalid/p');
-  vi.stubEnv('VITE_SUPPORT_URL','https://help.example.invalid/s');
+  vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','web');
+  vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://cosmas.ai/cosmabot/privacy');
+  vi.stubEnv('VITE_SUPPORT_URL','https://cosmas.ai/cosmabot/support');
   await act(async()=>root.render(<AccountControls identity={identity} onSignOut={vi.fn()}/>));
   const [privacy,support]=publicLinks();
   expect(privacy?.textContent).toBe('Privacy Policy');
   expect(support?.textContent).toBe('Support');
-  expect(privacy.href).toBe('https://policy.example.invalid/p');
-  expect(support.href).toBe('https://help.example.invalid/s');
+  expect(privacy.href).toBe('https://cosmas.ai/cosmabot/privacy');
+  expect(support.href).toBe('https://cosmas.ai/cosmabot/support');
   expect(privacy.target).toBe('_blank');
   expect(privacy.rel).toBe('noopener noreferrer');
   expect(support.target).toBe('_blank');
   expect(support.rel).toBe('noopener noreferrer');
 });
 
-it('falls back to placeholder Privacy Policy and Support defaults when config is blank',async()=>{
-  vi.stubEnv('VITE_PRIVACY_POLICY_URL','');
-  vi.stubEnv('VITE_SUPPORT_URL','  ');
+it('hides Privacy Policy and Support on the Account screen when config is unset',async()=>{
+  vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','web');
+  vi.stubEnv('VITE_PRIVACY_POLICY_URL',undefined);
+  vi.stubEnv('VITE_SUPPORT_URL',undefined);
   await act(async()=>root.render(<AccountControls identity={identity} onSignOut={vi.fn()}/>));
-  const [privacy,support]=publicLinks();
-  expect(privacy.href).toBe(DEFAULT_PRIVACY_POLICY_URL);
-  expect(support.href).toBe(DEFAULT_SUPPORT_URL);
+  expect(publicLinks()).toHaveLength(0);
+  expect(host.querySelector('[aria-label="Account"]')?.textContent).toContain('Log out');
 });
 
 it('shows Delete account in Account controls and Cancel leaves everything untouched',async()=>{

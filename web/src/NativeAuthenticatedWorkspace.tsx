@@ -4,6 +4,7 @@ import {NativePracticeConnection,nativePracticeConnectionAvailable,type NativePr
 import {nativeEnrollmentCapabilities,nativeAccountEntryRequested} from './native-enrollment';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {NativeAccountControls} from './NativeAccountControls';
+import {AccountPublicLinks} from './AccountPublicLinks';
 import {hostedWorkspaceRequested} from './hosted-workspace';
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceAuth, nativeWorkspaceAuthAvailable, type WorkspaceAuthPlugin } from "../../clients/capture/src/native/workspace-auth-plugin";
@@ -239,6 +240,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     detail={signInRecovery ? "Close any unfinished sign-in window, then try again. Your workspace stays closed until your account is verified." :
       pending ? "Your workspace is closed. Reconnect and finish signing out before continuing." :
       "Sign in with your invited account to start a private note and meet your team."}>
+    <AccountPublicLinks/>
     <button className="button" onClick={() => void act(pending && !signInRecovery ? "signOut" : "signIn")}>
       {signInRecovery ? "Try signing in again" : pending ? "Retry sign-out" : "Sign in"}
     </button>

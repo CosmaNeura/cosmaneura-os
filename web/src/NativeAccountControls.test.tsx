@@ -2,7 +2,6 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {NativeAccountControls} from './NativeAccountControls';
-import {DEFAULT_PRIVACY_POLICY_URL,DEFAULT_SUPPORT_URL} from './account-public-links';
 
 vi.mock('./unsaved-work',()=>({useUnsavedWorkPresent:()=>false}));
 vi.mock('./account-deletion-api',async original=>{
@@ -30,24 +29,24 @@ function publicLinks(){
 }
 
 it('shows Privacy Policy and Support with configured URLs in native Account controls',async()=>{
-  vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://native.example.invalid/privacy');
-  vi.stubEnv('VITE_SUPPORT_URL','https://native.example.invalid/support');
+  vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','apple');
+  vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://cosmas.ai/cosmabot/privacy');
+  vi.stubEnv('VITE_SUPPORT_URL','https://cosmas.ai/cosmabot/support');
   await act(async()=>root.render(<NativeAccountControls displayName="Alex Rivera" practiceName="Rivera Clinic" onSignOut={vi.fn()}/>));
   const [privacy,support]=publicLinks();
   expect(privacy?.textContent).toBe('Privacy Policy');
   expect(support?.textContent).toBe('Support');
-  expect(privacy.href).toBe('https://native.example.invalid/privacy');
-  expect(support.href).toBe('https://native.example.invalid/support');
+  expect(privacy.href).toBe('https://cosmas.ai/cosmabot/privacy');
+  expect(support.href).toBe('https://cosmas.ai/cosmabot/support');
   expect(privacy.target).toBe('_blank');
   expect(privacy.rel).toBe('noopener noreferrer');
   expect(support.rel).toBe('noopener noreferrer');
 });
 
-it('falls back to placeholder defaults in native Account controls when config is omitted',async()=>{
+it('hides Privacy Policy and Support in native Account controls when config is unset',async()=>{
+  vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','apple');
   vi.stubEnv('VITE_PRIVACY_POLICY_URL',undefined);
   vi.stubEnv('VITE_SUPPORT_URL',undefined);
   await act(async()=>root.render(<NativeAccountControls onSignOut={vi.fn()}/>));
-  const [privacy,support]=publicLinks();
-  expect(privacy.href).toBe(DEFAULT_PRIVACY_POLICY_URL);
-  expect(support.href).toBe(DEFAULT_SUPPORT_URL);
+  expect(publicLinks()).toHaveLength(0);
 });
