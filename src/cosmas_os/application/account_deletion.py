@@ -33,6 +33,8 @@ from cosmas_os.models import (
 CONFIRM_PHRASE = "delete_my_account"
 # Stable client-facing detail when Clerk Backend delete cannot run (missing secret).
 NOT_CONFIGURED = "account deletion is not configured"
+OWNER_TRANSFER_REQUIRED = "transfer ownership before deleting this owner account"
+SUBJECT_SET_CHANGED = "account deletion is temporarily unavailable"
 
 
 class AccountDeletionError(DomainError):
@@ -173,34 +175,42 @@ def _confirm_clerk_subjects(
                 "Practice identity setup can be retried safely.",
                 503,
             )
-        try:
-            clerk.require_user(subject)
-        except Exception:
-            if _has_delete_intent(
-                session, box_id=box_id, principal_id=principal_id, subject=subject
-            ):
-                continue
-            raise
+        # No lookup_user: require_user only. Do not treat arbitrary errors as
+        # success when an intent exists (fail-closed for ports without lookup).
+        clerk.require_user(subject)
 
 
-def delete_own_account(
+def _refuse_if_owner_with_teammates(session: Session, *, box_id: str, actor: Principal) -> None:
+    """Fail closed when deleting an owner would leave the practice without an owner."""
+    if not actor.is_owner:
+        return
+    other_active_humans = session.scalar(
+        select(func.count())
+        .select_from(Principal)
+        .where(
+            Principal.box_id == box_id,
+            Principal.id != actor.id,
+            Principal.principal_type == PrincipalType.HUMAN.value,
+            Principal.state == PrincipalState.ACTIVE.value,
+            Principal.tombstoned_at.is_(None),
+        )
+    ) or 0
+    if other_active_humans > 0:
+        raise AccountDeletionError(OWNER_TRANSFER_REQUIRED)
+
+
+def _lock_delete_target(
     session: Session,
     *,
     box_id: str,
     principal_id: str,
     external_identity_id: str | None,
-    confirm: str,
-    clerk: ClerkUserDeletionPort | None,
-) -> dict[str, str]:
-    """Delete the caller's CosmaBot account data and Clerk login.
+) -> tuple[BoxContext, Principal, list[ExternalIdentity], list[ExternalIdentity], list[str]]:
+    """Lock box/principal/bindings and enforce delete preconditions under FOR UPDATE.
 
-    Requires an explicit confirm phrase. Never deletes another principal or
-    practice-shared records (patients, tickets, appointments, other users).
+    Box lock serialises against ownership transfer and member enrolment, which
+    also take BoxContext FOR UPDATE. Re-run after every intent commit.
     """
-
-    if confirm != CONFIRM_PHRASE:
-        raise AccountDeletionError("account deletion requires explicit confirmation")
-
     box = session.scalar(select(BoxContext).where(BoxContext.id == box_id).with_for_update())
     actor = session.scalar(
         select(Principal)
@@ -236,24 +246,38 @@ def delete_own_account(
     if not active_bindings:
         raise AuthorizationError("account deletion is unavailable")
 
-    if actor.is_owner:
-        other_active_humans = session.scalar(
-            select(func.count())
-            .select_from(Principal)
-            .where(
-                Principal.box_id == box_id,
-                Principal.id != actor.id,
-                Principal.principal_type == PrincipalType.HUMAN.value,
-                Principal.state == PrincipalState.ACTIVE.value,
-                Principal.tombstoned_at.is_(None),
-            )
-        ) or 0
-        if other_active_humans > 0:
-            raise AccountDeletionError(
-                "transfer ownership before deleting this owner account"
-            )
+    _refuse_if_owner_with_teammates(session, box_id=box_id, actor=actor)
 
     clerk_subjects = sorted({b.subject for b in active_bindings if b.provider == "clerk"})
+    return box, actor, bindings, active_bindings, clerk_subjects
+
+
+def delete_own_account(
+    session: Session,
+    *,
+    box_id: str,
+    principal_id: str,
+    external_identity_id: str | None,
+    confirm: str,
+    clerk: ClerkUserDeletionPort | None,
+) -> dict[str, str]:
+    """Delete the caller's CosmaBot account data and Clerk login.
+
+    Requires an explicit confirm phrase. Never deletes another principal or
+    practice-shared records (patients, tickets, appointments, other users).
+    """
+
+    if confirm != CONFIRM_PHRASE:
+        raise AccountDeletionError("account deletion requires explicit confirmation")
+
+    box, actor, bindings, active_bindings, clerk_subjects = _lock_delete_target(
+        session,
+        box_id=box_id,
+        principal_id=principal_id,
+        external_identity_id=external_identity_id,
+    )
+    confirmed_subjects = list(clerk_subjects)
+
     if clerk is None and clerk_subjects:
         # Fail closed before any local wipe or Clerk HTTP call.
         raise AccountDeletionError(NOT_CONFIGURED)
@@ -276,32 +300,17 @@ def delete_own_account(
             principal_id=principal_id,
             subjects=clerk_subjects,
         )
-        # Re-lock after intent commit.
-        box = session.scalar(select(BoxContext).where(BoxContext.id == box_id).with_for_update())
-        actor = session.scalar(
-            select(Principal)
-            .where(Principal.id == principal_id, Principal.box_id == box_id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
+        # Intent commit drops FOR UPDATE locks. Re-lock and re-run every guard
+        # (owner/teammate, principal type, binding set) before wipe/Clerk delete.
+        box, actor, bindings, active_bindings, clerk_subjects = _lock_delete_target(
+            session,
+            box_id=box_id,
+            principal_id=principal_id,
+            external_identity_id=external_identity_id,
         )
-        if box is None or actor is None:
-            raise AuthorizationError("account deletion is unavailable")
-        if actor.state != PrincipalState.ACTIVE.value or actor.tombstoned_at is not None:
-            raise AuthorizationError("account deletion is unavailable")
-        bindings = list(
-            session.scalars(
-                select(ExternalIdentity)
-                .where(
-                    ExternalIdentity.principal_id == actor.id,
-                    ExternalIdentity.box_id == box_id,
-                )
-                .with_for_update()
-            )
-        )
-        active_bindings = [b for b in bindings if b.active]
-        if not active_bindings:
-            raise AuthorizationError("account deletion is unavailable")
-        clerk_subjects = sorted({b.subject for b in active_bindings if b.provider == "clerk"})
+        if clerk_subjects != confirmed_subjects:
+            # Binding added/removed in the gap would skip confirm/intent.
+            raise AccountDeletionError(SUBJECT_SET_CHANGED)
 
     try:
         for binding in bindings:

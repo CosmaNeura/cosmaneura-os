@@ -597,3 +597,252 @@ def test_retry_succeeds_after_second_subject_clerk_5xx(deletion, session):
     session.refresh(peer)
     assert peer.state == PrincipalState.TOMBSTONED.value
     assert "user_delete_peer_b" in deletion.clerk_transport.deleted
+
+
+def _active_owners(session, box_id: str) -> list[Principal]:
+    return list(
+        session.scalars(
+            select(Principal).where(
+                Principal.box_id == box_id,
+                Principal.principal_type == "human",
+                Principal.state == PrincipalState.ACTIVE.value,
+                Principal.tombstoned_at.is_(None),
+                Principal.is_owner.is_(True),
+            )
+        )
+    )
+
+
+def test_delete_refuses_when_new_member_enrolls_after_intent_commit(
+    deletion, session, monkeypatch
+):
+    """Sole-owner delete racing enrolment: post-intent owner guard refuses; practice keeps an owner."""
+    from cosmas_os.application import account_deletion as deletion_app
+    from cosmas_os.models import AccountDeleteIntent
+
+    # Make owner the sole active human so the first lock admits the delete.
+    peer = session.get(Principal, deletion.people["peer"])
+    peer.state = PrincipalState.TOMBSTONED.value
+    peer.tombstoned_at = datetime.now(UTC)
+    peer.is_owner = False
+    session.commit()
+
+    real_commit = session.commit
+
+    def enroll_member_during_intent_commit():
+        # Intent commit drops the box FOR UPDATE lock; enrolment takes it next.
+        new_member = Principal(
+            box_id=deletion.box,
+            principal_type="human",
+            display_name="Invented New Enrollee",
+            state="active",
+            is_owner=False,
+        )
+        session.add(new_member)
+        return real_commit()
+
+    commits = {"n": 0}
+
+    def flaky_commit():
+        commits["n"] += 1
+        if commits["n"] == 1:
+            return enroll_member_during_intent_commit()
+        return real_commit()
+
+    monkeypatch.setattr(session, "commit", flaky_commit)
+    response = deletion.client.post(
+        PATH, headers=deletion.headers("owner"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert response.status_code == 400, response.text
+    assert response.json() == {
+        "detail": deletion_app.OWNER_TRANSFER_REQUIRED,
+    }
+    assert deletion.clerk_transport.deleted == []
+    owner = session.get(Principal, deletion.people["owner"])
+    session.refresh(owner)
+    assert owner.state == PrincipalState.ACTIVE.value
+    assert owner.is_owner is True
+    assert len(_active_owners(session, deletion.box)) == 1
+    intent = session.scalar(
+        select(AccountDeleteIntent).where(
+            AccountDeleteIntent.box_id == deletion.box,
+            AccountDeleteIntent.principal_id == deletion.people["owner"],
+            AccountDeleteIntent.subject == "user_delete_owner",
+        )
+    )
+    assert intent is not None
+
+
+def test_delete_refuses_when_ownership_transfers_after_intent_commit(
+    deletion, session, monkeypatch
+):
+    """Member delete racing ownership transfer: re-lock owner guard refuses; no Clerk delete."""
+    from cosmas_os.application import account_deletion as deletion_app
+
+    real_commit = session.commit
+
+    def transfer_ownership_during_intent_commit():
+        owner = session.get(Principal, deletion.people["owner"])
+        peer = session.get(Principal, deletion.people["peer"])
+        owner.is_owner = False
+        peer.is_owner = True
+        return real_commit()
+
+    commits = {"n": 0}
+
+    def flaky_commit():
+        commits["n"] += 1
+        if commits["n"] == 1:
+            return transfer_ownership_during_intent_commit()
+        return real_commit()
+
+    monkeypatch.setattr(session, "commit", flaky_commit)
+    response = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert response.status_code == 400, response.text
+    assert response.json() == {"detail": deletion_app.OWNER_TRANSFER_REQUIRED}
+    assert deletion.clerk_transport.deleted == []
+    peer = session.get(Principal, deletion.people["peer"])
+    session.refresh(peer)
+    assert peer.state == PrincipalState.ACTIVE.value
+    assert peer.is_owner is True
+    assert len(_active_owners(session, deletion.box)) == 1
+
+
+def test_without_post_intent_owner_guard_transfer_race_leaves_practice_ownerless(
+    deletion, session, monkeypatch
+):
+    """Negative control: skipping the post-intent owner refuse leaves no owner.
+
+    Proves the re-lock guard is load-bearing: invert/remove it and this test fails
+    the final owner assertion (practice would be ownerless).
+    """
+    from cosmas_os.application import account_deletion as deletion_app
+
+    refuse_calls = {"n": 0}
+    real_refuse = deletion_app._refuse_if_owner_with_teammates
+
+    def selective_refuse(session_arg, *, box_id, actor):
+        refuse_calls["n"] += 1
+        # First lock: peer is not owner — real check is a no-op return.
+        # Second lock (after transfer): skip so the mutation wins.
+        if refuse_calls["n"] <= 1:
+            return real_refuse(session_arg, box_id=box_id, actor=actor)
+        return None
+
+    monkeypatch.setattr(deletion_app, "_refuse_if_owner_with_teammates", selective_refuse)
+
+    real_commit = session.commit
+
+    def transfer_ownership_during_intent_commit():
+        owner = session.get(Principal, deletion.people["owner"])
+        peer = session.get(Principal, deletion.people["peer"])
+        owner.is_owner = False
+        peer.is_owner = True
+        return real_commit()
+
+    commits = {"n": 0}
+
+    def flaky_commit():
+        commits["n"] += 1
+        if commits["n"] == 1:
+            return transfer_ownership_during_intent_commit()
+        return real_commit()
+
+    monkeypatch.setattr(session, "commit", flaky_commit)
+    response = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert response.status_code == 200, response.text
+    assert "user_delete_peer" in deletion.clerk_transport.deleted
+    peer = session.get(Principal, deletion.people["peer"])
+    session.refresh(peer)
+    assert peer.state == PrincipalState.TOMBSTONED.value
+    assert peer.is_owner is False
+    # Mutation proof: without the post-intent guard the practice has no owner.
+    assert _active_owners(session, deletion.box) == []
+    assert refuse_calls["n"] >= 2
+
+
+def test_delete_refuses_when_clerk_subject_set_changes_after_intent(
+    deletion, session, monkeypatch
+):
+    """Subject remapped in the intent-commit gap must refuse (no unconfirmed Clerk delete)."""
+    from cosmas_os.application import account_deletion as deletion_app
+
+    real_commit = session.commit
+
+    def remap_clerk_subject_during_intent_commit():
+        # One principal may only hold one issuer+org binding; remap subject instead
+        # of inserting a second row (would hit uq_external_identity_org_principal).
+        binding = session.get(ExternalIdentity, deletion.bindings["peer"].id)
+        binding.subject = "user_delete_peer_remapped"
+        return real_commit()
+
+    commits = {"n": 0}
+
+    def flaky_commit():
+        commits["n"] += 1
+        if commits["n"] == 1:
+            return remap_clerk_subject_during_intent_commit()
+        return real_commit()
+
+    monkeypatch.setattr(session, "commit", flaky_commit)
+    response = deletion.client.post(
+        PATH, headers=deletion.headers("peer"), json={"confirm": CONFIRM_PHRASE}
+    )
+    assert response.status_code == 400, response.text
+    assert response.json() == {"detail": deletion_app.SUBJECT_SET_CHANGED}
+    assert deletion.clerk_transport.deleted == []
+    peer = session.get(Principal, deletion.people["peer"])
+    session.refresh(peer)
+    assert peer.state == PrincipalState.ACTIVE.value
+
+
+def test_confirm_without_lookup_user_never_treats_errors_as_success(deletion, session):
+    """Fail-closed: ports without lookup_user must call require_user; no silent pass."""
+    from cosmas_os.application import account_deletion as deletion_app
+    from cosmas_os.enrollment.domain import EnrollmentError
+
+    class RequireOnlyClerk:
+        def __init__(self) -> None:
+            self.required: list[str] = []
+            self.deleted: list[str] = []
+
+        def require_user(self, subject: str) -> dict:
+            self.required.append(subject)
+            raise EnrollmentError(
+                "provisioning_identity_unavailable",
+                "Practice identity setup can be retried safely.",
+                503,
+            )
+
+        def delete_user(self, subject: str) -> None:
+            self.deleted.append(subject)
+
+    # Seed an intent so the old fail-open branch would have accepted any error.
+    from cosmas_os.models import AccountDeleteIntent
+
+    session.add(
+        AccountDeleteIntent(
+            box_id=deletion.box,
+            principal_id=deletion.people["peer"],
+            provider="clerk",
+            subject="user_delete_peer",
+        )
+    )
+    session.commit()
+
+    clerk = RequireOnlyClerk()
+    with pytest.raises(EnrollmentError):
+        deletion_app._confirm_clerk_subjects(
+            session,
+            clerk,
+            box_id=deletion.box,
+            principal_id=deletion.people["peer"],
+            subjects=["user_delete_peer"],
+        )
+    assert clerk.required == ["user_delete_peer"]
+    assert clerk.deleted == []
+
