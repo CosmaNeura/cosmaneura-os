@@ -1,4 +1,4 @@
-"""Parity: entrypoint and render classifyAccountDeleteProfile share one matrix."""
+"""Parity: shared classify_review_profile and render classifyAccountDeleteProfile."""
 
 from __future__ import annotations
 
@@ -8,10 +8,20 @@ from pathlib import Path
 
 import pytest
 
+from cosmas_os.production_review_profile import (
+    REVIEW_CLERK_ISSUER,
+    REVIEW_SESSION_POLICY,
+    REVIEW_WEB_ORIGIN,
+    STAGING_SESSION_POLICY,
+    STAGING_WEB_ORIGIN,
+    classify_review_profile,
+)
+
 REPO = Path(__file__).resolve().parents[2]
 ENTRYPOINT = REPO / "infra/standalone/package/entrypoint.py"
 RENDER = REPO / "infra/standalone/render.mjs"
 MATRIX = REPO / "infra/standalone/account-delete-profile-matrix.json"
+SHARED = REPO / "src/cosmas_os/production_review_profile.py"
 
 
 def _load_entrypoint():
@@ -41,9 +51,9 @@ def test_account_delete_shared_matrix_file_exists_and_covers_refused_rows():
 
 
 @pytest.mark.parametrize("row", _matrix_rows(), ids=lambda row: row["id"])
-def test_entrypoint_classify_matches_shared_matrix(row):
-    entrypoint = _load_entrypoint()
-    kind = entrypoint.classify_account_delete_profile(
+def test_shared_classify_review_profile_matches_matrix(row):
+    """Python side of the shared matrix drives cosmas_os.production_review_profile."""
+    kind = classify_review_profile(
         policy=row["policy"],
         web_origin=row["web_origin"],
         cors=row["cors"],
@@ -51,24 +61,48 @@ def test_entrypoint_classify_matches_shared_matrix(row):
     )
     expected = None if row["expect"] == "none" else row["expect"]
     assert kind == expected
-    # CORS-only path (entrypoint runtime) must agree when web_origin is omitted.
-    cors_only = entrypoint.classify_account_delete_profile(
+    cors_only = classify_review_profile(
         policy=row["policy"],
         web_origin=None,
         cors=row["cors"],
         issuer=row["issuer"],
     )
-    if row["web_origin"] in (entrypoint.REVIEW_WEB_ORIGIN, entrypoint.STAGING_WEB_ORIGIN) or (
-        entrypoint.REVIEW_WEB_ORIGIN in row["cors"] or entrypoint.STAGING_WEB_ORIGIN in row["cors"]
+    if row["web_origin"] in (REVIEW_WEB_ORIGIN, STAGING_WEB_ORIGIN) or (
+        REVIEW_WEB_ORIGIN in row["cors"] or STAGING_WEB_ORIGIN in row["cors"]
     ):
-        # When CORS already encodes the web origin (or mixed), cors-only matches.
         if row["web_origin"] in {p.strip() for p in row["cors"].split(",") if p.strip()}:
             assert cors_only == expected
 
 
-def test_entrypoint_constants_match_render_exports():
+@pytest.mark.parametrize("row", _matrix_rows(), ids=lambda row: row["id"])
+def test_entrypoint_thin_alias_matches_shared_classify(row):
+    entrypoint = _load_entrypoint()
+    assert entrypoint.classify_account_delete_profile is entrypoint.classify_review_profile
+    expected = classify_review_profile(
+        policy=row["policy"],
+        web_origin=row["web_origin"],
+        cors=row["cors"],
+        issuer=row["issuer"],
+    )
+    assert (
+        entrypoint.classify_account_delete_profile(
+            policy=row["policy"],
+            web_origin=row["web_origin"],
+            cors=row["cors"],
+            issuer=row["issuer"],
+        )
+        == expected
+    )
+
+
+def test_entrypoint_reexports_shared_constants_and_render_keeps_js_twin():
     entrypoint = _load_entrypoint()
     render = RENDER.read_text(encoding="utf-8")
+    assert entrypoint.STAGING_WEB_ORIGIN is STAGING_WEB_ORIGIN
+    assert entrypoint.REVIEW_WEB_ORIGIN is REVIEW_WEB_ORIGIN
+    assert entrypoint.REVIEW_CLERK_ISSUER is REVIEW_CLERK_ISSUER
+    assert entrypoint.STAGING_SESSION_POLICY is STAGING_SESSION_POLICY
+    assert entrypoint.REVIEW_SESSION_POLICY is REVIEW_SESSION_POLICY
     assert entrypoint.STAGING_WEB_ORIGIN == "https://staging.cosmas.ai"
     assert entrypoint.REVIEW_WEB_ORIGIN == "https://beta.cosmas.ai"
     assert entrypoint.REVIEW_CLERK_ISSUER == "https://clerk.beta.cosmas.ai"
@@ -81,3 +115,4 @@ def test_entrypoint_constants_match_render_exports():
     assert "export const REVIEW_ACCOUNT_DELETE_VAULT_OBJECT='CLERK-ACCOUNT-DELETION-SECRET'" in render
     assert "export const STAGING_ACCOUNT_DELETE_VAULT_SECRET='account-delete-clerk-secret-key'" in render
     assert "export function classifyAccountDeleteProfile" in render
+    assert SHARED.is_file()

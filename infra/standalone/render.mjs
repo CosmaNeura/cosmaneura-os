@@ -33,7 +33,8 @@ const publicUuid=value=>typeof value==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3
 const syntheticWebHosts=['staging.cosmas.ai','beta.cosmas.ai'];
 const ownedSyntheticHosts=new Set(syntheticWebHosts.flatMap(host=>[host,`api.${host}`]));
 const platformHosts=new Set(['cosmas.ai','www.cosmas.ai','app.cosmas.ai','api.cosmas.ai','bot.cosmas.ai',...ownedSyntheticHosts]);
-// Parity with entrypoint.classify_account_delete_profile (exclusive review).
+// JS twin of cosmas_os.production_review_profile.classify_review_profile
+// (shared matrix: account-delete-profile-matrix.json).
 export const STAGING_WEB_ORIGIN='https://staging.cosmas.ai';
 export const REVIEW_WEB_ORIGIN='https://beta.cosmas.ai';
 export const REVIEW_CLERK_ISSUER='https://clerk.beta.cosmas.ai';

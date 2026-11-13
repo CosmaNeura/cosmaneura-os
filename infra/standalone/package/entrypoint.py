@@ -7,6 +7,24 @@ import stat
 import sys
 from pathlib import Path
 
+# python -I (standalone Dockerfile.api.fragment) ignores PYTHONPATH; the image
+# ships application sources at /app/src (root Dockerfile COPY src ./src).
+_APP_SRC = Path("/app/src")
+if _APP_SRC.is_dir() and str(_APP_SRC) not in sys.path:
+    sys.path.insert(0, str(_APP_SRC))
+
+from cosmas_os.production_review_profile import (  # noqa: E402, F401
+    REVIEW_CLERK_ISSUER,
+    REVIEW_SESSION_POLICY,
+    REVIEW_WEB_ORIGIN,
+    STAGING_SESSION_POLICY,
+    STAGING_WEB_ORIGIN,
+    classify_review_profile,
+)
+
+# Thin alias — shared predicate lives in cosmas_os.production_review_profile.
+classify_account_delete_profile = classify_review_profile
+
 PUBLIC = Path("/run/cosmabot-standalone/api-public.json")
 PRIVATE = Path("/run/cosmabot-standalone/api-private.json")
 PRIVATE_NAMES = {"DATABASE_URL", "HUMAN_DEPLOY_EVIDENCE_REF"}
@@ -26,64 +44,14 @@ REVIEW_ACCOUNT_DELETE_VAULT_OBJECT = "CLERK-ACCOUNT-DELETION-SECRET"
 # Back-compat alias for tests that still import the old constant name.
 REVIEW_ACCOUNT_DELETE_KV_NAME = REVIEW_ACCOUNT_DELETE_HOST_KEY
 OPTIONAL_PRIVATE_NAMES = MODEL_PRIVATE_NAMES | GOOGLE_PRIVATE_NAMES | MICROSOFT_PRIVATE_NAMES
-# Must match render.mjs classifyAccountDeleteProfile exactly.
-STAGING_WEB_ORIGIN = "https://staging.cosmas.ai"
-REVIEW_WEB_ORIGIN = "https://beta.cosmas.ai"
-REVIEW_CLERK_ISSUER = "https://clerk.beta.cosmas.ai"
-STAGING_SESSION_POLICY = "shared_staging"
-REVIEW_SESSION_POLICY = "audience"
 
 
 class Refused(Exception):
     """Do not include configuration values or underlying exceptions in output."""
 
 
-def classify_account_delete_profile(
-    *,
-    policy: str | None,
-    web_origin: str | None,
-    cors: str | None,
-    issuer: str | None,
-) -> str | None:
-    """Return 'staging', 'review', or None. Parity with render.mjs.
-
-    Review requires web_origin==beta.cosmas.ai (or CORS first origin equal to
-    it when web_origin is omitted), audience policy, no staging origin in CORS,
-    and issuer https://clerk.beta.cosmas.ai as an added condition (never sole
-    admit). Mixed CORS or shared_staging+beta is refused (None).
-    """
-    cors_list = [part.strip() for part in (cors or "").split(",") if part.strip()]
-    origins = set(cors_list)
-    if web_origin:
-        origins.add(web_origin)
-    has_staging = STAGING_WEB_ORIGIN in origins
-    has_review = REVIEW_WEB_ORIGIN in origins
-    if has_staging and has_review:
-        return None
-    if policy == STAGING_SESSION_POLICY and has_review:
-        return None
-    # When web_origin is omitted (runtime CORS-only), first origin must be beta —
-    # never admit on mere membership (Opus parity with render web_origin match).
-    review_web = (
-        (web_origin == REVIEW_WEB_ORIGIN)
-        if web_origin is not None
-        else (bool(cors_list) and cors_list[0] == REVIEW_WEB_ORIGIN)
-    )
-    if (
-        policy == REVIEW_SESSION_POLICY
-        and review_web
-        and has_review
-        and not has_staging
-        and (issuer or "") == REVIEW_CLERK_ISSUER
-    ):
-        return "review"
-    if policy == STAGING_SESSION_POLICY or has_staging:
-        return "staging"
-    return None
-
-
 def account_delete_kind(checked) -> str | None:
-    return classify_account_delete_profile(
+    return classify_review_profile(
         policy=getattr(checked, "clerk_session_policy", None),
         web_origin=None,
         cors=getattr(checked, "cors_allowed_origins", None),
@@ -104,7 +72,7 @@ def review_account_delete_profile(checked) -> bool:
 def review_account_delete_host(public: dict) -> bool:
     """True when public fields classify as exclusive production-review."""
     return (
-        classify_account_delete_profile(
+        classify_review_profile(
             policy=public.get("CLERK_SESSION_POLICY"),
             web_origin=None,
             cors=public.get("CORS_ALLOWED_ORIGINS"),
