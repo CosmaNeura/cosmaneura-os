@@ -105,9 +105,43 @@ test('staging session policy must be explicitly matched to existing development 
   assert.equal(files['host-preparation.json'].clerk_session_proof.named_jwt_template_is_not_a_substitute,true);
   assert.equal(files['host-preparation.json'].live_readiness.requires_identity_policy,'audience');
   assert.equal(files['host-preparation.json'].live_readiness.qualified,false);
+  const privateEnv=files['host-preparation.json'].private_environment;
+  assert.deepEqual(privateEnv.exact_names,['DATABASE_URL','HUMAN_DEPLOY_EVIDENCE_REF']);
+  assert.deepEqual(privateEnv.optional_exact_names,['ACCOUNT_DELETE_CLERK_SECRET_KEY']);
+  assert.deepEqual(privateEnv.key_vault_secret_names,{
+    ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key',
+  });
+  assert.equal(privateEnv.key_vault_name,'kv-cbot-stg-stg0925c1');
+  assert.equal(privateEnv.key_vault_uri,'https://kv-cbot-stg-stg0925c1.vault.azure.net/');
+  assert.equal(privateEnv.values_in_package,false);
+  const clerkEgress=files['network-requirements.json'].api_egress.find(item=>item.hostname==='api.clerk.com');
+  assert.deepEqual(clerkEgress,{
+    protocol:'https',hostname:'api.clerk.com',tcp_port:443,
+    path:'/v1/users/',redirects_allowed:false,purpose:'account_delete_clerk_backend',
+  });
+  assert.equal(
+    files['network-requirements.json'].dns,
+    'Only the exact configured Clerk issuer, Clerk Backend API, and any declared optional model/Google hostnames; qualify resolver enforcement separately.',
+  );
   const wrongAudience=structuredClone(candidate);wrongAudience.identity.audience='invented-cosmabot-application-api';
   assert.throws(()=>render(wrongAudience));
   delete candidate.identity_policy;assert.throws(()=>render(candidate));
+});
+
+test('production audience profile keep private allowlist byte-compatible and omits account-delete vault mapping',()=>{
+  const files=render(copy());
+  const privateEnv=files['host-preparation.json'].private_environment;
+  assert.deepEqual(Object.keys(privateEnv).sort(),[
+    'database_url_structure','exact_names','expected_owner','file','mode','values_in_package',
+  ]);
+  assert.deepEqual(privateEnv.exact_names,['DATABASE_URL','HUMAN_DEPLOY_EVIDENCE_REF']);
+  assert.equal(Object.hasOwn(privateEnv,'optional_exact_names'),false);
+  assert.equal(Object.hasOwn(privateEnv,'key_vault_secret_names'),false);
+  assert.equal(Object.hasOwn(privateEnv,'key_vault_name'),false);
+  // Main fixture issuer is clerk.cosmas.ai (was identity.standalone.example.com on #272's base).
+  assert.equal(files['network-requirements.json'].api_egress.length,1);
+  assert.equal(files['network-requirements.json'].api_egress[0].hostname,'clerk.cosmas.ai');
+  assert.ok(!files['network-requirements.json'].api_egress.some(item=>item.hostname==='api.clerk.com'));
 });
 
 test('shared platform resources, identity ambiguity, plaintext origins and configuration injection are rejected before rendering',()=>{

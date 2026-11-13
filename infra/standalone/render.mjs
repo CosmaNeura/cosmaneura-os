@@ -302,6 +302,24 @@ export function render(input){
       content:'live microphone audio on a synthetic-only CosmaBot host; never relabelled as invented',
       real_patient_recording_process_switch:false}];
   }
+  // Staging-only: allow ACCOUNT_DELETE_CLERK_SECRET_KEY by Key Vault reference.
+  // Production / beta.cosmas.ai profiles leave private_environment byte-for-byte
+  // unchanged (no new keys on that object).
+  // Parity with entrypoint.staging_account_delete_profile: policy OR staging
+  // web origin only — never issuer alone.
+  const STAGING_WEB_ORIGIN='https://staging.cosmas.ai';
+  const STAGING_SESSION_POLICY='shared_staging';
+  const stagingHost=value.web_origin===STAGING_WEB_ORIGIN;
+  const stagingProfile=value.identity_policy===STAGING_SESSION_POLICY||stagingHost;
+  if(stagingProfile){
+    contract.private_environment.optional_exact_names=['ACCOUNT_DELETE_CLERK_SECRET_KEY'];
+    // Names only — never secret values. John pastes the Clerk Secret key into KV.
+    contract.private_environment.key_vault_secret_names={
+      ACCOUNT_DELETE_CLERK_SECRET_KEY:'account-delete-clerk-secret-key',
+    };
+    contract.private_environment.key_vault_name='kv-cbot-stg-stg0925c1';
+    contract.private_environment.key_vault_uri='https://kv-cbot-stg-stg0925c1.vault.azure.net/';
+  }
   if(ownedVm){
     contract.resource_identity.host_name='vm-cosmabot-staging-eus2-lab01';
     contract.private_environment.file=config+'/private/api-private.json';
@@ -323,6 +341,12 @@ export function render(input){
       '*.cosmaneura.com',...platformHosts],
     network_namespace:'Dedicated host; never the main platform host or its network/deployment identity',
     qualification:'Service configuration alone does not enforce destination allowlisting; demonstrate host egress policy before release.'};
+  if(stagingProfile){
+    // Account delete uses Clerk Backend API; JWKS-only issuer egress is not enough.
+    firewall.api_egress.push({protocol:'https',hostname:'api.clerk.com',tcp_port:443,
+      path:'/v1/users/',redirects_allowed:false,purpose:'account_delete_clerk_backend'});
+    firewall.dns='Only the exact configured Clerk issuer, Clerk Backend API, and any declared optional model/Google hostnames; qualify resolver enforcement separately.';
+  }
   if(features.model)firewall.api_egress.push({protocol:'https',hostname:new URL(features.model.origin).hostname,tcp_port:443,
     path:'/openai/v1/chat/completions',redirects_allowed:false});
   if(features.google){
@@ -359,13 +383,24 @@ export function render(input){
     });
   }
   if(value.beta_features!==undefined){
-    firewall.dns=captureEnabled
-      ?`Only the exact configured Clerk/model, selected Google/Microsoft API hostnames, ${coreHost} Core capture, IMDS token host, and ${value.core_capture_upload_host} Core capture upload blob; qualify resolver enforcement separately.`
-      :'Only the exact configured Clerk/model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
-    contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
-      (captureEnabled
-        ?`Host firewall and DNS qualification: only declared Clerk, optional own model, selected Google/Microsoft, Core capture ${coreHost}, IMDS token endpoint, and Core capture upload blob ${value.core_capture_upload_host}; runtime pins that upload host exactly on https:443; no other providers`
-        :'Host firewall and DNS qualification: only declared Clerk, optional own model and selected Google/Microsoft API egress; no metadata or other providers'):item);
+    // Keep main's capture/Microsoft wording; staging adds Clerk Backend API only.
+    if(stagingProfile){
+      firewall.dns=captureEnabled
+        ?`Only the exact configured Clerk issuer, Clerk Backend API, optional own model, selected Google/Microsoft API hostnames, ${coreHost} Core capture, IMDS token host, and ${value.core_capture_upload_host} Core capture upload blob; qualify resolver enforcement separately.`
+        :'Only the exact configured Clerk issuer, Clerk Backend API, optional own model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
+      contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
+        (captureEnabled
+          ?`Host firewall and DNS qualification: only declared Clerk JWKS, Clerk Backend API, optional own model, selected Google/Microsoft, Core capture ${coreHost}, IMDS token endpoint, and Core capture upload blob ${value.core_capture_upload_host}; runtime pins that upload host exactly on https:443; no other providers`
+          :'Host firewall and DNS qualification: only declared Clerk JWKS, Clerk Backend API, optional own model and selected Google/Microsoft API egress; no metadata or other providers'):item);
+    }else{
+      firewall.dns=captureEnabled
+        ?`Only the exact configured Clerk/model, selected Google/Microsoft API hostnames, ${coreHost} Core capture, IMDS token host, and ${value.core_capture_upload_host} Core capture upload blob; qualify resolver enforcement separately.`
+        :'Only the exact configured Clerk/model and selected Google/Microsoft API hostnames; qualify resolver enforcement separately.';
+      contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
+        (captureEnabled
+          ?`Host firewall and DNS qualification: only declared Clerk, optional own model, selected Google/Microsoft, Core capture ${coreHost}, IMDS token endpoint, and Core capture upload blob ${value.core_capture_upload_host}; runtime pins that upload host exactly on https:443; no other providers`
+          :'Host firewall and DNS qualification: only declared Clerk, optional own model and selected Google/Microsoft API egress; no metadata or other providers'):item);
+    }
   }
   if(ownedVm){
     firewall.dedicated_host_required=false;firewall.existing_owned_cosmabot_host_required=true;
