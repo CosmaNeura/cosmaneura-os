@@ -56,7 +56,7 @@ and `keychainNamespace`. Choose exactly one closed environment:
 
 `operational-production-v1` on `clerk.beta.cosmas.ai` / `api.beta.cosmas.ai` is the production-review identity selected with `--installation-profile production` (CTO decision, 11 Nov 2026 6:55pm ET). It is not a `--native-practice-config` realm; no native practice connection is approved for it. `clerk.cosmas.ai` / `operational-beta-v1` remains the live profile and is reserved for the later per-practice enrollment design.
 
-Production-review web/desktop builds (`VITE_WORKSPACE_HOSTED_API_ORIGIN=https://api.beta.cosmas.ai`) keep payments and portals as neutral **Not available** cards with a **Review saved … work** control so private drafts stay recoverable; practice-records tabs show “Practice records are not available in this release” with the same recovery disclosure. Staging and live beta wording is unchanged.
+Production-review web/desktop builds (`VITE_WORKSPACE_HOSTED_API_ORIGIN=https://api.beta.cosmas.ai`) keep payments and portals as neutral **Not available** cards with a **Review saved … work** control so private drafts stay recoverable. Practice-records tabs show “Practice records are not available in this release” and a **Saved work recovery** disclosure that only offers **Review saved private draft** — it does not mount EHR access, appointment-load, or sandbox controls. Staging and live beta wording is unchanged.
 
 The reviewed stable `keychainNamespace` is 64 lowercase hexadecimal characters in
 either environment. No credential or server secret belongs in this file.

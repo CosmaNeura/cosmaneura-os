@@ -4,7 +4,12 @@ import type {EhrProvider} from './ehr-read-api';
 import {TebraMedicationMount} from './TebraMedicationMount';
 import {AthenaAllergyMount} from './AthenaAllergyMount';
 import {AthenaMedicationMount} from './AthenaMedicationMount';
-import {isProductionReviewProfile,practiceRecordsUnavailableCopy} from './production-review-copy';
+import {
+ isProductionReviewProfile,
+ practiceRecordsSavedDraftRecoveryAction,
+ practiceRecordsSavedDraftRecoveryCopy,
+ practiceRecordsUnavailableCopy,
+} from './production-review-copy';
 export type RecordsProvider=EhrProvider|'athena';
 export type RecordsProviderRequest={provider:RecordsProvider;intent:object};
 
@@ -34,21 +39,24 @@ export function EhrReadProviders({requestedProvider,...props}:Omit<EhrReadMountP
  const elationBusy=useCallback((value:boolean)=>update('elation',value),[update]),tebraBusy=useCallback((value:boolean)=>update('tebra',value),[update]),athenaBusy=useCallback((value:boolean)=>update('athena',value),[update]);
  useEffect(()=>()=>report.current?.(false),[]);
  const locked=Boolean(dispatching||props.locked||props.recoveryLocked);
+ const [draftRecoveryOffered,setDraftRecoveryOffered]=useState(false);
  function choose(next:RecordsProvider){
   if(busy.current.elation||busy.current.tebra||busy.current.athena||props.locked||props.recoveryLocked)return;
   setProvider(next);setVisited(old=>old.includes(next)?old:[...old,next]);
  }
- const [recoveryOpen,setRecoveryOpen]=useState(false);
  const mounts=visited.map(name=><div key={name} hidden={provider!==name}>{name==='athena'?<AthenaRecords {...props} active={props.active!==false&&provider===name} onBusyChange={athenaBusy}/>:name==='tebra'?<TebraRecords {...props} active={props.active!==false&&provider===name} onBusyChange={tebraBusy}/>:<EhrReadMount {...props} provider={name} active={props.active!==false&&provider===name} onBusyChange={elationBusy}/>}</div>);
- // Production-review: no Records-system tabs onto empty mock panels. One neutral line;
- // saved-work recovery stays reachable under the disclosure (panels mount when opened).
+ // Production-review: no Records-system tabs and no EHR panel mounts. Neutral unavailable
+ // line plus a disclosure that only reopens a saved private draft.
  if(isProductionReviewProfile()){
   return <div className="ehr-read-panel" role="status" aria-label="Practice records unavailable">
    <p>{practiceRecordsUnavailableCopy()}</p>
-   <details onToggle={event=>setRecoveryOpen((event.currentTarget as HTMLDetailsElement).open)}>
+   <details>
     <summary>Saved work recovery</summary>
-    <p>Review a private draft or the exact outcome of an earlier request. This does not read practice records.</p>
-    {recoveryOpen?mounts:null}
+    <p>{practiceRecordsSavedDraftRecoveryCopy()}</p>
+    <button type="button" disabled={locked} onClick={()=>setDraftRecoveryOffered(true)}>
+     {practiceRecordsSavedDraftRecoveryAction()}
+    </button>
+    {draftRecoveryOffered&&<p role="status">Saved private draft ready to review for this visit.</p>}
    </details>
   </div>;
  }

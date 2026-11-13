@@ -26,6 +26,8 @@ vi.mock('./connection-summary', async (original) => ({
   ...(await original<typeof import('./connection-summary')>()),
   readConnectionSummary: vi.fn(),
 }));
+// Real mounts stay available for production disclosure tests; staging still needs a stub
+// so the Records-system tabs can render without EditorRecoveryContext.
 vi.mock('./EhrReadMount', () => ({EhrReadMount: () => <div className="ehr-read-panel">Check Elation access</div>}));
 vi.mock('./TebraMedicationMount', () => ({TebraMedicationMount: () => <div className="ehr-read-panel">Tebra medications</div>}));
 vi.mock('./AthenaAllergyMount', () => ({AthenaAllergyMount: () => <div className="ehr-read-panel">Athena allergies</div>}));
@@ -38,6 +40,29 @@ function assertNoTestStage(text: string | null | undefined) {
   for (const phrase of TEST_STAGE_PHRASES) {
     expect(body, `must not contain: ${phrase}`).not.toContain(phrase);
   }
+}
+
+async function waitFor(check: () => void) {
+  for (let i = 0; i < 80; i++) {
+    let done = false;
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      try {
+        check();
+        done = true;
+      } catch {
+        /* retry */
+      }
+    });
+    if (done) return;
+  }
+  check();
+}
+
+function messagingCard(container: HTMLElement) {
+  return [...container.querySelectorAll('button')].find(
+    (b) => !b.closest('[hidden]') && (b.textContent?.includes('Messaging') || b.textContent?.includes('fax')),
+  );
 }
 
 describe('production-review surfaces', () => {
@@ -79,7 +104,7 @@ describe('production-review surfaces', () => {
     expect(container.textContent).toContain('could not start sign-in');
   });
 
-  it('EhrReadProviders on production shows the neutral unavailable line (no empty Records tabs)', async () => {
+  it('EhrReadProviders production disclosure never mounts EHR panels or test-stage wording', async () => {
     await act(async () =>
       root.render(
         <EhrReadProviders
@@ -92,8 +117,26 @@ describe('production-review surfaces', () => {
     );
     expect(container.textContent).toContain('Practice records are not available in this release.');
     expect(container.querySelector('[aria-label="Records system"]')).toBeNull();
-    expect(container.querySelector('summary')?.textContent).toBe('Saved work recovery');
+    const disclosure = container.querySelector('details');
+    expect(disclosure).toBeTruthy();
+    expect(disclosure?.querySelector('summary')?.textContent).toBe('Saved work recovery');
+    await act(async () => {
+      disclosure!.open = true;
+      disclosure!.dispatchEvent(new Event('toggle', {bubbles: true}));
+    });
+    expect(container.textContent).toContain('Reopen a saved private draft for this visit.');
+    expect(container.textContent).toContain('Review saved private draft');
+    expect(container.textContent).not.toContain('This does not read practice records');
+    expect(container.textContent).not.toContain('Check Elation access');
+    expect(container.textContent).not.toContain('Load appointments');
+    expect(container.textContent).not.toMatch(/Elation sandbox|Enable this practice/i);
+    expect(container.querySelector('.ehr-provider-choice')).toBeNull();
     assertNoTestStage(container.textContent);
+    const reopen = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Review saved private draft');
+    expect(reopen).toBeTruthy();
+    await act(async () => reopen!.click());
+    expect(container.textContent).toContain('Saved private draft ready to review for this visit.');
+    expect(container.textContent).not.toContain('Check Elation access');
   });
 
   it('EhrReadProviders on staging still shows the full Records system panel', async () => {
@@ -112,17 +155,14 @@ describe('production-review surfaces', () => {
     expect(container.textContent).not.toContain('Practice records are not available in this release.');
   });
 
-  it('SettingsHub native directory uses checkKind discoveryOnly on production and staging', async () => {
-    for (const [origin, label] of [
-      [PRODUCTION_API_ORIGIN, 'Not available'],
-      ['https://api.staging.cosmas.ai', 'Coming soon'],
-    ] as const) {
+  it('discoveryOnly hides availability rows by checkKind even when the label is off the list', async () => {
+    // messaging is accountStatusSupported, so readConnectionSummary supplies the row.
+    for (const origin of [PRODUCTION_API_ORIGIN, 'https://api.staging.cosmas.ai'] as const) {
       vi.stubEnv('VITE_WORKSPACE_HOSTED_API_ORIGIN', origin);
-      // Pass line 302 (not coming_soon) so discoveryOnly is the only filter that hides the card.
-      vi.mocked(readConnectionCatalog).mockResolvedValue(readinessFixture({payments: 'user_connectable'}));
+      vi.mocked(readConnectionCatalog).mockResolvedValue(readinessFixture({messaging: 'user_connectable'}));
       vi.mocked(readConnectionSummary).mockResolvedValue({
-        label,
-        reason: 'No connection or request is started here.',
+        label: 'Renamed',
+        reason: 'Invented availability reason.',
         action: 'No action',
         tone: 'neutral',
         checkKind: 'availability',
@@ -136,16 +176,47 @@ describe('production-review surfaces', () => {
             guidedConnections
             connectionIdentity={{mode: 'clerk_jwt', getToken: async () => null}}
             team={<p>Team</p>}
-            payments={<button>Connect Stripe</button>}
-            portals={<button>Connect portal</button>}
+            messaging={<button>Open messaging</button>}
             teamSummary="5 coworkers"
             teamDirty={false}
             onClose={() => {}}
           />,
         ),
       );
-      const paymentsCard = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('Payments'));
-      expect(paymentsCard, origin).toBeUndefined();
+      await waitFor(() => expect(messagingCard(container), `hidden on ${origin}`).toBeUndefined());
+      await act(async () => root.unmount());
+      root = createRoot(container);
+    }
+  });
+
+  it('native directory still shows a Connected account card on production and staging', async () => {
+    for (const origin of [PRODUCTION_API_ORIGIN, 'https://api.staging.cosmas.ai'] as const) {
+      vi.stubEnv('VITE_WORKSPACE_HOSTED_API_ORIGIN', origin);
+      vi.mocked(readConnectionCatalog).mockResolvedValue(readinessFixture({messaging: 'user_connectable'}));
+      vi.mocked(readConnectionSummary).mockResolvedValue({
+        label: 'Connected',
+        reason: 'Account confirmed for this invented session.',
+        action: 'Open connection',
+        tone: 'ready',
+        checkKind: 'account',
+      });
+      await act(async () =>
+        root.render(
+          <SettingsHub
+            open
+            nativePresentation="workspace"
+            initialScreen="connections"
+            guidedConnections
+            connectionIdentity={{mode: 'clerk_jwt', getToken: async () => null}}
+            team={<p>Team</p>}
+            messaging={<button>Open messaging</button>}
+            teamSummary="5 coworkers"
+            teamDirty={false}
+            onClose={() => {}}
+          />,
+        ),
+      );
+      await waitFor(() => expect(messagingCard(container), `present on ${origin}`).toBeTruthy());
       await act(async () => root.unmount());
       root = createRoot(container);
     }

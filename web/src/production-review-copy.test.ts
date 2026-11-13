@@ -10,6 +10,8 @@ import {
   isProductionReviewProfile,
   nativeSignInUnavailableDetail,
   paymentsComingSoonReason,
+  practiceRecordsSavedDraftRecoveryAction,
+  practiceRecordsSavedDraftRecoveryCopy,
   practiceRecordsUnavailableCopy,
   remainsUnavailableClause,
   schedulingGuideAccess,
@@ -95,11 +97,24 @@ describe('production-review copy helpers', () => {
     );
     expect(nativeSignInUnavailableDetail(production)).not.toMatch(/test build|synthetic|invented|rehearsal|Coming soon/i);
     expect(practiceRecordsUnavailableCopy(production)).toBe('Practice records are not available in this release.');
+    expect(practiceRecordsSavedDraftRecoveryCopy(production)).toBe('Reopen a saved private draft for this visit.');
+    expect(practiceRecordsSavedDraftRecoveryCopy(production)).not.toContain('does not read practice records');
+    expect(practiceRecordsSavedDraftRecoveryAction(production)).toBe('Review saved private draft');
+    expect(inventedRecordsDisclaimer(production)).toMatch(/Sample records|not from a live/i);
+    expect(athenaInventedExampleSuffix(production)).toContain('Sample records, not from your Athena account');
+    expect(tebraInventedExampleSuffix(production)).toBe(' · Sample records, not from your Tebra account');
+    expect(ehrTransportLabelCopy({provider: 'tebra'}, production)).toBe('Sample records, not from your Tebra account');
+    expect(ehrTransportLabelCopy({provider: 'tebra'}, production)).not.toBe('Tebra clinical records');
     expect(comingSoonLabel(production)).toBe('Not available');
     expect(paymentsComingSoonReason(production)).toBe('Live payment collection is not available in this release.');
     expect(schedulingGuideAccess(production)).toContain('Live booking is not available in this release.');
     expect(unavailableInBetaLabel(production)).toBe('Unavailable');
     expect(teamSaveRequiresCheckMessage(production)).not.toContain('rehearsal');
+    expect(elationSandboxSetupCopy(production)).not.toContain('invented');
+    expect(elationSandboxEnableButtonLabel(production)).toBe('Enable this practice’s Elation sandbox');
+    expect(ehrAccessNotEnabledMessage('labs', production)).toBe(
+      'Laboratory-report access is not enabled. Other available records remain accessible.',
+    );
     expect(vendorDeliveryDisabledMessage(production)).toBe('Vendor delivery is disabled for this environment.');
   });
 });
