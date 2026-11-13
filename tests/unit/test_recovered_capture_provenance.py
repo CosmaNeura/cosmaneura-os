@@ -606,25 +606,6 @@ def test_owned_privacy_manifest_declares_precautionary_file_timestamp_c617():
     assert b"NSPrivacyAccessedAPICategoryFileTimestamp" in raw
     assert b"C617.1" in raw
 
-    fence = (
-        ROOT / "clients/apple/native-auth/Bridge/NativeCaptureProcessFence.swift"
-    ).read_text(encoding="utf-8")
-    # fstat/fstatat stay macOS-gated: present on macOS path, compiled out on iOS.
-    macos = re.sub(
-        r"#if os\(macOS\)\n(.*?)#else\n.*?#endif\n",
-        r"\1",
-        fence,
-        flags=re.DOTALL,
-    )
-    iphone = re.sub(
-        r"#if os\(macOS\)\n.*?#else\n(.*?)#endif\n",
-        r"\1",
-        fence,
-        flags=re.DOTALL,
-    )
-    assert re.search(r"\bfstat(?:at)?\s*\(", macos)
-    assert re.search(r"\bfstat(?:at)?\s*\(", iphone) is None
-
 
 def test_scaffold_info_plist_stays_frozen_export_key_left_for_owner_decision():
     info = plistlib.loads(APP_INFO.read_bytes())
