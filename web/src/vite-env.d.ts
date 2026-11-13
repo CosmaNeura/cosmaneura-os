@@ -28,6 +28,16 @@ interface ImportMetaEnv {
   readonly VITE_CUSTOM_BOTS_ENABLED?: string;
   /** Opt-in: show Coming soon connection cards (hidden by default in beta). */
   readonly VITE_COMING_SOON_CONNECTIONS_ENABLED?: string;
+  /**
+   * Public Privacy Policy URL on the Account / signed-out screens (App Store 5.1.1(i)).
+   * Must be https://cosmas.ai/…; unset means the Privacy Policy link is omitted.
+   */
+  readonly VITE_PRIVACY_POLICY_URL?: string;
+  /**
+   * Public Support URL on the Account / signed-out screens.
+   * Must be https://cosmas.ai/…; unset means the Support link is omitted.
+   */
+  readonly VITE_SUPPORT_URL?: string;
 }
 
 interface ImportMeta {

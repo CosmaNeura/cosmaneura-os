@@ -285,3 +285,71 @@ test('native renderer CLI accepts optional --installation-profile production', (
     '--output', '/new/build', '--installation-profile', 'review',
   ]));
 });
+
+test('apple renderer retains optional privacy and support URLs in the build env and simulated bundle', async t => {
+  const f = await fixture(t, 'apple', 'synthetic'), name = 'apple-build-env.json';
+  const urls = {
+    VITE_PRIVACY_POLICY_URL: 'https://cosmas.ai/cosmabot/privacy',
+    VITE_SUPPORT_URL: 'https://cosmas.ai/cosmabot/support',
+  };
+  const env = {...f.files[name], ...urls};
+  await writeFile(join(f.inputs, name), JSON.stringify(env));
+  const result = await buildNativeRenderer(f, {build: async config => {
+    for (const [key, value] of Object.entries(urls)) assert.equal(process.env[key], value);
+    await emit(config, env);
+    await mkdir(join(config.build.outDir, 'assets'), {recursive: true});
+    await writeFile(join(config.build.outDir, 'assets/index.js'),
+      `export const privacy=${JSON.stringify(process.env.VITE_PRIVACY_POLICY_URL)};` +
+      `export const support=${JSON.stringify(process.env.VITE_SUPPORT_URL)};\n`);
+  }});
+  const bundle = await readFile(join(result.dist, 'assets/index.js'), 'utf8');
+  assert.match(bundle, /https:\/\/cosmas\.ai\/cosmabot\/privacy/);
+  assert.match(bundle, /https:\/\/cosmas\.ai\/cosmabot\/support/);
+  assert.equal(result.inputsSha256[name], createHash('sha256').update(await readFile(join(f.inputs, name))).digest('hex'));
+  assert.equal(Object.keys(process.env).some(key => key.startsWith('VITE_')), false);
+});
+
+test('apple renderer omits privacy and support URLs from the build env when unset', async t => {
+  const f = await fixture(t, 'apple', 'synthetic'), env = f.files['apple-build-env.json'];
+  assert.equal(Object.hasOwn(env, 'VITE_PRIVACY_POLICY_URL'), false);
+  assert.equal(Object.hasOwn(env, 'VITE_SUPPORT_URL'), false);
+  await buildNativeRenderer(f, {build: async config => {
+    assert.equal(process.env.VITE_PRIVACY_POLICY_URL, undefined);
+    assert.equal(process.env.VITE_SUPPORT_URL, undefined);
+    await emit(config, env);
+    await mkdir(join(config.build.outDir, 'assets'), {recursive: true});
+    await writeFile(join(config.build.outDir, 'assets/index.js'),
+      `export const privacy=${JSON.stringify(process.env.VITE_PRIVACY_POLICY_URL)};` +
+      `export const support=${JSON.stringify(process.env.VITE_SUPPORT_URL)};\n`);
+  }});
+  const bundle = await readFile(join(f.output, 'dist/assets/index.js'), 'utf8');
+  assert.doesNotMatch(bundle, /cosmas\.ai\/cosmabot/);
+  assert.match(bundle, /privacy=undefined/);
+});
+
+test('invalid retained privacy or support URLs fail before native renderer compilation', async t => {
+  for (const [key, value] of [
+    ['VITE_PRIVACY_POLICY_URL', 'https://evil.example/privacy'],
+    ['VITE_SUPPORT_URL', 'http://cosmas.ai/support'],
+    ['VITE_PRIVACY_POLICY_URL', 'https://cosmas.ai:8443/privacy'],
+    ['VITE_SUPPORT_URL', ''],
+  ]) {
+    await t.test(`${key}=${value}`, async t => {
+      const f = await fixture(t, 'apple', 'synthetic'), name = 'apple-build-env.json';
+      const env = {...f.files[name], [key]: value};
+      await writeFile(join(f.inputs, name), JSON.stringify(env));
+      await assert.rejects(buildNativeRenderer(f, {build: () => assert.fail('Invalid URLs must not compile')}), /Invalid VITE_/);
+      await assert.rejects(access(f.output), {code: 'ENOENT'});
+    });
+  }
+});
+
+test('Dockerfile.web declares optional privacy and support ARG/ENV pass-throughs', async () => {
+  const docker = await readFile(new URL('../Dockerfile.web', import.meta.url), 'utf8');
+  assert.match(docker, /ARG VITE_PRIVACY_POLICY_URL/);
+  assert.match(docker, /ARG VITE_SUPPORT_URL/);
+  assert.match(docker, /ENV VITE_PRIVACY_POLICY_URL=\$\{VITE_PRIVACY_POLICY_URL\}/);
+  assert.match(docker, /VITE_SUPPORT_URL=\$\{VITE_SUPPORT_URL\}/);
+  assert.match(docker, /if test -z "\$VITE_PRIVACY_POLICY_URL"; then unset VITE_PRIVACY_POLICY_URL; fi/);
+  assert.match(docker, /if test -z "\$VITE_SUPPORT_URL"; then unset VITE_SUPPORT_URL; fi/);
+});
