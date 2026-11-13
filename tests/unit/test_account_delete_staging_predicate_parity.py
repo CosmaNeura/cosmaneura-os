@@ -45,7 +45,7 @@ def test_account_delete_staging_constants_match_render_mjs():
         render,
     )
     assert re.search(
-        r"const stagingProfile=value\.identity_policy===STAGING_SESSION_POLICY\|\|stagingHost",
+        r"const stagingProfile=value\.identity_policy===STAGING_SESSION_POLICY\|\|stagingHost;",
         render,
     )
 

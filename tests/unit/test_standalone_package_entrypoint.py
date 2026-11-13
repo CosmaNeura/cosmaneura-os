@@ -1,7 +1,8 @@
 """CI collection wrapper for infra/standalone/package/test_entrypoint.py.
 
 Source of truth stays under infra/standalone/package/. This module re-exports
-every pytest-collected name so python-tests-migrate (backend-2) runs the suite.
+every pytest-collected name so a `python-tests-migrate` backend shard
+(positional) runs the suite. Name the shard that executed it in the PR body.
 """
 
 from __future__ import annotations
