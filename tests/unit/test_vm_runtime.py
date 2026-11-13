@@ -322,6 +322,17 @@ def use_web_host(config, host):
     environment = config["runtime"]["environment"]
     environment["CORS_ALLOWED_ORIGINS"] = web
     environment["CLERK_AUTHORIZED_PARTIES"] = web
+    # Exclusive production-review (#381): beta.cosmas.ai + audience issuer +
+    # production OpenAI host. Staging keeps CosmasCode (Settings default).
+    if host == "beta.cosmas.ai":
+        environment["CLERK_SESSION_POLICY"] = "audience"
+        environment["CLERK_ISSUER"] = "https://clerk.beta.cosmas.ai"
+        environment["CLERK_JWKS_URL"] = (
+            "https://clerk.beta.cosmas.ai/.well-known/jwks.json"
+        )
+        environment["WORKSPACE_LLM_ENDPOINT"] = (
+            "https://oai-cbot-prd-abcd1234.openai.azure.com/openai/v1"
+        )
     return config
 
 

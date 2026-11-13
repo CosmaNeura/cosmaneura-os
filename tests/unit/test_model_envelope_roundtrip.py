@@ -91,7 +91,17 @@ def test_all_five_roles_dispatch_exact_saved_wire_after_object_roundtrip(monkeyp
     calls = []
     port = connector(value, calls)
     monkeypatch.setattr(model_work, "GPT41Connector", lambda _credential: port)
-    monkeypatch.setattr(model_work.team, "runtime_settings", SimpleNamespace(workspace_llm_api_key=SecretStr("invented")))
+    monkeypatch.setattr(
+        model_work.team,
+        "runtime_settings",
+        SimpleNamespace(
+            cosmas_env="early_adopter_beta",
+            workspace_llm_api_key=SecretStr("invented"),
+            workspace_llm_endpoint="https://cosmascode.services.ai.azure.com/openai/v1",
+            workspace_enrollment_managed=False,
+            workspace_llm_available=True,
+        ),
+    )
     claim = model_work.ModelClaim("invented-admission", "invented-box", "invented-owner", "invented-workspace",
                                 "invented-dispatch", model_work.digest(original), value)
     result = model_work.dispatch_claim(claim)
