@@ -14,6 +14,7 @@ import {EFaxInboundMount} from './EFaxInboundMount';
 import type {EFaxInboundPanelProps} from './EFaxInboundPanel';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {showComingSoonConnections} from './assistant-copy';
+import {comingSoonLabel} from './production-review-copy';
 
 type Screen = 'home' | 'connections' | 'provider' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google' | 'ehr';
 export type PracticeRecordProvider = 'atlas_md' | 'elation' | 'tebra' | 'athena';
@@ -208,7 +209,10 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       {label:'Not checked',reason:'Account status has not been checked.',action:'Check connection',tone:'neutral'};
   }
   const nativeConnectionDirectory=!!nativePresentation&&!!connectionIdentity;
-  const discoveryOnly=(value:ConnectionSummary)=>['Ready to connect','Needs setup','Practice setup required','Coming soon','Not checked'].includes(value.label);
+  // Key discovery on checkKind first. Production "Not available" always ships with
+  // checkKind:'availability' (connection-summary), so it is not duplicated in the label list.
+  const discoveryOnly=(value:ConnectionSummary)=>value.checkKind==='availability'
+    ||['Ready to connect','Needs setup','Practice setup required','Coming soon','Not checked'].includes(value.label);
   const directoryCards=nativeConnectionDirectory
     ?current&&!current.denied?connectionCards.filter(item=>{
       // Keep an existing service reachable while its check is pending or failed;
@@ -287,7 +291,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       {!nativeConnectionDirectory&&<details className="connection-state-help"><summary>What these states mean</summary><dl>
         <div><dt>Ready to connect</dt><dd>A supported connection is enabled. Sign in and review access.</dd></div>
         <div><dt>Practice setup required</dt><dd>Your administrator must install or enable the supported account.</dd></div>
-        <div><dt>Coming soon</dt><dd>This production action is not available. No connection or request is started here.</dd></div>
+        <div><dt>{comingSoonLabel()}</dt><dd>This production action is not available. No connection or request is started here.</dd></div>
         <div><dt>Connected</dt><dd>The account was confirmed. Check each read or task result separately.</dd></div>
         <div><dt>Verified</dt><dd>Both email and calendar reads succeeded for the current account in this session. Task results still need their own review.</dd></div>
         <div><dt>Needs setup</dt><dd>Finish sign-in, account setup or permissions before use.</dd></div>
@@ -318,9 +322,9 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       })}
       {!nativeConnectionDirectory&&(['practice_setup','coming_soon'] as const).filter(kind=>kind!=='coming_soon'||showComingSoonConnections()).map(kind=>{
         const cards=connectionCards.filter(item=>catalog?.readiness?.[item.id]?.state===kind&&(kind==='coming_soon'||guidedConnections&&!catalog?.[item.id]));
-        return cards.length>0&&<section key={kind} className="connection-group" aria-label={kind==='coming_soon'?'Coming soon':'Managed by your practice'}>
-          <h2>{kind==='coming_soon'?'Coming soon':'Managed by your practice'}</h2>{cards.map(item=><article key={item.id} className="connection-card-box">
-            <div className="connection-unavailable-row"><h3>{titles[item.id]}</h3><span className="connection-badge">{kind==='coming_soon'?'Coming soon':'Practice setup required'}</span></div>
+        return cards.length>0&&<section key={kind} className="connection-group" aria-label={kind==='coming_soon'?comingSoonLabel():'Managed by your practice'}>
+          <h2>{kind==='coming_soon'?comingSoonLabel():'Managed by your practice'}</h2>{cards.map(item=><article key={item.id} className="connection-card-box">
+            <div className="connection-unavailable-row"><h3>{titles[item.id]}</h3><span className="connection-badge">{kind==='coming_soon'?comingSoonLabel():'Practice setup required'}</span></div>
             <details className="connection-state-help"><summary>Setup and saved work</summary><p>{summary(item.id).reason}</p><p>{kind==='coming_soon'?'No connection or request is started here.':'Ask your practice administrator to finish setup.'}</p><p>Check a private draft or the exact outcome of an earlier request. This does not connect an account.</p>
               <button disabled={navigationLocked} onClick={()=>recoverConnection(item.id)}>Review saved {titles[item.id]} work</button></details>
           </article>)}
@@ -351,7 +355,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       <p role="status">{availabilityPending?'Checking whether this service is enabled…':current?.updateRequired?'On desktop, use CosmaBot → Update CosmaBot… for installation steps, then check availability again. Your saved work and unresolved requests are retained.':current?.denied?'Sign in to CosmasOS again to check this connection.':'Service availability could not be confirmed. Check again, or review the connection status below to finish sign-in.'}</p>
       {catalogError&&<button disabled={navigationLocked||!!current?.busy} onClick={()=>setRefreshCatalog(value=>value+1)}>Check availability again</button>}
     </section>}
-    {hiddenSetup&&selectedGuide&&readiness?.state==='coming_soon'?<section className="connection-setup-guide" aria-label="Coming soon"><h2>{titles[screen]}</h2><p>{summary(screen as ConnectionId).reason}</p><p>No connection or request is started here.</p><details><summary>Saved work recovery</summary><button disabled={navigationLocked} onClick={()=>recoverConnection(screen as ConnectionId)}>Review saved work</button></details></section>:
+    {hiddenSetup&&selectedGuide&&readiness?.state==='coming_soon'?<section className="connection-setup-guide" aria-label={comingSoonLabel()}><h2>{titles[screen]}</h2><p>{summary(screen as ConnectionId).reason}</p><p>No connection or request is started here.</p><details><summary>Saved work recovery</summary><button disabled={navigationLocked} onClick={()=>recoverConnection(screen as ConnectionId)}>Review saved work</button></details></section>:
     hiddenSetup&&selectedGuide&&<section className="connection-setup-guide" aria-label="Connection setup steps">
       <span className="connection-badge connection-badge-attention">Needs setup</span><h2>{titles[screen]}</h2><p>{selectedGuide.setup}</p>
       <h3>Your next step</h3><p>Ask your practice administrator to enable this service. No setup request has been sent from this screen.</p>
@@ -360,7 +364,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       <h3>Administrator steps</h3><p>{selectedGuide.setup}</p>
       <details><summary>Your steps after setup</summary><ol>{selectedGuide.steps.filter(step=>!step.startsWith("Have an administrator")).map(step=><li key={step}>{step}</li>)}</ol><p className="connection-access-summary">{selectedGuide.access}</p></details>
     </section>}
-    {selectedGuide&&readiness&&!presentingTask&&<details className="connection-state-help"><summary>Supported actions</summary><ul>{readiness.actions.map(action=><li key={action.id}>{CONNECTION_ACTION_LABELS[action.id]} · {!action.supported?'Coming soon':!connectionActionClientAvailable(action.id,screen as ConnectionId)?'Not available in this app':action.runtime_available?'Setup available; account and task checks required':'Practice setup required'}</li>)}</ul></details>}
+    {selectedGuide&&readiness&&!presentingTask&&<details className="connection-state-help"><summary>Supported actions</summary><ul>{readiness.actions.map(action=><li key={action.id}>{CONNECTION_ACTION_LABELS[action.id]} · {!action.supported?comingSoonLabel():!connectionActionClientAvailable(action.id,screen as ConnectionId)?'Not available in this app':action.runtime_available?'Setup available; account and task checks required':'Practice setup required'}</li>)}</ul></details>}
     {recoverSelected&&<p role="status">Review your saved work and exact unresolved requests. Current access is still required for source content and new work.</p>}
     {visited.map(id => <div key={id} ref={id==='messaging'?messagingEditor:undefined} tabIndex={id==='messaging'?-1:undefined} data-settings-screen={id} hidden={screen !== id||hiddenSetup||availabilityPending||!!current?.denied||presentingReceivedFaxTask&&id==='messaging'}>{editors[id]}</div>)}
   </section>;

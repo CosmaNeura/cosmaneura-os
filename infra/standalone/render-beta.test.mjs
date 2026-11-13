@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {render,Refused} from './render.mjs';
+import {PRODUCTION_NATIVE_PROFILE} from '../../clients/shared/operational-native-identity.mjs';
 
 const sample=JSON.parse(await readFile(new URL('./invented-host-input.json',import.meta.url),'utf8'));
 function liveKey(host){
@@ -11,14 +12,14 @@ function candidate({model=true,google=true,owned=false,host='staging.cosmas.ai'}
   const value=structuredClone(sample);
   if(owned){value.resource_scope='owned-cosmabot-vm-instance';value.web_origin=`https://${host}`;
     value.api_origin=`https://api.${host}`;value.identity.apiOrigin=value.api_origin;
-    value.tls.hostnames=[host,`api.${host}`];}
-  if(owned&&host==='beta.cosmas.ai'){
-    // Exclusive review: operational-production-v1 + clerk.beta.cosmas.ai issuer.
-    value.identity.profile='operational-production-v1';
-    value.identity.frontendOrigin='https://clerk.beta.cosmas.ai';
-    value.identity.publishableKey=liveKey('clerk.beta.cosmas.ai');
-    value.identity.audience='cosmas-os-beta-api';
-  }
+    value.tls.hostnames=[host,`api.${host}`];
+    // Exclusive review (#377): operational-production-v1 + clerk.beta.cosmas.ai issuer.
+    if(host==='beta.cosmas.ai'){
+      value.identity.profile=PRODUCTION_NATIVE_PROFILE;
+      value.identity.frontendOrigin='https://clerk.beta.cosmas.ai';
+      value.identity.publishableKey=liveKey('clerk.beta.cosmas.ai');
+      value.identity.audience='cosmas-os-beta-api';
+    }}
   value.beta_features={model:model?{origin:'https://invented-owned-chief.openai.azure.com',
     endpoint:'https://invented-owned-chief.openai.azure.com/openai/v1',deployment:'gpt-4.1'}:null,
     google:google?{client_id:'invented-client.apps.googleusercontent.com',
@@ -128,21 +129,29 @@ test('owned beta with shared_staging is refused (exclusive review predicate)',()
   value.identity.audience='';
   value.identity.frontendOrigin='https://invented-own-practice.clerk.accounts.dev';
   value.identity.publishableKey='pk_test_'+Buffer.from('invented-own-practice.clerk.accounts.dev$').toString('base64');
-  assert.throws(()=>render(value));
+  assert.throws(()=>render(value),error=>error instanceof Refused&&error.message==='production_review_requires_audience_policy');
 });
 
 test('owned beta refuses operational-beta-v1 and non-clerk.beta issuers',()=>{
   const betaProfile=candidate({owned:true,host:'beta.cosmas.ai'});
   betaProfile.identity.profile='operational-beta-v1';
-  assert.throws(()=>render(betaProfile),error=>error instanceof Refused);
+  assert.throws(()=>render(betaProfile),error=>error instanceof Refused&&error.message==='explicit_matching_identity_policy_required');
   const wrongIssuer=candidate({owned:true,host:'beta.cosmas.ai'});
   wrongIssuer.identity.frontendOrigin='https://clerk.staging.cosmas.ai';
   wrongIssuer.identity.publishableKey=liveKey('clerk.staging.cosmas.ai');
-  assert.throws(()=>render(wrongIssuer),error=>error instanceof Refused);
+  assert.throws(()=>render(wrongIssuer),error=>error instanceof Refused&&error.message==='production_review_requires_clerk_beta_issuer');
   const prodIssuer=candidate({owned:true,host:'beta.cosmas.ai'});
   prodIssuer.identity.frontendOrigin='https://clerk.cosmas.ai';
   prodIssuer.identity.publishableKey=liveKey('clerk.cosmas.ai');
-  assert.throws(()=>render(prodIssuer),error=>error instanceof Refused);
+  assert.throws(()=>render(prodIssuer),error=>error instanceof Refused&&error.message==='production_review_requires_clerk_beta_issuer');
+});
+
+test('staging host with production profile is refused',()=>{
+  const value=candidate({owned:true,host:'staging.cosmas.ai'});
+  value.identity.profile=PRODUCTION_NATIVE_PROFILE;
+  value.identity.frontendOrigin='https://clerk.beta.cosmas.ai';
+  value.identity.publishableKey=liveKey('clerk.beta.cosmas.ai');
+  assert.throws(()=>render(value),error=>error instanceof Refused&&error.message==='explicit_matching_identity_policy_required');
 });
 
 test('owned beta.cosmas.ai stays synthetic and every other host stays refused',()=>{

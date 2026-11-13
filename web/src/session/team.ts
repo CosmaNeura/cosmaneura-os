@@ -3,6 +3,7 @@ import {normalizeTeamConfiguration,setupChange,validTeamConfiguration,type Setup
 import {workspaceApi,WorkspaceApiError,requireRecoveryScope,type AuthenticatedWorkspaceIdentity,type ProviderTeam} from '../workspace-api';
 import type {WorkspaceSession} from './workspace-session';
 import type {SaveContext} from './saves';
+import {teamSaveRequiresCheckMessage} from '../production-review-copy';
 
 export type TeamContext={authenticated?:AuthenticatedWorkspaceIdentity;failure:(cause:unknown)=>void};
 
@@ -38,7 +39,7 @@ export class WorkspaceTeam {
     const {team,teamDraft,setupApproval}=this.session.getSnapshot();
     if(!team||!teamDraft||!validTeamConfiguration(teamDraft))return;
     const approval=setupApproval?.revision===team.revision&&setupApproval.configurationKey===JSON.stringify(teamDraft)?setupApproval.review:null;
-    if(setupChange(team.configuration,teamDraft)&&!approval){this.session.setError('Run the invented rehearsal and review the current draft before saving these capability changes.');return;}
+    if(setupChange(team.configuration,teamDraft)&&!approval){this.session.setError(teamSaveRequiresCheckMessage());return;}
     return this.session.saves.save({type:'team',body:{expected_revision:team.revision,idempotency_key:crypto.randomUUID(),configuration:normalizeTeamConfiguration(teamDraft),...(approval?{setup_review:approval}:{})}},context);
   }
 

@@ -14,6 +14,7 @@ import { parseNativeAuthState, parseNativeToken, sameNativeState, type NativeAut
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
 import {nativeSceneSignal,notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 import {hasUnsavedWork} from './unsaved-work';
+import {nativeSignInUnavailableDetail} from './production-review-copy';
 
 type Session = {
   plugin: WorkspaceAuthPlugin; active: boolean; epoch: number; pending: boolean;
@@ -203,7 +204,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   if(connectingPractice)return <NativeEnrollmentEntry plugin={practicePlugin} available={practiceConnectionAvailable} readyPractices onReturn={returnFromPractice}/>;
 
   if (!available || state?.phase === "disabled") return <StatusScreen title="Sign-in isn't available in this build"
-    detail="Use the approved test build to sign in to your workspace." />;
+    detail={nativeSignInUnavailableDetail()} />;
   if (busy || state?.phase === "signingIn") {
     const signingIn = busy ? busyAction === "signIn" : state?.phase === "signingIn";
     return <StatusScreen title={signingIn ? "Finish signing in" : "Signing out"}
