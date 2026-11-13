@@ -209,7 +209,11 @@ REVIEWED_APP_PRIVACY = {
         {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
             "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
-        }
+        },
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
+        },
     ],
 }
 
@@ -364,9 +368,10 @@ def _add_owned_app_privacy(repository: Path, output: Path, placed: list[dict[str
             "sha256": _digest(destination),
             "authoritative_counterpart": source_path,
             "wiring_note": (
-                "App-owned privacy resource: system boot time required-reason, "
-                "tracking=false, and collected-data declarations for audio, user ID, "
-                "email, name, health, other user content, and device ID."
+                "App-owned privacy resource: system boot time and file timestamp "
+                "required-reason coverage, tracking=false, and collected-data "
+                "declarations for audio, user ID, email, name, health, other user "
+                "content, and device ID."
             ),
         }
     )

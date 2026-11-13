@@ -97,7 +97,11 @@ EXPECTED_APP_PRIVACY = {
         {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategorySystemBootTime",
             "NSPrivacyAccessedAPITypeReasons": ["35F9.1"],
-        }
+        },
+        {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": ["C617.1"],
+        },
     ],
 }
 SYNTHETIC_MICROPHONE_USAGE = (
@@ -564,6 +568,41 @@ def test_portable_iphone_requires_every_reviewed_native_practice_addition_before
 
 def test_owned_privacy_manifest_declares_reviewed_coverage():
     assert plistlib.loads(OWNED_PRIVACY.read_bytes()) == EXPECTED_APP_PRIVACY
+
+
+def test_owned_privacy_manifest_declares_file_timestamp_c617_for_fstat():
+    """App PrivacyInfo must declare FileTimestamp/C617.1 for NativeCaptureProcessFence fstat.
+
+    Apple lists fstat/fstatat under NSPrivacyAccessedAPICategoryFileTimestamp
+    (https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
+    C617.1 fits because the fence reads size/mode/identity metadata of files inside
+    a private app-container directory. The CosmasWorkspaceAuthPlugin SPM target
+    (Bridge path) compiles NativeCaptureProcessFence.swift into the iPhone App via
+    CapApp-SPM; fstat call sites are #if os(macOS)-gated.
+    """
+    raw = OWNED_PRIVACY.read_bytes()
+    privacy = plistlib.loads(raw)
+    assert privacy == EXPECTED_APP_PRIVACY
+    assert _portable().REVIEWED_APP_PRIVACY == privacy
+
+    accessed = privacy["NSPrivacyAccessedAPITypes"]
+    file_timestamp = [
+        entry
+        for entry in accessed
+        if entry.get("NSPrivacyAccessedAPIType")
+        == "NSPrivacyAccessedAPICategoryFileTimestamp"
+    ]
+    assert len(file_timestamp) == 1
+    assert file_timestamp[0]["NSPrivacyAccessedAPITypeReasons"] == ["C617.1"]
+    # XML must stay parseable as a property list (not only as opaque bytes).
+    assert raw.lstrip().startswith(b"<?xml")
+    assert b"NSPrivacyAccessedAPICategoryFileTimestamp" in raw
+    assert b"C617.1" in raw
+
+    fence = (
+        ROOT / "clients/apple/native-auth/Bridge/NativeCaptureProcessFence.swift"
+    ).read_text(encoding="utf-8")
+    assert re.search(r"\bfstat(?:at)?\s*\(", fence)
 
 
 def test_scaffold_info_plist_stays_frozen_export_key_left_for_owner_decision():
