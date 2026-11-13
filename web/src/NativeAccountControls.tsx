@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import './native-account-controls.css';
 import {ACCOUNT_DELETE_CONFIRM,accountDeletionApi} from './account-deletion-api';
+import {AccountPublicLinks} from './AccountPublicLinks';
 import {useUnsavedWorkPresent} from './unsaved-work';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {WorkspaceDialog} from './WorkspaceDialog';
@@ -35,6 +36,7 @@ export function NativeAccountControls({displayName,practiceName,onSignOut,onConn
     <div className="native-account-actions" role="group" aria-label="Signed-in account">
       <p>{displayName?<strong>{displayName}</strong>:'Signed in to your workspace'}</p>
       {practiceName&&<p>{practiceName}</p>}
+      <AccountPublicLinks/>
       <button type="button" className="button secondary" disabled={busy} onClick={onSignOut}>Log out</button>
       {identity&&<button type="button" className="button secondary" disabled={busy} onClick={()=>{setFailed(false);setConfirming(true);}}>Delete account</button>}
       {onConnectPractice&&<><button type="button" className="button secondary" disabled={workPending||busy} onClick={onConnectPractice}>Connect practice</button>

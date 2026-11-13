@@ -70,8 +70,13 @@ PostgreSQL hostname verification and `sslrootcert=system` remain enabled.
 
 `secret_names` accepts current Settings `SecretStr` names, the required
 `HUMAN_DEPLOY_EVIDENCE_REF`, and supported `COSMAS_MANAGED_SECRET_*` references.
-It contains names only. `DATABASE_URL` and `REDIS_URL` cannot be supplied or
-overridden: the entrypoint constructs them from protected passwords and fixed
+It contains names only. On exclusive production-review (`beta.cosmas.ai` +
+`audience` + `https://clerk.beta.cosmas.ai`), the #356 host key
+`CLERK_ACCOUNT_DELETION_SECRET` is also admitted and remapped to
+`ACCOUNT_DELETE_CLERK_SECRET_KEY` before Settings; staging and other profiles
+refuse that host key. Padded or whitespace-only delete values are treated as
+absent, not as a boot refusal. `DATABASE_URL` and `REDIS_URL` cannot be supplied
+or overridden: the entrypoint constructs them from protected passwords and fixed
 private hosts/TLS settings. Root provisioning must retain exact Key Vault
 name/version/identity custody evidence separately; file presence is not that proof.
 

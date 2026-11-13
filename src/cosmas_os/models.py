@@ -103,6 +103,44 @@ class ExternalIdentity(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AccountDeleteIntent(Base):
+    """Durable intent to delete a Clerk subject before Backend confirmation.
+
+    Survives a rolled-back local wipe so retry can accept a Clerk 404 for that
+    subject without treating a wrong-instance key as success on first attempt.
+    """
+
+    __tablename__ = "account_delete_intents"
+    __table_args__ = (
+        UniqueConstraint(
+            "box_id",
+            "principal_id",
+            "provider",
+            "subject",
+            name="uq_account_delete_intent_subject",
+        ),
+        ForeignKeyConstraint(
+            ["principal_id", "box_id"],
+            ["principals.id", "principals.box_id"],
+            name="fk_account_delete_intent_principal_box",
+        ),
+        CheckConstraint("provider = 'clerk'", name="ck_account_delete_intent_provider"),
+        CheckConstraint(
+            "subject ~ '^user_' AND char_length(subject) BETWEEN 6 AND 255",
+            name="ck_account_delete_intent_subject",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    box_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("box_contexts.id"), nullable=False
+    )
+    principal_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="clerk")
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class CoreCaptureAccount(Base):
     """Reviewed Core identity correspondence; not an encounter permission grant."""
 

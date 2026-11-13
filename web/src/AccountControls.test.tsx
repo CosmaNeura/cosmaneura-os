@@ -18,6 +18,9 @@ async function click(name:string){
   expect(b!.disabled).toBe(false);
   await act(async()=>b!.click());
 }
+function publicLinks(){
+  return [...host.querySelectorAll<HTMLAnchorElement>('[aria-label="Account"] .account-public-links a')];
+}
 
 beforeEach(()=>{
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
@@ -30,7 +33,33 @@ afterEach(async()=>{
   await act(async()=>root.unmount());
   host.remove();
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+it('shows Privacy Policy and Support with configured URLs on the Account screen',async()=>{
+  vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','web');
+  vi.stubEnv('VITE_PRIVACY_POLICY_URL','https://cosmas.ai/cosmabot/privacy');
+  vi.stubEnv('VITE_SUPPORT_URL','https://cosmas.ai/cosmabot/support');
+  await act(async()=>root.render(<AccountControls identity={identity} onSignOut={vi.fn()}/>));
+  const [privacy,support]=publicLinks();
+  expect(privacy?.textContent).toBe('Privacy Policy');
+  expect(support?.textContent).toBe('Support');
+  expect(privacy.href).toBe('https://cosmas.ai/cosmabot/privacy');
+  expect(support.href).toBe('https://cosmas.ai/cosmabot/support');
+  expect(privacy.target).toBe('_blank');
+  expect(privacy.rel).toBe('noopener noreferrer');
+  expect(support.target).toBe('_blank');
+  expect(support.rel).toBe('noopener noreferrer');
+});
+
+it('hides Privacy Policy and Support on the Account screen when config is unset',async()=>{
+  vi.stubEnv('VITE_WORKSPACE_HOSTED_CLIENT','web');
+  vi.stubEnv('VITE_PRIVACY_POLICY_URL',undefined);
+  vi.stubEnv('VITE_SUPPORT_URL',undefined);
+  await act(async()=>root.render(<AccountControls identity={identity} onSignOut={vi.fn()}/>));
+  expect(publicLinks()).toHaveLength(0);
+  expect(host.querySelector('[aria-label="Account"]')?.textContent).toContain('Log out');
 });
 
 it('shows Delete account in Account controls and Cancel leaves everything untouched',async()=>{

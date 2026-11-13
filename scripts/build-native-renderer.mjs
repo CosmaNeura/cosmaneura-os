@@ -7,6 +7,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {resolveHostedWorkspace} from '../clients/shared/hosted-workspace-config.mjs';
+import {accountPublicUrlPassThrough} from '../clients/shared/account-public-url.mjs';
 import {
   SYNTHETIC_IPHONE_SIM_PROFILE,
   validateSyntheticIphoneSimIdentity,
@@ -114,6 +115,8 @@ export async function buildNativeRenderer(
     : loadOperationalNativeIdentity(
       identityInput.value, client, identityInput.value.apiOrigin, installationProfile);
   const env = envInput.value;
+  // Optional App Store public links: omitted when absent; invalid values fail closed.
+  const accountPublicUrls = accountPublicUrlPassThrough(env);
   const profile = resolveBetaFeatureProfile({
     VITE_WORKSPACE_FEATURE_PROFILE: env.VITE_WORKSPACE_FEATURE_PROFILE,
     VITE_WORKSPACE_HOSTED_CLIENT: client, VITE_WORKSPACE_DATA_MODE: validateOperationalNativeDataMode(env.VITE_WORKSPACE_DATA_MODE, identity),
@@ -127,6 +130,7 @@ export async function buildNativeRenderer(
       'VITE_CALENDAR_IMPORT_ENABLED', 'VITE_MICROSOFT_MESSAGE_ENABLED',
       'VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED']
       .filter(key => Object.hasOwn(env, key)).map(key => [key, env[key]])),
+    ...accountPublicUrls,
   });
   if (!isDeepStrictEqual(env, profile.env)) {
     throw new Error('Retained native environment differs from the complete current identity/profile');
