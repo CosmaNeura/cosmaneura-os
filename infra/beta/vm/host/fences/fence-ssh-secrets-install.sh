@@ -72,6 +72,14 @@ cosmabot_ssh_secrets_install() {
     rm -f "$RULES_FILE"
     return 1
   }
+  printf '%s' "$RULES_JSON" | jq -e \
+    --arg n TEMP-JOHN-SSH-SECRETS-INSTALL \
+    'map(select(.name==$n and .port=="22" and .access=="Allow" and (.priority|tonumber)==200)) | length == 1' \
+    >/dev/null || {
+    echo "STOP: ssh-install TEMP-JOHN-SSH-SECRETS-INSTALL not Allow TCP/22 priority 200" >&2
+    rm -f "$RULES_FILE"
+    return 1
+  }
   python3 "$SECRETS_TRANSPORT_PY" \
     --profile cosmabot-vm-prod-v1 \
     --resource-group rg-cosmabot-prod-eus2-01 \
@@ -79,7 +87,7 @@ cosmabot_ssh_secrets_install() {
     --check-ssh-install-ready \
     --ack-close-and-verify \
     --nsg-rules-json "$RULES_FILE" || {
-    echo "STOP: ssh-install gate refused" >&2
+    echo "STOP: ssh-install gate refused (TEMP-JOHN-SSH-SECRETS-INSTALL + close ack)" >&2
     rm -f "$RULES_FILE"
     return 1
   }
