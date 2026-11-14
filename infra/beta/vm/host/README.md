@@ -182,16 +182,21 @@ non-secret sidecar `WORKSPACE_LLM_API_KEY.source-account`.
 
 SSH install window (John `/32` only; see runbook §4.5 and `fences/`):
 
-1. OPEN: `fence-ssh-nsg-open.sh` (creates `TEMP-JOHN-SSH-SECRETS-INSTALL`).
-2. INSTALL: `fence-ssh-secrets-install.sh` (SCP staging, remote install,
-   cleanup both sides; workstation gate requires `--ack-close-and-verify`).
-3. CLOSE AND VERIFY: `fence-ssh-nsg-close-verify.sh` (always; also after STOP).
-4. If the terminal closed partway: `fence-ssh-nsg-recovery.sh`.
+1. Source define-only fences, then invoke `cosmabot_ssh_secrets_session`
+   (traps EXIT/INT/TERM/ERR so close-and-verify always runs).
+2. OPEN creates `TEMP-JOHN-SSH-SECRETS-INSTALL` (Tcp, John's `/32`, priority 200).
+3. INSTALL ships `secrets_transport.py` (sha256 pin
+   `secrets_transport.sha256`), pins the VM ed25519 host key via Run Command
+   (public key only), pipes each secret value over `ssh` stdin into
+   `--install-from-stdin` as root. No `scp` of values; no VM `/tmp` or `/root`
+   secret staging.
+4. CLOSE AND VERIFY deletes the rule, requires deny-all at 4000, runs
+   `--check-ssh-closed`, and probes SSH (refused/timeout PASS; auth failure FAIL).
+5. If the terminal closed partway: `cosmabot_ssh_nsg_recovery_if_stranded`.
 
-Session wrapper that always closes: `fence-ssh-secrets-session.sh` (source the
-open/install/close fences first).
+Sourcing a fence file has zero side effects (never opens or closes the NSG).
 
-Workstation gate before SCP:
+Workstation gate before stdin install:
 
 ```text
 python3 secrets_transport.py \
@@ -200,9 +205,11 @@ python3 secrets_transport.py \
   --vault-name kv-cbot-prd-<suffix> \
   --check-ssh-install-ready \
   --ack-close-and-verify \
+  --expected-source-cidr <john-ip>/32 \
   --nsg-rules-json /path/to/nsg-rules-names-ports-only.json
 ```
 
-CI proof: `tests/unit/test_secrets_transport.py` (canary value never appears in
-stdout/stderr/exception text). Local refusals also under
+CI proof: `tests/unit/test_secrets_transport.py` and
+`tests/unit/test_secrets_transport_fences.py` (canary value never appears in
+stdout/stderr/argv/exception text). Local refusals also under
 `host/tests/test_secrets_transport.py`.

@@ -10,7 +10,7 @@ Access model (does not widen the VM runtime managed identity):
 * Workstation stage-only mode runs inside John's temporary /32 vault
   public-access window (see runbook §4.1 / §4.3). It fetches into a
   mode-700 private directory, records the source-account check, never
-  prints values, and cleans up staged copies.
+  prints values, and cleans up staged copies (trap + wipe on STOP).
 * Do **not** `az login` as Secrets Officer on the prod VM (would leave a
   privileged token on the host). No Bastion.
 * VM access (John, 14 Nov 2026 9:45am ET): temporary NSG inbound Allow SSH
@@ -18,9 +18,14 @@ Access model (does not widen the VM runtime managed identity):
   TEMP-JOHN-SSH-SECRETS-INSTALL, then close-and-verify. No permanent
   Terraform/NSG IaC change. Out-of-band rules drift the next plan —
   close-and-verify is MANDATORY before any plan or apply.
+* Install path: pipe each secret VALUE over ssh stdin into this writer
+  running as root on the VM (umask 077 → mode 0400). Never stage values
+  under /tmp or /root on the VM. Never scp secret values. Ship this
+  module only; verify sha256 against the repo pin before running.
 * Host install writes service-UID-owned mode-0400 files matching
-  infra/beta/vm/runtime/entrypoint.py read_private.
-* Azure Run Command is refused (CTO 11 Nov 2026).
+  infra/beta/vm/runtime/entrypoint.py read_private and render.py.
+* Azure Run Command is refused for secret values (CTO 11 Nov 2026).
+  Host-key fetch may use Run Command for the public ed25519 key only.
 
 This module never prints, logs, or embeds a secret VALUE. Output is names,
 pass/fail, mode, owner uid, and size>0 only. Live Azure calls are opt-in
@@ -29,6 +34,7 @@ via an injected VaultReader; unit tests use fakes only.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -66,6 +72,13 @@ TEMP_SSH_NSG_RULE_PRIORITY = 200
 DENY_ALL_INGRESS_RULE_NAME = "deny-all-other-ingress"
 DENY_ALL_INGRESS_PRIORITY = 4000
 RUNBOOK_SSH_CLOSE = "docs/runbooks/cosmabot-production-post-apply.md §4.5"
+IPV4_CIDR_32_RE = re.compile(
+    r"^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}"
+    r"(?:25[0-5]|2[0-4]\d|[01]?\d?\d)/32$"
+)
+# Pin file next to this module; fence verifies before remote run.
+SHA256_PIN_NAME = "secrets_transport.sha256"
+REMOTE_MODULE_PATH = "/opt/cosmabot/host/secrets_transport.py"
 
 STAGING_NEEDLES = (
     "cosmabot-vm-staging",
@@ -317,6 +330,17 @@ def ensure_role_directory(
         raise Refused("role_directory_chown_requires_root") from error
 
 
+def _secret_file_valid(info: object, uid: int) -> bool:
+    mode = int(info.st_mode)  # type: ignore[attr-defined]
+    return bool(
+        stat.S_ISREG(mode)
+        and int(info.st_nlink) == 1  # type: ignore[attr-defined]
+        and stat.S_IMODE(mode) == 0o400
+        and int(info.st_uid) == uid  # type: ignore[attr-defined]
+        and int(info.st_size) > 0  # type: ignore[attr-defined]
+    )
+
+
 def write_secret_atomic(
     path: Path,
     value: bytes,
@@ -325,9 +349,28 @@ def write_secret_atomic(
     chown_fn: ChownFn = os.chown,
     lstat_fn: LstatFn = os.lstat,
 ) -> dict[str, object]:
-    """Atomically write value with umask 077 then mode 0400; empty/whitespace STOP."""
+    """Atomically write value with umask 077 then mode 0400; empty/whitespace STOP.
+
+    Idempotent on rerun: if the destination already exists with mode 0400,
+    correct owner uid, and size>0, return PASS without rewriting. Invalid
+    existing files are replaced atomically (partial-write recovery).
+    """
     raw = normalize_secret_value(value)
-    require(not path.exists() and not path.is_symlink(), f"secret_file_exists:{path.name}")
+    if path.exists() or path.is_symlink():
+        require(not path.is_symlink(), f"secret_file_symlink_refused:{path.name}")
+        existing = lstat_fn(path)
+        if _secret_file_valid(existing, uid):
+            return {
+                "host_name": path.name,
+                "path": str(path),
+                "mode": "0400",
+                "owner_uid": uid,
+                "size_gt_0": True,
+                "status": "PASS",
+                "idempotent": True,
+            }
+        # Invalid leftover from a partial write — remove then rewrite.
+        path.unlink(missing_ok=True)
 
     old_mask = os.umask(0o077)
     tmp_path: Path | None = None
@@ -359,14 +402,7 @@ def write_secret_atomic(
             tmp_path.unlink(missing_ok=True)
 
     info = lstat_fn(path)
-    require(
-        stat.S_ISREG(info.st_mode)
-        and info.st_nlink == 1
-        and stat.S_IMODE(info.st_mode) == 0o400
-        and info.st_uid == uid
-        and info.st_size > 0,
-        f"secret_file_mode_owner_failed:{path.name}",
-    )
+    require(_secret_file_valid(info, uid), f"secret_file_mode_owner_failed:{path.name}")
     return {
         "host_name": path.name,
         "path": str(path),
@@ -387,8 +423,32 @@ def _rule_port(rule: Mapping[str, object]) -> str:
     return str(port)
 
 
-def require_temp_ssh_rule_open(rules: list[Mapping[str, object]]) -> None:
-    """Require TEMP-JOHN-SSH-SECRETS-INSTALL Allow TCP/22 with priority before deny-all."""
+def _rule_protocol(rule: Mapping[str, object]) -> str:
+    return str(rule.get("protocol", rule.get("Protocol", ""))).strip().lower()
+
+
+def _rule_source(rule: Mapping[str, object]) -> str:
+    raw = rule.get(
+        "source",
+        rule.get("sourceAddressPrefix", rule.get("sourceAddressPrefixes", "")),
+    )
+    if isinstance(raw, list):
+        if len(raw) != 1:
+            return ""
+        return str(raw[0]).strip()
+    return str(raw).strip()
+
+
+def require_temp_ssh_rule_open(
+    rules: list[Mapping[str, object]],
+    *,
+    expected_source_cidr: str | None = None,
+) -> None:
+    """Require TEMP-JOHN-SSH-SECRETS-INSTALL Allow Tcp/22 with priority before deny-all.
+
+    When expected_source_cidr is set, the rule source must be exactly that /32
+    and protocol must be Tcp (install gate).
+    """
     require(isinstance(rules, list), "nsg_rules_required")
     matches = [
         rule
@@ -408,10 +468,20 @@ def require_temp_ssh_rule_open(rules: list[Mapping[str, object]]) -> None:
         and priority < DENY_ALL_INGRESS_PRIORITY,
         "temp_ssh_nsg_rule_priority_invalid",
     )
+    if expected_source_cidr is not None:
+        require(
+            IPV4_CIDR_32_RE.fullmatch(expected_source_cidr) is not None,
+            "expected_source_cidr_must_be_ipv4_32",
+        )
+        require(_rule_protocol(rule) == "tcp", "temp_ssh_nsg_rule_protocol_not_tcp")
+        require(
+            _rule_source(rule) == expected_source_cidr,
+            "temp_ssh_nsg_rule_source_not_john_32",
+        )
 
 
 def require_temp_ssh_rule_closed(rules: list[Mapping[str, object]]) -> None:
-    """Require temp rule gone, no port-22 Allow, deny-all intact."""
+    """Require temp rule gone, no port-22 Allow, deny-all intact at priority 4000."""
     require(isinstance(rules, list), "nsg_rules_required")
     require(
         all(str(rule.get("name", "")) != TEMP_SSH_NSG_RULE_NAME for rule in rules),
@@ -442,10 +512,62 @@ def require_ssh_install_ready(
     *,
     nsg_rules: list[Mapping[str, object]],
     close_verify_acked: bool,
+    expected_source_cidr: str | None = None,
 ) -> None:
     """Refuse install when the temp SSH rule is absent or close-and-verify was not acknowledged."""
     require(close_verify_acked, "close_and_verify_ack_required_before_install")
-    require_temp_ssh_rule_open(nsg_rules)
+    require_temp_ssh_rule_open(nsg_rules, expected_source_cidr=expected_source_cidr)
+
+
+def ssh_probe_indicates_closed(*, exit_code: int, stderr_text: str) -> bool:
+    """True only for connection refused or timeout. Auth failure = still reachable."""
+    text = (stderr_text or "").lower()
+    if "permission denied" in text or "authentication failed" in text:
+        return False
+    if "connection refused" in text:
+        return True
+    if "timed out" in text or "timeout" in text or "connection timed out" in text:
+        return True
+    # OpenSSH BatchMode often exits 255 on refuse/timeout without stable wording.
+    if exit_code in (255, 124) and "permission denied" not in text:
+        if any(
+            needle in text
+            for needle in (
+                "connection refused",
+                "no route to host",
+                "network is unreachable",
+                "timed out",
+                "timeout",
+            )
+        ):
+            return True
+    return False
+
+
+def require_ssh_unreachable(*, exit_code: int, stderr_text: str) -> None:
+    require(
+        ssh_probe_indicates_closed(exit_code=exit_code, stderr_text=stderr_text),
+        "ssh_still_reachable_after_close",
+    )
+
+
+def module_bytes_sha256(path: Path) -> str:
+    require(path.is_file() and not path.is_symlink(), "module_path_required")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def read_sha256_pin(pin_path: Path) -> str:
+    require(pin_path.is_file() and not pin_path.is_symlink(), "sha256_pin_required")
+    text = pin_path.read_text(encoding="utf-8").strip().splitlines()[0].strip()
+    require(re.fullmatch(r"[0-9a-f]{64}", text) is not None, "sha256_pin_shape")
+    return text
+
+
+def verify_module_sha256(*, module_path: Path, pin_path: Path) -> str:
+    digest = module_bytes_sha256(module_path)
+    pinned = read_sha256_pin(pin_path)
+    require(digest == pinned, "secrets_transport_sha256_mismatch")
+    return digest
 
 
 def load_nsg_rules_json(path: Path) -> list[Mapping[str, object]]:
@@ -513,6 +635,20 @@ def ensure_staging_dir_mode_700(staging_dir: Path) -> None:
     require(stat.S_IMODE(info.st_mode) == 0o700, "staging_dir_mode_700_required")
 
 
+def _wipe_staging_contents(staging_dir: Path) -> None:
+    """Remove staged files inside staging_dir; keep the directory itself if possible."""
+    if not staging_dir.exists():
+        return
+    for child in sorted(staging_dir.iterdir(), reverse=True):
+        try:
+            if child.is_symlink() or child.is_file():
+                child.unlink(missing_ok=True)
+            elif child.is_dir():
+                cleanup_private_dir(child)
+        except OSError:
+            pass
+
+
 def stage_from_vault(
     mappings: list[SecretMapping],
     *,
@@ -523,8 +659,9 @@ def stage_from_vault(
     """Workstation stage-only: fetch into mode-700 dir under John's /32 window.
 
     Records source-account for LLM. Never prints values. Never installs on the
-    VM. Caller must cleanup_private_dir / cleanup after transfer. After the
-    vault window: restore per runbook §4.3.
+    VM. On any STOP (including LLM-tag refusal after earlier values), wipe
+    staged contents so no partial values remain. After the vault window:
+    restore per runbook §4.3.
     """
     require(KEY_VAULT_NAME_RE.fullmatch(vault_name) is not None, "vault_name_must_be_kv-cbot-prd-*")
     refuse_staging_names(vault_name, str(staging_dir))
@@ -532,45 +669,121 @@ def stage_from_vault(
     results: list[dict[str, object]] = []
     old_mask = os.umask(0o077)
     try:
-        for item in mappings:
-            if is_llm_mapping(item):
-                tags = reader.read_tags(vault_name, item.vault_name)
-                account = validate_llm_source_account(tags)
-                write_source_account_sidecar(staging_dir, item, account)
-            value = normalize_secret_value(reader.read_value(vault_name, item.vault_name))
-            target = staging_dir / item.host_name
-            require(not target.exists() and not target.is_symlink(), f"staging_file_exists:{item.host_name}")
-            fd = os.open(
-                target,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-            )
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(value)
-                stream.flush()
-                os.fsync(stream.fileno())
-            info = target.lstat()
-            require(
-                stat.S_ISREG(info.st_mode)
-                and stat.S_IMODE(info.st_mode) == 0o600
-                and info.st_size > 0,
-                f"staging_file_mode_failed:{item.host_name}",
-            )
-            results.append(
-                {
-                    "vault_name": item.vault_name,
-                    "host_name": item.host_name,
-                    "role": "staging",
-                    "mode": "0600",
-                    "owner_uid": info.st_uid,
-                    "size_gt_0": True,
-                    "status": "PASS",
-                    "vault_restore": RUNBOOK_VAULT_RESTORE,
-                }
-            )
+        try:
+            for item in mappings:
+                if is_llm_mapping(item):
+                    tags = reader.read_tags(vault_name, item.vault_name)
+                    account = validate_llm_source_account(tags)
+                    write_source_account_sidecar(staging_dir, item, account)
+                value = normalize_secret_value(reader.read_value(vault_name, item.vault_name))
+                target = staging_dir / item.host_name
+                require(
+                    not target.exists() and not target.is_symlink(),
+                    f"staging_file_exists:{item.host_name}",
+                )
+                fd = os.open(
+                    target,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
+                )
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(value)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                info = target.lstat()
+                require(
+                    stat.S_ISREG(info.st_mode)
+                    and stat.S_IMODE(info.st_mode) == 0o600
+                    and info.st_size > 0,
+                    f"staging_file_mode_failed:{item.host_name}",
+                )
+                results.append(
+                    {
+                        "vault_name": item.vault_name,
+                        "host_name": item.host_name,
+                        "role": "staging",
+                        "mode": "0600",
+                        "owner_uid": info.st_uid,
+                        "size_gt_0": True,
+                        "status": "PASS",
+                        "vault_restore": RUNBOOK_VAULT_RESTORE,
+                    }
+                )
+        except Exception:
+            _wipe_staging_contents(staging_dir)
+            raise
     finally:
         os.umask(old_mask)
     return results
+
+
+def install_secret_value(
+    item: SecretMapping,
+    value: bytes,
+    *,
+    protected_root: Path,
+    release_id: str,
+    chown_fn: ChownFn = os.chown,
+    lstat_fn: LstatFn = os.lstat,
+) -> list[dict[str, object]]:
+    """Write one catalog secret to all role destinations (stdin/install path)."""
+    require(RELEASE_ID_RE.fullmatch(release_id) is not None, "release_id_invalid")
+    refuse_staging_names(release_id, str(protected_root), item.host_name, item.vault_name)
+    require(protected_root.is_dir() and not protected_root.is_symlink(), "protected_root_required")
+    results: list[dict[str, object]] = []
+    for role in item.roles:
+        uid = ROLE_UID[role]
+        role_dir = protected_role_dir(protected_root, role)
+        ensure_role_directory(role_dir, uid, chown_fn=chown_fn, lstat_fn=lstat_fn)
+        dest = role_dir / item.host_name
+        result = write_secret_atomic(
+            dest,
+            value,
+            uid,
+            chown_fn=chown_fn,
+            lstat_fn=lstat_fn,
+        )
+        results.append(
+            {
+                **result,
+                "vault_name": item.vault_name,
+                "role": role,
+                "release_id": release_id,
+            }
+        )
+    return results
+
+
+def install_from_stdin(
+    *,
+    host_name: str,
+    value: bytes,
+    protected_root: Path,
+    release_id: str,
+    llm_source_account: str | None = None,
+    chown_fn: ChownFn = os.chown,
+    lstat_fn: LstatFn = os.lstat,
+) -> list[dict[str, object]]:
+    """Root VM writer: read value from caller (stdin); never stage under /tmp or /root."""
+    by_host = catalog_by_host()
+    by_vault = catalog_by_vault()
+    item = by_host.get(host_name) or by_vault.get(host_name)
+    require(item is not None, f"unknown_secret_name:{host_name}")
+    assert item is not None
+    if is_llm_mapping(item):
+        require(
+            isinstance(llm_source_account, str) and bool(llm_source_account.strip()),
+            "llm_source_account_required_for_stdin_install",
+        )
+        validate_llm_source_account({SOURCE_ACCOUNT_TAG: llm_source_account.strip()})
+    return install_secret_value(
+        item,
+        value,
+        protected_root=protected_root,
+        release_id=release_id,
+        chown_fn=chown_fn,
+        lstat_fn=lstat_fn,
+    )
 
 
 def install_from_staging(
@@ -582,7 +795,11 @@ def install_from_staging(
     chown_fn: ChownFn = os.chown,
     lstat_fn: LstatFn = os.lstat,
 ) -> list[dict[str, object]]:
-    """Install secret files from a local staging directory (values as files, never argv)."""
+    """Install from a local workstation staging directory (values as files, never argv).
+
+    Prefer the SSH stdin path for the prod VM so values never land under /tmp
+    or /root. This helper remains for local/unit transport_from_vault tests.
+    """
     require(RELEASE_ID_RE.fullmatch(release_id) is not None, "release_id_invalid")
     refuse_staging_names(release_id, str(staging_dir), str(protected_root))
     require(staging_dir.is_dir() and not staging_dir.is_symlink(), "staging_dir_required")
@@ -602,27 +819,16 @@ def install_from_staging(
             f"staging_file_missing:{item.host_name}",
         )
         value = source.read_bytes()
-        # normalize_secret_value enforces whitespace-only / empty / NUL STOP.
-        for role in item.roles:
-            uid = ROLE_UID[role]
-            role_dir = protected_role_dir(protected_root, role)
-            ensure_role_directory(role_dir, uid, chown_fn=chown_fn, lstat_fn=lstat_fn)
-            dest = role_dir / item.host_name
-            result = write_secret_atomic(
-                dest,
+        results.extend(
+            install_secret_value(
+                item,
                 value,
-                uid,
+                protected_root=protected_root,
+                release_id=release_id,
                 chown_fn=chown_fn,
                 lstat_fn=lstat_fn,
             )
-            results.append(
-                {
-                    **result,
-                    "vault_name": item.vault_name,
-                    "role": role,
-                    "release_id": release_id,
-                }
-            )
+        )
     return results
 
 
@@ -771,12 +977,15 @@ def plan_lines(mappings: list[SecretMapping]) -> list[str]:
         f"temp_ssh_rule={TEMP_SSH_NSG_RULE_NAME}",
         f"temp_ssh_priority={TEMP_SSH_NSG_RULE_PRIORITY}",
         "owner_model=service_uid_mode_0400",
-        "transport=workstation_stage_then_temp_ssh_install",
-        "run_command=forbidden",
+        "transport=workstation_stage_then_ssh_stdin_install",
+        "vm_secret_staging=forbidden",
+        "scp_secret_values=forbidden",
+        "run_command_secret_values=forbidden",
         "bastion=forbidden",
         "vm_az_login_as_secrets_officer=forbidden",
         "vm_access_step=temp_ssh_nsg_rule_john_32",
         "close_and_verify=mandatory_before_terraform_plan_or_apply",
+        f"module_sha256_pin={SHA256_PIN_NAME}",
         f"vault_window_restore={RUNBOOK_VAULT_RESTORE}",
         f"ssh_close_verify={RUNBOOK_SSH_CLOSE}",
     ]
@@ -790,9 +999,9 @@ def plan_lines(mappings: list[SecretMapping]) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", required=True)
-    parser.add_argument("--resource-group", required=True)
-    parser.add_argument("--vault-name", required=True)
+    parser.add_argument("--profile", default="")
+    parser.add_argument("--resource-group", default="")
+    parser.add_argument("--vault-name", default="")
     parser.add_argument("--vm-name", default=VM_NAME)
     parser.add_argument(
         "--secret-name",
@@ -841,8 +1050,8 @@ def main(argv: list[str] | None = None) -> int:
         "--check-ssh-install-ready",
         action="store_true",
         help=(
-            "Workstation gate: require TEMP-JOHN-SSH-SECRETS-INSTALL open and "
-            "--ack-close-and-verify before SCP/install."
+            "Workstation gate: require TEMP-JOHN-SSH-SECRETS-INSTALL open "
+            "(Tcp, John's /32) and --ack-close-and-verify before stdin install."
         ),
     )
     parser.add_argument(
@@ -854,24 +1063,120 @@ def main(argv: list[str] | None = None) -> int:
         "--nsg-rules-json",
         type=Path,
         default=None,
-        help="JSON list of NSG rules {name,port,access,priority} only (no secrets).",
+        help=(
+            "JSON list of NSG rules {name,port,access,priority,protocol,source} "
+            "only (no secrets)."
+        ),
+    )
+    parser.add_argument(
+        "--expected-source-cidr",
+        default="",
+        help="John's exact /32 for TEMP-JOHN-SSH-SECRETS-INSTALL (install gate).",
     )
     parser.add_argument(
         "--check-ssh-closed",
         action="store_true",
-        help="Verify temp SSH rule absent, no port-22 Allow, deny-all intact.",
+        help="Verify temp SSH rule absent, no port-22 Allow, deny-all at 4000.",
+    )
+    parser.add_argument(
+        "--check-ssh-probe",
+        action="store_true",
+        help="Classify an SSH probe: refuse/timeout PASS; auth failure FAIL.",
+    )
+    parser.add_argument(
+        "--ssh-probe-exit-code",
+        type=int,
+        default=-1,
+        help="Exit code from the SSH probe (with --check-ssh-probe).",
+    )
+    parser.add_argument(
+        "--ssh-probe-stderr-file",
+        type=Path,
+        default=None,
+        help="Stderr capture from the SSH probe (with --check-ssh-probe).",
+    )
+    parser.add_argument(
+        "--verify-module-sha256",
+        action="store_true",
+        help="Verify secrets_transport.py against the repo sha256 pin file.",
+    )
+    parser.add_argument(
+        "--module-path",
+        type=Path,
+        default=None,
+        help="Path to secrets_transport.py (sha256 verify).",
+    )
+    parser.add_argument(
+        "--sha256-pin-path",
+        type=Path,
+        default=None,
+        help="Path to secrets_transport.sha256 pin file.",
+    )
+    parser.add_argument(
+        "--install-from-stdin",
+        action="store_true",
+        help=(
+            "VM root writer: read one secret VALUE from stdin; write final "
+            "mode-0400 destinations. Never stages under /tmp or /root."
+        ),
+    )
+    parser.add_argument(
+        "--host-name",
+        default="",
+        help="Host secret file name for --install-from-stdin (catalog host_name).",
+    )
+    parser.add_argument(
+        "--llm-source-account",
+        default="",
+        help="LLM source-account metadata for stdin install (not a secret value).",
     )
     args = parser.parse_args(argv)
 
     try:
         if args.via_run_command:
             refuse_run_command_transport()
+        if args.verify_module_sha256:
+            module_path = args.module_path or Path(__file__).resolve()
+            pin_path = args.sha256_pin_path or (module_path.parent / SHA256_PIN_NAME)
+            digest = verify_module_sha256(module_path=module_path, pin_path=pin_path)
+            print(f"PASS: secrets_transport sha256={digest}")
+            return 0
+        if args.check_ssh_probe:
+            require(args.ssh_probe_exit_code >= 0, "ssh_probe_exit_code_required")
+            require(args.ssh_probe_stderr_file is not None, "ssh_probe_stderr_file_required")
+            assert args.ssh_probe_stderr_file is not None
+            stderr_text = args.ssh_probe_stderr_file.read_text(encoding="utf-8", errors="replace")
+            require_ssh_unreachable(
+                exit_code=args.ssh_probe_exit_code,
+                stderr_text=stderr_text,
+            )
+            print("PASS: SSH probe indicates closed (refused or timeout)")
+            return 0
+        require(bool(args.profile), "profile_required")
+        require(bool(args.resource_group), "resource_group_required")
+        require(bool(args.vault_name), "vault_name_required")
         validate_prod_coordinates(
             profile=args.profile,
             resource_group=args.resource_group,
             vault_name=args.vault_name,
             vm_name=args.vm_name,
         )
+        if args.install_from_stdin:
+            require(args.release_id, "release_id_required")
+            require(args.host_name.strip(), "host_name_required")
+            root = args.protected_root or Path("/etc/cosmabot/runtime") / args.release_id
+            require(root.is_dir() and not root.is_symlink(), "protected_root_required")
+            value = sys.stdin.buffer.read()
+            results = install_from_stdin(
+                host_name=args.host_name.strip(),
+                value=value,
+                protected_root=root,
+                release_id=args.release_id,
+                llm_source_account=args.llm_source_account or None,
+            )
+            for result in results:
+                print(format_result_line(result))
+            return 0
         names = args.secret_names or [item.vault_name for item in SECRET_CATALOG]
         mappings = resolve_mappings(names)
         if args.plan_only:
@@ -888,9 +1193,11 @@ def main(argv: list[str] | None = None) -> int:
                     "mandatory before Terraform plan or apply"
                 )
                 return 0
+            expected = args.expected_source_cidr.strip() or None
             require_ssh_install_ready(
                 nsg_rules=rules,
                 close_verify_acked=args.ack_close_and_verify,
+                expected_source_cidr=expected,
             )
             print(
                 f"PASS: {TEMP_SSH_NSG_RULE_NAME} open; close-and-verify acknowledged"

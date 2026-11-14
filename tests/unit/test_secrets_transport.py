@@ -433,7 +433,15 @@ def test_no_vm_az_login_variant_in_source_or_help():
     assert "az login as" not in text.lower()
 
 
-def _baseline_nsg_rules(*, with_temp: bool = True) -> list[dict]:
+JOHN_CIDR = "203.0.113.10/32"
+
+
+def _baseline_nsg_rules(
+    *,
+    with_temp: bool = True,
+    source: str = JOHN_CIDR,
+    protocol: str = "Tcp",
+) -> list[dict]:
     rules = [
         {"name": "https", "port": "443", "access": "Allow", "priority": 100},
         {
@@ -457,6 +465,8 @@ def _baseline_nsg_rules(*, with_temp: bool = True) -> list[dict]:
                 "port": "22",
                 "access": "Allow",
                 "priority": transport.TEMP_SSH_NSG_RULE_PRIORITY,
+                "protocol": protocol,
+                "source": source,
             },
         )
     return rules
@@ -486,6 +496,7 @@ def test_require_ssh_install_ready_refuses_without_ack():
         transport.require_ssh_install_ready(
             nsg_rules=_baseline_nsg_rules(with_temp=True),
             close_verify_acked=False,
+            expected_source_cidr=JOHN_CIDR,
         )
 
 
@@ -494,6 +505,27 @@ def test_require_ssh_install_ready_refuses_when_rule_absent():
         transport.require_ssh_install_ready(
             nsg_rules=_baseline_nsg_rules(with_temp=False),
             close_verify_acked=True,
+            expected_source_cidr=JOHN_CIDR,
+        )
+
+
+def test_require_ssh_install_ready_requires_john_32_and_tcp():
+    transport.require_ssh_install_ready(
+        nsg_rules=_baseline_nsg_rules(with_temp=True),
+        close_verify_acked=True,
+        expected_source_cidr=JOHN_CIDR,
+    )
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_source_not_john_32"):
+        transport.require_ssh_install_ready(
+            nsg_rules=_baseline_nsg_rules(with_temp=True, source="198.51.100.1/32"),
+            close_verify_acked=True,
+            expected_source_cidr=JOHN_CIDR,
+        )
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_protocol_not_tcp"):
+        transport.require_ssh_install_ready(
+            nsg_rules=_baseline_nsg_rules(with_temp=True, protocol="Udp"),
+            close_verify_acked=True,
+            expected_source_cidr=JOHN_CIDR,
         )
 
 
@@ -514,6 +546,8 @@ def test_cli_check_ssh_install_ready_requires_ack_and_rule(tmp_path):
                 "--vault-name",
                 "kv-cbot-prd-lab01",
                 "--check-ssh-install-ready",
+                "--expected-source-cidr",
+                JOHN_CIDR,
                 "--nsg-rules-json",
                 str(rules_path),
             ]
@@ -531,6 +565,8 @@ def test_cli_check_ssh_install_ready_requires_ack_and_rule(tmp_path):
                 "kv-cbot-prd-lab01",
                 "--check-ssh-install-ready",
                 "--ack-close-and-verify",
+                "--expected-source-cidr",
+                JOHN_CIDR,
                 "--nsg-rules-json",
                 str(rules_path),
             ]
@@ -620,17 +656,32 @@ def test_transport_from_vault_uses_private_work_dir_and_cleans_up(tmp_path):
     assert llm.read_bytes() == CANARY.encode()
 
 
-def test_transport_from_vault_cleans_private_dir_on_exception(tmp_path):
+def test_transport_from_vault_cleans_private_dir_on_exception(tmp_path, monkeypatch):
+    """Non-vacuous: write canary into private staging, then raise; finally must wipe."""
     root = tmp_path / "runtime" / "rel-boom"
     root.mkdir(parents=True)
     work_parent = tmp_path / "private-work-boom"
     reader = transport.FakeVaultReader(
-        values={"WORKSPACE-LLM-API-KEY": CANARY.encode()},
-        tags={"WORKSPACE-LLM-API-KEY": {transport.SOURCE_ACCOUNT_TAG: COSMASCODE_ACCOUNT}},
+        values={
+            "CLERK-SECRET-KEY": CANARY.encode(),
+            "WORKSPACE-LLM-API-KEY": b"synthetic-llm-fixture-not-printed",
+        },
+        tags={"WORKSPACE-LLM-API-KEY": {transport.SOURCE_ACCOUNT_TAG: PROD_ACCOUNT}},
     )
-    mappings = transport.resolve_mappings(["WORKSPACE-LLM-API-KEY"])
+    mappings = transport.resolve_mappings(["CLERK-SECRET-KEY", "WORKSPACE-LLM-API-KEY"])
     chown_fn, lstat_fn, _ = _fake_fs()
-    with pytest.raises(transport.Refused):
+    seen_canary = {"ok": False}
+
+    def boom_install(*args, **kwargs):
+        staging_dir = kwargs.get("staging_dir") or args[2]
+        canary_path = Path(staging_dir) / "CLERK_SECRET_KEY"
+        assert canary_path.is_file()
+        assert canary_path.read_bytes() == CANARY.encode()
+        seen_canary["ok"] = True
+        raise RuntimeError("boom_after_stage_write")
+
+    monkeypatch.setattr(transport, "install_from_staging", boom_install)
+    with pytest.raises(RuntimeError, match="boom_after_stage_write"):
         transport.transport_from_vault(
             mappings,
             vault_name="kv-cbot-prd-lab01",
@@ -641,10 +692,13 @@ def test_transport_from_vault_cleans_private_dir_on_exception(tmp_path):
             chown_fn=chown_fn,
             lstat_fn=lstat_fn,
         )
+    assert seen_canary["ok"] is True
     if work_parent.exists():
         for path in work_parent.rglob("*"):
             if path.is_file():
                 assert CANARY.encode() not in path.read_bytes()
+        leftovers = [p for p in work_parent.rglob("*") if p.is_file()]
+        assert leftovers == []
 
 
 def test_private_work_dir_is_mode_700(tmp_path):
@@ -753,9 +807,10 @@ def test_az_reader_failure_never_prints_canary_from_stdout_or_stderr():
     reader = transport.AzCliVaultReader(runner=fake_run)
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
-        with pytest.raises(transport.Refused, match="vault_read_failed"):
+        with pytest.raises(transport.Refused, match="vault_read_failed") as raised:
             reader.read_value("kv-cbot-prd-lab01", "CLERK-SECRET-KEY")
-    _assert_canary_absent(out.getvalue(), err.getvalue())
+    _assert_canary_absent(out.getvalue(), err.getvalue(), str(raised.value), repr(raised.value))
+    assert CANARY not in str(raised.value)
 
 
 def test_az_reader_success_captures_without_printing():
@@ -778,7 +833,7 @@ def test_az_reader_success_captures_without_printing():
     _assert_canary_absent(out.getvalue(), err.getvalue())
 
 
-def test_overwrite_refused(tmp_path):
+def test_partial_write_rerun_is_idempotent(tmp_path):
     staging = tmp_path / "staging"
     root = tmp_path / "runtime" / "rel-6"
     staging.mkdir()
@@ -786,7 +841,7 @@ def test_overwrite_refused(tmp_path):
     (staging / "POSTGRES_PASSWORD").write_bytes(b"synthetic-postgres-fixture-01")
     mappings = transport.resolve_mappings(["POSTGRES-PASSWORD"])
     chown_fn, lstat_fn, _ = _fake_fs()
-    transport.install_from_staging(
+    first = transport.install_from_staging(
         mappings,
         protected_root=root,
         staging_dir=staging,
@@ -794,15 +849,17 @@ def test_overwrite_refused(tmp_path):
         chown_fn=chown_fn,
         lstat_fn=lstat_fn,
     )
-    with pytest.raises(transport.Refused, match="secret_file_exists"):
-        transport.install_from_staging(
-            mappings,
-            protected_root=root,
-            staging_dir=staging,
-            release_id="rel-6",
-            chown_fn=chown_fn,
-            lstat_fn=lstat_fn,
-        )
+    second = transport.install_from_staging(
+        mappings,
+        protected_root=root,
+        staging_dir=staging,
+        release_id="rel-6",
+        chown_fn=chown_fn,
+        lstat_fn=lstat_fn,
+    )
+    assert first and second
+    assert all(row.get("status") == "PASS" for row in second)
+    assert any(row.get("idempotent") is True for row in second)
 
 
 def test_exception_message_scrub_on_failed_install(tmp_path):
@@ -813,9 +870,9 @@ def test_exception_message_scrub_on_failed_install(tmp_path):
     (staging / "CLERK_SECRET_KEY").write_bytes(CANARY.encode())
     role = root / "api"
     role.mkdir()
-    (role / "CLERK_SECRET_KEY").write_bytes(b"prior")
+    (role / "CLERK_SECRET_KEY").symlink_to(staging / "CLERK_SECRET_KEY")
     mappings = transport.resolve_mappings(["CLERK-SECRET-KEY"])
-    chown_fn, lstat_fn, _ = _fake_fs({str(role / "CLERK_SECRET_KEY"): transport.API_UID})
+    chown_fn, lstat_fn, _ = _fake_fs()
     _, stdout, stderr, exc = _capture(
         transport.install_from_staging,
         mappings,
@@ -835,3 +892,147 @@ def test_module_source_never_hardcodes_live_secret_values():
     assert "sk_test_" not in source
     assert CANARY not in source
     assert "§4.3" in source or "4.3" in source
+
+
+def test_stage_from_vault_wipes_on_llm_tag_stop(tmp_path):
+    staging = tmp_path / "stage-wipe"
+    staging.mkdir(mode=0o700)
+    reader = transport.FakeVaultReader(
+        values={
+            "CLERK-SECRET-KEY": CANARY.encode(),
+            "WORKSPACE-LLM-API-KEY": b"synthetic-llm-later",
+        },
+        tags={"WORKSPACE-LLM-API-KEY": {transport.SOURCE_ACCOUNT_TAG: COSMASCODE_ACCOUNT}},
+    )
+    mappings = transport.resolve_mappings(["CLERK-SECRET-KEY", "WORKSPACE-LLM-API-KEY"])
+    with pytest.raises(transport.Refused):
+        transport.stage_from_vault(
+            mappings,
+            vault_name="kv-cbot-prd-lab01",
+            staging_dir=staging,
+            reader=reader,
+        )
+    assert list(staging.iterdir()) == []
+
+
+def test_require_temp_ssh_rule_closed_negatives():
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_still_present"):
+        transport.require_temp_ssh_rule_closed(_baseline_nsg_rules(with_temp=True))
+    open_allow = _baseline_nsg_rules(with_temp=False) + [
+        {"name": "other-ssh", "port": "22", "access": "Allow", "priority": 250}
+    ]
+    with pytest.raises(transport.Refused, match="port_22_allow_still_present"):
+        transport.require_temp_ssh_rule_closed(open_allow)
+    no_deny = [
+        rule
+        for rule in _baseline_nsg_rules(with_temp=False)
+        if rule["name"] != transport.DENY_ALL_INGRESS_RULE_NAME
+    ]
+    with pytest.raises(transport.Refused, match="deny_all_ingress_missing"):
+        transport.require_temp_ssh_rule_closed(no_deny)
+    wrong_pri = _baseline_nsg_rules(with_temp=False)
+    for rule in wrong_pri:
+        if rule["name"] == transport.DENY_ALL_INGRESS_RULE_NAME:
+            rule["priority"] = 3999
+    with pytest.raises(transport.Refused, match="deny_all_ingress_priority_invalid"):
+        transport.require_temp_ssh_rule_closed(wrong_pri)
+
+
+def test_ssh_probe_refused_or_timeout_pass_auth_fail():
+    assert transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="ssh: connect to host x port 22: Connection refused"
+    )
+    assert transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Connection timed out"
+    )
+    assert not transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Permission denied (publickey)."
+    )
+    with pytest.raises(transport.Refused, match="ssh_still_reachable_after_close"):
+        transport.require_ssh_unreachable(
+            exit_code=255, stderr_text="Permission denied (publickey)."
+        )
+
+
+def test_role_uid_map_pins_entrypoint_and_render():
+    entrypoint = (REPO / "infra/beta/vm/runtime/entrypoint.py").read_text()
+    render = (REPO / "infra/beta/vm/runtime/render.py").read_text()
+    assert "API_UID = 10001" in entrypoint
+    assert "DATA_UID = 999" in render
+    assert transport.API_UID == 10001
+    assert transport.DATA_UID == 999
+    assert transport.ROLE_UID == {
+        "api": 10001,
+        "worker": 10001,
+        "prepare": 10001,
+        "postgres": 999,
+        "redis": 999,
+    }
+    assert "10001" in render and "999" in render
+
+
+def test_module_sha256_pin_matches_file():
+    pin = MODULE_PATH.parent / transport.SHA256_PIN_NAME
+    digest = transport.verify_module_sha256(module_path=MODULE_PATH, pin_path=pin)
+    assert digest == transport.module_bytes_sha256(MODULE_PATH)
+
+
+def test_cli_install_success_path_with_canary_via_staging(tmp_path):
+    staging = tmp_path / "staging"
+    root = tmp_path / "runtime" / "rel-ok"
+    staging.mkdir()
+    root.mkdir(parents=True)
+    (staging / "CLERK_SECRET_KEY").write_bytes(CANARY.encode())
+    chown_fn, lstat_fn, _ = _fake_fs()
+    results, stdout, stderr, exc = _capture(
+        transport.install_from_staging,
+        transport.resolve_mappings(["CLERK-SECRET-KEY"]),
+        protected_root=root,
+        staging_dir=staging,
+        release_id="rel-ok",
+        chown_fn=chown_fn,
+        lstat_fn=lstat_fn,
+    )
+    assert exc is None
+    assert results
+    lines = [transport.format_result_line(r) for r in results]
+    _assert_canary_absent(stdout, stderr, *lines)
+    assert (root / "api" / "CLERK_SECRET_KEY").read_bytes() == CANARY.encode()
+
+
+def test_install_from_stdin_success_canary_absent_from_status(tmp_path):
+    root = tmp_path / "runtime" / "rel-stdin"
+    root.mkdir(parents=True)
+    chown_fn, lstat_fn, _ = _fake_fs()
+    results, stdout, stderr, exc = _capture(
+        transport.install_from_stdin,
+        host_name="CLERK_SECRET_KEY",
+        value=CANARY.encode(),
+        protected_root=root,
+        release_id="rel-stdin",
+        chown_fn=chown_fn,
+        lstat_fn=lstat_fn,
+    )
+    assert exc is None
+    assert results
+    lines = [transport.format_result_line(r) for r in results]
+    _assert_canary_absent(stdout, stderr, *lines)
+    assert (root / "api" / "CLERK_SECRET_KEY").read_bytes() == CANARY.encode()
+
+
+def test_fence_files_are_define_only_on_source():
+    fences = REPO / "infra/beta/vm/host/fences"
+    for name in (
+        "fence-ssh-nsg-open.sh",
+        "fence-ssh-nsg-close-verify.sh",
+        "fence-ssh-nsg-recovery.sh",
+        "fence-ssh-secrets-install.sh",
+        "fence-ssh-secrets-session.sh",
+    ):
+        text = (fences / name).read_text()
+        # No trailing auto-invoke: last non-empty line must close a function body.
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        assert lines[-1] == "}"
+        assert "scp " not in text
+        assert "/tmp/cosmabot-secret-staging" not in text
+        assert "/root/cosmabot-secret-staging" not in text

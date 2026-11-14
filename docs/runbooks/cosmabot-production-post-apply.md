@@ -108,9 +108,9 @@ Not John's hands-on. Still synthetic; still no staging. **One order** (same as �
    prod bootstrap retarget ticket/PR exists (**BLOCKED** until then).
 2. Install mode-0400 secret files from the names John pasted (§4) with
    `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): workstation
-   stage under `/32`, then §4.5 temporary SSH `/32` open → install →
-   close-and-verify (John, 14 Nov 2026 9:45am ET). Run Command still must
-   not carry secret values.
+   stage under `/32`, then §4.5 temporary SSH `/32` open → ssh-stdin install
+   (no VM value staging) → close-and-verify (John, 14 Nov 2026 9:45am ET).
+   Run Command must not carry secret values (host-key public fetch only).
 3. Deploy-time STOP checks: §4.1 (remaining host/post-start proofs) and §4.2
    (bundle API origins). On any mismatch: **STOP and roll back** — do not flip
    AI-on flags, do not start API/worker with model traffic.
@@ -208,10 +208,11 @@ value himself. No Clerk secret values in this runbook.
 `WORKSPACE_LLM_API_KEY` file (and the other §4 name-mapped secrets) uses
 `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): workstation
 `--stage-from-vault` under John's vault `/32` window → §4.5 temporary SSH
-`/32` open/install/close → mode-0400 service-UID host files; Run Command
-refused; no Secrets Officer `az login` on the VM; no Bastion; values never
-printed. Restore vault per §4.3; SSH close-and-verify per §4.5 (mandatory
-before any Terraform plan/apply).
+`/32` open → ssh-stdin install (no VM value staging) → close-and-verify →
+mode-0400 service-UID host files; Run Command refused for values (host-key
+public fetch only); no Secrets Officer `az login` on the VM; no Bastion;
+values never printed. Restore vault per §4.3; SSH close-and-verify per §4.5
+(mandatory before any Terraform plan/apply).
 
 ### Clerk public values (Sitting 1)
 
@@ -1177,31 +1178,53 @@ change. Fixed rule name `TEMP-JOHN-SSH-SECRETS-INSTALL`, priority `200`
 RG `rg-cosmabot-prod-eus2-01`. Detect John's IP with
 `curl -fsS https://api.ipify.org` (prints IP only). Create uses `--output none`.
 
-**Close-and-verify is MANDATORY after every outcome**, including STOP mid-way.
-An out-of-band NSG rule shows as drift on the next Terraform plan — finish
-close-and-verify before any plan or apply.
+**No secret values on the prod disk outside final mode-0400 destinations.**
+Workstation stages under a local mode-700 dir; install pipes each value over
+`ssh` stdin into `secrets_transport.py --install-from-stdin` as root (umask
+077). Do not `scp` secret values. Do not stage under `/tmp` or `/root` on the
+VM. Ship the module only; verify `sha256` against
+`infra/beta/vm/host/secrets_transport.sha256` before running. Pin the VM
+ed25519 host key via `az vm run-command` (public key only) into a per-session
+`known_hosts`; `ssh` uses `StrictHostKeyChecking=yes`.
 
-Pasteable fences (no `#` comment lines) live in
-`infra/beta/vm/host/fences/`:
+**Close-and-verify is MANDATORY after every outcome**, including STOP mid-way
+and SIGINT. An out-of-band NSG rule shows as drift on the next Terraform plan —
+finish close-and-verify before any plan or apply. Close requires deny-all at
+priority `4000`, Python `--check-ssh-closed`, and an SSH probe that PASSes only
+on connection refused or timeout (auth failure = still reachable = FAIL).
+
+Define-only fence files (no `#` comment lines; sourcing has zero side effects)
+live in `infra/beta/vm/host/fences/`:
 
 | Step | Fence file |
 | --- | --- |
-| OPEN | `fence-ssh-nsg-open.sh` |
-| INSTALL | `fence-ssh-secrets-install.sh` |
-| CLOSE AND VERIFY | `fence-ssh-nsg-close-verify.sh` |
-| Session (always closes) | `fence-ssh-secrets-session.sh` (source open/install/close first) |
-| Terminal closed partway | `fence-ssh-nsg-recovery.sh` |
+| OPEN | `fence-ssh-nsg-open.sh` → `cosmabot_ssh_nsg_open` |
+| INSTALL | `fence-ssh-secrets-install.sh` → `cosmabot_ssh_secrets_install` |
+| CLOSE AND VERIFY | `fence-ssh-nsg-close-verify.sh` → `cosmabot_ssh_nsg_close_and_verify` |
+| Session (always closes) | `fence-ssh-secrets-session.sh` → `cosmabot_ssh_secrets_session` |
+| Terminal closed partway | `fence-ssh-nsg-recovery.sh` → `cosmabot_ssh_nsg_recovery_if_stranded` |
 
-Export once before fences: `RG=rg-cosmabot-prod-eus2-01`, `VM_PUBLIC_IP`,
-`RELEASE_ID`, `LOCAL_STAGING` (mode-700), `PROD_KV_NAME`,
-`SECRETS_TRANSPORT_PY` (path to `secrets_transport.py`). Secrets stay with
-John; fences print names / rule metadata / pass-fail only.
+**Order:** source the open/install/close fences, then invoke the session
+wrapper (it traps EXIT/INT/TERM/ERR so close-and-verify always runs):
+
+```text
+export RG=rg-cosmabot-prod-eus2-01 VM_PUBLIC_IP=… RELEASE_ID=… LOCAL_STAGING=… PROD_KV_NAME=… SECRETS_TRANSPORT_PY=…/secrets_transport.py
+source infra/beta/vm/host/fences/fence-ssh-nsg-open.sh
+source infra/beta/vm/host/fences/fence-ssh-secrets-install.sh
+source infra/beta/vm/host/fences/fence-ssh-nsg-close-verify.sh
+source infra/beta/vm/host/fences/fence-ssh-secrets-session.sh
+cosmabot_ssh_secrets_session
+```
+
+Sourcing alone must never open or close the NSG rule. Secrets stay with John;
+fences print names / rule metadata / pass-fail only.
 
 #### Terminal closed partway — recovery
 
-If the session dies while `TEMP-JOHN-SSH-SECRETS-INSTALL` may still exist, paste
-`fence-ssh-nsg-recovery.sh` (finds the rule by fixed name, deletes it, verifies
-absence + deny-all). Then do not plan/apply until that PASS prints.
+If the session dies while `TEMP-JOHN-SSH-SECRETS-INSTALL` may still exist, source
+and invoke `cosmabot_ssh_nsg_recovery_if_stranded` (deletes the rule by fixed
+name, verifies absence + deny-all at 4000, removes stranded local staging).
+Then do not plan/apply until that PASS prints.
 
 ### 4.4 Mac-side fence syntax proof
 
@@ -1404,9 +1427,10 @@ After-14:30 host work):**
 5. **Install** mode-0400 secret files with
    `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): names from
    §4; workstation stage under John's vault `/32` window (not the runtime
-   UAMI); §4.5 temporary SSH `/32` open → install → close-and-verify;
-   service-UID ownership; mode 0400; Run Command refused. Matches §1
-   After 14:30 step 2.
+   UAMI); §4.5 temporary SSH `/32` open → ssh-stdin install (sha256-pinned
+   module; no VM `/tmp`/`/root` value staging) → close-and-verify;
+   service-UID ownership; mode 0400; Run Command refused for values. Matches
+   §1 After 14:30 step 2.
 6. **STOP checks** before AI-on: §4.1 (host files) and §4.2 (exact
    `https://api.beta.cosmas.ai` + Clerk issuer/publishable key on Info.plist /
    JSON; scan `$APP/public` only; refuse configured staging API origin forms;

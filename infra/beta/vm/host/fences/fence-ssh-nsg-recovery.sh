@@ -21,6 +21,10 @@ cosmabot_ssh_nsg_recovery_if_stranded() {
     --nsg-name nsg-cosmabot-prod-eus2-01 \
     --name TEMP-JOHN-SSH-SECRETS-INSTALL \
     --output none 2>/dev/null || true
+  if test -n "${LOCAL_STAGING:-}" && test -e "${LOCAL_STAGING}"; then
+    rm -rf "${LOCAL_STAGING:?}"
+    echo "PASS: recovery removed local staging path (values not printed)"
+  fi
   RULES_JSON=$(az network nsg rule list \
     --resource-group "$RG" \
     --nsg-name nsg-cosmabot-prod-eus2-01 \
@@ -37,15 +41,11 @@ cosmabot_ssh_nsg_recovery_if_stranded() {
     echo "STOP: recovery left TEMP-JOHN-SSH-SECRETS-INSTALL in place" >&2
     return 1
   }
-  test "$(printf '%s' "$RULES_JSON" | jq -r '[.[] | select(.name=="deny-all-other-ingress" and .access=="Deny")] | length')" = "1" || {
-    echo "STOP: recovery deny-all-other-ingress missing or not Deny" >&2
+  test "$(printf '%s' "$RULES_JSON" | jq -r '[.[] | select(.name=="deny-all-other-ingress" and .access=="Deny" and (.priority|tonumber)==4000)] | length')" = "1" || {
+    echo "STOP: recovery deny-all-other-ingress missing or not Deny priority 4000" >&2
     return 1
   }
   echo "PASS: recovery deleted TEMP-JOHN-SSH-SECRETS-INSTALL; deny-all intact"
   echo "NOTE: out-of-band NSG rules drift the next Terraform plan; close-and-verify is MANDATORY before any plan or apply"
   return 0
-}
-cosmabot_ssh_nsg_recovery_if_stranded || {
-  echo "STOP: ssh-nsg-recovery failed" >&2
-  false
 }

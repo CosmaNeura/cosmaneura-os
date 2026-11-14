@@ -23,6 +23,8 @@ cosmabot_ssh_nsg_open() {
     echo "STOP: ssh-nsg-open IP shape invalid" >&2
     return 1
   }
+  JOHN_SSH_CIDR="${JOHN_IP}/32"
+  export JOHN_SSH_CIDR
   az network nsg rule create \
     --resource-group "$RG" \
     --nsg-name nsg-cosmabot-prod-eus2-01 \
@@ -31,7 +33,7 @@ cosmabot_ssh_nsg_open() {
     --direction Inbound \
     --access Allow \
     --protocol Tcp \
-    --source-address-prefixes "${JOHN_IP}/32" \
+    --source-address-prefixes "${JOHN_SSH_CIDR}" \
     --source-port-ranges '*' \
     --destination-address-prefixes '*' \
     --destination-port-ranges 22 \
@@ -39,10 +41,6 @@ cosmabot_ssh_nsg_open() {
     echo "STOP: ssh-nsg-open rule create failed" >&2
     return 1
   }
-  echo "PASS: TEMP-JOHN-SSH-SECRETS-INSTALL Allow TCP/22 from ${JOHN_IP}/32 priority 200"
+  echo "PASS: TEMP-JOHN-SSH-SECRETS-INSTALL Allow Tcp/22 from ${JOHN_SSH_CIDR} priority 200"
   return 0
-}
-cosmabot_ssh_nsg_open || {
-  echo "STOP: ssh-nsg-open failed - run fence-ssh-nsg-close-verify next" >&2
-  false
 }
