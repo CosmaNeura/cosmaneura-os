@@ -4,11 +4,13 @@
 D2s_v5 host. Default `--profile cosmabot-vm-staging-v1` targets the staging RG/VM.
 `--profile cosmabot-vm-prod-v1` targets production (`rg-cosmabot-prod-eus2-01` /
 `vm-cosmabot-prod-eus2-01`) and refuses staging names (and the reverse). It installs
-runtime dependencies and formats/mounts only the approved new 128 GiB data disk,
-creating empty `postgres`/`redis` dirs for the later runtime Postgres 16 + Redis
-start. No application image, credential, release, service unit, registry login or
-container is installed or started. Secret file install is **T-PROD-3** (name only).
-It changes no Azure resource, identity, NSG, SSH ingress or protected runner.
+runtime dependencies and formats/mounts only the approved new 128 GiB data disk.
+`format_mount` creates empty `postgres`/`redis` (UID 999) and `caddy-*` (UID 10001)
+directories under `/var/lib/cosmabot`; it does not install Postgres or Redis
+packages or start containers. No application image, credential, release, systemd
+unit enablement, registry login or container is installed or started. Secret file
+install is **T-PROD-3** (name only). It changes no Azure resource, identity, NSG,
+SSH ingress or protected runner.
 
 Run only after reviewing this source and the completed foundation apply, and
 observing the actual VM, disk and Linux device. The script requires root on
@@ -67,8 +69,11 @@ python3 bootstrap_host.py --profile cosmabot-vm-staging-v1 --vm-id <actual-vm-id
 python3 bootstrap_host.py --profile cosmabot-vm-prod-v1 --vm-id <actual-vm-id> --disk-id <actual-disk-id> --expected-device <observed-lun0-device> --creation-receipt <root-owned-receipt.json> --creation-receipt-sha256 <reviewed-sha256> --format-new-empty-disk <same-exact-disk-id>
 ```
 
-After prod bootstrap, install `infra/beta/vm/runtime/cosmabot-prod.service` (do not
-rename or reuse `cosmabot-staging.service`). Staging unit stays for staging only.
+The prod unit **file** is `infra/beta/vm/runtime/cosmabot-prod.service`. Install and
+enable it only after secrets are on the host and runtime acceptance (same order as
+the staging runtime README). Do not rename or reuse `cosmabot-staging.service`.
+Container UID drop stays in `render.py` compose (`user: 10001:10001` / `999:999`),
+not in the systemd unit (which must stay root for `start.sh`).
 
 Omitting the final flag or naming any other disk refuses formatting. Formatting
 uses ext4 without a force flag. The script mounts by its newly created UUID at

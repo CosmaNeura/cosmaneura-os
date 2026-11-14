@@ -5,15 +5,25 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 MODULE = Path(__file__).resolve().parents[1]
 RUNTIME = MODULE.parent / "runtime"
+PROD_ROOT = MODULE.parent / "prod"
 spec = importlib.util.spec_from_file_location("bootstrap_host", MODULE / "bootstrap_host.py")
 host = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(host)
+
+guards_spec = importlib.util.spec_from_file_location(
+    "cosmabot_name_guards_for_host", PROD_ROOT / "name_guards.py"
+)
+guards = importlib.util.module_from_spec(guards_spec)
+assert guards_spec.loader is not None
+guards_spec.loader.exec_module(guards)
 
 
 def _ids_for(profile: str) -> tuple[str, str, str]:
@@ -180,10 +190,109 @@ class ProdProfileBootstrap(unittest.TestCase):
         self.assertNotRegex(joined, r"/subscriptions/[0-9a-f-]{36}/")
         self.assertIn(host.SECRETS_TRANSPORT_TICKET, joined)
 
+    def test_prod_unit_ships_systemd_hardening_directives(self):
+        text = (RUNTIME / "cosmabot-prod.service").read_text()
+        for directive in (
+            "NoNewPrivileges=yes",
+            "ProtectSystem=strict",
+            "ProtectHome=yes",
+            "PrivateTmp=yes",
+            "ProtectKernelTunables=yes",
+            "ProtectKernelModules=yes",
+            "ProtectKernelLogs=yes",
+            "ProtectControlGroups=yes",
+            "RestrictSUIDSGID=yes",
+            "LockPersonality=yes",
+            "ReadWritePaths=/var/lib/cosmabot /run/cosmabot",
+            "UMask=0077",
+        ):
+            with self.subTest(directive=directive):
+                self.assertIn(directive, text)
+        # Must stay root for start.sh; omit User=.
+        self.assertNotRegex(text, r"(?m)^User=")
+        self.assertNotIn("PrivateNetwork=yes", text)
+        self.assertNotIn("PrivateDevices=yes", text)
+
+    def test_container_uid_drop_is_in_render_compose_not_systemd_unit(self):
+        # Container UID drop lives in render.py compose (api/worker 10001; data 999),
+        # not in the root systemd unit required by start.sh.
+        source = (RUNTIME / "render.py").read_text()
+        api_block_start = source.index('for service, address in (("api", "10"), ("worker", "11")):')
+        api_block = source[api_block_start:api_block_start + 800]
+        self.assertIn('"user": "10001:10001"', api_block)
+        self.assertIn('"security_opt": ["no-new-privileges:true"]', source)
+        self.assertIn('"user": "999:999"', source)
+        unit = (RUNTIME / "cosmabot-prod.service").read_text()
+        self.assertNotRegex(unit, r"(?m)^User=")
+        self.assertNotIn("User=999", unit)
+        self.assertNotIn("User=10001", unit)
+
+    def test_host_profile_names_stay_in_parity_with_name_guards(self):
+        staging = host.resolve_profile(host.STAGING_PROFILE)
+        production = host.resolve_profile(host.PROD_PROFILE)
+        self.assertEqual(staging["rg"], guards.STAGING["resource_group"])
+        self.assertEqual(staging["vm"], guards.STAGING["vm_name"])
+        self.assertEqual(staging["web_host"], guards.STAGING["web_host"])
+        self.assertEqual(staging["api_host"], guards.STAGING["api_host"])
+        self.assertEqual(production["rg"], guards.PRODUCTION["resource_group"])
+        self.assertEqual(production["vm"], guards.PRODUCTION["vm_name"])
+        self.assertEqual(production["web_host"], guards.PRODUCTION["web_host"])
+        self.assertEqual(production["api_host"], guards.PRODUCTION["api_host"])
+        # Cross-refuse needles must include the other side's RG/VM/hosts.
+        for needle in (
+            guards.STAGING["resource_group"],
+            guards.STAGING["vm_name"],
+            guards.STAGING["web_host"],
+            guards.STAGING["api_host"],
+        ):
+            self.assertIn(needle.lower(), host.forbidden_needles(host.PROD_PROFILE))
+        for needle in (
+            guards.PRODUCTION["resource_group"],
+            guards.PRODUCTION["vm_name"],
+            guards.PRODUCTION["web_host"],
+            guards.PRODUCTION["api_host"],
+        ):
+            self.assertIn(needle.lower(), host.forbidden_needles(host.STAGING_PROFILE))
+
     def test_default_profile_remains_staging(self):
         self.assertEqual(host.resolve_profile(None)["profile"], host.STAGING_PROFILE)
         self.assertEqual(host.RG, host.PROFILES[host.STAGING_PROFILE]["rg"])
         self.assertEqual(host.VM, host.PROFILES[host.STAGING_PROFILE]["vm"])
+
+    def test_argparse_profile_defaults_to_staging(self):
+        staging_vm, staging_disk, _ = _ids_for(host.STAGING_PROFILE)
+        argv = [
+            "bootstrap_host.py",
+            "--vm-id", staging_vm,
+            "--disk-id", staging_disk,
+            "--expected-device", "/dev/sdc",
+            "--creation-receipt", "/tmp/synthetic-receipt.json",
+            "--creation-receipt-sha256", "ab" * 32,
+        ]
+        with patch.object(sys, "argv", argv), patch.object(
+            host, "fresh_host", side_effect=host.Refused("stop-after-parse")
+        ) as fresh:
+            with self.assertRaises(host.Refused) as raised:
+                host.main()
+        self.assertEqual(str(raised.exception), "stop-after-parse")
+        fresh.assert_called_once()
+
+    def test_main_preflight_refuses_cross_environment_before_fresh_host(self):
+        staging_vm, staging_disk, _ = _ids_for(host.STAGING_PROFILE)
+        argv = [
+            "bootstrap_host.py",
+            "--profile", host.PROD_PROFILE,
+            "--vm-id", staging_vm,
+            "--disk-id", staging_disk,
+            "--expected-device", "/dev/sdc",
+            "--creation-receipt", "/tmp/synthetic-receipt.json",
+            "--creation-receipt-sha256", "ab" * 32,
+        ]
+        with patch.object(sys, "argv", argv), patch.object(host, "fresh_host") as fresh:
+            with self.assertRaises(host.Refused) as raised:
+                host.main()
+        self.assertIn("Cross-environment", str(raised.exception))
+        fresh.assert_not_called()
 
     def test_unknown_profile_is_refused(self):
         with self.assertRaises(host.Refused):
@@ -240,6 +349,22 @@ class ProdProfileBootstrap(unittest.TestCase):
                 bad, self.vm, self.disk, self.disk, self.now, profile=host.PROD_PROFILE
             )
 
+    def test_prod_refuses_non_staging_wrong_receipt_profile_field(self):
+        # Mutation target: deleting the explicit profile equality require.
+        # Value is not a staging/prod needle, so cross-refuse alone would miss it.
+        bad = {**self.receipt, "profile": "cosmabot-vm-other-v1"}
+        with self.assertRaises(host.Refused):
+            host.validate_receipt(
+                bad, self.vm, self.disk, self.disk, self.now, profile=host.PROD_PROFILE
+            )
+
+    def test_prod_receipt_without_profile_field_is_accepted(self):
+        receipt = {key: value for key, value in self.receipt.items() if key != "profile"}
+        self.assertNotIn("profile", receipt)
+        host.validate_receipt(
+            receipt, self.vm, self.disk, self.disk, self.now, profile=host.PROD_PROFILE
+        )
+
     def test_prod_receipt_with_staging_unit_field_is_refused(self):
         # Mutation target: deleting refuse_cross_environment from validate_receipt.
         # Prod VM/disk IDs are otherwise valid; only the staging unit name must refuse.
@@ -277,6 +402,68 @@ class ProdProfileBootstrap(unittest.TestCase):
                 host.STAGING_PROFILE,
             ],
         )
+
+    def test_format_mount_creates_empty_postgres_and_redis_dirs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = root / "var-lib-cosmabot"
+            fstab = root / "fstab"
+            fstab_before = root / "fstab.cosmabot-before"
+            fstab.write_bytes(b"# synthetic-fstab\n")
+            fs_uuid = "00000000-0000-4000-8000-000000000099"
+            original_path = host.Path
+            chowns: list[tuple[str, int, int]] = []
+
+            def path_factory(*args, **kwargs):
+                if args and str(args[0]) == "/etc/fstab":
+                    return fstab
+                if args and str(args[0]) == "/etc/fstab.cosmabot-before":
+                    return fstab_before
+                return original_path(*args, **kwargs)
+
+            def fake_run(argv, *, allowed=(0,), timeout=120):
+                if argv[0] == "mkfs.ext4":
+                    return subprocess.CompletedProcess(argv, 0, b"", b"")
+                if argv[:4] == ["blkid", "-s", "UUID", "-o"]:
+                    return subprocess.CompletedProcess(argv, 0, (fs_uuid + "\n").encode(), b"")
+                if argv[0] == "systemctl":
+                    return subprocess.CompletedProcess(argv, 0, b"", b"")
+                if argv[0] == "mount":
+                    data.mkdir(mode=0o700, exist_ok=True)
+                    return subprocess.CompletedProcess(argv, 0, b"", b"")
+                if argv[0] == "findmnt":
+                    payload = {
+                        "filesystems": [{
+                            "target": str(data),
+                            "uuid": fs_uuid,
+                            "fstype": "ext4",
+                        }]
+                    }
+                    return subprocess.CompletedProcess(
+                        argv, 0, json.dumps(payload).encode(), b""
+                    )
+                raise AssertionError("unexpected command: " + " ".join(argv))
+
+            def fake_write_new(path, content, mode=0o600):
+                path = original_path(path)
+                path.write_bytes(content)
+                os.chmod(path, mode)
+
+            with patch.object(host, "DATA", data), patch.object(host, "Path", path_factory), \
+                 patch.object(host, "check_disk", return_value=7), \
+                 patch.object(host, "run", side_effect=fake_run), \
+                 patch.object(host, "write_new", side_effect=fake_write_new), \
+                 patch.object(host.os, "chown", side_effect=lambda p, u, g: chowns.append(
+                     (original_path(p).name, u, g)
+                 )):
+                got = host.format_mount("/dev/sdc", self.receipt, 7)
+            self.assertEqual(got, fs_uuid)
+            self.assertTrue((data / "postgres").is_dir())
+            self.assertTrue((data / "redis").is_dir())
+            self.assertEqual((data / "postgres").stat().st_mode & 0o777, 0o700)
+            self.assertEqual((data / "redis").stat().st_mode & 0o777, 0o700)
+            self.assertIn(("postgres", 999, 999), chowns)
+            self.assertIn(("redis", 999, 999), chowns)
 
 
 if __name__ == "__main__":

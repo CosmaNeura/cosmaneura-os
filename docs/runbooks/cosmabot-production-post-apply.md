@@ -84,7 +84,7 @@ Hands-on only. Exact order:
 | Who | Work |
 | --- | --- |
 | Agents | Read-only verify RG/VM/IP/OpenAI names; draft DNS record text (do not publish) |
-| Agents | **BLOCKED** — prod host-bootstrap retarget (staging unit is `infra/beta/vm/runtime/cosmabot-staging.service`). Do not invent a transport or rename in place. Wait for a **named** ticket/PR that owns the prod unit/receipt retarget. |
+| Agents | Prod host bootstrap tooling and unit **file** exist (T-PROD-2 / `#389`). Do not run staging-hardwired names against prod. Do not install the unit yet (after secrets + acceptance; see After 14:30). |
 | Agents | Advance [`#383`](https://github.com/CosmaNeura/cosmaneura-os/pull/383) toward green; do not merge without John (`#377` / `#381` already Merged) |
 | Agents | Prepare Key Vault **names** checklist and mode-600 password-file instructions for Sitting 2 (John loads; agents never rotate or load vault secrets) |
 | Agents | No Run Command with secrets; no staging changes |
@@ -104,11 +104,12 @@ Hands-on only. Exact order:
 
 Not John's hands-on. Still synthetic; still no staging. **One order** (same as §9 (b)):
 
-1. Host bootstrap / Postgres 16 + Redis on the VM (§3) — run
+1. Host bootstrap on the VM (§3) — run
    `infra/beta/vm/host/bootstrap_host.py --profile cosmabot-vm-prod-v1` with the
    prod creation receipt (`infra/beta/vm/host/creation-receipt.prod.example.json`
-   as the field template) and install `infra/beta/vm/runtime/cosmabot-prod.service`
-   (T-PROD-2-BOOTSTRAP). Do not run staging-hardwired names against prod.
+   as the field template) (T-PROD-2-BOOTSTRAP). The host bootstrap script and
+   `cosmabot-prod.service` **file** exist; do not install or enable the unit
+   yet. Do not run staging-hardwired names against prod.
 2. Install mode-0400 secret files from the names John pasted (§4) — **BLOCKED**
    until a **named** secrets-transport ticket/PR exists. Do not invent a
    transport. Run Command still must not carry secret values.
@@ -123,6 +124,11 @@ Not John's hands-on. Still synthetic; still no staging. **One order** (same as �
 6. §4.1 post-start value-free HTTP status proof against the prod OpenAI
    endpoint (status code only). Then `/ready`, `/version.json`, smoke, eight
    backend switches `'false'` (§8). Admit smoke only after John's separate yes.
+7. After secrets are on the host and acceptance above passes: install
+   `infra/beta/vm/runtime/cosmabot-prod.service` with a root-owned
+   `/etc/cosmabot/active-release` (matches host/runtime READMEs). Leave
+   staging hardwires in render/backup/probe/`start.sh` for the named follow-ups
+   in §9 Other gaps.
 
 External TestFlight still needs **Alfred's go + John's direct yes** (not today).
 
@@ -1297,11 +1303,11 @@ After-14:30 host work):**
    (`--output none`, `test -s`) → Step B list/compare → remove `$KEYFILE` only
    on Step B PASS before closing the vault.
 4. Host prep (agents after Sitting 2 yes) — run prod host bootstrap with
-   `--profile cosmabot-vm-prod-v1` and the prod unit/receipt from
+   `--profile cosmabot-vm-prod-v1` and the prod creation receipt from
    T-PROD-2-BOOTSTRAP (`infra/beta/vm/host/bootstrap_host.py`,
-   `infra/beta/vm/runtime/cosmabot-prod.service`,
-   `infra/beta/vm/host/creation-receipt.prod.example.json`). Matches §1 After
-   14:30 step 1.
+   `infra/beta/vm/host/creation-receipt.prod.example.json`). The
+   `cosmabot-prod.service` **file** exists; install it only after secrets and
+   acceptance (step 10). Matches §1 After 14:30 step 1.
 5. **Install** mode-0400 secret files — **BLOCKED** until a named
    secrets-transport ticket/PR exists (do not invent a transport). Matches §1
    After 14:30 step 2.
@@ -1321,21 +1327,30 @@ After-14:30 host work):**
    `/ready` after DB prepare, secrets loaded, BASE satisfied, `#381`
    availability true for the configured prod host, DNS or local checks OK;
    `/version.json` shows reviewed commit.
+10. After secrets + acceptance: install `cosmabot-prod.service` with
+    `/etc/cosmabot/active-release`. Matches §1 After 14:30 step 7.
 
 ### Other gaps
 
 1. **BLOCKED:** named secrets-transport ticket/PR owns host 0400 install
    (vault is closed after Sitting 2; Run Command must not carry values). Do
    not invent a transport in this runbook.
-2. **BLOCKED:** named prod host-bootstrap retarget ticket/PR (staging unit is
-   `cosmabot-staging.service`). Do not invent a rename here.
-3. Endpoint kind: classic vs Foundry recreate — §7.
-4. Password-name acceptance on prod entrypoint still unverified per `#356`
+2. **Follow-up:** `infra/beta/vm/runtime/render.py` `SCRIPT_NAMES` still lists
+   only `cosmabot-staging.service` (prod unit file exists but is not copied
+   into rendered releases yet).
+3. **Follow-up:** backup units under `infra/beta/vm/backup/` still
+   `Requires=` / `PartOf=` / `After=` `cosmabot-staging.service`.
+4. **Follow-up:** `infra/beta/vm/monitoring/probe.py` still observes
+   `cosmabot-staging.service`.
+5. **Follow-up:** `infra/beta/vm/runtime/start.sh` still hardwires Compose
+   project name `cosmabot-staging`.
+6. Endpoint kind: classic vs Foundry recreate — §7.
+7. Password-name acceptance on prod entrypoint still unverified per `#356`
    guard-hardening notes — prove before admitting testers.
-5. `#356` OpenAI is first-apply-only if omitted from Sitting 1 inputs.
-6. TestFlight blocked until Alfred + John.
-7. Staging ticket files named in the original ask were not in this checkout;
-   this doc mirrors `release-r7` pointer-switch + in-repo host/runtime READMEs.
+8. `#356` OpenAI is first-apply-only if omitted from Sitting 1 inputs.
+9. TestFlight blocked until Alfred + John.
+10. Staging ticket files named in the original ask were not in this checkout;
+    this doc mirrors `release-r7` pointer-switch + in-repo host/runtime READMEs.
 
 ---
 
@@ -1343,10 +1358,10 @@ After-14:30 host work):**
 
 - [ ] Agents: runbook PR green; `#383` watched (`#377` / `#381` Merged)
 - [ ] Sitting 1: plan-hash yes → `#356` apply **or** `#383` `--recover` → IP recorded → Clerk public values sent
-- [ ] Between: agent prep only (no secrets, no staging); bootstrap retarget **BLOCKED** until named ticket/PR
+- [ ] Between: agent prep only (no secrets, no staging); host bootstrap tooling ready (T-PROD-2); do not install prod unit yet
 - [ ] Sitting 2: export `KEYFILE` once → Fence 1 Step A wrapper → pause → rotate wrapper (`pipefail` + `test -s`) → Fence 2 (`test -s`, `--output none`) → pause → Step B (rm `$KEYFILE` only on PASS) → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
 - [ ] §4.3 if interrupted: restore Disabled + empty `ipRules`, print whole list, verify
-- [ ] After 14:30 (= §9 (b) steps 4–9): install (BLOCKED) → checks → flag flip → render/start
+- [ ] After 14:30 (= §9 (b) steps 4–10): host bootstrap → secrets install (BLOCKED until T-PROD-3) → checks → flag flip → render/start → accept → install `cosmabot-prod.service`
 - [ ] §4.1: Fence 1 wrapper (no PASS after STOP); fail-closed rotate; `test -s`; anchored ACCOUNT_ID `^…$`; `--output none`; no key on screen/history
 - [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode; `$APP/public` Clerk key **presence-only**; web `-F` key; staging host class `[a-z0-9.-]+`; baseline **Pending**
 - [ ] `#377` / `#381` Merged; `#383` merged before any recover apply

@@ -384,7 +384,6 @@ def main() -> None:
         install_packages()
         print("Packages installed with services masked; rechecking exact new disk before formatting.", flush=True)
         uuid = format_mount(args.expected_device, receipt, device_number)
-        # postgres/redis dirs under DATA prepare the mount for runtime Postgres 16 + Redis (§3).
         result = {"version": 1, "profile": spec["profile"], "unit": spec["unit"],
                   "vm_id": args.vm_id, "disk_id": args.disk_id, "filesystem_uuid": uuid,
                   "data_mount": str(DATA), "packages": PACKAGES, "creation_receipt_sha256": args.creation_receipt_sha256,
