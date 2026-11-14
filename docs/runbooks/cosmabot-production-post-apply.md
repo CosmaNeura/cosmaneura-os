@@ -1290,9 +1290,9 @@ After-14:30 host work):**
 2. Sitting 1: apply `#356` (RG, VM, OpenAI `gpt-4.1-dzus`).
 3. Sitting 2: John sets mode-600 passwords; pastes KV names including vault
    `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET`
-   (#356 README line 191); §4.1 Step A print account id → umask-077 rotate into
-   `$KEYFILE` → Fence 2 load (`--output none`) → Step B list/compare → remove
-   `$KEYFILE` before closing the vault.
+   (#356 README line 191); §4.1 Step A wrapper → rotate wrapper → Fence 2 load
+   (`--output none`, `test -s`) → Step B list/compare → remove `$KEYFILE` only
+   on Step B PASS before closing the vault.
 4. Host prep (agents after Sitting 2 yes) — prod bootstrap retarget **BLOCKED**
    until a named ticket/PR exists. Matches §1 After 14:30 step 1.
 5. **Install** mode-0400 secret files — **BLOCKED** until a named
@@ -1337,11 +1337,11 @@ After-14:30 host work):**
 - [ ] Agents: runbook PR green; `#383` watched (`#377` / `#381` Merged)
 - [ ] Sitting 1: plan-hash yes → `#356` apply **or** `#383` `--recover` → IP recorded → Clerk public values sent
 - [ ] Between: agent prep only (no secrets, no staging); bootstrap retarget **BLOCKED** until named ticket/PR
-- [ ] Sitting 2: §4.1 Fence 1 Step A → pause → umask-077 rotate into `$KEYFILE` → Fence 2 load (`--output none`) → pause → Fence 3 Step B → `rm -f "$KEYFILE"` → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
+- [ ] Sitting 2: export `KEYFILE` once → Fence 1 Step A wrapper → pause → rotate wrapper (`pipefail` + `test -s`) → Fence 2 (`test -s`, `--output none`) → pause → Step B (rm `$KEYFILE` only on PASS) → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
 - [ ] §4.3 if interrupted: restore Disabled + empty `ipRules`, print whole list, verify
 - [ ] After 14:30 (= §9 (b) steps 4–9): install (BLOCKED) → checks → flag flip → render/start
-- [ ] §4.1: stderr STOPs; ACCOUNT_ID shape; Fence 2 function; `--output none`; no key on screen/history; bash -n + zsh -n proof; HTTP trap restore
-- [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode + `$APP/public` `-F` key; web `-F` key; staging host class `[a-z0-9.-]+`; baseline **Pending**
+- [ ] §4.1: Fence 1 wrapper (no PASS after STOP); fail-closed rotate; `test -s`; anchored ACCOUNT_ID `^…$`; `--output none`; no key on screen/history
+- [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode; `$APP/public` Clerk key **presence-only**; web `-F` key; staging host class `[a-z0-9.-]+`; baseline **Pending**
 - [ ] `#377` / `#381` Merged; `#383` merged before any recover apply
 - [ ] Account-delete vault `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET` (#356 README line 191)
 - [ ] Flags: `WORKSPACE_LLM_BACKEND=azure_gpt41`, `WORKSPACE_LLM_USDZ_ENABLED=true` → `/ready` + `version.json`
