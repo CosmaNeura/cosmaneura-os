@@ -6,11 +6,14 @@ import {applyPreset,replacePresetSlot,upgradeInboxPreset,upgradeMembershipPreset
 import "./team-setup.css";
 
 import type {ReviewedTeamDraft} from './session/model';
+import {remainsUnavailableClause,unavailableInBetaLabel} from './production-review-copy';
 export type {ReviewedTeamDraft} from './session/model';
-export const readinessLabels:Record<ReadinessState,string>={ready_local:"Available locally",available_for_scoped_request:"Scoped request available",
+export function readinessLabels(env:Record<string,string|boolean|undefined>=import.meta.env):Record<ReadinessState,string>{
+  return{ready_local:"Available locally",available_for_scoped_request:"Scoped request available",
   requires_encounter:"Encounter review required",connection_required:"Prerequisite missing",disabled_by_owner:"Disabled by your settings",
-  paused:"Bot paused",retired:"Bot retired",unavailable_in_beta:"Unavailable in this beta",resource_restricted:"Source restricted by your settings",
+  paused:"Bot paused",retired:"Bot retired",unavailable_in_beta:unavailableInBetaLabel(env),resource_restricted:"Source restricted by your settings",
   resource_unavailable:"Selected source unavailable",work_limit_reached:"New model work paused or allowance used"};
+}
 const capabilityLabels:Record<CapabilityId,string>={saved_notebook:"Saved notebook",saved_evidence:"Saved evidence",work_status:"Work status",
   model_answer:"AI answers",private_draft_handoff:"Private bot assignments",practice_work_brief:"Scheduled work briefs",encounter_prep:"Saved intake preparation",
   consented_capture:"Consented recording",clinical_note:"Clinical note",transcript_correction:"Transcript correction",calendar_availability:"Calendar availability",
@@ -21,7 +24,7 @@ export function SetupReadiness({configuration,setup,label}:{configuration:TeamCo
     <p>Availability depends on the current connections and the access you allow. Each action checks its required sources and permissions again.</p>
     {configuration.bots.map(bot=><details key={botAddress(bot)}><summary>{bot.name || "Unnamed coworker"} · {bot.retired?"Retired":bot.enabled?"Configured":"Paused"}</summary>
       <ul>{setup.capabilities.filter(c=>c.bot===botAddress(bot)).map(c=><li key={c.capability}>
-        <div><strong>{capabilityLabels[c.capability]}</strong><span className="team-pill">{readinessLabels[c.state]}</span></div>
+        <div><strong>{capabilityLabels[c.capability]}</strong><span className="team-pill">{readinessLabels()[c.state]}</span></div>
         <p>{c.explanation}</p>
         {c.sources.length>0&&<small>{c.sources.map(s=>s.kind==="runtime"?`Runtime ${s.key}: ${s.enabled?"enabled":"disabled"}`:
           s.kind==="account"?`Account mapping ${s.key}: ${s.state}`:s.kind==="routine"?`Routine revision ${s.revision}: ${s.status.replaceAll("_"," ")}`:
@@ -140,7 +143,7 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
       {chosen&&<div className="team-preset-preview" aria-label={`${chosen.label} preview`}><h3>{chosen.label}</h3>
         <p>{installed?"This group is already in your draft. Names, settings and bot identities are preserved.":`${additions} new coworkers; ${chosen.slots.length-additions} existing coworkers reused. Your AI assistant settings stay as you set them.`}</p>
         <ul>{chosen.slots.map(slot=><li key={slot.slot}><strong>{slot.name}</strong> · {slot.address?"Reuse existing coworker":slot.enabled?"New configured coworker":"New paused coworker"}</li>)}</ul>
-        {chosen.unavailable_capabilities.length>0&&<p>{chosen.unavailable_capabilities.map(c=>capabilityLabels[c]).join(", ")} remains unavailable in this beta. Turning on chat does not connect this operational lane.</p>}
+        {chosen.unavailable_capabilities.length>0&&<p>{chosen.unavailable_capabilities.map(c=>capabilityLabels[c]).join(", ")}{remainsUnavailableClause()}</p>}
         <p>{draft.bots.filter(b=>!b.retired).length+additions} of 12 current coworkers · {draft.bots.length+additions} of 100 retained records.</p>
         {!fits&&<p role="status">This complete group will not fit. Retire an added coworker to make room; retained history is never removed.</p>}
         <button disabled={locked||!!installed||!fits||rehearsing} onClick={add}>Add {chosen.label} to draft</button>

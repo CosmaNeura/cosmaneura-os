@@ -5,6 +5,11 @@ import {fileURLToPath} from 'node:url';
 import {resolve,join} from 'node:path';
 import {workspaceIdentityInputs} from '../../scripts/prepare-workspace-identity.mjs';
 import {REVIEWED_CORE_CAPTURE_ORIGIN} from '../../clients/shared/beta-feature-profile.mjs';
+import {
+  OPERATIONAL_NATIVE_PROFILE,
+  PRODUCTION_NATIVE_PROFILE,
+  STAGING_NATIVE_PROFILE,
+} from '../../clients/shared/operational-native-identity.mjs';
 
 export class Refused extends Error {}
 const refuse=code=>{throw new Refused(code);};
@@ -154,13 +159,12 @@ export function validateInput(value){
   if(web===api)refuse('separate_api_and_web_origins_required');
   const issuer=origin(value.identity?.frontendOrigin);
   if(issuer.endsWith('.invalid')||issuer.endsWith('.localhost')||[web,api].includes(issuer))refuse('separate_explicit_clerk_issuer_required');
-  const staging=value.identity_policy==='shared_staging';
+  const staging=value.identity_policy===STAGING_SESSION_POLICY;
   const reviewHost=value.web_origin===REVIEW_WEB_ORIGIN;
-  const expectedIdentityProfile=staging?'operational-staging-v1'
-    :(reviewHost?'operational-production-v1':'operational-beta-v1');
+  const expectedProfile=staging?STAGING_NATIVE_PROFILE:reviewHost?PRODUCTION_NATIVE_PROFILE:OPERATIONAL_NATIVE_PROFILE;
   const audience=value.identity?.audience;
   if(!['audience','shared_staging'].includes(value.identity_policy)||
-    value.identity?.profile!==expectedIdentityProfile||
+    value.identity?.profile!==expectedProfile||
     value.identity?.apiOrigin!==value.api_origin||
     typeof audience!=='string'||(staging?audience!=='':!/^[\x21-\x7e]{1,255}$/.test(audience)))refuse('explicit_matching_identity_policy_required');
   // Exclusive review: beta.cosmas.ai + audience also requires clerk.beta issuer.

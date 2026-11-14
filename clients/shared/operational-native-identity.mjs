@@ -85,6 +85,8 @@ export function validateOperationalNativeIdentity(value, client, apiOrigin) {
       !['apple', 'desktop'].includes(client) || value.client !== client || value.apiOrigin !== apiOrigin ||
       !exactHostedOrigin(apiOrigin) || !frontendOrigin || !hostAllowed ||
       (production && apiOrigin !== PRODUCTION_API_ORIGIN) ||
+      // PRODUCTION_API_ORIGIN is production-only; beta/staging identities may not carry it.
+      (!production && apiOrigin === PRODUCTION_API_ORIGIN) ||
       !/^[a-z]/.test(hostname.split('.').at(-1)) ||
       typeof value.publishableKey !== 'string' || value.publishableKey.length > 1024 ||
       !value.publishableKey.startsWith(prefix) ||

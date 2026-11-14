@@ -4,6 +4,10 @@ import type {EhrProvider} from './ehr-read-api';
 import {TebraMedicationMount} from './TebraMedicationMount';
 import {AthenaAllergyMount} from './AthenaAllergyMount';
 import {AthenaMedicationMount} from './AthenaMedicationMount';
+import {
+ isProductionReviewProfile,
+ practiceRecordsUnavailableCopy,
+} from './production-review-copy';
 export type RecordsProvider=EhrProvider|'athena';
 export type RecordsProviderRequest={provider:RecordsProvider;intent:object};
 
@@ -37,10 +41,17 @@ export function EhrReadProviders({requestedProvider,...props}:Omit<EhrReadMountP
   if(busy.current.elation||busy.current.tebra||busy.current.athena||props.locked||props.recoveryLocked)return;
   setProvider(next);setVisited(old=>old.includes(next)?old:[...old,next]);
  }
+ const mounts=visited.map(name=><div key={name} hidden={provider!==name}>{name==='athena'?<AthenaRecords {...props} active={props.active!==false&&provider===name} onBusyChange={athenaBusy}/>:name==='tebra'?<TebraRecords {...props} active={props.active!==false&&provider===name} onBusyChange={tebraBusy}/>:<EhrReadMount {...props} provider={name} active={props.active!==false&&provider===name} onBusyChange={elationBusy}/>}</div>);
+ // Production-review: no Records-system tabs and no EHR panel mounts — unavailable line only.
+ if(isProductionReviewProfile()){
+  return <div className="ehr-read-panel" role="status" aria-label="Practice records unavailable">
+   <p>{practiceRecordsUnavailableCopy()}</p>
+  </div>;
+ }
  return <>
   <SegmentedChoice label="Records system" value={provider} disabled={locked} onChange={choose}
    options={[{id:'elation',name:'Elation'},{id:'tebra',name:'Tebra'},{id:'athena',name:'Athena'}]}/>
-  {visited.map(name=><div key={name} hidden={provider!==name}>{name==='athena'?<AthenaRecords {...props} active={props.active!==false&&provider===name} onBusyChange={athenaBusy}/>:name==='tebra'?<TebraRecords {...props} active={props.active!==false&&provider===name} onBusyChange={tebraBusy}/>:<EhrReadMount {...props} provider={name} active={props.active!==false&&provider===name} onBusyChange={elationBusy}/>}</div>)}
+  {mounts}
  </>;
 }
 

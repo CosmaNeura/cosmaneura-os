@@ -18,4 +18,10 @@ describe('assistant copy',()=>{
     expect(showComingSoonConnections({VITE_COMING_SOON_CONNECTIONS_ENABLED:'TRUE'})).toBe(false);
     expect(showComingSoonConnections({VITE_COMING_SOON_CONNECTIONS_ENABLED:'true'})).toBe(true);
   });
+  it('keeps Not available coming-soon cards on production so Review-saved-work stays reachable',()=>{
+    const production={VITE_COMING_SOON_CONNECTIONS_ENABLED:'false',VITE_WORKSPACE_HOSTED_API_ORIGIN:'https://api.beta.cosmas.ai'};
+    const staging={VITE_COMING_SOON_CONNECTIONS_ENABLED:'true',VITE_WORKSPACE_HOSTED_API_ORIGIN:'https://api.staging.cosmas.ai'};
+    expect(showComingSoonConnections(production)).toBe(true);
+    expect(showComingSoonConnections(staging)).toBe(true);
+  });
 });
