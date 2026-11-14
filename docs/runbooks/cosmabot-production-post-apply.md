@@ -106,9 +106,9 @@ Not John's hands-on. Still synthetic; still no staging. **One order** (same as �
 
 1. Host bootstrap / Postgres 16 + Redis on the VM (§3) — only after the named
    prod bootstrap retarget ticket/PR exists (**BLOCKED** until then).
-2. Install mode-0400 secret files from the names John pasted (§4) — **BLOCKED**
-   until a **named** secrets-transport ticket/PR exists. Do not invent a
-   transport. Run Command still must not carry secret values.
+2. Install mode-0400 secret files from the names John pasted (§4) with
+   `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS). Run Command
+   still must not carry secret values (tooling refuses that path).
 3. Deploy-time STOP checks: §4.1 (remaining host/post-start proofs) and §4.2
    (bundle API origins). On any mismatch: **STOP and roll back** — do not flip
    AI-on flags, do not start API/worker with model traffic.
@@ -203,7 +203,10 @@ value himself. No Clerk secret values in this runbook.
 
 `WORKSPACE-LLM-API-KEY` is **John-only** in Sitting 2 (rotate + load with
 `source-account` tag). Agents never rotate or load. Host install of the
-`WORKSPACE_LLM_API_KEY` file waits on the named secrets-transport ticket/PR.
+`WORKSPACE_LLM_API_KEY` file (and the other §4 name-mapped secrets) uses
+`infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): release-operator
+vault read → mode-0400 service-UID host files; Run Command refused; values
+never printed.
 
 ### Clerk public values (Sitting 1)
 
@@ -507,7 +510,7 @@ cosmabot_llm_kv_step_b_verify_tag || {
 Then restore `publicNetworkAccess=Disabled` and empty `ipRules` (Sitting 2
 gate). If the session is interrupted, jump to §4.3 first.
 
-#### After host install (when secrets-transport ticket/PR exists) — file name/mode only
+#### After host install (`infra/beta/vm/host/secrets_transport.py`) — file name/mode only
 
 **Shell:** bash on the Linux VM (`stat -c`). Chain every check with `|| return 1`.
 
@@ -1295,9 +1298,10 @@ After-14:30 host work):**
    on Step B PASS before closing the vault.
 4. Host prep (agents after Sitting 2 yes) — prod bootstrap retarget **BLOCKED**
    until a named ticket/PR exists. Matches §1 After 14:30 step 1.
-5. **Install** mode-0400 secret files — **BLOCKED** until a named
-   secrets-transport ticket/PR exists (do not invent a transport). Matches §1
-   After 14:30 step 2.
+5. **Install** mode-0400 secret files with
+   `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): names from
+   §4, release-operator vault read (not the runtime UAMI), service-UID
+   ownership, mode 0400, Run Command refused. Matches §1 After 14:30 step 2.
 6. **STOP checks** before AI-on: §4.1 (host files) and §4.2 (exact
    `https://api.beta.cosmas.ai` + Clerk issuer/publishable key on Info.plist /
    JSON; scan `$APP/public` only; refuse configured staging API origin forms;
@@ -1317,9 +1321,10 @@ After-14:30 host work):**
 
 ### Other gaps
 
-1. **BLOCKED:** named secrets-transport ticket/PR owns host 0400 install
-   (vault is closed after Sitting 2; Run Command must not carry values). Do
-   not invent a transport in this runbook.
+1. Host 0400 install: use `infra/beta/vm/host/secrets_transport.py`
+   (T-PROD-3-SECRETS). Vault is closed after Sitting 2; reopen only under the
+   existing release-operator path (or temporary public-access window). Run
+   Command must not carry values (tooling refuses that path).
 2. **BLOCKED:** named prod host-bootstrap retarget ticket/PR (staging unit is
    `cosmabot-staging.service`). Do not invent a rename here.
 3. Endpoint kind: classic vs Foundry recreate — §7.
@@ -1339,7 +1344,7 @@ After-14:30 host work):**
 - [ ] Between: agent prep only (no secrets, no staging); bootstrap retarget **BLOCKED** until named ticket/PR
 - [ ] Sitting 2: export `KEYFILE` once → Fence 1 Step A wrapper → pause → rotate wrapper (`pipefail` + `test -s`) → Fence 2 (`test -s`, `--output none`) → pause → Step B (rm `$KEYFILE` only on PASS) → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
 - [ ] §4.3 if interrupted: restore Disabled + empty `ipRules`, print whole list, verify
-- [ ] After 14:30 (= §9 (b) steps 4–9): install (BLOCKED) → checks → flag flip → render/start
+- [ ] After 14:30 (= §9 (b) steps 4–9): install via `secrets_transport.py` → checks → flag flip → render/start
 - [ ] §4.1: Fence 1 wrapper (no PASS after STOP); fail-closed rotate; `test -s`; anchored ACCOUNT_ID `^…$`; `--output none`; no key on screen/history
 - [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode; `$APP/public` Clerk key **presence-only**; web `-F` key; staging host class `[a-z0-9.-]+`; baseline **Pending**
 - [ ] `#377` / `#381` Merged; `#383` merged before any recover apply
