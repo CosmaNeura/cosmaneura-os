@@ -106,9 +106,11 @@ Not John's hands-on. Still synthetic; still no staging. **One order** (same as �
 
 1. Host bootstrap / Postgres 16 + Redis on the VM (§3) — only after the named
    prod bootstrap retarget ticket/PR exists (**BLOCKED** until then).
-2. Install mode-0400 secret files from the names John pasted (§4) — **BLOCKED**
-   until a **named** secrets-transport ticket/PR exists. Do not invent a
-   transport. Run Command still must not carry secret values.
+2. Install mode-0400 secret files from the names John pasted (§4) with
+   `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): workstation
+   stage under `/32`, then §4.5 temporary SSH `/32` open → ssh-stdin install
+   (no VM value staging) → close-and-verify (John, 14 Nov 2026 9:45am ET).
+   Run Command must not carry secret values (host-key public fetch only).
 3. Deploy-time STOP checks: §4.1 (remaining host/post-start proofs) and §4.2
    (bundle API origins). On any mismatch: **STOP and roll back** — do not flip
    AI-on flags, do not start API/worker with model traffic.
@@ -203,7 +205,14 @@ value himself. No Clerk secret values in this runbook.
 
 `WORKSPACE-LLM-API-KEY` is **John-only** in Sitting 2 (rotate + load with
 `source-account` tag). Agents never rotate or load. Host install of the
-`WORKSPACE_LLM_API_KEY` file waits on the named secrets-transport ticket/PR.
+`WORKSPACE_LLM_API_KEY` file (and the other §4 name-mapped secrets) uses
+`infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): workstation
+`--stage-from-vault` under John's vault `/32` window → §4.5 temporary SSH
+`/32` open → ssh-stdin install (no VM value staging) → close-and-verify →
+mode-0400 service-UID host files; Run Command refused for values (host-key
+public fetch only); no Secrets Officer `az login` on the VM; no Bastion;
+values never printed. Restore vault per §4.3; SSH close-and-verify per §4.5
+(mandatory before any Terraform plan/apply).
 
 ### Clerk public values (Sitting 1)
 
@@ -537,7 +546,7 @@ Then restore `publicNetworkAccess=Disabled` and empty `ipRules` (Sitting 2
 gate). If the session is interrupted or abandoned, jump to §4.3 first
 (including the abandon `$KEYFILE` cleanup).
 
-#### After host install (when secrets-transport ticket/PR exists) — file name/mode only
+#### After host install (`infra/beta/vm/host/secrets_transport.py`) — file name/mode only
 
 **Shell:** bash on the Linux VM (`stat -c`). Chain every check with `|| return 1`.
 
@@ -1159,6 +1168,64 @@ cosmabot_abandon_sitting_keyfile_cleanup || {
 Do not continue Sitting 2 secret work until the vault-closed verify passes.
 If abandoning, run the `$KEYFILE` cleanup before leaving the machine.
 
+### 4.5 Temporary SSH `/32` for secrets install (John, 14 Nov 2026 9:45am ET)
+
+John: "Yes, open sign-in to my address for the install, then close it."
+
+No Bastion. No Secrets Officer `az login` on the VM. No permanent NSG/Terraform
+change. Fixed rule name `TEMP-JOHN-SSH-SECRETS-INSTALL`, priority `200`
+(before `deny-all-other-ingress` at `4000`), NSG `nsg-cosmabot-prod-eus2-01`,
+RG `rg-cosmabot-prod-eus2-01`. Detect John's IP with
+`curl -fsS https://api.ipify.org` (prints IP only). Create uses `--output none`.
+
+**No secret values on the prod disk outside final mode-0400 destinations.**
+Workstation stages under a local mode-700 dir; install pipes each value over
+`ssh` stdin into `secrets_transport.py --install-from-stdin` as root (umask
+077). Do not `scp` secret values. Do not stage under `/tmp` or `/root` on the
+VM. Ship the module only; verify `sha256` against
+`infra/beta/vm/host/secrets_transport.sha256` before running. Pin the VM
+ed25519 host key via `az vm run-command` (public key only) into a per-session
+`known_hosts`; `ssh` uses `StrictHostKeyChecking=yes`.
+
+**Close-and-verify is MANDATORY after every outcome**, including STOP mid-way
+and SIGINT. An out-of-band NSG rule shows as drift on the next Terraform plan —
+finish close-and-verify before any plan or apply. Close requires deny-all at
+priority `4000`, Python `--check-ssh-closed`, and an SSH probe that PASSes only
+on connection refused or timeout (auth failure = still reachable = FAIL).
+
+Define-only fence files (no `#` comment lines; sourcing has zero side effects)
+live in `infra/beta/vm/host/fences/`:
+
+| Step | Fence file |
+| --- | --- |
+| OPEN | `fence-ssh-nsg-open.sh` → `cosmabot_ssh_nsg_open` |
+| INSTALL | `fence-ssh-secrets-install.sh` → `cosmabot_ssh_secrets_install` |
+| CLOSE AND VERIFY | `fence-ssh-nsg-close-verify.sh` → `cosmabot_ssh_nsg_close_and_verify` |
+| Session (always closes) | `fence-ssh-secrets-session.sh` → `cosmabot_ssh_secrets_session` |
+| Terminal closed partway | `fence-ssh-nsg-recovery.sh` → `cosmabot_ssh_nsg_recovery_if_stranded` |
+
+**Order:** source the open/install/close fences, then invoke the session
+wrapper (it traps EXIT/INT/TERM/ERR so close-and-verify always runs):
+
+```text
+export RG=rg-cosmabot-prod-eus2-01 VM_PUBLIC_IP=… RELEASE_ID=… LOCAL_STAGING=… PROD_KV_NAME=… SECRETS_TRANSPORT_PY=…/secrets_transport.py
+source infra/beta/vm/host/fences/fence-ssh-nsg-open.sh
+source infra/beta/vm/host/fences/fence-ssh-secrets-install.sh
+source infra/beta/vm/host/fences/fence-ssh-nsg-close-verify.sh
+source infra/beta/vm/host/fences/fence-ssh-secrets-session.sh
+cosmabot_ssh_secrets_session
+```
+
+Sourcing alone must never open or close the NSG rule. Secrets stay with John;
+fences print names / rule metadata / pass-fail only.
+
+#### Terminal closed partway — recovery
+
+If the session dies while `TEMP-JOHN-SSH-SECRETS-INSTALL` may still exist, source
+and invoke `cosmabot_ssh_nsg_recovery_if_stranded` (deletes the rule by fixed
+name, verifies absence + deny-all at 4000, removes stranded local staging).
+Then do not plan/apply until that PASS prints.
+
 ### 4.4 Mac-side fence syntax proof
 
 Every pasteable bash fence in §4.1–§4.3 (ten fences: Step A, rotate,
@@ -1357,9 +1424,13 @@ After-14:30 host work):**
    before closing the vault.
 4. Host prep (agents after Sitting 2 yes) — prod bootstrap retarget **BLOCKED**
    until a named ticket/PR exists. Matches §1 After 14:30 step 1.
-5. **Install** mode-0400 secret files — **BLOCKED** until a named
-   secrets-transport ticket/PR exists (do not invent a transport). Matches §1
-   After 14:30 step 2.
+5. **Install** mode-0400 secret files with
+   `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): names from
+   §4; workstation stage under John's vault `/32` window (not the runtime
+   UAMI); §4.5 temporary SSH `/32` open → ssh-stdin install (sha256-pinned
+   module; no VM `/tmp`/`/root` value staging) → close-and-verify;
+   service-UID ownership; mode 0400; Run Command refused for values. Matches
+   §1 After 14:30 step 2.
 6. **STOP checks** before AI-on: §4.1 (host files) and §4.2 (exact
    `https://api.beta.cosmas.ai` + Clerk issuer/publishable key on Info.plist /
    JSON; scan `$APP/public` only; refuse configured staging API origin forms;
@@ -1379,9 +1450,13 @@ After-14:30 host work):**
 
 ### Other gaps
 
-1. **BLOCKED:** named secrets-transport ticket/PR owns host 0400 install
-   (vault is closed after Sitting 2; Run Command must not carry values). Do
-   not invent a transport in this runbook.
+1. Host 0400 install: use `infra/beta/vm/host/secrets_transport.py`
+   (T-PROD-3-SECRETS). Vault is closed after Sitting 2; workstation
+   `--stage-from-vault` uses a temporary vault `/32` window then §4.3
+   restore. SSH install uses §4.5 temporary NSG `/32` rule then
+   close-and-verify (mandatory before any plan/apply). Do not `az login`
+   as Secrets Officer on the VM. No Bastion. Run Command must not carry
+   values.
 2. **BLOCKED:** named prod host-bootstrap retarget ticket/PR (staging unit is
    `cosmabot-staging.service`). Do not invent a rename here.
 3. Endpoint kind: classic vs Foundry recreate — §7.
@@ -1401,7 +1476,7 @@ After-14:30 host work):**
 - [ ] Between: agent prep only (no secrets, no staging); bootstrap retarget **BLOCKED** until named ticket/PR
 - [ ] Sitting 2: export `KEYFILE` once → Fence 1 Step A wrapper → pause → rotate wrapper (`pipefail` + `test -s`; `key1` only) → Fence 2 (`test -s`, `--output none`) → pause → Step B (tag proof; rm `$KEYFILE` on PASS and STOP fail-safe) → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
 - [ ] §4.3 if interrupted/abandoned: restore Disabled + empty `ipRules`, print whole list, verify, then abandon `$KEYFILE` cleanup
-- [ ] After 14:30 (= §9 (b) steps 4–9): install (BLOCKED) → checks → flag flip → render/start
+- [ ] After 14:30 (= §9 (b) steps 4–9): install via `secrets_transport.py` + §4.5 SSH open/install/close-and-verify → checks → flag flip → render/start
 - [ ] §4.1: Fence 1 wrapper (no PASS after STOP); fail-closed rotate (`key1` only; `key2` later); `test -s`; anchored ACCOUNT_ID `^…$`; `--output none`; Step B tag-only; no key on screen/history
 - [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode; `$APP/public` Clerk key **presence-only**; web `-F` key; staging host class `[a-z0-9.-]+`; baseline **Pending**
 - [ ] `#377` / `#381` Merged; `#383` merged before any recover apply

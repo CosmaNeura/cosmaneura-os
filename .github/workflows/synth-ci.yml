@@ -353,7 +353,7 @@ jobs:
         run: tofu init -backend=false -input=false && tofu validate -no-color && tofu test -no-color
       - name: Deployment guard shell tests
         run: |
-          bash -n infra/beta/*.sh infra/beta/tests/*.sh
+          bash -n infra/beta/*.sh infra/beta/tests/*.sh infra/beta/vm/host/fences/*.sh
           bash infra/beta/tests/deployment-guards.sh
       - name: Enrollment configuration contract
         run: |
