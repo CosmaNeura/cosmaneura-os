@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "source": "azure-arm-disk-and-vm-get",
+  "profile": "cosmabot-vm-prod-v1",
+  "vm_id": "<actual full new VM ARM resource ID for vm-cosmabot-prod-eus2-01 in rg-cosmabot-prod-eus2-01>",
+  "vm_instance_id": "<actual VM properties.vmId UUID>",
+  "disk_id": "<actual full new data disk ARM resource ID for data-vm-cosmabot-prod-eus2-01>",
+  "disk_unique_id": "<actual managed disk properties.uniqueId UUID>",
+  "managed_by_vm_id": "<actual disk managedBy matching vm_id>",
+  "create_option": "Empty",
+  "size_gib": 128,
+  "lun": 0,
+  "apply_started_utc": "<recorded start of this reviewed apply, ISO8601 with timezone>",
+  "disk_created_utc": "<actual disk timeCreated, ISO8601 with timezone>",
+  "apply_completed_utc": "<recorded successful end of this apply, ISO8601 with timezone>",
+  "notes": [
+    "Operator-filled provenance only. Replace every angle-bracket placeholder before use.",
+    "Never commit real subscription IDs, public IPs, or secret values.",
+    "Secret file install onto the host is T-PROD-3 (names only here)."
+  ]
+}

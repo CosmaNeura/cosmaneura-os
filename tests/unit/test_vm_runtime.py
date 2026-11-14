@@ -248,6 +248,24 @@ def test_only_proxy_adds_capability_required_by_official_caddy(installed):
     assert "https_port 8443" in vm.caddy(config)
 
 
+def test_compose_drops_container_uids_for_api_worker_and_data(installed):
+    """UID drop is in rendered compose structure, not the root systemd unit."""
+    config, root, output = installed
+    services = vm.compose(config, output, root, Path("/var/lib/cosmabot"))["services"]
+    assert services["api"]["user"] == "10001:10001"
+    assert services["worker"]["user"] == "10001:10001"
+    assert services["postgres"]["user"] == "999:999"
+    assert services["redis"]["user"] == "999:999"
+    assert services["proxy"]["user"] == "10001:10001"
+    unit = (RUNTIME / "cosmabot-prod.service").read_text()
+    active = {
+        line.split("=", 1)[0].strip()
+        for line in unit.splitlines()
+        if line.strip() and not line.strip().startswith("#") and "=" in line
+    }
+    assert "User" not in active
+
+
 @pytest.mark.parametrize("version", [1, 2])
 def test_backup_profile_preserves_app_access_and_binds_rendered_files(installed, version):
     config, root, output = installed
