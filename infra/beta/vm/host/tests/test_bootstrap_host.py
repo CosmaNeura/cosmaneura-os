@@ -227,6 +227,7 @@ class ProdProfileBootstrap(unittest.TestCase):
             "UMask": "0077",
             "RuntimeDirectory": "cosmabot",
             "RuntimeDirectoryMode": "0700",
+            "RuntimeDirectoryPreserve": "yes",
         }
         for key, value in expected.items():
             with self.subTest(key=key):
@@ -247,6 +248,15 @@ class ProdProfileBootstrap(unittest.TestCase):
         self.assertTrue(
             any(
                 line.strip() == "RuntimeDirectory=cosmabot"
+                for line in text.splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            )
+        )
+        # Mutation target: dropping RuntimeDirectoryPreserve=yes lets systemd wipe
+        # /run/cosmabot (and runtime.lock) on stop/fail/restart.
+        self.assertTrue(
+            any(
+                line.strip() == "RuntimeDirectoryPreserve=yes"
                 for line in text.splitlines()
                 if line.strip() and not line.strip().startswith("#")
             )
@@ -441,14 +451,69 @@ class ProdProfileBootstrap(unittest.TestCase):
             profile=host.STAGING_PROFILE,
         )
 
+    def test_staging_receipt_with_matching_profile_field_is_accepted(self):
+        staging_vm, staging_disk, _ = _ids_for(host.STAGING_PROFILE)
+        receipt = {
+            "version": 1, "source": "azure-arm-disk-and-vm-get",
+            "profile": host.STAGING_PROFILE,
+            "vm_id": staging_vm, "disk_id": staging_disk, "managed_by_vm_id": staging_vm,
+            "create_option": "Empty", "size_gib": 128, "lun": 0,
+            "disk_unique_id": "00000000-0000-4000-8000-000000000024",
+            "vm_instance_id": "00000000-0000-4000-8000-000000000025",
+            "apply_started_utc": "2026-09-25T19:00:00Z",
+            "disk_created_utc": "2026-09-25T19:02:00Z",
+            "apply_completed_utc": "2026-09-25T19:05:00Z",
+        }
+        host.validate_receipt(
+            receipt, staging_vm, staging_disk, staging_disk, self.now,
+            profile=host.STAGING_PROFILE,
+        )
+
+    def test_staging_receipt_with_non_prod_mismatched_profile_is_refused(self):
+        # Mutation target: deleting the staging elif profile equality require.
+        staging_vm, staging_disk, _ = _ids_for(host.STAGING_PROFILE)
+        receipt = {
+            "version": 1, "source": "azure-arm-disk-and-vm-get",
+            "profile": "cosmabot-vm-other-v1",
+            "vm_id": staging_vm, "disk_id": staging_disk, "managed_by_vm_id": staging_vm,
+            "create_option": "Empty", "size_gib": 128, "lun": 0,
+            "disk_unique_id": "00000000-0000-4000-8000-000000000026",
+            "vm_instance_id": "00000000-0000-4000-8000-000000000027",
+            "apply_started_utc": "2026-09-25T19:00:00Z",
+            "disk_created_utc": "2026-09-25T19:02:00Z",
+            "apply_completed_utc": "2026-09-25T19:05:00Z",
+        }
+        with self.assertRaises(host.Refused):
+            host.validate_receipt(
+                receipt, staging_vm, staging_disk, staging_disk, self.now,
+                profile=host.STAGING_PROFILE,
+            )
+
     def test_prod_receipt_with_staging_unit_field_is_refused(self):
-        # Mutation target: deleting refuse_cross_environment from validate_receipt.
+        # Mutation target: deleting the receipt unit equality require.
         # Prod VM/disk IDs are otherwise valid; only the staging unit name must refuse.
         bad = {**self.receipt, "unit": host.PROFILES[host.STAGING_PROFILE]["unit"]}
         with self.assertRaises(host.Refused):
             host.validate_receipt(
                 bad, self.vm, self.disk, self.disk, self.now, profile=host.PROD_PROFILE
             )
+
+    def test_receipt_unit_field_uses_equality_not_substring(self):
+        # Mutation target: reverting unit check to substring-only cross-env needles
+        # would accept a wrong unit that does not embed the other environment name.
+        wrong = {**self.receipt, "unit": "cosmabot-other.service"}
+        self.assertNotIn(
+            host.PROFILES[host.STAGING_PROFILE]["unit"].lower(),
+            wrong["unit"].lower(),
+        )
+        with self.assertRaises(host.Refused):
+            host.validate_receipt(
+                wrong, self.vm, self.disk, self.disk, self.now, profile=host.PROD_PROFILE
+            )
+        good = {**self.receipt, "unit": host.PROFILES[host.PROD_PROFILE]["unit"]}
+        host.validate_receipt(
+            good, self.vm, self.disk, self.disk, self.now, profile=host.PROD_PROFILE
+        )
 
     def test_cross_refuse_catches_embedded_other_environment_name(self):
         # Mutation target: equality-only checks would miss path embeds.

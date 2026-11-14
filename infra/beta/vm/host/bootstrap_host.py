@@ -124,7 +124,7 @@ def validate_receipt(value: dict, vm_id: str, disk_id: str, approval: str | None
     require(isinstance(value, dict), "Creation receipt must be an object")
     receipt_strings = [vm_id, disk_id, approval]
     receipt_strings.extend(
-        str(value[key]) for key in ("vm_id", "disk_id", "managed_by_vm_id", "profile", "unit")
+        str(value[key]) for key in ("vm_id", "disk_id", "managed_by_vm_id", "profile")
         if key in value and value[key] is not None
     )
     refuse_cross_environment(spec["profile"], receipt_strings)
@@ -151,6 +151,10 @@ def validate_receipt(value: dict, vm_id: str, disk_id: str, approval: str | None
         )
     elif "profile" in value:
         require(value.get("profile") == spec["profile"], "Creation receipt profile does not match")
+    # Unit field uses equality (not substring): a distinct wrong unit name must refuse
+    # even when it does not embed the other environment's unit needle.
+    if "unit" in value:
+        require(value.get("unit") == spec["unit"], "Creation receipt unit does not match")
     require(value.get("create_option") == "Empty" and value.get("size_gib") == 128
             and value.get("lun") == 0, "Only the new Empty 128 GiB LUN 0 disk is accepted")
     require(re.fullmatch(r"[0-9a-f-]{36}", value.get("disk_unique_id", ""), re.I) is not None

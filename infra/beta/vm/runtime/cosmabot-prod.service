@@ -13,8 +13,11 @@ RemainAfterExit=yes
 EnvironmentFile=/etc/cosmabot/active-release
 # /run is tmpfs; create /run/cosmabot before ExecStart so ProtectSystem=strict
 # + ReadWritePaths does not fail with 226/NAMESPACE after reboot.
+# Preserve across stop/fail/restart so start.sh's runtime.lock is not deleted
+# while prepare/migration may still hold it.
 RuntimeDirectory=cosmabot
 RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
 ExecStart=/bin/sh ${RELEASE_DIR}/start.sh ${RELEASE_DIR} run
 ExecStop=/bin/sh ${RELEASE_DIR}/start.sh ${RELEASE_DIR} stop
 TimeoutStartSec=240

@@ -69,11 +69,13 @@ python3 bootstrap_host.py --profile cosmabot-vm-staging-v1 --vm-id <actual-vm-id
 python3 bootstrap_host.py --profile cosmabot-vm-prod-v1 --vm-id <actual-vm-id> --disk-id <actual-disk-id> --expected-device <observed-lun0-device> --creation-receipt <root-owned-receipt.json> --creation-receipt-sha256 <reviewed-sha256> --format-new-empty-disk <same-exact-disk-id>
 ```
 
-The prod unit **file** is `infra/beta/vm/runtime/cosmabot-prod.service`. Install and
-enable it only after secrets are on the host and runtime acceptance (same order as
-the staging runtime README). Do not rename or reuse `cosmabot-staging.service`.
-Container UID drop stays in `render.py` compose (`user: 10001:10001` / `999:999`),
-not in the systemd unit (which must stay root for `start.sh`).
+The prod unit **file** is `infra/beta/vm/runtime/cosmabot-prod.service`. Place it
+only after secrets are on the host and runtime acceptance (same order as the
+staging runtime README). **Do NOT enable** `cosmabot-prod.service` until
+**T-PROD-5** (backup units) and **T-PROD-6** (probe) retarget are merged. Do not
+rename or reuse `cosmabot-staging.service`. Container UID drop stays in
+`render.py` compose (`user: 10001:10001` / `999:999`), not in the systemd unit
+(which must stay root for `start.sh`).
 
 Omitting the final flag or naming any other disk refuses formatting. Formatting
 uses ext4 without a force flag. The script mounts by its newly created UUID at

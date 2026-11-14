@@ -129,7 +129,14 @@ Not John's hands-on. Still synthetic; still no staging. **One order** (same as �
    `/etc/cosmabot/active-release` (matches host/runtime READMEs). **Do NOT
    enable** `cosmabot-prod.service` until **T-PROD-5** (backup units) and
    **T-PROD-6** (probe) retarget are merged. Leave staging hardwires in render /
-   `start.sh` for the other named follow-ups in §9 Other gaps.
+   `start.sh` for the other named follow-ups in §9 Other gaps. Once enabling is
+   allowed: `systemctl start cosmabot-prod.service`, then
+   `systemctl restart cosmabot-prod.service`, then reboot, then confirm
+   `systemctl is-active cosmabot-prod.service` and that `/run/cosmabot` exists.
+   Note: `host-preflight.py`'s `mountpoint -q /var/lib/cosmabot` is not
+   trustworthy under the unit's `ReadWritePaths` (bind-mount visibility); the
+   operator runs `findmnt /var/lib/cosmabot` **outside** the unit to prove the
+   data disk mount.
 
 External TestFlight still needs **Alfred's go + John's direct yes** (not today).
 
@@ -1393,7 +1400,13 @@ After-14:30 host work):**
 10. After secrets + acceptance: place `cosmabot-prod.service` with
     `/etc/cosmabot/active-release`, but **do NOT enable** it until **T-PROD-5**
     (backup units) and **T-PROD-6** (probe) are merged. Matches §1 After 14:30
-    step 7.
+    step 7. Once enabling is allowed: `systemctl start cosmabot-prod.service`,
+    then `systemctl restart cosmabot-prod.service`, then reboot, then confirm
+    `systemctl is-active cosmabot-prod.service` and that `/run/cosmabot` exists.
+    Note: `host-preflight.py`'s `mountpoint -q /var/lib/cosmabot` is not
+    trustworthy under the unit's `ReadWritePaths` (bind-mount visibility); the
+    operator runs `findmnt /var/lib/cosmabot` **outside** the unit to prove the
+    data disk mount.
 
 ### Other gaps
 
