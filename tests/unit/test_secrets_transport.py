@@ -169,8 +169,11 @@ def test_plan_lines_never_echo_module_trap(monkeypatch):
     mappings = transport.resolve_mappings(["HUMAN-DEPLOY-EVIDENCE-REF"])
     text = "\n".join(transport.plan_lines(mappings))
     assert "HUMAN-DEPLOY-EVIDENCE-REF" in text
-    assert "PENDING_JOHN_DECISION" in text
+    assert transport.TEMP_SSH_NSG_RULE_NAME in text
+    assert "temp_ssh_nsg_rule_john_32" in text
+    assert "close_and_verify=mandatory_before_terraform_plan_or_apply" in text
     assert "vm_az_login_as_secrets_officer=forbidden" in text
+    assert "PENDING_JOHN_DECISION" not in text
     _assert_canary_absent(text)
 
 
@@ -411,7 +414,8 @@ def test_cleanup_private_dir_removes_staged_canary(tmp_path):
 def test_no_vm_az_login_variant_in_source_or_help():
     source = MODULE_PATH.read_text()
     assert "vm_az_login_as_secrets_officer=forbidden" in source
-    assert "PENDING_JOHN_DECISION" in source
+    assert transport.TEMP_SSH_NSG_RULE_NAME in source
+    assert "PENDING_JOHN_DECISION" not in source
     assert "Secrets Officer token" in source
     assert "--from-vault" not in source
     assert "emit-host-script" not in source
@@ -425,7 +429,155 @@ def test_no_vm_az_login_variant_in_source_or_help():
     text = help_out.getvalue() + err.getvalue()
     assert "stage-from-vault" in text
     assert "Workstation only" in text
+    assert "ack-close-and-verify" in text
     assert "az login as" not in text.lower()
+
+
+def _baseline_nsg_rules(*, with_temp: bool = True) -> list[dict]:
+    rules = [
+        {"name": "https", "port": "443", "access": "Allow", "priority": 100},
+        {
+            "name": "acme-http-and-https-redirect",
+            "port": "80",
+            "access": "Allow",
+            "priority": 110,
+        },
+        {
+            "name": transport.DENY_ALL_INGRESS_RULE_NAME,
+            "port": "*",
+            "access": "Deny",
+            "priority": transport.DENY_ALL_INGRESS_PRIORITY,
+        },
+    ]
+    if with_temp:
+        rules.insert(
+            2,
+            {
+                "name": transport.TEMP_SSH_NSG_RULE_NAME,
+                "port": "22",
+                "access": "Allow",
+                "priority": transport.TEMP_SSH_NSG_RULE_PRIORITY,
+            },
+        )
+    return rules
+
+
+def test_temp_ssh_rule_name_and_priority_constants():
+    assert transport.TEMP_SSH_NSG_RULE_NAME == "TEMP-JOHN-SSH-SECRETS-INSTALL"
+    assert transport.TEMP_SSH_NSG_RULE_PRIORITY == 200
+    assert transport.TEMP_SSH_NSG_RULE_PRIORITY < transport.DENY_ALL_INGRESS_PRIORITY
+    assert transport.PROD_NSG_NAME == "nsg-cosmabot-prod-eus2-01"
+
+
+def test_require_temp_ssh_rule_open_and_closed():
+    open_rules = _baseline_nsg_rules(with_temp=True)
+    transport.require_temp_ssh_rule_open(open_rules)
+    closed_rules = _baseline_nsg_rules(with_temp=False)
+    transport.require_temp_ssh_rule_closed(closed_rules)
+
+
+def test_require_temp_ssh_rule_open_refuses_missing():
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_missing"):
+        transport.require_temp_ssh_rule_open(_baseline_nsg_rules(with_temp=False))
+
+
+def test_require_ssh_install_ready_refuses_without_ack():
+    with pytest.raises(transport.Refused, match="close_and_verify_ack_required"):
+        transport.require_ssh_install_ready(
+            nsg_rules=_baseline_nsg_rules(with_temp=True),
+            close_verify_acked=False,
+        )
+
+
+def test_require_ssh_install_ready_refuses_when_rule_absent():
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_missing"):
+        transport.require_ssh_install_ready(
+            nsg_rules=_baseline_nsg_rules(with_temp=False),
+            close_verify_acked=True,
+        )
+
+
+def test_cli_check_ssh_install_ready_requires_ack_and_rule(tmp_path):
+    rules_path = tmp_path / "rules.json"
+    rules_path.write_text(
+        __import__("json").dumps(_baseline_nsg_rules(with_temp=True)),
+        encoding="utf-8",
+    )
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = transport.main(
+            [
+                "--profile",
+                transport.PROFILE,
+                "--resource-group",
+                transport.RESOURCE_GROUP,
+                "--vault-name",
+                "kv-cbot-prd-lab01",
+                "--check-ssh-install-ready",
+                "--nsg-rules-json",
+                str(rules_path),
+            ]
+        )
+    assert code == 1
+    assert "close_and_verify_ack_required" in err.getvalue()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = transport.main(
+            [
+                "--profile",
+                transport.PROFILE,
+                "--resource-group",
+                transport.RESOURCE_GROUP,
+                "--vault-name",
+                "kv-cbot-prd-lab01",
+                "--check-ssh-install-ready",
+                "--ack-close-and-verify",
+                "--nsg-rules-json",
+                str(rules_path),
+            ]
+        )
+    assert code == 0
+    assert transport.TEMP_SSH_NSG_RULE_NAME in out.getvalue()
+
+
+def test_cli_check_ssh_closed(tmp_path):
+    rules_path = tmp_path / "rules-closed.json"
+    rules_path.write_text(
+        __import__("json").dumps(_baseline_nsg_rules(with_temp=False)),
+        encoding="utf-8",
+    )
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = transport.main(
+            [
+                "--profile",
+                transport.PROFILE,
+                "--resource-group",
+                transport.RESOURCE_GROUP,
+                "--vault-name",
+                "kv-cbot-prd-lab01",
+                "--check-ssh-closed",
+                "--nsg-rules-json",
+                str(rules_path),
+            ]
+        )
+    assert code == 0
+    assert "mandatory before Terraform" in out.getvalue()
+
+
+def test_fence_files_declare_fixed_rule_name():
+    fences = REPO / "infra/beta/vm/host/fences"
+    for name in (
+        "fence-ssh-nsg-open.sh",
+        "fence-ssh-nsg-close-verify.sh",
+        "fence-ssh-nsg-recovery.sh",
+        "fence-ssh-secrets-install.sh",
+        "fence-ssh-secrets-session.sh",
+    ):
+        text = (fences / name).read_text()
+        assert transport.TEMP_SSH_NSG_RULE_NAME in text or name.endswith("session.sh")
+        assert "#" not in [
+            line for line in text.splitlines() if line.strip().startswith("#")
+        ]
 
 
 # --- private work dir for transport_from_vault ---

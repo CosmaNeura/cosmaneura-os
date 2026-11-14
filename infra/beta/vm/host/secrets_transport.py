@@ -12,8 +12,12 @@ Access model (does not widen the VM runtime managed identity):
   mode-700 private directory, records the source-account check, never
   prints values, and cleans up staged copies.
 * Do **not** `az login` as Secrets Officer on the prod VM (would leave a
-  privileged token on the host). VM access / how staged files reach the
-  host is **PENDING JOHN DECISION** — no NSG or IaC change in this ticket.
+  privileged token on the host). No Bastion.
+* VM access (John, 14 Nov 2026 9:45am ET): temporary NSG inbound Allow SSH
+  TCP/22 from John's own /32 only, fixed rule name
+  TEMP-JOHN-SSH-SECRETS-INSTALL, then close-and-verify. No permanent
+  Terraform/NSG IaC change. Out-of-band rules drift the next plan —
+  close-and-verify is MANDATORY before any plan or apply.
 * Host install writes service-UID-owned mode-0400 files matching
   infra/beta/vm/runtime/entrypoint.py read_private.
 * Azure Run Command is refused (CTO 11 Nov 2026).
@@ -55,6 +59,13 @@ SOURCE_ACCOUNT_TAG = "source-account"
 SOURCE_ACCOUNT_SIDECAR_SUFFIX = ".source-account"
 # Runbook §4.3 restore/verify after any vault public-access window.
 RUNBOOK_VAULT_RESTORE = "docs/runbooks/cosmabot-production-post-apply.md §4.3"
+# Temporary SSH install window (John 14 Nov 2026 9:45am ET). Not in Terraform.
+PROD_NSG_NAME = "nsg-cosmabot-prod-eus2-01"
+TEMP_SSH_NSG_RULE_NAME = "TEMP-JOHN-SSH-SECRETS-INSTALL"
+TEMP_SSH_NSG_RULE_PRIORITY = 200
+DENY_ALL_INGRESS_RULE_NAME = "deny-all-other-ingress"
+DENY_ALL_INGRESS_PRIORITY = 4000
+RUNBOOK_SSH_CLOSE = "docs/runbooks/cosmabot-production-post-apply.md §4.5"
 
 STAGING_NEEDLES = (
     "cosmabot-vm-staging",
@@ -371,6 +382,81 @@ def refuse_run_command_transport() -> None:
     raise Refused("run_command_secret_transport_forbidden")
 
 
+def _rule_port(rule: Mapping[str, object]) -> str:
+    port = rule.get("port", rule.get("destinationPortRange", ""))
+    return str(port)
+
+
+def require_temp_ssh_rule_open(rules: list[Mapping[str, object]]) -> None:
+    """Require TEMP-JOHN-SSH-SECRETS-INSTALL Allow TCP/22 with priority before deny-all."""
+    require(isinstance(rules, list), "nsg_rules_required")
+    matches = [
+        rule
+        for rule in rules
+        if str(rule.get("name", "")) == TEMP_SSH_NSG_RULE_NAME
+    ]
+    require(len(matches) == 1, "temp_ssh_nsg_rule_missing")
+    rule = matches[0]
+    require(str(rule.get("access", "")) == "Allow", "temp_ssh_nsg_rule_not_allow")
+    require(_rule_port(rule) == "22", "temp_ssh_nsg_rule_port_not_22")
+    try:
+        priority = int(rule.get("priority", -1))
+    except (TypeError, ValueError) as error:
+        raise Refused("temp_ssh_nsg_rule_priority_invalid") from error
+    require(
+        priority == TEMP_SSH_NSG_RULE_PRIORITY
+        and priority < DENY_ALL_INGRESS_PRIORITY,
+        "temp_ssh_nsg_rule_priority_invalid",
+    )
+
+
+def require_temp_ssh_rule_closed(rules: list[Mapping[str, object]]) -> None:
+    """Require temp rule gone, no port-22 Allow, deny-all intact."""
+    require(isinstance(rules, list), "nsg_rules_required")
+    require(
+        all(str(rule.get("name", "")) != TEMP_SSH_NSG_RULE_NAME for rule in rules),
+        "temp_ssh_nsg_rule_still_present",
+    )
+    require(
+        all(
+            not (_rule_port(rule) == "22" and str(rule.get("access", "")) == "Allow")
+            for rule in rules
+        ),
+        "port_22_allow_still_present",
+    )
+    deny = [
+        rule
+        for rule in rules
+        if str(rule.get("name", "")) == DENY_ALL_INGRESS_RULE_NAME
+        and str(rule.get("access", "")) == "Deny"
+    ]
+    require(len(deny) == 1, "deny_all_ingress_missing")
+    try:
+        priority = int(deny[0].get("priority", -1))
+    except (TypeError, ValueError) as error:
+        raise Refused("deny_all_ingress_priority_invalid") from error
+    require(priority == DENY_ALL_INGRESS_PRIORITY, "deny_all_ingress_priority_invalid")
+
+
+def require_ssh_install_ready(
+    *,
+    nsg_rules: list[Mapping[str, object]],
+    close_verify_acked: bool,
+) -> None:
+    """Refuse install when the temp SSH rule is absent or close-and-verify was not acknowledged."""
+    require(close_verify_acked, "close_and_verify_ack_required_before_install")
+    require_temp_ssh_rule_open(nsg_rules)
+
+
+def load_nsg_rules_json(path: Path) -> list[Mapping[str, object]]:
+    import json
+
+    require(path.is_file() and not path.is_symlink(), "nsg_rules_json_required")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    require(isinstance(payload, list), "nsg_rules_json_shape")
+    return [item for item in payload if isinstance(item, dict)]
+
+
 def cleanup_private_dir(path: Path) -> None:
     """Remove a private staging directory and its contents (best-effort)."""
     if not path.exists() and not path.is_symlink():
@@ -681,12 +767,18 @@ def plan_lines(mappings: list[SecretMapping]) -> list[str]:
         f"resource_group={RESOURCE_GROUP}",
         f"vm_name={VM_NAME}",
         f"key_vault_prefix={KEY_VAULT_PREFIX}",
+        f"nsg_name={PROD_NSG_NAME}",
+        f"temp_ssh_rule={TEMP_SSH_NSG_RULE_NAME}",
+        f"temp_ssh_priority={TEMP_SSH_NSG_RULE_PRIORITY}",
         "owner_model=service_uid_mode_0400",
-        "transport=workstation_stage_then_host_install",
+        "transport=workstation_stage_then_temp_ssh_install",
         "run_command=forbidden",
+        "bastion=forbidden",
         "vm_az_login_as_secrets_officer=forbidden",
-        "vm_access_step=PENDING_JOHN_DECISION",
+        "vm_access_step=temp_ssh_nsg_rule_john_32",
+        "close_and_verify=mandatory_before_terraform_plan_or_apply",
         f"vault_window_restore={RUNBOOK_VAULT_RESTORE}",
+        f"ssh_close_verify={RUNBOOK_SSH_CLOSE}",
     ]
     for item in mappings:
         roles = ",".join(item.roles)
@@ -745,6 +837,30 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Print name mapping only.",
     )
+    parser.add_argument(
+        "--check-ssh-install-ready",
+        action="store_true",
+        help=(
+            "Workstation gate: require TEMP-JOHN-SSH-SECRETS-INSTALL open and "
+            "--ack-close-and-verify before SCP/install."
+        ),
+    )
+    parser.add_argument(
+        "--ack-close-and-verify",
+        action="store_true",
+        help="Acknowledge that §4.5 close-and-verify is mandatory after every outcome.",
+    )
+    parser.add_argument(
+        "--nsg-rules-json",
+        type=Path,
+        default=None,
+        help="JSON list of NSG rules {name,port,access,priority} only (no secrets).",
+    )
+    parser.add_argument(
+        "--check-ssh-closed",
+        action="store_true",
+        help="Verify temp SSH rule absent, no port-22 Allow, deny-all intact.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -762,6 +878,24 @@ def main(argv: list[str] | None = None) -> int:
             for line in plan_lines(mappings):
                 print(line)
             return 0
+        if args.check_ssh_install_ready or args.check_ssh_closed:
+            require(args.nsg_rules_json is not None, "nsg_rules_json_required")
+            rules = load_nsg_rules_json(args.nsg_rules_json)
+            if args.check_ssh_closed:
+                require_temp_ssh_rule_closed(rules)
+                print(
+                    f"PASS: temp SSH rule closed; see {RUNBOOK_SSH_CLOSE}; "
+                    "mandatory before Terraform plan or apply"
+                )
+                return 0
+            require_ssh_install_ready(
+                nsg_rules=rules,
+                close_verify_acked=args.ack_close_and_verify,
+            )
+            print(
+                f"PASS: {TEMP_SSH_NSG_RULE_NAME} open; close-and-verify acknowledged"
+            )
+            return 0
         if args.stage_from_vault:
             require(args.staging_dir is not None, "staging_dir_required")
             results = stage_from_vault(
@@ -774,7 +908,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(format_result_line(result))
             print(
                 "PASS: workstation stage complete; restore vault per "
-                f"{RUNBOOK_VAULT_RESTORE}; VM access PENDING_JOHN_DECISION"
+                f"{RUNBOOK_VAULT_RESTORE}; next §4.5 temp SSH open/install/close"
             )
             return 0
         require(args.release_id, "release_id_required")

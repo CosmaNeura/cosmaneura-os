@@ -125,10 +125,16 @@ installs mode-0400 host files under `/etc/cosmabot/runtime/<release_id>/<role>/`
 - **Does not widen runtime access:** no new role assignment, access policy, or
   identity for the runtime managed identity.
 - **Do not** `az login` as Secrets Officer on the prod VM (would leave a
-  privileged token on the host). That path is removed.
-- **VM access / how staged files reach the host:** **PENDING JOHN DECISION**
-  (no NSG or IaC change in this ticket).
-- After any vault window: restore/verify per runbook **§4.3**.
+  privileged token on the host). No Bastion.
+- **VM access (John, 14 Nov 2026 9:45am ET):** temporary NSG inbound Allow
+  SSH TCP/22 from John's own `/32` only, fixed rule name
+  `TEMP-JOHN-SSH-SECRETS-INSTALL` (priority `200`, before
+  `deny-all-other-ingress` at `4000`). Pasteable fences under
+  `infra/beta/vm/host/fences/`. **Close-and-verify is MANDATORY** after every
+  outcome (including STOP). No permanent Terraform/NSG change. An out-of-band
+  rule drifts the next plan — close before any plan or apply.
+- After any vault window: restore/verify per runbook **§4.3**. After any SSH
+  window: close/verify per runbook **§4.5**.
 - **Ownership:** secret files are owned by the **service UID** for that role
   directory (`10001` for `api` / `worker` / `prepare`, `999` for `postgres` /
   `redis`), mode `0400`, matching `runtime/entrypoint.py` `read_private`.
@@ -174,20 +180,27 @@ python3 secrets_transport.py \
 Then restore vault public access per **§4.3**. LLM installs also write a
 non-secret sidecar `WORKSPACE_LLM_API_KEY.source-account`.
 
-Install on the host from a staging directory (filenames = host names; values
-never on the command line). How the staging directory arrives on the VM is
-**PENDING JOHN DECISION**:
+SSH install window (John `/32` only; see runbook §4.5 and `fences/`):
+
+1. OPEN: `fence-ssh-nsg-open.sh` (creates `TEMP-JOHN-SSH-SECRETS-INSTALL`).
+2. INSTALL: `fence-ssh-secrets-install.sh` (SCP staging, remote install,
+   cleanup both sides; workstation gate requires `--ack-close-and-verify`).
+3. CLOSE AND VERIFY: `fence-ssh-nsg-close-verify.sh` (always; also after STOP).
+4. If the terminal closed partway: `fence-ssh-nsg-recovery.sh`.
+
+Session wrapper that always closes: `fence-ssh-secrets-session.sh` (source the
+open/install/close fences first).
+
+Workstation gate before SCP:
 
 ```text
 python3 secrets_transport.py \
   --profile cosmabot-vm-prod-v1 \
   --resource-group rg-cosmabot-prod-eus2-01 \
   --vault-name kv-cbot-prd-<suffix> \
-  --release-id <release_id> \
-  --protected-root /etc/cosmabot/runtime/<release_id> \
-  --staging-dir /path/to/mode-700-private-staging \
-  --cleanup-staging \
-  --secret-name CLERK-SECRET-KEY
+  --check-ssh-install-ready \
+  --ack-close-and-verify \
+  --nsg-rules-json /path/to/nsg-rules-names-ports-only.json
 ```
 
 CI proof: `tests/unit/test_secrets_transport.py` (canary value never appears in
