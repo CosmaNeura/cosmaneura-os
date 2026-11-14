@@ -789,12 +789,9 @@ def _verify_prepared_recheck(folder: Path) -> tuple[dict, dict, dict]:
     prepare_path = _latest_recheck_prepare(folder)
     secure_file(prepare_path)
     recheck_prepare = read_json(prepare_path)
+    # private_directory is already bound by _latest_recheck_prepare (do not duplicate).
     if not recheck_prepare.get("recheck") or not isinstance(recheck_prepare.get("source"), dict):
         raise Refused("recheck-prepare artifact is missing reviewed source digests")
-    if recheck_prepare.get("private_directory") != str(folder):
-        raise Refused(
-            "recheck-prepare private_directory does not match this private directory"
-        )
     if recheck_prepare.get("source") != fingerprint():
         raise Refused(
             "recheck-prepare source digests do not match the running foundation fingerprint"

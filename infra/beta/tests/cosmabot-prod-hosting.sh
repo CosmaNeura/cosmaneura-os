@@ -110,7 +110,9 @@ set -e
 grep -F "mutually exclusive" "$tmp_root/recheck-mutex.err" >/dev/null
 [[ ! -s "$COSMABOT_STUB_MARKER" ]] || { echo "stub az/tofu was invoked during mutex check" >&2; exit 1; }
 
-# --recheck path with stub az/tofu must fail (stubs exit 97) and never mention apply.
+# --recheck path with stub az/tofu must exit non-zero and never mention apply.
+# (Empty/incomplete private dir refuses in Python before stubbed az/tofu run; stubs
+# themselves exit 97 if invoked, but this block only asserts non-zero + no-apply.)
 mkdir -p "$tmp_root/existing-private"
 set +e
 bash "$beta_dir/review-cosmabot-prod-foundation.sh" \
