@@ -181,6 +181,12 @@ explicitly start the receiver and timers alongside staging. Wait for any full
 backup to finish before planned maintenance; do not interrupt it to prove restart.
 Docker health status does not itself restart an unhealthy process; alert on it.
 
+Production twin unit file: `cosmabot-prod.service` (same `start.sh` ExecStart/
+ExecStop shape, with `RuntimeDirectory=cosmabot` and docker-compatible
+hardening). Do **not** enable it on a prod host until backup and probe retarget
+tickets land; `SCRIPT_NAMES` / backup / probe / `start.sh` still name the staging
+unit until those follow-ups.
+
 **Still required before admission:** host provisioning and actual identity grant;
 exact digest/config/public trust provenance; secret installation/rotation; DNS,
 Clerk/Core configuration; manual database preparation; certificate renewal and

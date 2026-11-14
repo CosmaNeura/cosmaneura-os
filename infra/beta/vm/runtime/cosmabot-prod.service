@@ -11,6 +11,10 @@ Type=oneshot
 RemainAfterExit=yes
 # Root-owned, public file containing only RELEASE_DIR=/opt/cosmabot/releases/<id>.
 EnvironmentFile=/etc/cosmabot/active-release
+# /run is tmpfs; create /run/cosmabot before ExecStart so ProtectSystem=strict
+# + ReadWritePaths does not fail with 226/NAMESPACE after reboot.
+RuntimeDirectory=cosmabot
+RuntimeDirectoryMode=0700
 ExecStart=/bin/sh ${RELEASE_DIR}/start.sh ${RELEASE_DIR} run
 ExecStop=/bin/sh ${RELEASE_DIR}/start.sh ${RELEASE_DIR} stop
 TimeoutStartSec=240
@@ -24,13 +28,12 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
-ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
 ReadWritePaths=/var/lib/cosmabot /run/cosmabot
-# Omitted (would break start.sh / docker client):
+# Omitted (would break start.sh / docker client / IMDS guard):
 # - User= / DynamicUser= : start.sh requires uid 0
 # - PrivateDevices= : docker CLI may need host /dev visibility
 # - PrivateNetwork= : needs docker networks and DNS
@@ -38,6 +41,8 @@ ReadWritePaths=/var/lib/cosmabot /run/cosmabot
 # - RestrictAddressFamilies=AF_INET AF_INET6 : needs AF_UNIX for docker.sock
 # - CapabilityBoundingSet= (empty) : leave root caps for docker socket client
 # - InaccessiblePaths= for /run/docker.sock : start.sh talks to dockerd
+# - ProtectKernelModules=yes : imds-guard.sh runs iptables (-m comment, REJECT,
+#   DOCKER-USER); xt_* / ip_tables modules may need to autoload on first use
 
 [Install]
 WantedBy=multi-user.target

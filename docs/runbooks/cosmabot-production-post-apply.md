@@ -124,11 +124,12 @@ Not John's hands-on. Still synthetic; still no staging. **One order** (same as �
 6. §4.1 post-start value-free HTTP status proof against the prod OpenAI
    endpoint (status code only). Then `/ready`, `/version.json`, smoke, eight
    backend switches `'false'` (§8). Admit smoke only after John's separate yes.
-7. After secrets are on the host and acceptance above passes: install
-   `infra/beta/vm/runtime/cosmabot-prod.service` with a root-owned
-   `/etc/cosmabot/active-release` (matches host/runtime READMEs). Leave
-   staging hardwires in render/backup/probe/`start.sh` for the named follow-ups
-   in §9 Other gaps.
+7. After secrets are on the host and acceptance above passes: the
+   `cosmabot-prod.service` **file** may be placed with a root-owned
+   `/etc/cosmabot/active-release` (matches host/runtime READMEs). **Do NOT
+   enable** `cosmabot-prod.service` until **T-PROD-5** (backup units) and
+   **T-PROD-6** (probe) retarget are merged. Leave staging hardwires in render /
+   `start.sh` for the other named follow-ups in §9 Other gaps.
 
 External TestFlight still needs **Alfred's go + John's direct yes** (not today).
 
@@ -1389,22 +1390,24 @@ After-14:30 host work):**
    `/ready` after DB prepare, secrets loaded, BASE satisfied, `#381`
    availability true for the configured prod host, DNS or local checks OK;
    `/version.json` shows reviewed commit.
-10. After secrets + acceptance: install `cosmabot-prod.service` with
-    `/etc/cosmabot/active-release`. Matches §1 After 14:30 step 7.
+10. After secrets + acceptance: place `cosmabot-prod.service` with
+    `/etc/cosmabot/active-release`, but **do NOT enable** it until **T-PROD-5**
+    (backup units) and **T-PROD-6** (probe) are merged. Matches §1 After 14:30
+    step 7.
 
 ### Other gaps
 
-1. **BLOCKED:** named secrets-transport ticket/PR owns host 0400 install
-   (vault is closed after Sitting 2; Run Command must not carry values). Do
-   not invent a transport in this runbook.
-2. **Follow-up:** `infra/beta/vm/runtime/render.py` `SCRIPT_NAMES` still lists
+1. **BLOCKED (T-PROD-3 / `#388`):** secrets-transport ticket owns host 0400
+   install (vault is closed after Sitting 2; Run Command must not carry
+   values). Do not invent a transport in this runbook.
+2. **T-PROD-4:** `infra/beta/vm/runtime/render.py` `SCRIPT_NAMES` still lists
    only `cosmabot-staging.service` (prod unit file exists but is not copied
    into rendered releases yet).
-3. **Follow-up:** backup units under `infra/beta/vm/backup/` still
+3. **T-PROD-5:** backup units under `infra/beta/vm/backup/` still
    `Requires=` / `PartOf=` / `After=` `cosmabot-staging.service`.
-4. **Follow-up:** `infra/beta/vm/monitoring/probe.py` still observes
+4. **T-PROD-6:** `infra/beta/vm/monitoring/probe.py` still observes
    `cosmabot-staging.service`.
-5. **Follow-up:** `infra/beta/vm/runtime/start.sh` still hardwires Compose
+5. **T-PROD-7:** `infra/beta/vm/runtime/start.sh` still hardwires Compose
    project name `cosmabot-staging`.
 6. Endpoint kind: classic vs Foundry recreate — §7.
 7. Password-name acceptance on prod entrypoint still unverified per `#356`
@@ -1423,7 +1426,7 @@ After-14:30 host work):**
 - [ ] Between: agent prep only (no secrets, no staging); host bootstrap tooling ready (T-PROD-2); do not install prod unit yet
 - [ ] Sitting 2: export `KEYFILE` once → Fence 1 Step A wrapper → pause → rotate wrapper (`pipefail` + `test -s`; `key1` only) → Fence 2 (`test -s`, `--output none`) → pause → Step B (tag proof; rm `$KEYFILE` on PASS and STOP fail-safe) → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
 - [ ] §4.3 if interrupted/abandoned: restore Disabled + empty `ipRules`, print whole list, verify, then abandon `$KEYFILE` cleanup
-- [ ] After 14:30 (= §9 (b) steps 4–10): host bootstrap → secrets install (BLOCKED until T-PROD-3) → checks → flag flip → render/start → accept → install `cosmabot-prod.service`
+- [ ] After 14:30 (= §9 (b) steps 4–10): host bootstrap → secrets install (BLOCKED until T-PROD-3) → checks → flag flip → render/start → accept → place prod unit file; enable only after T-PROD-5 + T-PROD-6
 - [ ] §4.1: Fence 1 wrapper (no PASS after STOP); fail-closed rotate (`key1` only; `key2` later); `test -s`; anchored ACCOUNT_ID `^…$`; `--output none`; Step B tag-only; no key on screen/history
 - [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode; `$APP/public` Clerk key **presence-only**; web `-F` key; staging host class `[a-z0-9.-]+`; baseline **Pending**
 - [ ] `#377` / `#381` Merged; `#383` merged before any recover apply

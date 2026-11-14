@@ -144,7 +144,12 @@ def validate_receipt(value: dict, vm_id: str, disk_id: str, approval: str | None
             and value.get("disk_id", "").lower() == disk_id.lower()
             and value.get("managed_by_vm_id", "").lower() == vm_id.lower(),
             "Creation receipt belongs to a different disk or VM")
-    if "profile" in value:
+    if spec["profile"] == PROD_PROFILE:
+        require(
+            value.get("profile") == PROD_PROFILE,
+            "Production creation receipt must declare profile cosmabot-vm-prod-v1",
+        )
+    elif "profile" in value:
         require(value.get("profile") == spec["profile"], "Creation receipt profile does not match")
     require(value.get("create_option") == "Empty" and value.get("size_gib") == 128
             and value.get("lun") == 0, "Only the new Empty 128 GiB LUN 0 disk is accepted")

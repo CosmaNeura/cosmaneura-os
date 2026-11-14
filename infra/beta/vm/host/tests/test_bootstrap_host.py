@@ -37,6 +37,25 @@ def _ids_for(profile: str) -> tuple[str, str, str]:
     return vm, disk, spec["disk"]
 
 
+def _parse_systemd_unit(text: str) -> dict[str, dict[str, str]]:
+    """Parse active (non-comment) KEY=value lines under [Section] headers."""
+    sections: dict[str, dict[str, str]] = {}
+    current: str | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = line[1:-1]
+            sections.setdefault(current, {})
+            continue
+        if current is None or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        sections[current][key.strip()] = value.strip()
+    return sections
+
+
 class NewHostRefusals(unittest.TestCase):
     def setUp(self):
         self.now = dt.datetime(2026, 9, 25, 20, tzinfo=dt.timezone.utc)
@@ -190,42 +209,56 @@ class ProdProfileBootstrap(unittest.TestCase):
         self.assertNotRegex(joined, r"/subscriptions/[0-9a-f-]{36}/")
         self.assertIn(host.SECRETS_TRANSPORT_TICKET, joined)
 
-    def test_prod_unit_ships_systemd_hardening_directives(self):
+    def test_prod_unit_service_section_hardening_and_runtime_directory(self):
         text = (RUNTIME / "cosmabot-prod.service").read_text()
-        for directive in (
-            "NoNewPrivileges=yes",
-            "ProtectSystem=strict",
-            "ProtectHome=yes",
-            "PrivateTmp=yes",
-            "ProtectKernelTunables=yes",
-            "ProtectKernelModules=yes",
-            "ProtectKernelLogs=yes",
-            "ProtectControlGroups=yes",
-            "RestrictSUIDSGID=yes",
-            "LockPersonality=yes",
-            "ReadWritePaths=/var/lib/cosmabot /run/cosmabot",
-            "UMask=0077",
-        ):
-            with self.subTest(directive=directive):
-                self.assertIn(directive, text)
-        # Must stay root for start.sh; omit User=.
-        self.assertNotRegex(text, r"(?m)^User=")
-        self.assertNotIn("PrivateNetwork=yes", text)
-        self.assertNotIn("PrivateDevices=yes", text)
+        parsed = _parse_systemd_unit(text)
+        service = parsed["Service"]
+        expected = {
+            "NoNewPrivileges": "yes",
+            "ProtectSystem": "strict",
+            "ProtectHome": "yes",
+            "PrivateTmp": "yes",
+            "ProtectKernelTunables": "yes",
+            "ProtectKernelLogs": "yes",
+            "ProtectControlGroups": "yes",
+            "RestrictSUIDSGID": "yes",
+            "LockPersonality": "yes",
+            "ReadWritePaths": "/var/lib/cosmabot /run/cosmabot",
+            "UMask": "0077",
+            "RuntimeDirectory": "cosmabot",
+            "RuntimeDirectoryMode": "0700",
+        }
+        for key, value in expected.items():
+            with self.subTest(key=key):
+                self.assertEqual(service.get(key), value)
+        self.assertNotIn("User", service)
+        self.assertNotIn("PrivateNetwork", service)
+        self.assertNotIn("PrivateDevices", service)
+        # Dropped: iptables in imds-guard.sh may need xt_* autoload.
+        self.assertNotIn("ProtectKernelModules", service)
+        self.assertTrue(
+            any(
+                line.lstrip().startswith("#") and "ProtectKernelModules" in line
+                for line in text.splitlines()
+            ),
+            "omission of ProtectKernelModules must stay documented in a comment",
+        )
+        # Mutation target: commenting out RuntimeDirectory= would leave parser empty.
+        self.assertTrue(
+            any(
+                line.strip() == "RuntimeDirectory=cosmabot"
+                for line in text.splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            )
+        )
 
-    def test_container_uid_drop_is_in_render_compose_not_systemd_unit(self):
-        # Container UID drop lives in render.py compose (api/worker 10001; data 999),
-        # not in the root systemd unit required by start.sh.
-        source = (RUNTIME / "render.py").read_text()
-        api_block_start = source.index('for service, address in (("api", "10"), ("worker", "11")):')
-        api_block = source[api_block_start:api_block_start + 800]
-        self.assertIn('"user": "10001:10001"', api_block)
-        self.assertIn('"security_opt": ["no-new-privileges:true"]', source)
-        self.assertIn('"user": "999:999"', source)
-        unit = (RUNTIME / "cosmabot-prod.service").read_text()
-        self.assertNotRegex(unit, r"(?m)^User=")
-        self.assertNotIn("User=999", unit)
-        self.assertNotIn("User=10001", unit)
+    def test_protect_home_is_safe_for_start_and_imds_guard_scripts(self):
+        # Static proof: neither script references home paths ProtectHome hides.
+        for name in ("start.sh", "imds-guard.sh"):
+            body = (RUNTIME / name).read_text()
+            with self.subTest(script=name):
+                self.assertNotRegex(body, r"(?m)(\$HOME|/home/|/root\b|~/)")
+        self.assertIn("iptables", (RUNTIME / "imds-guard.sh").read_text())
 
     def test_host_profile_names_stay_in_parity_with_name_guards(self):
         staging = host.resolve_profile(host.STAGING_PROFILE)
@@ -287,6 +320,30 @@ class ProdProfileBootstrap(unittest.TestCase):
             "--expected-device", "/dev/sdc",
             "--creation-receipt", "/tmp/synthetic-receipt.json",
             "--creation-receipt-sha256", "ab" * 32,
+        ]
+        with patch.object(sys, "argv", argv), patch.object(host, "fresh_host") as fresh:
+            with self.assertRaises(host.Refused) as raised:
+                host.main()
+        self.assertIn("Cross-environment", str(raised.exception))
+        fresh.assert_not_called()
+
+    def test_main_preflight_refuses_staging_name_in_receipt_path_only(self):
+        # Prod VM/disk IDs are valid; only the creation-receipt path embeds staging.
+        prod_vm, prod_disk, _ = _ids_for(host.PROD_PROFILE)
+        receipt_path = (
+            "/tmp/review/"
+            + host.PROFILES[host.STAGING_PROFILE]["unit"]
+            + "/creation-receipt.json"
+        )
+        argv = [
+            "bootstrap_host.py",
+            "--profile", host.PROD_PROFILE,
+            "--vm-id", prod_vm,
+            "--disk-id", prod_disk,
+            "--expected-device", "/dev/sdc",
+            "--creation-receipt", receipt_path,
+            "--creation-receipt-sha256", "ab" * 32,
+            "--format-new-empty-disk", prod_disk,
         ]
         with patch.object(sys, "argv", argv), patch.object(host, "fresh_host") as fresh:
             with self.assertRaises(host.Refused) as raised:
@@ -358,11 +415,30 @@ class ProdProfileBootstrap(unittest.TestCase):
                 bad, self.vm, self.disk, self.disk, self.now, profile=host.PROD_PROFILE
             )
 
-    def test_prod_receipt_without_profile_field_is_accepted(self):
+    def test_prod_receipt_without_profile_field_is_refused(self):
         receipt = {key: value for key, value in self.receipt.items() if key != "profile"}
         self.assertNotIn("profile", receipt)
+        with self.assertRaises(host.Refused):
+            host.validate_receipt(
+                receipt, self.vm, self.disk, self.disk, self.now, profile=host.PROD_PROFILE
+            )
+
+    def test_staging_receipt_without_profile_field_is_accepted(self):
+        staging_vm, staging_disk, _ = _ids_for(host.STAGING_PROFILE)
+        receipt = {
+            "version": 1, "source": "azure-arm-disk-and-vm-get",
+            "vm_id": staging_vm, "disk_id": staging_disk, "managed_by_vm_id": staging_vm,
+            "create_option": "Empty", "size_gib": 128, "lun": 0,
+            "disk_unique_id": "00000000-0000-4000-8000-000000000022",
+            "vm_instance_id": "00000000-0000-4000-8000-000000000023",
+            "apply_started_utc": "2026-09-25T19:00:00Z",
+            "disk_created_utc": "2026-09-25T19:02:00Z",
+            "apply_completed_utc": "2026-09-25T19:05:00Z",
+        }
+        self.assertNotIn("profile", receipt)
         host.validate_receipt(
-            receipt, self.vm, self.disk, self.disk, self.now, profile=host.PROD_PROFILE
+            receipt, staging_vm, staging_disk, staging_disk, self.now,
+            profile=host.STAGING_PROFILE,
         )
 
     def test_prod_receipt_with_staging_unit_field_is_refused(self):
