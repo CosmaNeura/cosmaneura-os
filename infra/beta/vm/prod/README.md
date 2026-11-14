@@ -4,10 +4,11 @@ Production copy of the East US 2 CosmaBot VM staging foundation. **Nothing in
 this folder is applied by coding agents.** John reviews the plan and cost, then
 applies only after an explicit yes.
 
-This tooling is **first-apply-only**. OpenAI opt-in must be in the first apply's
-inputs or wait for a separately reviewed day-2 tool. Do not run raw tofu by
-hand. Partial-apply recovery: keep the private directory, retain encrypted
-state/plans/logs, and open a separately reviewed recovery ticket before retry.
+This tooling is **first-apply-only** by default. OpenAI opt-in must be in the
+first apply's inputs or wait for a separately reviewed day-2 tool. Do not run
+raw tofu by hand. Partial-apply recovery: keep the private directory, retain
+encrypted state/plans/logs, and use `--recover` on the reviewed recovery
+tooling (see Recovery below) before any retry.
 
 A shared-module refactor of staging/prod foundation is a later ticket. Staging
 files under `infra/beta/vm/foundation` stay byte-unchanged in this PR.
@@ -154,7 +155,64 @@ Press Ctrl-C once for a graceful stop of a running apply. A second Ctrl-C does
 not stop OpenTofu; it only detaches the wrapper while tofu must be left to
 finish (follow the uniquely named `logs/apply-*.log`). Apply failures and
 interrupts exit with code **2**. Partial-apply recovery: keep that private
-directory and open a separately reviewed recovery ticket before retry.
+directory and follow **Recovery** below (do not delete encrypted state or the
+passphrase; do not run raw tofu by hand).
+
+## Recovery (partial first apply; `--recover`)
+
+Use this only when a reviewed first apply created most of `rg-cosmabot-prod-eus2-01`
+but stopped short (for example the OpenAI private endpoint and its NIC). Keep the
+existing private directory. Never regenerate, print, or move the passphrase.
+Never wipe encrypted state except through tofu's own state handling on a later
+approved apply.
+
+1. Re-fingerprint this foundation after checking out the recovery tooling, and
+   pass the new operator-supplied `--source-sha256` / `--lock-sha256` (the
+   fingerprint covers `bootstrap_local.py`, `name_guards.py`, and the review /
+   apply scripts).
+2. Print-only recover plan (no apply):
+
+```bash
+bash infra/beta/review-cosmabot-prod-foundation.sh \
+  --recover \
+  --subscription-id "$SUBSCRIPTION_ID" \
+  --inputs /absolute/path/to/same-reviewed-prod-inputs.json \
+  --private-dir /absolute/path/outside/repo/cosmabot-prod-foundation-fresh \
+  --source-sha256 "$SOURCE_SHA256" \
+  --lock-sha256 "$LOCK_SHA256" \
+  --tofu /absolute/path/to/tofu-1.12.5 \
+  --provider-mirror /absolute/path/to/verified-azurerm-mirror
+```
+
+The recover path reuses the existing private dir in place, requires
+`state/foundation.tfstate` and `encryption.passphrase`, allows only the existing
+production resource group to pre-exist, and writes `plans/recover-<UTC>.tfplan`
+plus `recover-plan-summary-<UTC>.json` / `recover-plan-result-<UTC>.json`. It
+never overwrites `plans/first.tfplan` or the first-apply summary/result files.
+Before planning it also writes `state/foundation.tfstate.pre-recover-<UTC>` and
+`manifest.first-apply.json` (0600). The plan is accepted for approval only when
+it is ADD-ONLY (0 change, 0 replace, 0 destroy), every create's
+`resource_group_name` / scope and every nested ARM
+`/subscriptions/.../resourceGroups/.../` id resolve to this subscription and
+`rg-cosmabot-prod-eus2-01` (case-insensitive; unknown id fields in
+`after_unknown` are refused), and name guards refuse cross-environment /
+staging names.
+
+3. John reviews the printed `plan_sha256` / `summary_sha256` and types yes on
+   that new recovery plan hash only.
+4. Bind a four-key approval file (0600, outside the repo) to those exact recover
+   hashes, then apply once:
+
+```bash
+bash infra/beta/apply-cosmabot-prod-foundation.sh \
+  --recover \
+  --confirm-apply \
+  --approval /absolute/path/outside/repo/recovery-approval.json \
+  --private-dir /absolute/path/outside/repo/cosmabot-prod-foundation-fresh
+```
+
+On failure: stop, keep the artifacts, do not retry. Coding agents must not run
+apply.
 
 ## Load secrets into Key Vault (separate later secrets ticket)
 

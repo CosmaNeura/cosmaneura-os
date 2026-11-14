@@ -10,9 +10,11 @@ Operator entrypoints live one level up:
 - Apply (requires `--confirm-apply` and `--approval`): `infra/beta/apply-cosmabot-prod-foundation.sh`
 - Offline dry-run: `infra/beta/vm/prod/dry_run.py`
 
-See `../README.md` for John's exact commands. This helper is **first-apply-only**.
-OpenAI opt-in must be in the first apply's inputs or wait for a separately
-reviewed day-2 tool. Do not run raw tofu by hand.
+See `../README.md` for John's exact commands. This helper is **first-apply-only**
+by default; pass `--recover` on prepare/plan/apply for the separately reviewed
+partial-apply recovery path (reuses encrypted state/passphrase; writes
+`plans/recover-<UTC>.tfplan`). OpenAI opt-in must be in the first apply's inputs
+or wait for a separately reviewed day-2 tool. Do not run raw tofu by hand.
 
 Azure OpenAI is a separate module (variable default `false`). John's first-apply
 reviewed inputs set `"enable_azure_openai": true` to include `gpt-4.1-dzus` at
