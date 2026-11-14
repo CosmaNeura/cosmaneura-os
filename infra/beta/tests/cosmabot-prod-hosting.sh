@@ -110,7 +110,7 @@ set -e
 grep -F "mutually exclusive" "$tmp_root/recheck-mutex.err" >/dev/null
 [[ ! -s "$COSMABOT_STUB_MARKER" ]] || { echo "stub az/tofu was invoked during mutex check" >&2; exit 1; }
 
-# --recheck path with stub az/tofu: must not print --confirm-apply or invoke apply script.
+# --recheck path with stub az/tofu must fail (stubs exit 97) and never mention apply.
 mkdir -p "$tmp_root/existing-private"
 set +e
 bash "$beta_dir/review-cosmabot-prod-foundation.sh" \
@@ -123,7 +123,9 @@ bash "$beta_dir/review-cosmabot-prod-foundation.sh" \
   --tofu "$stub_bin/tofu" \
   --provider-mirror "$tmp_root/mirror" \
   >"$tmp_root/recheck-full.out" 2>"$tmp_root/recheck-full.err"
+recheck_rc=$?
 set -e
+[[ "$recheck_rc" -ne 0 ]] || { echo "expected --recheck with stubs to exit non-zero" >&2; exit 1; }
 if grep -F -- "--confirm-apply" "$tmp_root/recheck-full.out" "$tmp_root/recheck-full.err" >/dev/null; then
   echo "recheck review output must not contain --confirm-apply" >&2
   exit 1

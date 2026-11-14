@@ -748,16 +748,24 @@ def _latest_recheck_prepare(folder: Path) -> Path:
             "Post-apply re-check requires prepare --recheck "
             "(recheck-prepare-<UTC>.json) on this private directory"
         )
-    return matches[-1]
+    latest = matches[-1]
+    secure_file(latest)
+    record = read_json(latest)
+    if record.get("private_directory") != str(folder):
+        raise Refused(
+            "recheck-prepare private_directory does not match this private directory"
+        )
+    return latest
 
 
 def _verify_prepared_recheck(folder: Path) -> tuple[dict, dict, dict]:
     """Like ``_verify_prepared``, but do not require ``manifest.source == fingerprint()``.
 
     Re-check binds the reviewed source digests via ``recheck-prepare-<UTC>.json``
-    written by ``prepare --recheck``. Private module files must still match that
-    reviewed fingerprint (so a ``.tf`` change refuses). Manifest ``source`` may
-    still reflect an older prepare --recover head.
+    written by ``prepare --recheck``. That record's ``source`` must equal the
+    running ``fingerprint()`` and ``private_directory`` must equal this folder.
+    Private module ``*.tf`` files must still match that reviewed fingerprint.
+    Manifest ``source`` may still reflect an older prepare --recover head.
     """
     folder = private_directory(folder)
     for name in ("manifest.json", "inputs.json", "backend.hcl", "tofurc", "encryption.passphrase"):
@@ -783,6 +791,14 @@ def _verify_prepared_recheck(folder: Path) -> tuple[dict, dict, dict]:
     recheck_prepare = read_json(prepare_path)
     if not recheck_prepare.get("recheck") or not isinstance(recheck_prepare.get("source"), dict):
         raise Refused("recheck-prepare artifact is missing reviewed source digests")
+    if recheck_prepare.get("private_directory") != str(folder):
+        raise Refused(
+            "recheck-prepare private_directory does not match this private directory"
+        )
+    if recheck_prepare.get("source") != fingerprint():
+        raise Refused(
+            "recheck-prepare source digests do not match the running foundation fingerprint"
+        )
     reviewed = recheck_prepare["source"]
     expected_files = {
         name: value
@@ -802,6 +818,47 @@ def _verify_prepared_recheck(folder: Path) -> tuple[dict, dict, dict]:
     for name in ("module", "state", "plans", "workspaces", "logs"):
         private_directory(folder / name)
     return manifest, read_json(folder / "inputs.json"), recheck_prepare
+
+
+def _assert_recheck_commands_safe(commands: list[tuple[str, list[str]]]) -> None:
+    """Refuse planted apply / -refresh=false before any tofu subprocess runs."""
+    for _name, args in commands:
+        if not isinstance(args, list) or not args:
+            raise Refused("Post-apply re-check command list is invalid")
+        if args[0] == "apply" or "apply" in args[1:]:
+            raise Refused("Post-apply re-check must never invoke tofu apply")
+        if args[0] == "plan" and "-refresh=false" in args:
+            raise Refused("Post-apply re-check must refresh against Azure (no -refresh=false)")
+
+
+def _recheck_tofu_commands(
+    *, backend_hcl: Path, inputs: Path, plan_out: Path
+) -> list[tuple[str, list[str]]]:
+    commands = [
+        (
+            "init",
+            [
+                "init",
+                "-input=false",
+                "-lockfile=readonly",
+                "-reconfigure",
+                "-backend-config=" + str(backend_hcl),
+            ],
+        ),
+        (
+            "plan",
+            [
+                "plan",
+                "-input=false",
+                "-lock=true",
+                "-lock-timeout=30s",
+                "-var-file=" + str(inputs),
+                "-out=" + str(plan_out),
+            ],
+        ),
+    ]
+    _assert_recheck_commands_safe(commands)
+    return commands
 
 
 def sanitize_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256: str) -> dict:
@@ -1398,10 +1455,6 @@ def plan_recheck(folder: Path) -> dict:
     summary_path = folder / f"recheck-plan-summary-{stamp}.json"
     result_path = folder / f"recheck-plan-result-{stamp}.json"
     data_dir = folder / f"tofu-data-recheck-{stamp}"
-    if plan_path.name == "first.tfplan" or plan_path.resolve() == (folder / "plans/first.tfplan").resolve():
-        raise Refused("Post-apply re-check must not overwrite plans/first.tfplan")
-    if plan_path.name.startswith("recover-"):
-        raise Refused("Post-apply re-check must not overwrite recover plan artifacts")
     if plan_path.exists() or summary_path.exists() or result_path.exists() or data_dir.exists():
         raise Refused("Post-apply re-check plan path already exists; refuse overwrite")
     tofu = Path(manifest["tofu"])
@@ -1421,35 +1474,11 @@ def plan_recheck(folder: Path) -> dict:
     env = execution_environment(folder, data_dir=data_dir)
     if owner_context(clean_environment(), inputs, recheck=True) != manifest["context"]:
         raise Refused("Owner CLI context changed since preparation")
-    # Never include "apply" in this command list. Tests assert that invariant.
-    commands = [
-        (
-            "init",
-            [
-                "init",
-                "-input=false",
-                "-lockfile=readonly",
-                "-reconfigure",
-                "-backend-config=" + str(folder / "backend.hcl"),
-            ],
-        ),
-        (
-            "plan",
-            [
-                "plan",
-                "-input=false",
-                "-lock=true",
-                "-lock-timeout=30s",
-                "-var-file=" + str(folder / "inputs.json"),
-                "-out=" + str(plan_path),
-            ],
-        ),
-    ]
-    for _name, args in commands:
-        if args and args[0] == "apply":
-            raise Refused("Post-apply re-check must never invoke tofu apply")
-        if args and args[0] == "plan" and "-refresh=false" in args:
-            raise Refused("Post-apply re-check must refresh against Azure (no -refresh=false)")
+    commands = _recheck_tofu_commands(
+        backend_hcl=folder / "backend.hcl",
+        inputs=folder / "inputs.json",
+        plan_out=plan_path,
+    )
     summary = None
     result = None
     try:

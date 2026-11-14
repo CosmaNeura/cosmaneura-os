@@ -1,8 +1,10 @@
 """Local bootstrap refusal tests and an actual OpenTofu encryption-only proof."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import secrets
@@ -2509,6 +2511,7 @@ class RecheckMode(unittest.TestCase):
             elif argv[1] == "plan":
                 self.assertNotIn("-refresh=false", argv)
                 self.assertIn("-lock=true", argv)
+                self.assertIn("-lock-timeout=30s", argv)
                 out = Path(next(arg for arg in argv if arg.startswith("-out=")).split("=", 1)[1])
                 self.assertTrue(out.name.startswith("recheck-"))
                 bootstrap.write_private(
@@ -2634,9 +2637,47 @@ class RecheckMode(unittest.TestCase):
                 bootstrap.main()
         self.assertEqual(exit_err.exception.code, 1)
         plan_mock.assert_not_called()
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "bootstrap_local.py",
+                "prepare",
+                "--private-dir",
+                str(self.folder),
+                "--inputs",
+                str(self.input_file),
+                "--source-sha256",
+                "a" * 64,
+                "--lock-sha256",
+                "b" * 64,
+                "--tofu",
+                str(self.tofu),
+                "--provider-mirror",
+                str(self.mirror),
+                "--recover",
+                "--recheck",
+            ],
+        ), patch.object(bootstrap, "prepare") as prepare_mock, patch.object(
+            bootstrap, "_operator_print"
+        ):
+            with self.assertRaises(SystemExit) as exit_err:
+                bootstrap.main()
+        self.assertEqual(exit_err.exception.code, 1)
+        prepare_mock.assert_not_called()
 
     def test_assert_recheck_zero_drift_pass_and_refusals(self):
         self.assertEqual(bootstrap.assert_recheck_zero_drift(self._noop_plan_json()), [])
+        read_only = {
+            "resource_changes": [
+                {
+                    "address": "data.azurerm_client_config.current",
+                    "type": "azurerm_resource_group",
+                    "change": {"actions": ["read"], "after": {"name": bootstrap.RESOURCE_GROUP}},
+                }
+            ]
+        }
+        self.assertEqual(bootstrap.assert_recheck_zero_drift(read_only), [])
         summary = bootstrap.sanitize_recheck_plan_summary(
             self._noop_plan_json(),
             inputs=self.inputs,
@@ -2838,6 +2879,7 @@ class RecheckMode(unittest.TestCase):
         # Mutation kill: if -refresh=false is reintroduced, this fails.
         self.assertNotIn("-refresh=false", plan_argv)
         self.assertIn("-lock=true", plan_argv)
+        self.assertIn("-lock-timeout=30s", plan_argv)
         self.assertEqual(bootstrap.digest(self.folder / "plans/first.tfplan"), first_plan_sha)
         self.assertEqual(bootstrap.digest(self.folder / "plan-summary.json"), first_summary_sha)
         self.assertEqual(bootstrap.digest(self.folder / "plan-result.json"), first_result_sha)
@@ -2905,27 +2947,153 @@ class RecheckMode(unittest.TestCase):
                 }
             ]
         }
-        printed = []
-
-        def capture(message: str) -> None:
-            printed.append(message)
-
+        err = io.StringIO()
         with patch.object(
             sys,
             "argv",
             ["bootstrap_local.py", "plan", "--private-dir", str(self.folder), "--recheck"],
         ), patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap, "command", side_effect=self._mock_tofu_run(drift_plan)
-        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261114T131000Z"), patch.object(
-            bootstrap, "_operator_print", side_effect=capture
-        ), patch("builtins.print"), self.assertRaises(SystemExit) as exit_err:
+        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261114T131000Z"), contextlib.redirect_stderr(
+            err
+        ), self.assertRaises(SystemExit) as exit_err:
             bootstrap.main()
         self.assertEqual(exit_err.exception.code, 1)
-        joined = "\n".join(printed)
+        joined = err.getvalue()
         self.assertIn("azurerm_private_endpoint.openai", joined)
         self.assertIn("Addresses:", joined)
         self.assertNotIn(planted, joined)
         self.assertNotIn("inspect reviewed inputs or private logs", joined)
+
+    def test_recheck_commands_helper_refuses_planted_apply_and_refresh_false(self):
+        good = bootstrap._recheck_tofu_commands(
+            backend_hcl=self.root / "backend.hcl",
+            inputs=self.root / "inputs.json",
+            plan_out=self.root / "plans" / "recheck-20261114T990000Z.tfplan",
+        )
+        self.assertEqual([name for name, _ in good], ["init", "plan"])
+        plan_args = good[1][1]
+        self.assertNotIn("-refresh=false", plan_args)
+        self.assertIn("-lock-timeout=30s", plan_args)
+        planted_apply = list(good) + [("apply", ["apply", "-auto-approve"])]
+        with self.assertRaises(bootstrap.Refused) as err:
+            bootstrap._assert_recheck_commands_safe(planted_apply)
+        self.assertIn("never invoke tofu apply", str(err.exception).lower())
+        planted_refresh = [
+            good[0],
+            ("plan", ["plan", "-input=false", "-refresh=false", "-out=x"]),
+        ]
+        with self.assertRaises(bootstrap.Refused) as err:
+            bootstrap._assert_recheck_commands_safe(planted_refresh)
+        self.assertIn("refresh=false", str(err.exception).lower())
+
+    def test_plan_recheck_binds_running_fingerprint_and_private_directory(self):
+        self._seed_applied_private_dir()
+        self._recheck_prepare(stamp="20261114T160000Z")
+        prepare_path = self.folder / "recheck-prepare-20261114T160000Z.json"
+        record = json.loads(prepare_path.read_text())
+        # Tamper bootstrap_local.py digest — must refuse even if .tf files match.
+        record["source"]["files"]["bootstrap_local.py"] = "e" * 64
+        bootstrap.replace_private(prepare_path, bootstrap.json_bytes(record))
+        with patch.object(bootstrap, "owner_context", return_value=self.context), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(self.folder, recheck=True)
+        self.assertIn("running foundation fingerprint", str(err.exception).lower())
+        # Restore fingerprint match, break private_directory binding.
+        record["source"] = bootstrap.fingerprint()
+        record["private_directory"] = str(self.root / "other-private")
+        bootstrap.replace_private(prepare_path, bootstrap.json_bytes(record))
+        with self.assertRaises(bootstrap.Refused) as err:
+            bootstrap._latest_recheck_prepare(self.folder)
+        self.assertIn("private_directory", str(err.exception).lower())
+
+    def test_plan_recheck_refuses_missing_malformed_and_tofu_changed_prepare(self):
+        self._seed_applied_private_dir()
+        with patch.object(bootstrap, "owner_context", return_value=self.context), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(self.folder, recheck=True)
+        self.assertIn("recheck-prepare", str(err.exception).lower())
+        self._recheck_prepare(stamp="20261114T161000Z")
+        prepare_path = self.folder / "recheck-prepare-20261114T161000Z.json"
+        # Malformed: missing source digests / recheck marker.
+        bootstrap.replace_private(
+            prepare_path,
+            bootstrap.json_bytes({"recheck": False, "private_directory": str(self.folder)}),
+        )
+        with patch.object(bootstrap, "owner_context", return_value=self.context), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(self.folder, recheck=True)
+        self.assertIn("missing reviewed source", str(err.exception).lower())
+        # Valid source again, but tofu_sha256 drifted since prepare.
+        self._recheck_prepare(stamp="20261114T161100Z")
+        prepare_path = self.folder / "recheck-prepare-20261114T161100Z.json"
+        record = json.loads(prepare_path.read_text())
+        record["tofu_sha256"] = "0" * 64
+        bootstrap.replace_private(prepare_path, bootstrap.json_bytes(record))
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=self._mock_tofu_run(self._noop_plan_json())
+        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261114T161200Z"), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(self.folder, recheck=True)
+        self.assertIn("changed since prepare", str(err.exception).lower())
+
+    def test_plan_recheck_refuses_shared_tofu_data_mutation(self):
+        self._seed_applied_private_dir()
+        shared = self.folder / "tofu-data"
+        shared.mkdir(mode=0o700)
+        bootstrap.write_private(shared / "marker.txt", b"shared-before\n")
+        self._recheck_prepare(stamp="20261114T162000Z")
+
+        def run_mutate_shared(argv, **kwargs):
+            env = kwargs.get("env") or {}
+            if argv[1] == "init":
+                data = Path(env["TF_DATA_DIR"])
+                data.mkdir(mode=0o700, exist_ok=True)
+                bootstrap.write_private(
+                    data / "terraform.tfstate",
+                    bootstrap.json_bytes(
+                        {
+                            "backend": {
+                                "type": "local",
+                                "config": {
+                                    "path": str(self.folder / "state/foundation.tfstate"),
+                                    "workspace_dir": str(self.folder / "workspaces"),
+                                },
+                            }
+                        }
+                    ),
+                )
+                bootstrap.replace_private(shared / "marker.txt", b"shared-mutated\n")
+            elif argv[1] == "plan":
+                out = Path(next(arg for arg in argv if arg.startswith("-out=")).split("=", 1)[1])
+                bootstrap.write_private(
+                    out,
+                    bootstrap.json_bytes(
+                        {
+                            "encryption_version": "v0",
+                            "encrypted_data": "invented-recheck-plan",
+                            "meta": {},
+                        }
+                    ),
+                )
+            elif argv[1] == "show":
+                return subprocess.CompletedProcess(
+                    argv, 0, json.dumps(self._noop_plan_json()).encode(), b""
+                )
+            return subprocess.CompletedProcess(argv, 0, b"ok", b"")
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run_mutate_shared
+        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261114T162100Z"), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(self.folder, recheck=True)
+        self.assertIn("shared tofu-data", str(err.exception).lower())
+        self.assertFalse((self.folder / "plans/recheck-20261114T162100Z.tfplan").exists())
 
     def test_plan_recheck_refuses_state_mutation_and_apply_never_reachable_from_main(self):
         self._seed_applied_private_dir()
@@ -3032,24 +3200,23 @@ class RecheckMode(unittest.TestCase):
             bootstrap.owner_context({}, self.inputs, recheck=True)
         self.assertIn("already be present", str(err.exception).lower())
 
-    def test_apply_refuses_recheck_marked_artifacts(self):
+    def test_apply_refuses_recheck_marked_result_alone(self):
+        """Mutation kill: only plan-result.json recheck=true must refuse apply."""
         self._seed_applied_private_dir()
         result_path = self.folder / "plan-result.json"
         summary_path = self.folder / "plan-summary.json"
         result = json.loads(result_path.read_text())
         summary = json.loads(summary_path.read_text())
         result["recheck"] = True
-        summary["recheck"] = True
+        # Summary stays unmarked — apply must still refuse on result alone.
         result_path.write_text(json.dumps(result))
         result_path.chmod(0o600)
-        summary_path.write_text(json.dumps(summary))
-        summary_path.chmod(0o600)
-        approval = self.root / "approval.json"
+        approval = self.root / "approval-result.json"
         approval.write_text(
             json.dumps(
                 {
                     "reviewer": "reviewer@example.invalid",
-                    "review_reference": "synthetic-recheck",
+                    "review_reference": "synthetic-recheck-result",
                     "plan_sha256": result["plan_sha256"],
                     "summary_sha256": summary["summary_sha256"],
                 }
@@ -3065,10 +3232,112 @@ class RecheckMode(unittest.TestCase):
         self.assertIn("recheck", str(err.exception).lower())
         popen.assert_not_called()
 
-    def test_recover_apply_refuses_recheck_flagged_recover_named_plan(self):
-        """Recover-named plan + recheck marker must still be refused."""
+    def test_apply_refuses_recheck_marked_summary_alone(self):
+        """Mutation kill: only plan-summary.json recheck=true must refuse apply."""
         self._seed_applied_private_dir()
-        # Mark the private dir as recover-prepared so apply --recover is eligible.
+        result_path = self.folder / "plan-result.json"
+        summary_path = self.folder / "plan-summary.json"
+        result = json.loads(result_path.read_text())
+        summary = json.loads(summary_path.read_text())
+        summary["recheck"] = True
+        # Result stays unmarked — apply must still refuse on summary alone.
+        summary_path.write_text(json.dumps(summary))
+        summary_path.chmod(0o600)
+        approval = self.root / "approval-summary.json"
+        approval.write_text(
+            json.dumps(
+                {
+                    "reviewer": "reviewer@example.invalid",
+                    "review_reference": "synthetic-recheck-summary",
+                    "plan_sha256": result["plan_sha256"],
+                    "summary_sha256": summary["summary_sha256"],
+                }
+            )
+        )
+        approval.chmod(0o600)
+        with patch.object(subprocess, "Popen") as popen, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(
+                self.folder,
+                confirm_apply=True,
+                approval_path=approval,
+            )
+        self.assertIn("recheck", str(err.exception).lower())
+        popen.assert_not_called()
+
+    def test_recover_apply_refuses_recheck_flagged_result_alone(self):
+        """Recover-named result with recheck=true (summary unmarked) must refuse."""
+        self._seed_applied_private_dir()
+        manifest = json.loads((self.folder / "manifest.json").read_text())
+        manifest["recover"] = True
+        backup = self.folder / "state/foundation.tfstate.pre-recover-20261113T100000Z"
+        bootstrap.write_private(backup, (self.folder / "state/foundation.tfstate").read_bytes())
+        manifest["recover_backups"] = {
+            "state_pre_recover": str(backup),
+            "state_pre_recover_sha256": bootstrap.digest(backup),
+            "state_sha256_at_prepare": bootstrap.digest(self.folder / "state/foundation.tfstate"),
+            "manifest_first_apply": str(self.folder / "manifest.first-apply.json"),
+            "manifest_first_apply_sha256": "a" * 64,
+        }
+        bootstrap.replace_private(self.folder / "manifest.json", bootstrap.json_bytes(manifest))
+        bootstrap.write_private(
+            self.folder / "manifest.first-apply.json",
+            bootstrap.json_bytes({**manifest, "recover": False}),
+        )
+        plan_path = self.folder / "plans/recover-20261113T100000Z.tfplan"
+        plan_sha = bootstrap.digest(plan_path)
+        summary = {
+            "create": {"azurerm_private_endpoint": 1},
+            "update": {},
+            "replace": {},
+            "delete": {},
+            "enable_azure_openai": True,
+            "subscription_id": self.inputs["subscription_id"],
+            "tenant_id": self.inputs["tenant_id"],
+            "plan_sha256": plan_sha,
+            "resource_group": bootstrap.RESOURCE_GROUP,
+            "first_apply_only": False,
+            "recover": True,
+        }
+        summary["summary_sha256"] = hashlib.sha256(bootstrap.json_bytes(summary)).hexdigest()
+        summary_path = self.folder / "recover-plan-summary-20261113T100000Z.json"
+        bootstrap.replace_private(summary_path, bootstrap.json_bytes(summary))
+        result = {
+            "planned": True,
+            "recover": True,
+            "recheck": True,
+            "stamp": "20261113T100000Z",
+            "plan": str(plan_path),
+            "summary_path": str(summary_path),
+            "plan_sha256": plan_sha,
+            "summary_sha256": summary["summary_sha256"],
+        }
+        result_path = self.folder / "recover-plan-result-20261113T100000Z.json"
+        bootstrap.replace_private(result_path, bootstrap.json_bytes(result))
+        approval = self.root / "approval.json"
+        approval.write_text(
+            json.dumps(
+                {
+                    "reviewer": "reviewer@example.invalid",
+                    "review_reference": "synthetic-recover-recheck-result",
+                    "plan_sha256": plan_sha,
+                    "summary_sha256": summary["summary_sha256"],
+                }
+            )
+        )
+        approval.chmod(0o600)
+        with patch.object(subprocess, "Popen") as popen, self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.apply(
+                self.folder,
+                confirm_apply=True,
+                approval_path=approval,
+                recover=True,
+            )
+        self.assertIn("recheck", str(err.exception).lower())
+        popen.assert_not_called()
+
+    def test_recover_apply_refuses_recheck_flagged_summary_alone(self):
+        """Recover-named summary with recheck=true (result unmarked) must refuse."""
+        self._seed_applied_private_dir()
         manifest = json.loads((self.folder / "manifest.json").read_text())
         manifest["recover"] = True
         backup = self.folder / "state/foundation.tfstate.pre-recover-20261113T100000Z"
@@ -3107,7 +3376,6 @@ class RecheckMode(unittest.TestCase):
         result = {
             "planned": True,
             "recover": True,
-            "recheck": True,
             "stamp": "20261113T100000Z",
             "plan": str(plan_path),
             "summary_path": str(summary_path),
@@ -3116,12 +3384,12 @@ class RecheckMode(unittest.TestCase):
         }
         result_path = self.folder / "recover-plan-result-20261113T100000Z.json"
         bootstrap.replace_private(result_path, bootstrap.json_bytes(result))
-        approval = self.root / "approval.json"
+        approval = self.root / "approval-recover-summary.json"
         approval.write_text(
             json.dumps(
                 {
                     "reviewer": "reviewer@example.invalid",
-                    "review_reference": "synthetic-recover-recheck",
+                    "review_reference": "synthetic-recover-recheck-summary",
                     "plan_sha256": plan_sha,
                     "summary_sha256": summary["summary_sha256"],
                 }
