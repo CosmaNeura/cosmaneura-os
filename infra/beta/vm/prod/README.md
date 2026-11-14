@@ -214,6 +214,45 @@ bash infra/beta/apply-cosmabot-prod-foundation.sh \
 On failure: stop, keep the artifacts, do not retry. Coding agents must not run
 apply.
 
+## Post-apply re-check
+
+Use this only after a reviewed first apply (or recover apply) finished and you
+want a print-only proof that nothing is left to change. Keep the existing
+private directory. Never regenerate, print, or move the passphrase. Never wipe
+encrypted state. This mode never applies.
+
+```bash
+bash infra/beta/review-cosmabot-prod-foundation.sh \
+  --recheck \
+  --subscription-id "$SUBSCRIPTION_ID" \
+  --inputs /absolute/path/to/same-reviewed-prod-inputs.json \
+  --private-dir /absolute/path/outside/repo/cosmabot-prod-foundation-fresh \
+  --source-sha256 "$SOURCE_SHA256" \
+  --lock-sha256 "$LOCK_SHA256" \
+  --tofu /absolute/path/to/tofu-1.12.5 \
+  --provider-mirror /absolute/path/to/verified-azurerm-mirror
+```
+
+**Pass** means the sanitised summary is 0 add, 0 change, 0 destroy, 0 replace
+(and no import / moved / deposed), and the command exits 0. **Fail** means any
+of those actions appear: the command exits non-zero and prints the drifted
+resource addresses only (no attribute values, no secrets, no passphrase).
+
+Artifacts written (0600) under the private dir only:
+
+- `plans/recheck-<UTC>.tfplan`
+- `recheck-plan-summary-<UTC>.json` / `recheck-plan-result-<UTC>.json` (with
+  `plan_sha256` / `summary_sha256`)
+- `logs/recheck-init-<UTC>.log` / `logs/recheck-plan-<UTC>.log`
+
+It never overwrites `plans/first.tfplan`, recover plans/summaries/results,
+manifests, or state. OpenTofu is invoked with `-refresh=false` so the encrypted
+local state is not rewritten by a refresh, and with `-lock=true
+-lock-timeout=30s` for the brief exclusive lock a consistent read-only plan
+needs. `--recheck` and `--recover` are mutually exclusive. There is no apply
+path from re-check mode; do not pass recheck plans to
+`apply-cosmabot-prod-foundation.sh`.
+
 ## Load secrets into Key Vault (separate later secrets ticket)
 
 **Loading secrets into Key Vault and installing them onto the host as 0400 files

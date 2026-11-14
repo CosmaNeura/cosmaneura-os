@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Review CosmaBot production foundation: name guards, monthly cost estimate, OpenTofu plan.
 # First-apply-only by default. Pass --recover for the separately reviewed partial-apply
-# recovery path. Does not apply. Requires John's az login for the plan portion.
+# recovery path. Pass --recheck for a print-only post-apply re-check (0 add/change/
+# destroy/replace). Does not apply. Requires John's az login for the plan portion.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -17,12 +18,13 @@ source_sha256=""
 lock_sha256=""
 skip_plan=0
 recover=0
+recheck=0
 
 usage() {
   cat <<EOF
 Usage: $0 --subscription-id UUID --inputs PATH --private-dir PATH
           --source-sha256 HEX --lock-sha256 HEX
-          [--tofu PATH] [--provider-mirror PATH] [--cost-only] [--recover]
+          [--tofu PATH] [--provider-mirror PATH] [--cost-only] [--recover | --recheck]
 
 First-apply-only review by default. Prints the checked-in monthly cost estimate
 (labeled with price dates), refuses staging names, then runs the encrypted local
@@ -32,6 +34,11 @@ OpenTofu plan for rg-cosmabot-prod-eus2-01.
 With --recover, --private-dir must already exist and hold the encrypted state
 plus passphrase from the partial first apply; the plan is written to
 plans/recover-<UTC>.tfplan and never overwrites plans/first.tfplan.
+With --recheck, --private-dir must already exist with post-apply encrypted state;
+the plan is written to plans/recheck-<UTC>.tfplan only. Recheck never applies,
+never refreshes/writes state (-refresh=false), and fails unless the plan is
+0 add / 0 change / 0 destroy / 0 replace (and no import/move/deposed).
+--recover and --recheck are mutually exclusive.
 --source-sha256 / --lock-sha256 must be operator-supplied (from a prior
 fingerprint review), not self-trusted.
 --subscription-id must equal inputs.subscription_id.
@@ -59,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --lock-sha256) lock_sha256="${2:-}"; shift 2 ;;
     --cost-only) skip_plan=1; shift ;;
     --recover) recover=1; shift ;;
+    --recheck) recheck=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -66,6 +74,10 @@ done
 
 [[ -f "$price_file" ]] || die "missing price table"
 [[ -f "$prod_dir/name_guards.py" ]] || die "missing name guards"
+
+if [[ "$recover" -eq 1 && "$recheck" -eq 1 ]]; then
+  die "--recover and --recheck are mutually exclusive"
+fi
 
 python3 - "$price_file" "$prod_dir" <<'PY'
 import json, sys
@@ -182,7 +194,9 @@ fi
 [[ -n "$provider_mirror" && -d "$provider_mirror" ]] || die "pass --provider-mirror to the verified azurerm mirror"
 command -v "$tofu_bin" >/dev/null || die "OpenTofu not found; pass --tofu"
 command -v az >/dev/null || die "az CLI required; run az login to John's tenant first"
-if [[ "$recover" -eq 1 ]]; then
+if [[ "$recheck" -eq 1 ]]; then
+  [[ -d "$private_dir" ]] || die "recheck --private-dir must already exist with encrypted state"
+elif [[ "$recover" -eq 1 ]]; then
   [[ -d "$private_dir" ]] || die "recovery --private-dir must already exist with encrypted state"
 else
   [[ ! -e "$private_dir" ]] || die "private directory must be fresh (path must not exist yet)"
@@ -218,17 +232,22 @@ if [[ "$recover" -eq 1 ]]; then
   prepare_args+=(--recover)
   plan_args+=(--recover)
 fi
+if [[ "$recheck" -eq 1 ]]; then
+  prepare_args+=(--recheck)
+  plan_args+=(--recheck)
+fi
 
 python3 "$foundation_dir/bootstrap_local.py" "${prepare_args[@]}"
 
 plan_json="$(python3 "$foundation_dir/bootstrap_local.py" "${plan_args[@]}")"
-python3 - "$plan_json" "$private_dir" "$recover" <<'PY'
+python3 - "$plan_json" "$private_dir" "$recover" "$recheck" <<'PY'
 import json, sys
 from pathlib import Path
 result = json.loads(sys.argv[1])
 private_dir = Path(sys.argv[2])
 recover = sys.argv[3] == "1"
-if recover:
+recheck = sys.argv[4] == "1"
+if recover or recheck:
     summary_path = Path(result["summary_path"])
 else:
     summary_path = private_dir / "plan-summary.json"
@@ -240,15 +259,24 @@ print("")
 print(f"enable_azure_openai (effective): {summary.get('enable_azure_openai')}")
 print(f"plan_sha256: {result['plan_sha256']}")
 print(f"summary_sha256: {result['summary_sha256']}")
-if recover:
+if recheck:
+    print("Post-apply re-check PASS: 0 add, 0 change, 0 destroy, 0 replace.")
+    print(f"Plan saved under plans/recheck-<UTC>.tfplan ({Path(result['plan']).name}).")
+    print(f"Summary/result: {summary_path.name} / {Path(result['result_path']).name}")
+    print("Nothing was applied. State, manifests, first.tfplan, and recover artifacts were not overwritten.")
+    print("This mode never applies and never prints the state passphrase or secrets.")
+elif recover:
     print("Recovery review complete. Plan saved under plans/recover-<UTC>.tfplan.")
     print(f"Summary/result: {summary_path.name} / {Path(result['result_path']).name}")
     print("Nothing was applied. plans/first.tfplan was not overwritten.")
     print("After John's yes on this recovery plan hash, bind an approval file (0600, outside the repo) to:")
+    print(f"  plan_sha256={result['plan_sha256']}")
+    print(f"  summary_sha256={result['summary_sha256']}")
+    print("Then follow the Apply section in infra/beta/vm/prod/README.md.")
 else:
     print("Review complete. Plan saved under the private directory. Nothing was applied.")
     print("First-apply-only. After John's yes, bind an approval file (0600, outside the repo) to:")
-print(f"  plan_sha256={result['plan_sha256']}")
-print(f"  summary_sha256={result['summary_sha256']}")
-print("Then follow the Apply section in infra/beta/vm/prod/README.md.")
+    print(f"  plan_sha256={result['plan_sha256']}")
+    print(f"  summary_sha256={result['summary_sha256']}")
+    print("Then follow the Apply section in infra/beta/vm/prod/README.md.")
 PY

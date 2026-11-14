@@ -2,9 +2,11 @@
 
 First-apply-only tooling by default. Pass --recover for the separately reviewed
 partial-apply recovery path (reuse encrypted state/passphrase in place; ADD-ONLY
-plans under plans/recover-<UTC>.tfplan). OpenAI opt-in must be in the first
-apply's inputs or wait for a separately reviewed day-2 tool. Do not run raw
-tofu by hand.
+plans under plans/recover-<UTC>.tfplan). Pass --recheck for a print-only
+post-apply re-check (same reviewed inputs + existing private dir; writes only
+plans/recheck-<UTC>.tfplan and matching summary/result; never apply). OpenAI
+opt-in must be in the first apply's inputs or wait for a separately reviewed
+day-2 tool. Do not run raw tofu by hand.
 """
 from __future__ import annotations
 
@@ -91,6 +93,9 @@ APPLY_RECOVERY = (
 RECOVER_PLAN_NAME = re.compile(r"^recover-\d{8}T\d{6}Z\.tfplan$")
 RECOVER_SUMMARY_NAME = re.compile(r"^recover-plan-summary-\d{8}T\d{6}Z\.json$")
 RECOVER_RESULT_NAME = re.compile(r"^recover-plan-result-\d{8}T\d{6}Z\.json$")
+RECHECK_PLAN_NAME = re.compile(r"^recheck-\d{8}T\d{6}Z\.tfplan$")
+RECHECK_SUMMARY_NAME = re.compile(r"^recheck-plan-summary-\d{8}T\d{6}Z\.json$")
+RECHECK_RESULT_NAME = re.compile(r"^recheck-plan-result-\d{8}T\d{6}Z\.json$")
 ARM_SUBSCRIPTION_RE = re.compile(r"/subscriptions/([^/]+)", re.IGNORECASE)
 ARM_RESOURCE_GROUP_RE = re.compile(
     r"/subscriptions/([^/]+)/resourceGroups/([^/]+)",
@@ -257,7 +262,9 @@ def command(argv, *, env, cwd=None, timeout=120):
     )
 
 
-def owner_context(env: dict, inputs: dict, *, recover: bool = False) -> dict:
+def owner_context(env: dict, inputs: dict, *, recover: bool = False, recheck: bool = False) -> dict:
+    if recover and recheck:
+        raise Refused("--recover and --recheck are mutually exclusive")
     result = command(["az", "account", "show", "--output", "json", "--only-show-errors"], env=env)
     if result.returncode:
         raise Refused("Cannot verify the current owner Azure CLI context")
@@ -289,10 +296,11 @@ def owner_context(env: dict, inputs: dict, *, recover: bool = False) -> dict:
         env=env,
     )
     present = None if exists.returncode else json.loads(exists.stdout)
-    if recover:
+    if recover or recheck:
         if present is not True:
+            label = "Recovery" if recover else "Post-apply re-check"
             raise Refused(
-                "Recovery requires the existing workload resource group "
+                f"{label} requires the existing workload resource group "
                 f"{RESOURCE_GROUP} to already be present"
             )
     elif exists.returncode or present is not False:
@@ -372,7 +380,12 @@ def prepare(
     mirror: Path,
     *,
     recover: bool = False,
+    recheck: bool = False,
 ) -> dict:
+    if recover and recheck:
+        raise Refused("--recover and --recheck are mutually exclusive")
+    if recheck:
+        return prepare_recheck(folder, inputs_path, expected_source, expected_lock, tofu, mirror)
     if recover:
         return prepare_recover(folder, inputs_path, expected_source, expected_lock, tofu, mirror)
     env = clean_environment()
@@ -548,6 +561,102 @@ def prepare_recover(
         "first_apply_only": True,
     }
 
+
+def prepare_recheck(
+    folder: Path,
+    inputs_path: Path,
+    expected_source: str,
+    expected_lock: str,
+    tofu: Path,
+    mirror: Path,
+) -> dict:
+    """Verify an existing private dir for a print-only post-apply re-check.
+
+    Never regenerates the passphrase, never backs up or writes state, and never
+    mutates manifests, first.tfplan, or recover artifacts.
+    """
+    env = clean_environment()
+    actual = fingerprint()
+    if actual["source_sha256"] != expected_source or actual["lock_sha256"] != expected_lock:
+        raise Refused("Foundation source/lock differs from the reviewed hashes")
+    inputs = normalize_inputs(read_json(inputs_path))
+    context = owner_context(env, inputs, recheck=True)
+    tofu = _verify_tofu_mirror(tofu, mirror, env)
+    folder = private_directory(folder, fresh=False)
+    passphrase = folder / "encryption.passphrase"
+    state_path = folder / "state/foundation.tfstate"
+    if not passphrase.exists():
+        raise Refused("Post-apply re-check requires the existing encryption.passphrase file")
+    if not state_path.exists():
+        raise Refused("Post-apply re-check requires existing state/foundation.tfstate")
+    for name in ("manifest.json", "inputs.json", "backend.hcl", "tofurc", "encryption.passphrase"):
+        secure_file(folder / name)
+    ciphertext(state_path)
+    for name in ("module", "state", "plans", "workspaces", "logs"):
+        private_directory(folder / name)
+    prior = read_json(folder / "manifest.json")
+    if (
+        prior.get("version") != 1
+        or prior.get("profile") != NAMESPACE
+        or prior.get("resource_group") != RESOURCE_GROUP
+    ):
+        raise Refused("Prepared bootstrap no longer matches the reviewed source/namespace")
+    if set(prior.get("protected_files", {})) != PROTECTED_FILES:
+        raise Refused("Prepared bootstrap file bindings are incomplete")
+    for name, expected in prior["protected_files"].items():
+        if digest(folder / name) != expected:
+            raise Refused("Prepared bootstrap inputs changed")
+    expected_module = {
+        name: value
+        for name, value in actual["files"].items()
+        if name != "bootstrap_local.py" and not name.startswith("extra/")
+    }
+    actual_module = {
+        path.relative_to(folder / "module").as_posix(): digest(path)
+        for path in (folder / "module").rglob("*")
+        if path.is_file()
+    }
+    if actual_module != expected_module:
+        raise Refused("Private module snapshot changed")
+    bound = dict(inputs)
+    bound["state_namespace"] = NAMESPACE
+    if read_json(folder / "inputs.json") != bound:
+        raise Refused("Post-apply re-check inputs must match the existing private inputs.json")
+    tofu_sha = digest(tofu)
+    if prior.get("tofu_sha256") != tofu_sha:
+        raise Refused(
+            "Post-apply re-check tofu_sha256 differs from private manifest: "
+            f"manifest={prior.get('tofu_sha256')} recheck={tofu_sha}"
+        )
+    if prior.get("context") != context:
+        raise Refused(
+            "Post-apply re-check owner context differs from private manifest: "
+            f"manifest={prior.get('context')} recheck={context}"
+        )
+    # Read-only prepare: refuse any mutation of protected artifacts.
+    first_plan = folder / "plans/first.tfplan"
+    first_plan_sha = digest(first_plan) if first_plan.is_file() else None
+    manifest_sha = digest(folder / "manifest.json")
+    state_sha = digest(state_path)
+    passphrase_sha = digest(passphrase)
+    if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
+        raise Refused("Post-apply re-check prepare must not modify plans/first.tfplan")
+    if digest(folder / "manifest.json") != manifest_sha:
+        raise Refused("Post-apply re-check prepare must not modify manifest.json")
+    if digest(state_path) != state_sha:
+        raise Refused("Post-apply re-check prepare must not modify state/foundation.tfstate")
+    if digest(passphrase) != passphrase_sha:
+        raise Refused("Post-apply re-check prepare must not modify encryption.passphrase")
+    return {
+        "prepared": True,
+        "recheck": True,
+        "private_directory": str(folder),
+        "source_sha256": expected_source,
+        "state_backend": "local-encrypted",
+        "cloud_mutations": False,
+        "first_apply_only": False,
+        "applied": False,
+    }
 
 
 def ciphertext(path: Path) -> None:
@@ -858,8 +967,93 @@ def sanitize_recover_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256:
     return summary
 
 
+def assert_recheck_zero_drift(plan_json: dict) -> list[str]:
+    """Hard-fail unless the plan has 0 add/change/destroy/replace (and no import/move/deposed).
 
-def plan(folder: Path, *, recover: bool = False) -> dict:
+    On drift, raises Refused listing resource addresses only (no attribute values).
+    Returns the empty drift address list on pass.
+    """
+    changes = plan_json.get("resource_changes") or []
+    drifted: list[str] = []
+    for change in changes:
+        if not isinstance(change, dict):
+            raise Refused("Post-apply re-check resource_changes entries must be objects")
+        rtype = _assert_recover_entry_type_guards(change)
+        address = str(change.get("address") or rtype)
+        if change.get("importing") is not None:
+            raise Refused(
+                "Post-apply re-check found import; refused. Addresses: " + address
+            )
+        previous = change.get("previous_address")
+        if previous is not None and previous != change.get("address"):
+            raise Refused(
+                "Post-apply re-check found moved resource; refused. Addresses: " + address
+            )
+        if change.get("deposed") is not None:
+            raise Refused(
+                "Post-apply re-check found deposed resource; refused. Addresses: " + address
+            )
+        change_body = change.get("change")
+        if not isinstance(change_body, dict):
+            raise Refused("Post-apply re-check change body is missing")
+        if "actions" not in change_body:
+            raise Refused("Post-apply re-check change is missing actions")
+        actions = change_body.get("actions")
+        if not isinstance(actions, list) or not actions:
+            raise Refused("Post-apply re-check change has empty or invalid actions")
+        after = change_body.get("after") or {}
+        if not isinstance(after, dict):
+            after = {}
+        candidates = [
+            str(change.get("address") or ""),
+            str(change.get("name") or ""),
+            str(change.get("module_address") or ""),
+            *(_string_candidates(after)),
+        ]
+        for raw in candidates:
+            if STAGING_RG_NEEDLE in raw.lower():
+                raise Refused("Post-apply re-check touches staging resource group names")
+        try:
+            refuse_cross_environment("production", candidates)
+        except NameGuardError as exc:
+            raise Refused(f"Post-apply re-check touches staging names: {exc}") from exc
+        if actions == ["no-op"] or actions == ["read"]:
+            continue
+        drifted.append(address)
+    if drifted:
+        # Addresses only — never attribute values from the plan JSON.
+        raise Refused(
+            "Post-apply re-check found drift (add/change/destroy/replace); refused. Addresses: "
+            + ", ".join(drifted)
+        )
+    return drifted
+
+
+def sanitize_recheck_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256: str) -> dict:
+    assert_recheck_zero_drift(plan_json)
+    enabled = bool(inputs.get("enable_azure_openai", False))
+    summary = {
+        "create": {},
+        "update": {},
+        "replace": {},
+        "delete": {},
+        "enable_azure_openai": enabled,
+        "subscription_id": inputs["subscription_id"],
+        "tenant_id": inputs["tenant_id"],
+        "plan_sha256": plan_sha256,
+        "resource_group": RESOURCE_GROUP,
+        "first_apply_only": False,
+        "recheck": True,
+    }
+    summary["summary_sha256"] = hashlib.sha256(json_bytes(summary)).hexdigest()
+    return summary
+
+
+def plan(folder: Path, *, recover: bool = False, recheck: bool = False) -> dict:
+    if recover and recheck:
+        raise Refused("--recover and --recheck are mutually exclusive")
+    if recheck:
+        return plan_recheck(folder)
     if recover:
         return plan_recover(folder)
     manifest, inputs = _verify_prepared(folder)
@@ -1066,6 +1260,189 @@ def plan_recover(folder: Path) -> dict:
     return result
 
 
+def plan_recheck(folder: Path) -> dict:
+    """Print-only post-apply plan. Never apply. Never write state or first/recover artifacts.
+
+    OpenTofu flags (read-only-safe):
+    - ``-refresh=false``: a normal plan refresh would rewrite state; re-check compares
+      config to the encrypted local state without that write.
+    - ``-lock=true -lock-timeout=30s``: brief exclusive lock while reading state for a
+      consistent plan — the same lock a read-only plan needs, no longer.
+    """
+    manifest, inputs = _verify_prepared(folder)
+    passphrase = folder / "encryption.passphrase"
+    state_path = folder / "state/foundation.tfstate"
+    if not passphrase.exists():
+        raise Refused("Post-apply re-check requires the existing encryption.passphrase file")
+    if not state_path.exists():
+        raise Refused("Post-apply re-check requires existing state/foundation.tfstate")
+    secure_file(passphrase)
+    ciphertext(state_path)
+    state_sha = digest(state_path)
+    passphrase_sha = digest(passphrase)
+    manifest_sha = digest(folder / "manifest.json")
+    first_plan = folder / "plans/first.tfplan"
+    first_plan_sha = digest(first_plan) if first_plan.is_file() else None
+    first_summary = folder / "plan-summary.json"
+    first_result = folder / "plan-result.json"
+    first_summary_sha = digest(first_summary) if first_summary.is_file() else None
+    first_result_sha = digest(first_result) if first_result.is_file() else None
+    recover_digests = {
+        path: digest(path)
+        for path in sorted((folder / "plans").glob("recover-*.tfplan"))
+        if path.is_file()
+    }
+    recover_summary_digests = {
+        path: digest(path)
+        for path in sorted(folder.glob("recover-plan-summary-*.json"))
+        if path.is_file()
+    }
+    recover_result_digests = {
+        path: digest(path)
+        for path in sorted(folder.glob("recover-plan-result-*.json"))
+        if path.is_file()
+    }
+    stamp = utc_plan_stamp()
+    plan_path = folder / "plans" / f"recheck-{stamp}.tfplan"
+    summary_path = folder / f"recheck-plan-summary-{stamp}.json"
+    result_path = folder / f"recheck-plan-result-{stamp}.json"
+    if plan_path.name == "first.tfplan" or plan_path.resolve() == (folder / "plans/first.tfplan").resolve():
+        raise Refused("Post-apply re-check must not overwrite plans/first.tfplan")
+    if plan_path.name.startswith("recover-"):
+        raise Refused("Post-apply re-check must not overwrite recover plan artifacts")
+    if plan_path.exists() or summary_path.exists() or result_path.exists():
+        raise Refused("Post-apply re-check plan path already exists; refuse overwrite")
+    tofu = Path(manifest["tofu"])
+    if digest(tofu) != manifest["tofu_sha256"]:
+        raise Refused("Pinned OpenTofu executable changed")
+    env = execution_environment(folder)
+    if owner_context(clean_environment(), inputs, recheck=True) != manifest["context"]:
+        raise Refused("Owner CLI context changed since preparation")
+    # Never include "apply" in this command list. Tests assert that invariant.
+    commands = [
+        (
+            "init",
+            [
+                "init",
+                "-input=false",
+                "-lockfile=readonly",
+                "-reconfigure",
+                "-backend-config=" + str(folder / "backend.hcl"),
+            ],
+        ),
+        (
+            "plan",
+            [
+                "plan",
+                "-input=false",
+                "-lock=true",
+                "-lock-timeout=30s",
+                "-refresh=false",
+                "-var-file=" + str(folder / "inputs.json"),
+                "-out=" + str(plan_path),
+            ],
+        ),
+    ]
+    for _name, args in commands:
+        if args and args[0] == "apply":
+            raise Refused("Post-apply re-check must never invoke tofu apply")
+    summary = None
+    result = None
+    try:
+        for name, args in commands:
+            cmd_result = command([str(tofu), *args], cwd=folder / "module", env=env, timeout=300)
+            write_private(
+                folder / "logs" / f"recheck-{name}-{stamp}.log",
+                cmd_result.stdout + cmd_result.stderr,
+            )
+            if cmd_result.returncode:
+                raise Refused(
+                    "Post-apply re-check " + name + " failed; private logs retained, no apply was attempted"
+                )
+            if name == "init":
+                backend = read_json(folder / "tofu-data/terraform.tfstate").get("backend", {})
+                config = backend.get("config", {})
+                if (
+                    backend.get("type") != "local"
+                    or config.get("path") != str(folder / "state/foundation.tfstate")
+                    or config.get("workspace_dir") != str(folder / "workspaces")
+                ):
+                    raise Refused("Initialized backend differs from the fixed local paths")
+                workspace_file = folder / "tofu-data/environment"
+                if workspace_file.exists() and workspace_file.read_text().strip() != "default":
+                    raise Refused("Only the default workspace is supported")
+            if digest(state_path) != state_sha:
+                raise Refused("Post-apply re-check must not modify state/foundation.tfstate")
+        if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
+            raise Refused("Post-apply re-check must not overwrite plans/first.tfplan")
+        if digest(folder / "manifest.json") != manifest_sha:
+            raise Refused("Post-apply re-check must not modify manifest.json")
+        if digest(passphrase) != passphrase_sha:
+            raise Refused("Post-apply re-check must not modify encryption.passphrase")
+        for path, expected in recover_digests.items():
+            if digest(path) != expected:
+                raise Refused("Post-apply re-check must not overwrite recover plan artifacts")
+        for path, expected in recover_summary_digests.items():
+            if digest(path) != expected:
+                raise Refused("Post-apply re-check must not overwrite recover summary artifacts")
+        for path, expected in recover_result_digests.items():
+            if digest(path) != expected:
+                raise Refused("Post-apply re-check must not overwrite recover result artifacts")
+        ciphertext(plan_path)
+        plan_sha = digest(plan_path)
+        show = command(
+            [str(tofu), "show", "-json", str(plan_path)],
+            cwd=folder / "module",
+            env=env,
+            timeout=120,
+        )
+        if show.returncode:
+            raise Refused("Unable to render sanitised re-check plan summary; no apply was attempted")
+        summary = sanitize_recheck_plan_summary(
+            json.loads(show.stdout), inputs=inputs, plan_sha256=plan_sha
+        )
+        result = {
+            "planned": True,
+            "recheck": True,
+            "stamp": stamp,
+            "plan": str(plan_path),
+            "summary_path": str(summary_path),
+            "result_path": str(result_path),
+            "plan_sha256": plan_sha,
+            "summary_sha256": summary["summary_sha256"],
+            "enable_azure_openai": summary["enable_azure_openai"],
+            "source_sha256": manifest["source"]["source_sha256"],
+            "state_backend": "local-encrypted",
+            "applied": False,
+            "first_apply_only": False,
+            "create": 0,
+            "update": 0,
+            "replace": 0,
+            "delete": 0,
+        }
+        write_private(summary_path, json_bytes(summary))
+        write_private(result_path, json_bytes(result))
+    except Exception:
+        if plan_path.exists():
+            plan_path.unlink()
+        if summary_path.exists():
+            summary_path.unlink()
+        if result_path.exists():
+            result_path.unlink()
+        raise
+    if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
+        raise Refused("Post-apply re-check must not overwrite plans/first.tfplan")
+    if first_summary_sha is not None and digest(first_summary) != first_summary_sha:
+        raise Refused("Post-apply re-check must not overwrite first-apply plan-summary.json")
+    if first_result_sha is not None and digest(first_result) != first_result_sha:
+        raise Refused("Post-apply re-check must not overwrite first-apply plan-result.json")
+    if digest(state_path) != state_sha:
+        raise Refused("Post-apply re-check left state/foundation.tfstate changed after writing recheck artifacts")
+    if digest(folder / "manifest.json") != manifest_sha:
+        raise Refused("Post-apply re-check left manifest.json changed after writing recheck artifacts")
+    assert result is not None
+    return result
+
 
 def read_approval(path: Path, *, plan_sha256: str, summary_sha256: str) -> dict:
     if not path.is_absolute() or path.resolve() != path or path.is_relative_to(REPO):
@@ -1158,6 +1535,8 @@ def _resolve_apply_artifacts(folder: Path, *, recover: bool) -> tuple[Path, Path
             raise Refused("recover plan must live under the private plans/ directory")
         if resolved_plan.name == "first.tfplan" or not RECOVER_PLAN_NAME.match(resolved_plan.name):
             raise Refused("Recovery apply refuses plans/first.tfplan; use plans/recover-<UTC>.tfplan")
+        if RECHECK_PLAN_NAME.match(resolved_plan.name) or plan_result.get("recheck"):
+            raise Refused("Recovery apply refuses recheck plans; post-apply re-check is print-only")
         if not resolved_plan.is_file():
             raise Refused("Reviewed recover plan file is required before apply")
         if not plan_result.get("recover") or not summary.get("recover"):
@@ -1168,10 +1547,16 @@ def _resolve_apply_artifacts(folder: Path, *, recover: bool) -> tuple[Path, Path
     summary_path = folder / "plan-summary.json"
     if not plan_path.is_file() or not result_path.is_file() or not summary_path.is_file():
         raise Refused("Reviewed plan, plan-result.json, and plan-summary.json are required before apply")
+    if RECHECK_PLAN_NAME.match(plan_path.name):
+        raise Refused("Apply refuses recheck plans; post-apply re-check is print-only")
     secure_file(plan_path)
     secure_file(result_path)
     secure_file(summary_path)
-    return plan_path, result_path, summary_path, read_json(result_path), read_json(summary_path)
+    plan_result = read_json(result_path)
+    summary = read_json(summary_path)
+    if plan_result.get("recheck") or summary.get("recheck"):
+        raise Refused("Apply refuses recheck plan artifacts; post-apply re-check is print-only")
+    return plan_path, result_path, summary_path, plan_result, summary
 
 
 
@@ -1384,14 +1769,17 @@ def main() -> None:
     first.add_argument("--source-sha256", required=True)
     first.add_argument("--lock-sha256", required=True)
     first.add_argument("--recover", action="store_true")
+    first.add_argument("--recheck", action="store_true")
     later = commands.add_parser("plan")
     later.add_argument("--private-dir", type=Path, required=True)
     later.add_argument("--recover", action="store_true")
+    later.add_argument("--recheck", action="store_true")
     apply_cmd = commands.add_parser("apply")
     apply_cmd.add_argument("--private-dir", type=Path, required=True)
     apply_cmd.add_argument("--confirm-apply", action="store_true")
     apply_cmd.add_argument("--approval", type=Path, required=True)
     apply_cmd.add_argument("--recover", action="store_true")
+    # Intentionally no --recheck on apply: re-check is print-only and must never apply.
     args = parser.parse_args()
     os.umask(0o077)
     result = None
@@ -1399,6 +1787,8 @@ def main() -> None:
         if args.command == "fingerprint":
             result = fingerprint()
         elif args.command == "prepare":
+            if args.recover and args.recheck:
+                raise Refused("--recover and --recheck are mutually exclusive")
             result = prepare(
                 args.private_dir,
                 args.inputs,
@@ -1407,9 +1797,12 @@ def main() -> None:
                 args.tofu,
                 args.provider_mirror,
                 recover=args.recover,
+                recheck=args.recheck,
             )
         elif args.command == "plan":
-            result = plan(args.private_dir, recover=args.recover)
+            if args.recover and args.recheck:
+                raise Refused("--recover and --recheck are mutually exclusive")
+            result = plan(args.private_dir, recover=args.recover, recheck=args.recheck)
         else:
             result = apply(
                 args.private_dir,
