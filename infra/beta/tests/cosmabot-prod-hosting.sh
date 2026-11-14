@@ -91,6 +91,51 @@ if grep -F -- "--confirm-apply" "$tmp_root/review-full.out" "$tmp_root/review-fu
 fi
 : >"$COSMABOT_STUB_MARKER"
 
+# --recheck and --recover are mutually exclusive (shell gate; stubs must not run).
+set +e
+bash "$beta_dir/review-cosmabot-prod-foundation.sh" \
+  --recheck \
+  --recover \
+  --subscription-id "00000000-0000-4000-8000-000000000001" \
+  --inputs "$tmp_root/inputs.json" \
+  --private-dir "$tmp_root/existing-private" \
+  --source-sha256 "$(python3 -c 'print("a"*64)')" \
+  --lock-sha256 "$(python3 -c 'print("b"*64)')" \
+  --tofu "$stub_bin/tofu" \
+  --provider-mirror "$tmp_root/mirror" \
+  >"$tmp_root/recheck-mutex.out" 2>"$tmp_root/recheck-mutex.err"
+mutex_rc=$?
+set -e
+[[ "$mutex_rc" -ne 0 ]] || { echo "expected --recheck/--recover mutual exclusion" >&2; exit 1; }
+grep -F "mutually exclusive" "$tmp_root/recheck-mutex.err" >/dev/null
+[[ ! -s "$COSMABOT_STUB_MARKER" ]] || { echo "stub az/tofu was invoked during mutex check" >&2; exit 1; }
+
+# --recheck path with stub az/tofu must fail (stubs exit 97) and never mention apply.
+mkdir -p "$tmp_root/existing-private"
+set +e
+bash "$beta_dir/review-cosmabot-prod-foundation.sh" \
+  --recheck \
+  --subscription-id "00000000-0000-4000-8000-000000000001" \
+  --inputs "$tmp_root/inputs.json" \
+  --private-dir "$tmp_root/existing-private" \
+  --source-sha256 "$(python3 -c 'print("a"*64)')" \
+  --lock-sha256 "$(python3 -c 'print("b"*64)')" \
+  --tofu "$stub_bin/tofu" \
+  --provider-mirror "$tmp_root/mirror" \
+  >"$tmp_root/recheck-full.out" 2>"$tmp_root/recheck-full.err"
+recheck_rc=$?
+set -e
+[[ "$recheck_rc" -ne 0 ]] || { echo "expected --recheck with stubs to exit non-zero" >&2; exit 1; }
+if grep -F -- "--confirm-apply" "$tmp_root/recheck-full.out" "$tmp_root/recheck-full.err" >/dev/null; then
+  echo "recheck review output must not contain --confirm-apply" >&2
+  exit 1
+fi
+if grep -F "apply-cosmabot-prod-foundation" "$tmp_root/recheck-full.out" "$tmp_root/recheck-full.err" >/dev/null; then
+  echo "recheck review output must not point at the apply script" >&2
+  exit 1
+fi
+: >"$COSMABOT_STUB_MARKER"
+
 # Offline dry-run (real interpreter PATH; stubs stay unused).
 PATH="/usr/bin:/bin" python3 "$beta_dir/vm/prod/dry_run.py" --allow-no-provider >"$tmp_root/dry-run.out"
 grep -F '"dry_run": true' "$tmp_root/dry-run.out" >/dev/null
