@@ -737,7 +737,12 @@ def _verify_prepared(folder: Path) -> tuple[dict, dict]:
     return manifest, read_json(folder / "inputs.json")
 
 
-def _latest_recheck_prepare(folder: Path) -> Path:
+def _latest_recheck_prepare(folder: Path) -> tuple[Path, dict]:
+    """Return the latest recheck-prepare path and the record already read/validated.
+
+    Callers must use the returned ``record`` and must not ``read_json`` the file
+    again — a second read could observe a swapped/tampered artifact.
+    """
     matches = sorted(
         path
         for path in folder.glob("recheck-prepare-*.json")
@@ -755,7 +760,7 @@ def _latest_recheck_prepare(folder: Path) -> Path:
         raise Refused(
             "recheck-prepare private_directory does not match this private directory"
         )
-    return latest
+    return latest, record
 
 
 def _verify_prepared_recheck(folder: Path) -> tuple[dict, dict, dict]:
@@ -786,10 +791,9 @@ def _verify_prepared_recheck(folder: Path) -> tuple[dict, dict, dict]:
     for name, expected in manifest["protected_files"].items():
         if digest(folder / name) != expected:
             raise Refused("Prepared bootstrap inputs changed")
-    prepare_path = _latest_recheck_prepare(folder)
+    prepare_path, recheck_prepare = _latest_recheck_prepare(folder)
     secure_file(prepare_path)
-    recheck_prepare = read_json(prepare_path)
-    # private_directory is already bound by _latest_recheck_prepare (do not duplicate).
+    # Use the validated record from _latest_recheck_prepare — do not re-read.
     if not recheck_prepare.get("recheck") or not isinstance(recheck_prepare.get("source"), dict):
         raise Refused("recheck-prepare artifact is missing reviewed source digests")
     if recheck_prepare.get("source") != fingerprint():
@@ -1546,7 +1550,7 @@ def plan_recheck(folder: Path) -> dict:
             "plan": str(plan_path),
             "summary_path": str(summary_path),
             "result_path": str(result_path),
-            "prepare_path": str(_latest_recheck_prepare(folder)),
+            "prepare_path": str(_latest_recheck_prepare(folder)[0]),
             "plan_sha256": plan_sha,
             "summary_sha256": summary["summary_sha256"],
             "enable_azure_openai": summary["enable_azure_openai"],
