@@ -94,7 +94,7 @@ Hands-on only. Exact order:
 | # | John does | ~Min | Gate |
 | --- | --- | --- | ---: |
 | 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from John's own `/32` (vault is RBAC; `publicNetworkAccess` starts Disabled — every vault write sits inside this window). **John only, §4.1:** export `KEYFILE=$HOME/.cosmabot-sitting2/llm-key1` once → open vault `/32` → Step A → **pause** → rotate **key1** → Fence 2 → **pause** → Step B → generate mode-600 password file (CSPRNG; never printed) → load the other six vault secrets (`--file` / no-echo prompt; `--output none`) → **then** close vault + verify. Close-and-verify is mandatory even after a STOP. **If interrupted/abandoned:** close vault first, then abandon `$KEYFILE` cleanup (§4.3). Agents never rotate or load. | 30 | **"yes, KV secrets loaded and public access disabled"** |
-| 2 | Reach the prod VM only via temporary NSG rule `TEMP-JOHN-SSH-SECRETS-INSTALL` (John `/32`; detail in [`#388`](https://github.com/CosmaNeura/cosmaneura-os/pull/388)). SSH host / user / key from tofu `foundation.public_ip`, reviewed `admin_username`, and the private key that matches `admin_ssh_public_key` (placeholders only — §4.1). Host secrets install / mode-0400 files; then delete the rule and verify. Never via Azure Run Command. Close-and-verify before any tofu plan/apply. | 10 | **"yes, host secrets path closed; no port-22 allow"** |
+| 2 | **WAITING ON [`#388`](https://github.com/CosmaNeura/cosmaneura-os/pull/388)** — host secrets install via temporary NSG rule `TEMP-JOHN-SSH-SECRETS-INSTALL` (John `/32`; detail in that PR). SSH host / user / key from tofu `foundation.public_ip`, reviewed `admin_username`, and the private key that matches `admin_ssh_public_key` (placeholders only — §4.1). **No second vault window:** row 1 already loads the LLM key and the other six secrets before vault close; host install only moves those vault **names** onto the VM. Never via Azure Run Command. Close-and-verify the NSG rule before any tofu plan/apply. | 10 | **"yes, host secrets path closed; no port-22 allow"** |
 | 3 | Type **yes** to format the new empty data disk (prod IDs only) | 5 | **"yes, format the new empty data disk"** |
 | 4 | Publish Cloudflare DNS (proxy **off**): `beta.cosmas.ai` A, `api.beta.cosmas.ai` A → public IP; `clerk.beta.cosmas.ai` CNAME from Clerk | 10 | — |
 | 5 | Decide §9 (b) path (recommended: AI-on first start after endpoint-allow PR) and type **yes** for agents to continue host prep / data services after this sitting | 5 | **"yes, continue host prep"** |
@@ -260,12 +260,15 @@ into this doc), user = `<admin_username from reviewed prod inputs>` (IaC var
 inputs>`. Temporary NSG rule name **`TEMP-JOHN-SSH-SECRETS-INSTALL`** — see
 §4.1 “Server access for secrets install” and [`#388`](https://github.com/CosmaNeura/cosmaneura-os/pull/388).
 
-**Hard rule:** no step may print a secret value or put it in shell history /
-argv. Never assign a secret value to a lasting shell variable for display.
-Never use `printf` / `echo` with a secret value. Every `az keyvault secret set`
-must use `--file … --encoding utf-8 --output none` (never a value in argv).
-Step A STOP reasons go to **stderr** so they are not captured into
-`ACCOUNT_ID`. On any Step A failure, clear `ACCOUNT_ID`.
+**Hard rule:** no step may **print** a secret value or put it in shell history /
+process **argv**. Never `echo` a secret value. Never `az keyvault secret show`.
+Every `az keyvault secret set` must use `--file … --encoding utf-8 --output none`
+(never a value in argv). **Allowed:** `printf '%s' "$val" >mode-600-file`
+(and the no-echo `read -rs` → printf-to-file path) because `printf` is a shell
+builtin and the value is **not** placed in process argv. Never assign a secret
+value to a lasting shell variable for display. Step A STOP reasons go to
+**stderr** so they are not captured into `ACCOUNT_ID`. On any Step A failure,
+clear `ACCOUNT_ID`.
 
 `ACCOUNT_ID` must match this full resource-id regex (anchored with `^` and
 `$`) in Fence 1, rotate, Fence 2, and Step B:
@@ -273,9 +276,11 @@ Step A STOP reasons go to **stderr** so they are not captured into
 `^/subscriptions/[^/]+/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft\.CognitiveServices/accounts/oai-cbot-prd-[a-z0-9]{6,10}$`
 
 **Fence 0 — open vault public access for John's `/32` only** (detect IP with a
-command that prints **only** the IP; then enable + add rule). All `az` calls
-use `--output none` except the read-only verify (access flag + rule count
-only). Paste this **before** any `secret set`:
+command that prints **only** the IP; then enable + add rule). Saves the `/32`
+to `$HOME/.cosmabot-sitting2/john-32.ip` (mode `600`) so close can work without
+relying on the current shell. All `az` writes use `--output none` except the
+read-only verify (access flag + rule count only). Paste this **before** any
+`secret set`:
 
 ```bash
 cosmabot_kv_open_john_32() {
@@ -299,6 +304,15 @@ cosmabot_kv_open_john_32() {
     echo "STOP: kv-open PROD_KV_NAME must match kv-cbot-prd-<suffix>" >&2
     return 1
   }
+  SITDIR="$HOME/.cosmabot-sitting2"
+  IPFILE="$SITDIR/john-32.ip"
+  (
+    umask 077
+    mkdir -m 700 -p "$SITDIR" || exit 1
+  ) || {
+    echo "STOP: kv-open sitting2 dir failed" >&2
+    return 1
+  }
   MY_IP=$(curl -4 -fsS --max-time 15 https://api.ipify.org) || {
     echo "STOP: kv-open IP detect failed" >&2
     return 1
@@ -308,13 +322,21 @@ cosmabot_kv_open_john_32() {
     echo "STOP: kv-open MY_IP is not a dotted IPv4" >&2
     return 1
   }
+  (
+    umask 077
+    printf '%s\n' "${MY_IP}/32" >"$IPFILE" || exit 1
+    chmod 600 "$IPFILE" || exit 1
+  ) || {
+    echo "STOP: kv-open save john-32.ip failed" >&2
+    return 1
+  }
   az keyvault update \
     --name "$PROD_KV_NAME" \
     --resource-group "$RG" \
     --public-network-access Enabled \
     --default-action Deny \
     --output none || {
-    echo "STOP: kv-open update Enabled failed" >&2
+    echo "STOP: kv-open update Enabled failed - run kv-close before leaving" >&2
     return 1
   }
   az keyvault network-rule add \
@@ -322,7 +344,7 @@ cosmabot_kv_open_john_32() {
     --resource-group "$RG" \
     --ip-address "${MY_IP}/32" \
     --output none || {
-    echo "STOP: kv-open network-rule add failed" >&2
+    echo "STOP: kv-open network-rule add failed - run kv-close before leaving" >&2
     return 1
   }
   ACCESS=$(az keyvault show --name "$PROD_KV_NAME" --resource-group "$RG" \
@@ -616,7 +638,6 @@ cosmabot_llm_kv_step_b_verify_tag() {
     echo "STOP: Step B source-account tag does not match Step A id" >&2
     return 1
   }
-  echo "PASS: Step B source-account tag matches Step A"
   test -n "${KEYFILE:-}" || {
     echo "STOP: Step B PASS path KEYFILE unset" >&2
     return 1
@@ -630,11 +651,18 @@ cosmabot_llm_kv_step_b_verify_tag() {
     return 1
   }
   KEYFILE=
+  echo "PASS: Step B source-account tag matches Step A"
   return 0
 }
 cosmabot_llm_kv_step_b_verify_tag || {
-  echo "STOP: Step B failed - close vault per section 4.3; fail-safe removing KEYFILE; retry means re-export KEYFILE, re-rotate, then Fence 2" >&2
-  rm -f "${KEYFILE:-}"
+  echo "STOP: Step B failed - close vault per section 4.3; fail-safe removing sitting2 secret files; retry means re-export KEYFILE, re-rotate, then Fence 2" >&2
+  rm -f "${KEYFILE:-}" \
+    "$HOME/.cosmabot-sitting2/DATABASE-PASSWORD.value" \
+    "$HOME/.cosmabot-sitting2/POSTGRES-PASSWORD.value" \
+    "$HOME/.cosmabot-sitting2/REDIS-PASSWORD.value" \
+    "$HOME/.cosmabot-sitting2/prompt-CLERK-SECRET-KEY.tmp" \
+    "$HOME/.cosmabot-sitting2/prompt-CLERK-ACCOUNT-DELETION-SECRET.tmp" \
+    "$HOME/.cosmabot-sitting2/prompt-HUMAN-DEPLOY-EVIDENCE-REF.tmp"
   KEYFILE=
   false
 }
@@ -645,9 +673,10 @@ secrets first (ordering: every secret load, including generated passwords,
 happens **before** public network access is disabled again).
 
 **Fence — generate mode-600 password files** (workstation; CSPRNG; never print
-values). Writes three distinct URL-safe password files John owns under
-`$HOME/.cosmabot-sitting2/` (dir mode `700`; file mode `600`) named for vault
-secrets `DATABASE-PASSWORD`, `POSTGRES-PASSWORD`, and `REDIS-PASSWORD`:
+values). Writes three distinct URL-safe password files under the mode-`700`
+dir `$HOME/.cosmabot-sitting2/` (never the default tmp dir; file mode `600`)
+named for vault secrets `DATABASE-PASSWORD`, `POSTGRES-PASSWORD`, and
+`REDIS-PASSWORD`. Trap on `EXIT`/`INT`/`TERM` removes those files on interrupt:
 
 ```bash
 cosmabot_sitting2_write_password_file() {
@@ -660,6 +689,10 @@ cosmabot_sitting2_write_password_file() {
   DBF="$SITDIR/DATABASE-PASSWORD.value"
   PGF="$SITDIR/POSTGRES-PASSWORD.value"
   RDF="$SITDIR/REDIS-PASSWORD.value"
+  _prev_exit=$(trap -p EXIT)
+  _prev_int=$(trap -p INT)
+  _prev_term=$(trap -p TERM)
+  trap 'rm -f "$DBF" "$PGF" "$RDF"' EXIT INT TERM
   (
     umask 077
     mkdir -m 700 -p "$SITDIR" || exit 1
@@ -672,18 +705,32 @@ cosmabot_sitting2_write_password_file() {
   ) || {
     echo "STOP: password file write failed" >&2
     rm -f "$DBF" "$PGF" "$RDF"
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   for _pf in "$DBF" "$PGF" "$RDF"; do
-    _mode=$(stat -f '%Lp' "$_pf" 2>/dev/null || stat -c '%a' "$_pf") || {
+    _mode=$(stat -c '%a' "$_pf" 2>/dev/null || stat -f '%Lp' "$_pf") || {
       echo "STOP: password file stat failed" >&2
+      rm -f "$DBF" "$PGF" "$RDF"
+      eval "${_prev_exit:-trap - EXIT}"
+      eval "${_prev_int:-trap - INT}"
+      eval "${_prev_term:-trap - TERM}"
       return 1
     }
     test "$_mode" = "600" || {
       echo "STOP: password file not mode 600" >&2
+      rm -f "$DBF" "$PGF" "$RDF"
+      eval "${_prev_exit:-trap - EXIT}"
+      eval "${_prev_int:-trap - INT}"
+      eval "${_prev_term:-trap - TERM}"
       return 1
     }
   done
+  eval "${_prev_exit:-trap - EXIT}"
+  eval "${_prev_int:-trap - INT}"
+  eval "${_prev_term:-trap - TERM}"
   echo "PASS: mode-600 password files written (values not printed)"
   return 0
 }
@@ -697,8 +744,10 @@ cosmabot_sitting2_write_password_file || {
 `--file` + `--encoding utf-8` + `--output none`; never a value in argv; never
 `echo` a value). Password files come from the fence above. For Clerk / evidence
 values John already holds in local mode-600 files, point the `*_FILE` exports
-at those paths. For a no-echo prompt path, the helper writes a mode-600 temp
-file, loads it, then `rm` + `test ! -e`:
+at those paths. For a no-echo prompt path, the helper writes a mode-600 file
+under `$HOME/.cosmabot-sitting2/` (**never** default tmp), loads it, then
+`rm` + `test ! -e`, with trap cleanup on `EXIT`/`INT`/`TERM`.
+`printf '%s' "$_val" >file` is the allowed write path (builtin; not argv):
 
 ```bash
 cosmabot_kv_set_from_file() {
@@ -728,19 +777,45 @@ cosmabot_kv_set_from_file() {
 cosmabot_kv_set_from_prompt_file() {
   _name=$1
   set +x
-  _tmp=$(mktemp) || {
-    echo "STOP: kv-set prompt mktemp failed for $_name" >&2
+  SITDIR="$HOME/.cosmabot-sitting2"
+  (
+    umask 077
+    mkdir -m 700 -p "$SITDIR" || exit 1
+  ) || {
+    echo "STOP: kv-set prompt sitting2 dir failed for $_name" >&2
     return 1
   }
-  chmod 600 "$_tmp" || {
+  _tmp="$SITDIR/prompt-${_name}.tmp"
+  _prev_exit=$(trap -p EXIT)
+  _prev_int=$(trap -p INT)
+  _prev_term=$(trap -p TERM)
+  trap 'rm -f "$_tmp"' EXIT INT TERM
+  rm -f "$_tmp" || {
+    echo "STOP: kv-set prompt pre-rm failed for $_name" >&2
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
+    return 1
+  }
+  (
+    umask 077
+    : >"$_tmp" || exit 1
+    chmod 600 "$_tmp" || exit 1
+  ) || {
     rm -f "$_tmp"
     echo "STOP: kv-set prompt chmod failed for $_name" >&2
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   printf 'Paste value for %s (no echo), then Enter: ' "$_name" >&2
   read -rs _val || {
     rm -f "$_tmp"
     echo "STOP: kv-set prompt read failed for $_name" >&2
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   printf '\n' >&2
@@ -748,21 +823,36 @@ cosmabot_kv_set_from_prompt_file() {
     unset _val
     rm -f "$_tmp"
     echo "STOP: kv-set prompt write failed for $_name" >&2
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   unset _val
   cosmabot_kv_set_from_file "$_name" "$_tmp" || {
     rm -f "$_tmp"
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   rm -f "$_tmp" || {
     echo "STOP: kv-set prompt temp rm failed for $_name" >&2
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   test ! -e "$_tmp" || {
     echo "STOP: kv-set prompt temp still exists for $_name" >&2
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
+  eval "${_prev_exit:-trap - EXIT}"
+  eval "${_prev_int:-trap - INT}"
+  eval "${_prev_term:-trap - TERM}"
   return 0
 }
 cosmabot_sitting2_load_other_secrets() {
@@ -771,35 +861,94 @@ cosmabot_sitting2_load_other_secrets() {
     echo "STOP: other-secrets PROD_KV_NAME unset" >&2
     return 1
   }
-  DBF="$HOME/.cosmabot-sitting2/DATABASE-PASSWORD.value"
-  PGF="$HOME/.cosmabot-sitting2/POSTGRES-PASSWORD.value"
-  RDF="$HOME/.cosmabot-sitting2/REDIS-PASSWORD.value"
-  cosmabot_kv_set_from_file DATABASE-PASSWORD "$DBF" || return 1
-  cosmabot_kv_set_from_file POSTGRES-PASSWORD "$PGF" || return 1
-  cosmabot_kv_set_from_file REDIS-PASSWORD "$RDF" || return 1
+  SITDIR="$HOME/.cosmabot-sitting2"
+  DBF="$SITDIR/DATABASE-PASSWORD.value"
+  PGF="$SITDIR/POSTGRES-PASSWORD.value"
+  RDF="$SITDIR/REDIS-PASSWORD.value"
+  _prev_exit=$(trap -p EXIT)
+  _prev_int=$(trap -p INT)
+  _prev_term=$(trap -p TERM)
+  trap 'rm -f "$DBF" "$PGF" "$RDF" "$SITDIR/prompt-CLERK-SECRET-KEY.tmp" "$SITDIR/prompt-CLERK-ACCOUNT-DELETION-SECRET.tmp" "$SITDIR/prompt-HUMAN-DEPLOY-EVIDENCE-REF.tmp"' EXIT INT TERM
+  cosmabot_kv_set_from_file DATABASE-PASSWORD "$DBF" || {
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
+    return 1
+  }
+  cosmabot_kv_set_from_file POSTGRES-PASSWORD "$PGF" || {
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
+    return 1
+  }
+  cosmabot_kv_set_from_file REDIS-PASSWORD "$RDF" || {
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
+    return 1
+  }
   rm -f "$DBF" "$PGF" "$RDF" || {
     echo "STOP: other-secrets password temp rm failed" >&2
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   test ! -e "$DBF" && test ! -e "$PGF" && test ! -e "$RDF" || {
     echo "STOP: other-secrets password temp still exists" >&2
+    eval "${_prev_exit:-trap - EXIT}"
+    eval "${_prev_int:-trap - INT}"
+    eval "${_prev_term:-trap - TERM}"
     return 1
   }
   if test -n "${CLERK_SECRET_KEY_FILE:-}" && test -s "${CLERK_SECRET_KEY_FILE}"; then
-    cosmabot_kv_set_from_file CLERK-SECRET-KEY "$CLERK_SECRET_KEY_FILE" || return 1
+    cosmabot_kv_set_from_file CLERK-SECRET-KEY "$CLERK_SECRET_KEY_FILE" || {
+      eval "${_prev_exit:-trap - EXIT}"
+      eval "${_prev_int:-trap - INT}"
+      eval "${_prev_term:-trap - TERM}"
+      return 1
+    }
   else
-    cosmabot_kv_set_from_prompt_file CLERK-SECRET-KEY || return 1
+    cosmabot_kv_set_from_prompt_file CLERK-SECRET-KEY || {
+      eval "${_prev_exit:-trap - EXIT}"
+      eval "${_prev_int:-trap - INT}"
+      eval "${_prev_term:-trap - TERM}"
+      return 1
+    }
   fi
   if test -n "${CLERK_ACCOUNT_DELETION_SECRET_FILE:-}" && test -s "${CLERK_ACCOUNT_DELETION_SECRET_FILE}"; then
-    cosmabot_kv_set_from_file CLERK-ACCOUNT-DELETION-SECRET "$CLERK_ACCOUNT_DELETION_SECRET_FILE" || return 1
+    cosmabot_kv_set_from_file CLERK-ACCOUNT-DELETION-SECRET "$CLERK_ACCOUNT_DELETION_SECRET_FILE" || {
+      eval "${_prev_exit:-trap - EXIT}"
+      eval "${_prev_int:-trap - INT}"
+      eval "${_prev_term:-trap - TERM}"
+      return 1
+    }
   else
-    cosmabot_kv_set_from_prompt_file CLERK-ACCOUNT-DELETION-SECRET || return 1
+    cosmabot_kv_set_from_prompt_file CLERK-ACCOUNT-DELETION-SECRET || {
+      eval "${_prev_exit:-trap - EXIT}"
+      eval "${_prev_int:-trap - INT}"
+      eval "${_prev_term:-trap - TERM}"
+      return 1
+    }
   fi
   if test -n "${HUMAN_DEPLOY_EVIDENCE_REF_FILE:-}" && test -s "${HUMAN_DEPLOY_EVIDENCE_REF_FILE}"; then
-    cosmabot_kv_set_from_file HUMAN-DEPLOY-EVIDENCE-REF "$HUMAN_DEPLOY_EVIDENCE_REF_FILE" || return 1
+    cosmabot_kv_set_from_file HUMAN-DEPLOY-EVIDENCE-REF "$HUMAN_DEPLOY_EVIDENCE_REF_FILE" || {
+      eval "${_prev_exit:-trap - EXIT}"
+      eval "${_prev_int:-trap - INT}"
+      eval "${_prev_term:-trap - TERM}"
+      return 1
+    }
   else
-    cosmabot_kv_set_from_prompt_file HUMAN-DEPLOY-EVIDENCE-REF || return 1
+    cosmabot_kv_set_from_prompt_file HUMAN-DEPLOY-EVIDENCE-REF || {
+      eval "${_prev_exit:-trap - EXIT}"
+      eval "${_prev_int:-trap - INT}"
+      eval "${_prev_term:-trap - TERM}"
+      return 1
+    }
   fi
+  eval "${_prev_exit:-trap - EXIT}"
+  eval "${_prev_int:-trap - INT}"
+  eval "${_prev_term:-trap - TERM}"
   echo "PASS: other six vault secrets loaded (values not printed)"
   return 0
 }
@@ -810,9 +959,13 @@ cosmabot_sitting2_load_other_secrets || {
 ```
 
 **Fence — close vault `/32` and verify** (Sitting 2 gate). **Mandatory even
-after a STOP partway through** this sitting. Removes John's `/32` rule, sets
-`publicNetworkAccess=Disabled`, then prints **only**
-`publicNetworkAccess` and the rule count:
+after a STOP partway through** this sitting, including from a **new shell**.
+Order is fixed: (1) set `publicNetworkAccess=Disabled` **first**, (2) remove
+**every** IP rule from `az keyvault network-rule list` (and the `/32` saved in
+`$HOME/.cosmabot-sitting2/john-32.ip` if present), (3) verify **last** that
+access is Disabled **and** rule count is 0. Close must **not** depend on
+`MY_IP`, ipify, or the current shell. A failed lookup or dead terminal must
+never leave the vault Enabled:
 
 ```bash
 cosmabot_kv_close_john_32() {
@@ -828,29 +981,6 @@ cosmabot_kv_close_john_32() {
     echo "STOP: kv-close RG unset" >&2
     return 1
   }
-  if test -z "${MY_IP:-}"; then
-    command -v curl >/dev/null || {
-      echo "STOP: kv-close needs curl to redetect IP" >&2
-      return 1
-    }
-    MY_IP=$(curl -4 -fsS --max-time 15 https://api.ipify.org) || {
-      echo "STOP: kv-close IP detect failed" >&2
-      return 1
-    }
-    MY_IP=$(printf '%s' "$MY_IP" | tr -d '[:space:]')
-  fi
-  printf '%s' "$MY_IP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' || {
-    echo "STOP: kv-close MY_IP is not a dotted IPv4" >&2
-    return 1
-  }
-  az keyvault network-rule remove \
-    --name "$PROD_KV_NAME" \
-    --resource-group "$RG" \
-    --ip-address "${MY_IP}/32" \
-    --output none || {
-    echo "STOP: kv-close network-rule remove failed (retry or remove by listed rule)" >&2
-    return 1
-  }
   az keyvault update \
     --name "$PROD_KV_NAME" \
     --resource-group "$RG" \
@@ -859,6 +989,32 @@ cosmabot_kv_close_john_32() {
     echo "STOP: kv-close update Disabled failed" >&2
     return 1
   }
+  IPFILE="$HOME/.cosmabot-sitting2/john-32.ip"
+  if test -s "$IPFILE"; then
+    _saved=$(tr -d '[:space:]' <"$IPFILE") || _saved=
+    if printf '%s' "$_saved" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/32$'; then
+      az keyvault network-rule remove \
+        --name "$PROD_KV_NAME" \
+        --resource-group "$RG" \
+        --ip-address "$_saved" \
+        --output none 2>/dev/null || true
+    fi
+  fi
+  while true; do
+    _ip=$(az keyvault network-rule list \
+      --name "$PROD_KV_NAME" \
+      --resource-group "$RG" \
+      --query "ipRules[0].value" -o tsv 2>/dev/null) || _ip=
+    test -n "$_ip" || break
+    az keyvault network-rule remove \
+      --name "$PROD_KV_NAME" \
+      --resource-group "$RG" \
+      --ip-address "$_ip" \
+      --output none || {
+      echo "STOP: kv-close network-rule remove failed" >&2
+      return 1
+    }
+  done
   ACCESS=$(az keyvault show --name "$PROD_KV_NAME" --resource-group "$RG" \
     --query properties.publicNetworkAccess -o tsv) || {
     echo "STOP: kv-close verify access failed" >&2
@@ -888,15 +1044,18 @@ cosmabot_kv_close_john_32 || {
 ```
 
 If the session is interrupted or abandoned, jump to §4.3 first (close-and-verify,
-then abandon `$KEYFILE` cleanup).
+then abandon sitting2 cleanup / dead-terminal dir recovery).
 
 #### Server access for secrets install (temporary SSH `/32`)
 
+**WAITING ON [`#388`](https://github.com/CosmaNeura/cosmaneura-os/pull/388).**
 John (9:45am ET): open sign-in to his address for the install, then close it.
 Where this runbook reaches the prod VM (Sitting 2 row 2 / host secrets install),
-use the temporary NSG rule procedure owned by
-[`#388`](https://github.com/CosmaNeura/cosmaneura-os/pull/388) (`grok/prod-secrets-transport`).
-**Do not duplicate `#388` tooling here.** Fixed rule name:
+use the temporary NSG rule procedure owned by that PR
+(`grok/prod-secrets-transport`). **Do not duplicate `#388` tooling here.**
+**No second vault window** for this host install: Sitting 2 row 1 already
+loaded the LLM key and the other six secrets before vault close; `#388` only
+stages/installs those vault **names** onto the VM. Fixed rule name:
 `TEMP-JOHN-SSH-SECRETS-INSTALL`. Order:
 
 1. Open the rule from John's `/32` only, with a priority that beats
@@ -1483,17 +1642,19 @@ If Sitting 2 is interrupted while the vault is open to the operator `/32`
 (or any STOP leaves the window open):
 
 1. **First (mandatory):** paste the §4.1 **kv-close** fence
-   (`cosmabot_kv_close_john_32`) — network-rule remove for John's `/32`, then
-   `--public-network-access Disabled`, then verify. Close-and-verify must run
-   even after a STOP partway through.
+   (`cosmabot_kv_close_john_32`) — **Disabled first**, then remove every listed
+   IP rule (works from a new shell; does not need `MY_IP` / ipify), then verify
+   last. Close-and-verify must run even after a STOP partway through.
 2. **Then verify** again with the read-only fence below (prints only
    `publicNetworkAccess` and `ipRules` count — not secret values).
-3. **Abandon sitting / will not retry (residual Lows):** after the vault is
-   closed, remove any local rotated key file. If `KEYFILE` is unset, the
-   abandon fence prints **STOP** and tells John to re-export the §4.1 path
-   (`$HOME/.cosmabot-sitting2/llm-key1`) — it never prints PASS for unset.
-   A retry after STOP means: re-export `KEYFILE`, re-rotate, then Fence 2.
-   Never leave `$KEYFILE` overnight or across sittings.
+3. **Abandon sitting / STOP leftover secrets:** after the vault is closed,
+   remove **all** Sitting 2 local secret files under
+   `$HOME/.cosmabot-sitting2/` (not only `$KEYFILE`): `llm-key1`, the three
+   `*-PASSWORD.value` files, the three `prompt-*.tmp` files, and `john-32.ip`.
+   Verify each with `! -e`. If the shell died mid-sitting, prefer the
+   dead-terminal dir recovery fence (removes the whole dir). A retry after
+   STOP means: re-export `KEYFILE=$HOME/.cosmabot-sitting2/llm-key1`,
+   re-rotate, then Fence 2. Never leave secret files overnight.
 
 **Shell:** bash 3.2+ or default macOS zsh. Fence has no `#` comments.
 
@@ -1535,27 +1696,35 @@ cosmabot_verify_kv_closed || {
 }
 ```
 
-**Abandon-sitting `$KEYFILE` cleanup** (paste after vault closed). Fail-safe;
-never prints file contents. `KEYFILE` must already be the same once-exported
-path from §4.1 (`$HOME/.cosmabot-sitting2/llm-key1`). If unset: **STOP** (never
-PASS) and re-export that path before any further Sitting 2 key work.
+**Abandon-sitting secret-file cleanup** (paste after vault closed). Removes
+**all** known Sitting 2 local secret files (not only `$KEYFILE`); never prints
+file contents. Then `test ! -e` on each path:
 
 ```bash
 cosmabot_abandon_sitting_keyfile_cleanup() {
-  test -n "${KEYFILE:-}" || {
-    echo "STOP: abandon sitting KEYFILE unset - re-export the section 4.1 path \$HOME/.cosmabot-sitting2/llm-key1" >&2
+  SITDIR="$HOME/.cosmabot-sitting2"
+  DBF="$SITDIR/DATABASE-PASSWORD.value"
+  PGF="$SITDIR/POSTGRES-PASSWORD.value"
+  RDF="$SITDIR/REDIS-PASSWORD.value"
+  IPFILE="$SITDIR/john-32.ip"
+  P1="$SITDIR/prompt-CLERK-SECRET-KEY.tmp"
+  P2="$SITDIR/prompt-CLERK-ACCOUNT-DELETION-SECRET.tmp"
+  P3="$SITDIR/prompt-HUMAN-DEPLOY-EVIDENCE-REF.tmp"
+  if test -z "${KEYFILE:-}"; then
+    KEYFILE="$SITDIR/llm-key1"
+  fi
+  rm -f "$KEYFILE" "$DBF" "$PGF" "$RDF" "$IPFILE" "$P1" "$P2" "$P3" || {
+    echo "STOP: abandon sitting rm failed" >&2
     return 1
   }
-  rm -f "$KEYFILE" || {
-    echo "STOP: abandon sitting KEYFILE rm failed" >&2
-    return 1
-  }
-  test ! -e "$KEYFILE" || {
-    echo "STOP: abandon sitting KEYFILE still exists after rm" >&2
-    return 1
-  }
+  for _f in "$KEYFILE" "$DBF" "$PGF" "$RDF" "$IPFILE" "$P1" "$P2" "$P3"; do
+    test ! -e "$_f" || {
+      echo "STOP: abandon sitting path still exists after rm" >&2
+      return 1
+    }
+  done
   KEYFILE=
-  echo "PASS: abandon sitting removed KEYFILE (value not printed)"
+  echo "PASS: abandon sitting removed sitting2 secret files (values not printed)"
   return 0
 }
 cosmabot_abandon_sitting_keyfile_cleanup || {
@@ -1564,22 +1733,52 @@ cosmabot_abandon_sitting_keyfile_cleanup || {
 }
 ```
 
+**Dead-terminal recovery** (paste when the Sitting 2 shell died and leftover
+files may remain under `$HOME/.cosmabot-sitting2/`). Removes the **whole**
+directory and verifies it is gone. Never prints file contents:
+
+```bash
+cosmabot_sitting2_dead_terminal_dir_recovery() {
+  SITDIR="$HOME/.cosmabot-sitting2"
+  if test ! -e "$SITDIR"; then
+    echo "PASS: sitting2 dir already absent"
+    return 0
+  fi
+  rm -rf "$SITDIR" || {
+    echo "STOP: sitting2 dir rm -rf failed" >&2
+    return 1
+  }
+  test ! -e "$SITDIR" || {
+    echo "STOP: sitting2 dir still exists after rm -rf" >&2
+    return 1
+  }
+  KEYFILE=
+  echo "PASS: sitting2 dir removed (values not printed)"
+  return 0
+}
+cosmabot_sitting2_dead_terminal_dir_recovery || {
+  echo "STOP: sitting2 dead-terminal recovery failed" >&2
+  false
+}
+```
+
 Do not continue Sitting 2 secret work until the vault-closed verify passes.
-If abandoning, run close-and-verify first, then the `$KEYFILE` cleanup before
-leaving the machine.
+If abandoning, run close-and-verify first, then the abandon cleanup (or
+dead-terminal dir recovery) before leaving the machine.
 
 ### 4.4 Mac-side fence syntax proof
 
 Every pasteable bash/sh fence in §4.1–§4.3 must parse under `bash -n` and
 `zsh -n` (including kv-open, password file, other-secrets load, kv-close,
 Step A, rotate, Fence 2, Step B, host-files, HTTP status, bundle-checks,
-baseline, kv-closed verify, abandon-sitting `$KEYFILE` cleanup). Real evidence
-that a pasted interactive zsh prompt will not treat `#` as a comment is that
-the fences contain **no `#` comment lines** (parameter expansions like
-`${var#prefix}` are fine). Do **not** claim that `zsh -n` honours a parent
-`unsetopt interactivecomments` — `zsh -n` always treats `#` as a comment
-inside a file. Proof: extract each fence and run `bash -n` / `zsh -n`; results
-for this revision are in the PR body / agent artifact for **T-386-LOWS-FU**.
+baseline, kv-closed verify, abandon-sitting cleanup, dead-terminal dir
+recovery). Real evidence that a pasted interactive zsh prompt will not treat
+`#` as a comment is that the fences contain **no `#` comment lines**
+(parameter expansions like `${var#prefix}` are fine). Do **not** claim that
+`zsh -n` honours a parent `unsetopt interactivecomments` — `zsh -n` always
+treats `#` as a comment inside a file. Proof: extract each fence and run
+`bash -n` / `zsh -n`; results for this revision are in the PR body / agent
+artifact for **T-386-LOWS-FU**.
 
 ---
 
