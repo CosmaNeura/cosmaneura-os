@@ -1,10 +1,14 @@
 # Initial Ubuntu host preparation
 
 `bootstrap_host.py` is a one-time preparation step for the newly created East US 2
-D2s_v5 staging host. It installs runtime dependencies and formats/mounts only the
-approved new 128 GiB data disk. No application image, credential, release, service
-unit, registry login or container is installed or started. It changes no Azure
-resource, identity, NSG, SSH ingress or protected runner.
+D2s_v5 host. Default `--profile cosmabot-vm-staging-v1` targets the staging RG/VM.
+`--profile cosmabot-vm-prod-v1` targets production (`rg-cosmabot-prod-eus2-01` /
+`vm-cosmabot-prod-eus2-01`) and refuses staging names (and the reverse). It installs
+runtime dependencies and formats/mounts only the approved new 128 GiB data disk,
+creating empty `postgres`/`redis` dirs for the later runtime Postgres 16 + Redis
+start. No application image, credential, release, service unit, registry login or
+container is installed or started. Secret file install is **T-PROD-3** (name only).
+It changes no Azure resource, identity, NSG, SSH ingress or protected runner.
 
 Run only after reviewing this source and the completed foundation apply, and
 observing the actual VM, disk and Linux device. The script requires root on
@@ -36,10 +40,13 @@ inputs or evidence:
 ```
 
 The disk creation time must fall within that completed apply, started less than
-24 hours ago. IDs must identify only `rg-cosmas-os-vm-staging-eus2-lab01`,
-`vm-cosmabot-staging-eus2-lab01` and `data-vm-cosmabot-staging-eus2-lab01`.
-The receipt is operator-supplied provenance; its hash binds the reviewed bytes.
-The script does not independently authenticate a fabricated receipt against ARM.
+24 hours ago. For staging, IDs must identify only
+`rg-cosmas-os-vm-staging-eus2-lab01`, `vm-cosmabot-staging-eus2-lab01` and
+`data-vm-cosmabot-staging-eus2-lab01`. For production (`--profile cosmabot-vm-prod-v1`),
+IDs must identify only `rg-cosmabot-prod-eus2-01`, `vm-cosmabot-prod-eus2-01` and
+`data-vm-cosmabot-prod-eus2-01` (see `creation-receipt.prod.example.json`). The
+receipt is operator-supplied provenance; its hash binds the reviewed bytes. The
+script does not independently authenticate a fabricated receipt against ARM.
 
 At execution it reads **compute metadata only**, without proxies or an identity
 token. Actual IMDS VM instance/resource IDs, region, size, managed disk ID, size,
@@ -56,8 +63,12 @@ receipt establishes that this is the newly created Empty disk.
 Command shape, with actual reviewed public inputs:
 
 ```text
-python3 bootstrap_host.py --vm-id <actual-vm-id> --disk-id <actual-disk-id> --expected-device <observed-lun0-device> --creation-receipt <root-owned-receipt.json> --creation-receipt-sha256 <reviewed-sha256> --format-new-empty-disk <same-exact-disk-id>
+python3 bootstrap_host.py --profile cosmabot-vm-staging-v1 --vm-id <actual-vm-id> --disk-id <actual-disk-id> --expected-device <observed-lun0-device> --creation-receipt <root-owned-receipt.json> --creation-receipt-sha256 <reviewed-sha256> --format-new-empty-disk <same-exact-disk-id>
+python3 bootstrap_host.py --profile cosmabot-vm-prod-v1 --vm-id <actual-vm-id> --disk-id <actual-disk-id> --expected-device <observed-lun0-device> --creation-receipt <root-owned-receipt.json> --creation-receipt-sha256 <reviewed-sha256> --format-new-empty-disk <same-exact-disk-id>
 ```
+
+After prod bootstrap, install `infra/beta/vm/runtime/cosmabot-prod.service` (do not
+rename or reuse `cosmabot-staging.service`). Staging unit stays for staging only.
 
 Omitting the final flag or naming any other disk refuses formatting. Formatting
 uses ext4 without a force flag. The script mounts by its newly created UUID at

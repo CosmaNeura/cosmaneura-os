@@ -104,8 +104,11 @@ Hands-on only. Exact order:
 
 Not John's hands-on. Still synthetic; still no staging. **One order** (same as §9 (b)):
 
-1. Host bootstrap / Postgres 16 + Redis on the VM (§3) — only after the named
-   prod bootstrap retarget ticket/PR exists (**BLOCKED** until then).
+1. Host bootstrap / Postgres 16 + Redis on the VM (§3) — run
+   `infra/beta/vm/host/bootstrap_host.py --profile cosmabot-vm-prod-v1` with the
+   prod creation receipt (`infra/beta/vm/host/creation-receipt.prod.example.json`
+   as the field template) and install `infra/beta/vm/runtime/cosmabot-prod.service`
+   (T-PROD-2-BOOTSTRAP). Do not run staging-hardwired names against prod.
 2. Install mode-0400 secret files from the names John pasted (§4) — **BLOCKED**
    until a **named** secrets-transport ticket/PR exists. Do not invent a
    transport. Run Command still must not carry secret values.
@@ -1293,8 +1296,12 @@ After-14:30 host work):**
    (#356 README line 191); §4.1 Step A wrapper → rotate wrapper → Fence 2 load
    (`--output none`, `test -s`) → Step B list/compare → remove `$KEYFILE` only
    on Step B PASS before closing the vault.
-4. Host prep (agents after Sitting 2 yes) — prod bootstrap retarget **BLOCKED**
-   until a named ticket/PR exists. Matches §1 After 14:30 step 1.
+4. Host prep (agents after Sitting 2 yes) — run prod host bootstrap with
+   `--profile cosmabot-vm-prod-v1` and the prod unit/receipt from
+   T-PROD-2-BOOTSTRAP (`infra/beta/vm/host/bootstrap_host.py`,
+   `infra/beta/vm/runtime/cosmabot-prod.service`,
+   `infra/beta/vm/host/creation-receipt.prod.example.json`). Matches §1 After
+   14:30 step 1.
 5. **Install** mode-0400 secret files — **BLOCKED** until a named
    secrets-transport ticket/PR exists (do not invent a transport). Matches §1
    After 14:30 step 2.

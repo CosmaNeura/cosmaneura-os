@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Prepare only the newly created CosmaBot Ubuntu host; never start containers."""
+"""Prepare only the newly created CosmaBot Ubuntu host; never start containers.
+
+Supports staging profile cosmabot-vm-staging-v1 (default) and production profile
+cosmabot-vm-prod-v1. Each profile binds exact RG/VM/disk/unit names and refuses
+the other environment's names. Secret values are never handled here; host secret
+file install is T-PROD-3 (name-only hook).
+"""
 from __future__ import annotations
 
 import argparse
@@ -17,8 +23,31 @@ import subprocess
 import sys
 import urllib.request
 
-RG = "rg-cosmas-os-vm-staging-eus2-lab01"
-VM = "vm-cosmabot-staging-eus2-lab01"
+STAGING_PROFILE = "cosmabot-vm-staging-v1"
+PROD_PROFILE = "cosmabot-vm-prod-v1"
+# Name-only placeholder for the separate secrets-transport ticket. No values.
+SECRETS_TRANSPORT_TICKET = "T-PROD-3"
+
+PROFILES = {
+    STAGING_PROFILE: {
+        "rg": "rg-cosmas-os-vm-staging-eus2-lab01",
+        "vm": "vm-cosmabot-staging-eus2-lab01",
+        "unit": "cosmabot-staging.service",
+        "web_host": "staging.cosmas.ai",
+        "api_host": "api.staging.cosmas.ai",
+    },
+    PROD_PROFILE: {
+        "rg": "rg-cosmabot-prod-eus2-01",
+        "vm": "vm-cosmabot-prod-eus2-01",
+        "unit": "cosmabot-prod.service",
+        "web_host": "beta.cosmas.ai",
+        "api_host": "api.beta.cosmas.ai",
+    },
+}
+
+# Staging aliases kept for existing callers/tests; prod uses resolve_profile().
+RG = PROFILES[STAGING_PROFILE]["rg"]
+VM = PROFILES[STAGING_PROFILE]["vm"]
 DISK = "data-" + VM
 SIZE = 128 * 1024**3
 LUN = Path("/dev/disk/azure/scsi1/lun0")
@@ -45,6 +74,44 @@ def require(condition: bool, reason: str) -> None:
         raise Refused(reason)
 
 
+def resolve_profile(profile: str | None) -> dict:
+    name = STAGING_PROFILE if profile is None else profile
+    require(name in PROFILES, "Unknown host bootstrap profile")
+    spec = dict(PROFILES[name])
+    spec["profile"] = name
+    spec["disk"] = "data-" + spec["vm"]
+    return spec
+
+
+def other_profile_name(profile: str) -> str:
+    return PROD_PROFILE if profile == STAGING_PROFILE else STAGING_PROFILE
+
+
+def forbidden_needles(profile: str) -> list[str]:
+    """Other environment's resource groups, hosts, units, and profile id."""
+    other = resolve_profile(other_profile_name(profile))
+    return [
+        other["rg"].lower(),
+        other["vm"].lower(),
+        other["disk"].lower(),
+        other["unit"].lower(),
+        other["web_host"].lower(),
+        other["api_host"].lower(),
+        other["profile"].lower(),
+    ]
+
+
+def refuse_cross_environment(profile: str, candidates: list[str | None]) -> None:
+    needles = forbidden_needles(profile)
+    for raw in candidates:
+        if not isinstance(raw, str) or not raw:
+            continue
+        value = raw.lower()
+        for needle in needles:
+            if value == needle or needle in value:
+                raise Refused("Cross-environment host name refused for profile " + profile)
+
+
 def timestamp(value: str) -> dt.datetime:
     parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
     require(parsed.tzinfo is not None, "Creation times must include a timezone")
@@ -52,11 +119,23 @@ def timestamp(value: str) -> dt.datetime:
 
 
 def validate_receipt(value: dict, vm_id: str, disk_id: str, approval: str | None,
-                     now: dt.datetime) -> None:
+                     now: dt.datetime, *, profile: str | None = None) -> None:
+    spec = resolve_profile(profile)
     require(isinstance(value, dict), "Creation receipt must be an object")
-    vm_pattern = rf"/subscriptions/[0-9a-f-]{{36}}/resourceGroups/{RG}/providers/Microsoft.Compute/virtualMachines/{VM}"
+    receipt_strings = [vm_id, disk_id, approval]
+    receipt_strings.extend(
+        str(value[key]) for key in ("vm_id", "disk_id", "managed_by_vm_id", "profile", "unit")
+        if key in value and value[key] is not None
+    )
+    refuse_cross_environment(spec["profile"], receipt_strings)
+    vm_pattern = (
+        rf"/subscriptions/[0-9a-f-]{{36}}/resourceGroups/{re.escape(spec['rg'])}"
+        rf"/providers/Microsoft.Compute/virtualMachines/{re.escape(spec['vm'])}"
+    )
     require(re.fullmatch(vm_pattern, vm_id, re.I) is not None, "Unexpected VM identity")
-    expected_disk = vm_id.rsplit("/providers/", 1)[0] + "/providers/Microsoft.Compute/disks/" + DISK
+    expected_disk = (
+        vm_id.rsplit("/providers/", 1)[0] + "/providers/Microsoft.Compute/disks/" + spec["disk"]
+    )
     require(disk_id.lower() == expected_disk.lower(), "Unexpected data disk identity")
     require(approval == disk_id, "Explicit formatting approval must repeat the exact new disk ID")
     require(value.get("version") == 1 and value.get("source") == "azure-arm-disk-and-vm-get",
@@ -65,6 +144,8 @@ def validate_receipt(value: dict, vm_id: str, disk_id: str, approval: str | None
             and value.get("disk_id", "").lower() == disk_id.lower()
             and value.get("managed_by_vm_id", "").lower() == vm_id.lower(),
             "Creation receipt belongs to a different disk or VM")
+    if "profile" in value:
+        require(value.get("profile") == spec["profile"], "Creation receipt profile does not match")
     require(value.get("create_option") == "Empty" and value.get("size_gib") == 128
             and value.get("lun") == 0, "Only the new Empty 128 GiB LUN 0 disk is accepted")
     require(re.fullmatch(r"[0-9a-f-]{36}", value.get("disk_unique_id", ""), re.I) is not None
@@ -270,6 +351,7 @@ def format_mount(device: str, receipt: dict, original_device_number: int) -> str
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", default=STAGING_PROFILE, choices=sorted(PROFILES))
     parser.add_argument("--vm-id", required=True)
     parser.add_argument("--disk-id", required=True)
     parser.add_argument("--expected-device", required=True)
@@ -278,6 +360,12 @@ def main() -> None:
     parser.add_argument("--format-new-empty-disk")
     args = parser.parse_args()
     os.umask(0o077)
+    spec = resolve_profile(args.profile)
+    refuse_cross_environment(
+        spec["profile"],
+        [args.profile, args.vm_id, args.disk_id, args.format_new_empty_disk,
+         str(args.creation_receipt)],
+    )
     fresh_host()
     meta = args.creation_receipt.lstat()
     require(stat.S_ISREG(meta.st_mode) and meta.st_uid == 0 and meta.st_nlink == 1
@@ -286,7 +374,8 @@ def main() -> None:
     raw = args.creation_receipt.read_bytes()
     require(hashlib.sha256(raw).hexdigest() == args.creation_receipt_sha256, "Creation receipt differs from reviewed hash")
     receipt = json.loads(raw)
-    validate_receipt(receipt, args.vm_id, args.disk_id, args.format_new_empty_disk, dt.datetime.now(dt.timezone.utc))
+    validate_receipt(receipt, args.vm_id, args.disk_id, args.format_new_empty_disk,
+                     dt.datetime.now(dt.timezone.utc), profile=spec["profile"])
     with Path("/run/lock/cosmabot-host-bootstrap.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         device_number = check_disk(args.expected_device, receipt)
@@ -295,10 +384,13 @@ def main() -> None:
         install_packages()
         print("Packages installed with services masked; rechecking exact new disk before formatting.", flush=True)
         uuid = format_mount(args.expected_device, receipt, device_number)
-        result = {"version": 1, "vm_id": args.vm_id, "disk_id": args.disk_id, "filesystem_uuid": uuid,
+        # postgres/redis dirs under DATA prepare the mount for runtime Postgres 16 + Redis (§3).
+        result = {"version": 1, "profile": spec["profile"], "unit": spec["unit"],
+                  "vm_id": args.vm_id, "disk_id": args.disk_id, "filesystem_uuid": uuid,
                   "data_mount": str(DATA), "packages": PACKAGES, "creation_receipt_sha256": args.creation_receipt_sha256,
                   "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                  "docker_services_masked": True, "containers_started": False, "application_installed": False}
+                  "docker_services_masked": True, "containers_started": False, "application_installed": False,
+                  "secrets_transport_ticket": SECRETS_TRANSPORT_TICKET}
         Path("/etc/cosmabot").mkdir(mode=0o700, exist_ok=True)
         write_new(Path("/etc/cosmabot/host-bootstrap.json"), (json.dumps(result, indent=2) + "\n").encode())
         print(json.dumps(result, sort_keys=True))
