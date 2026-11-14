@@ -93,7 +93,7 @@ Hands-on only. Exact order:
 
 | # | John does | ~Min | Gate |
 | --- | --- | --- | ---: |
-| 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from John's own `/32`. **John only, §4.1:** export `KEYFILE` once → paste Step A → **pause** → rotate wrapper (umask 077 + `pipefail` + `test -s`) → Fence 2 load (`--output none`, `test -s`) → **pause** → Step B (removes `$KEYFILE` only on PASS) **inside this window**. Never print the key. Then restore `publicNetworkAccess=Disabled` and empty `ipRules`. **If interrupted:** restore Disabled + empty `ipRules` first (§4.3). Agents never rotate or load. | 25 | **"yes, KV secrets loaded and public access disabled"** |
+| 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from John's own `/32`. **John only, §4.1:** export `KEYFILE` once → paste Step A → **pause** → rotate wrapper (umask 077 + `pipefail` + `test -s`; **key1 only**) → Fence 2 load (`--output none`, `test -s`) → **pause** → Step B (tag proof; removes `$KEYFILE` on PASS and on STOP fail-safe) **inside this window**. Never print the key. Then restore `publicNetworkAccess=Disabled` and empty `ipRules`. **If interrupted/abandoned:** restore Disabled + empty `ipRules` first, then remove `$KEYFILE` (§4.3). Agents never rotate or load. | 25 | **"yes, KV secrets loaded and public access disabled"** |
 | 2 | On the new VM as root: create distinct DB/Postgres/Redis passwords in a **mode-600** file he owns. **Never** via Azure Run Command | 10 | **"yes, mode-600 password file is on the host"** |
 | 3 | Type **yes** to format the new empty data disk (prod IDs only) | 5 | **"yes, format the new empty data disk"** |
 | 4 | Publish Cloudflare DNS (proxy **off**): `beta.cosmas.ai` A, `api.beta.cosmas.ai` A → public IP; `clerk.beta.cosmas.ai` CNAME from Clerk | 10 | — |
@@ -343,6 +343,14 @@ cosmabot_llm_kv_step_a_run || {
 the already-exported `KEYFILE`; never reassigns it). Never `cat` / `echo` /
 `printf` the file contents. Then paste Fence 2 only.
 
+**key1 only (L-3):** this rotate regenerates and loads **`key1` only**. Azure
+OpenAI keeps two account keys; Sitting 2 uses `key1` as the active value for
+vault `WORKSPACE-LLM-API-KEY`. Leave **`key2` untouched** in this sitting so it
+remains the prior/backup key for rollback if the new `key1` load fails. Rotate
+and load `key2` only in a later sitting after the new `key1` is proven in use
+(host HTTP proof / AI-on) and John schedules a second dual-key cutover — do not
+regenerate both keys in the same sitting.
+
 ```bash
 cosmabot_llm_kv_rotate_key() {
   test -n "${KEYFILE:-}" || {
@@ -441,9 +449,28 @@ cosmabot_llm_kv_fence2_load || {
 
 **Pause here.** Confirm Fence 2 printed PASS. Then paste Fence 3.
 
-**Fence 3 — Step B** (metadata only; never `az keyvault secret show`). Remove
-`$KEYFILE` **only after PASS** (leave it in place on STOP so John can retry
-Fence 2 without re-rotating, then remove it once Step B passes):
+**Fence 3 — Step B** (metadata only; never `az keyvault secret show`).
+
+**What Step B proves / does not prove (L-2):** Step B lists vault secret
+**metadata** and checks that the `source-account` **tag** equals the Step A
+account resource id. It does **not** read or compare the secret **value**, and
+it does **not** prove that the bytes in `$KEYFILE` match what Fence 2 wrote.
+Never use `az keyvault secret show` to “fix” the key (that would print or
+expose the production AI key). Key-value proof is later: the §4.1 host HTTP
+status check (auth header from the host key **file**, status `200` only). If
+you re-run **rotate**, you must also re-run **Fence 2** before Step B — a new
+`$KEYFILE` is useless until it is loaded again.
+
+**`$KEYFILE` keep vs remove (L-1):** do not leave a key file on disk after a
+failed or abandoned sitting.
+
+| Outcome | `$KEYFILE` |
+| --- | --- |
+| Step B **PASS** | **Remove** (`rm -f` + clear `KEYFILE` inside the function). |
+| Step B **STOP**, will **not** immediately retry Fence 2 / Step B in this sitting | **Remove** (fail-safe on the STOP path below). Then close the vault (§4.3). |
+| Step B **STOP**, will **immediately** retry Fence 2 / Step B **without** re-rotating | **Keep** for that retry only: skip the STOP-path `rm` lines for that attempt, retry, then remove on PASS or when abandoning. |
+| Re-run **rotate** to retry | **Remove** any old `$KEYFILE` first (rotate does). Must also re-run **Fence 2**, then Step B. |
+| **Abandon sitting** / interrupt / will not retry | **Remove** via §4.3 abandon cleanup after closing the vault. |
 
 ```bash
 cosmabot_llm_kv_step_b_verify_tag() {
@@ -499,13 +526,16 @@ cosmabot_llm_kv_step_b_verify_tag() {
   return 0
 }
 cosmabot_llm_kv_step_b_verify_tag || {
-  echo "STOP: Step B failed - close vault per section 4.3; KEYFILE left in place for retry" >&2
+  echo "STOP: Step B failed - close vault per section 4.3; fail-safe removing KEYFILE (skip next two lines only for immediate Fence 2 retry)" >&2
+  rm -f "${KEYFILE:-}"
+  KEYFILE=
   false
 }
 ```
 
 Then restore `publicNetworkAccess=Disabled` and empty `ipRules` (Sitting 2
-gate). If the session is interrupted, jump to §4.3 first.
+gate). If the session is interrupted or abandoned, jump to §4.3 first
+(including the abandon `$KEYFILE` cleanup).
 
 #### After host install (when secrets-transport ticket/PR exists) — file name/mode only
 
@@ -1053,6 +1083,12 @@ If Sitting 2 is interrupted while the vault is open to the operator `/32`:
 1. **First:** restore `publicNetworkAccess=Disabled` and empty `ipRules`
    (John only; use the `#356` README restore commands for the prod vault).
 2. **Then verify** by printing the **whole** `ipRules` list (and access flag).
+3. **Abandon sitting / will not retry (L-1):** after the vault is closed (or
+   immediately if the vault was never opened), remove any local rotated key
+   file so a failed or abandoned sitting does not leave `$KEYFILE` on disk.
+   Keep `$KEYFILE` only when you will **immediately** retry Fence 2 / Step B
+   in this same sitting without re-rotating (see §4.1 keep-vs-remove table).
+   Never leave `$KEYFILE` overnight or across sittings.
 
 **Shell:** bash 3.2+ or default macOS zsh. Fence has no `#` comments.
 
@@ -1099,18 +1135,41 @@ cosmabot_verify_kv_closed || {
 }
 ```
 
-Do not continue Sitting 2 secret work until that verify passes.
+**Abandon-sitting `$KEYFILE` cleanup** (paste after vault closed, or when the
+sitting will not retry Fence 2 / Step B). Fail-safe; never prints file
+contents. `KEYFILE` must already be the same once-exported path from §4.1:
+
+```bash
+cosmabot_abandon_sitting_keyfile_cleanup() {
+  test -n "${KEYFILE:-}" || {
+    echo "PASS: abandon sitting KEYFILE already unset"
+    return 0
+  }
+  rm -f "$KEYFILE"
+  KEYFILE=
+  echo "PASS: abandon sitting removed KEYFILE (value not printed)"
+  return 0
+}
+cosmabot_abandon_sitting_keyfile_cleanup || {
+  echo "STOP: abandon sitting KEYFILE cleanup failed" >&2
+  false
+}
+```
+
+Do not continue Sitting 2 secret work until the vault-closed verify passes.
+If abandoning, run the `$KEYFILE` cleanup before leaving the machine.
 
 ### 4.4 Mac-side fence syntax proof
 
-Every pasteable bash fence in §4.1–§4.3 (nine fences: Step A, rotate,
+Every pasteable bash fence in §4.1–§4.3 (ten fences: Step A, rotate,
 Fence 2 load, Step B, host-files, HTTP status, bundle-checks, baseline,
-kv-closed) must parse under `bash -n` and `zsh -n`. Real evidence that a
-pasted interactive zsh prompt will not treat `#` as a comment is that the
-fences contain **no `#` comment lines** (parameter expansions like
-`${var#prefix}` are fine). Do **not** claim that `zsh -n` honours a parent
-`unsetopt interactivecomments` — `zsh -n` always treats `#` as a comment
-inside a file. Proof commands (re-run after editing fences):
+kv-closed, abandon-sitting `$KEYFILE` cleanup) must parse under `bash -n`
+and `zsh -n`. Real evidence that a pasted interactive zsh prompt will not
+treat `#` as a comment is that the fences contain **no `#` comment lines**
+(parameter expansions like `${var#prefix}` are fine). Do **not** claim that
+`zsh -n` honours a parent `unsetopt interactivecomments` — `zsh -n` always
+treats `#` as a comment inside a file. Proof commands (re-run after editing
+fences):
 
 ```text
 bash -n fence1-step-a.sh
@@ -1122,6 +1181,7 @@ bash -n fence-http-status.sh
 bash -n fence-bundle-checks.sh
 bash -n fence-baseline.sh
 bash -n fence-kv-closed.sh
+bash -n fence-abandon-keyfile.sh
 zsh -n fence1-step-a.sh
 zsh -n fence-rotate.sh
 zsh -n fence2-load.sh
@@ -1131,10 +1191,11 @@ zsh -n fence-http-status.sh
 zsh -n fence-bundle-checks.sh
 zsh -n fence-baseline.sh
 zsh -n fence-kv-closed.sh
+zsh -n fence-abandon-keyfile.sh
 ```
 
 Author proof results for this revision (all exit 0): listed in the PR body /
-agent artifact for the Round 6 commit.
+agent artifact for issue `#385` (follow-up Lows to `#379`).
 
 ---
 
@@ -1290,9 +1351,10 @@ After-14:30 host work):**
 2. Sitting 1: apply `#356` (RG, VM, OpenAI `gpt-4.1-dzus`).
 3. Sitting 2: John sets mode-600 passwords; pastes KV names including vault
    `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET`
-   (#356 README line 191); §4.1 Step A wrapper → rotate wrapper → Fence 2 load
-   (`--output none`, `test -s`) → Step B list/compare → remove `$KEYFILE` only
-   on Step B PASS before closing the vault.
+   (#356 README line 191); §4.1 Step A wrapper → rotate wrapper (`key1` only)
+   → Fence 2 load (`--output none`, `test -s`) → Step B tag proof → remove
+   `$KEYFILE` on Step B PASS (and on STOP fail-safe / abandon per §4.3)
+   before closing the vault.
 4. Host prep (agents after Sitting 2 yes) — prod bootstrap retarget **BLOCKED**
    until a named ticket/PR exists. Matches §1 After 14:30 step 1.
 5. **Install** mode-0400 secret files — **BLOCKED** until a named
@@ -1337,10 +1399,10 @@ After-14:30 host work):**
 - [ ] Agents: runbook PR green; `#383` watched (`#377` / `#381` Merged)
 - [ ] Sitting 1: plan-hash yes → `#356` apply **or** `#383` `--recover` → IP recorded → Clerk public values sent
 - [ ] Between: agent prep only (no secrets, no staging); bootstrap retarget **BLOCKED** until named ticket/PR
-- [ ] Sitting 2: export `KEYFILE` once → Fence 1 Step A wrapper → pause → rotate wrapper (`pipefail` + `test -s`) → Fence 2 (`test -s`, `--output none`) → pause → Step B (rm `$KEYFILE` only on PASS) → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
-- [ ] §4.3 if interrupted: restore Disabled + empty `ipRules`, print whole list, verify
+- [ ] Sitting 2: export `KEYFILE` once → Fence 1 Step A wrapper → pause → rotate wrapper (`pipefail` + `test -s`; `key1` only) → Fence 2 (`test -s`, `--output none`) → pause → Step B (tag proof; rm `$KEYFILE` on PASS and STOP fail-safe) → restore Disabled → mode-600 passwords → disk-format yes → DNS proxy off → continue-prep yes
+- [ ] §4.3 if interrupted/abandoned: restore Disabled + empty `ipRules`, print whole list, verify, then abandon `$KEYFILE` cleanup
 - [ ] After 14:30 (= §9 (b) steps 4–9): install (BLOCKED) → checks → flag flip → render/start
-- [ ] §4.1: Fence 1 wrapper (no PASS after STOP); fail-closed rotate; `test -s`; anchored ACCOUNT_ID `^…$`; `--output none`; no key on screen/history
+- [ ] §4.1: Fence 1 wrapper (no PASS after STOP); fail-closed rotate (`key1` only; `key2` later); `test -s`; anchored ACCOUNT_ID `^…$`; `--output none`; Step B tag-only; no key on screen/history
 - [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode; `$APP/public` Clerk key **presence-only**; web `-F` key; staging host class `[a-z0-9.-]+`; baseline **Pending**
 - [ ] `#377` / `#381` Merged; `#383` merged before any recover apply
 - [ ] Account-delete vault `CLERK-ACCOUNT-DELETION-SECRET` → host `CLERK_ACCOUNT_DELETION_SECRET` (#356 README line 191)
