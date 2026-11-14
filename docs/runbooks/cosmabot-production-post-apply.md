@@ -93,7 +93,7 @@ Hands-on only. Exact order:
 
 | # | John does | ~Min | Gate |
 | --- | --- | --- | ---: |
-| 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from John's own `/32`. **John only, §4.1:** paste Step A → **pause** → umask-077 regenerate into `$KEYFILE` (no display, no history) → Fence 2 load (`--output none`) → **pause** → Step B → `rm -f "$KEYFILE"` **inside this window**. Never print the key. Then restore `publicNetworkAccess=Disabled` and empty `ipRules`. **If interrupted:** restore Disabled + empty `ipRules` first (§4.3). Agents never rotate or load. | 25 | **"yes, KV secrets loaded and public access disabled"** |
+| 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from John's own `/32`. **John only, §4.1:** export `KEYFILE` once → paste Step A → **pause** → rotate wrapper (umask 077 + `pipefail` + `test -s`) → Fence 2 load (`--output none`, `test -s`) → **pause** → Step B (removes `$KEYFILE` only on PASS) **inside this window**. Never print the key. Then restore `publicNetworkAccess=Disabled` and empty `ipRules`. **If interrupted:** restore Disabled + empty `ipRules` first (§4.3). Agents never rotate or load. | 25 | **"yes, KV secrets loaded and public access disabled"** |
 | 2 | On the new VM as root: create distinct DB/Postgres/Redis passwords in a **mode-600** file he owns. **Never** via Azure Run Command | 10 | **"yes, mode-600 password file is on the host"** |
 | 3 | Type **yes** to format the new empty data disk (prod IDs only) | 5 | **"yes, format the new empty data disk"** |
 | 4 | Publish Cloudflare DNS (proxy **off**): `beta.cosmas.ai` A, `api.beta.cosmas.ai` A → public IP; `clerk.beta.cosmas.ai` CNAME from Clerk | 10 | — |
@@ -183,12 +183,11 @@ Per `#356` `infra/beta/vm/prod/README.md` on `main` (merged)
 
 **Production entrypoint:** the `#356` prod profile runs
 `infra/beta/vm/runtime/entrypoint.py` (`runtime.secret_names` + host-file
-contract). [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) is a
-**prerequisite**: it adds the `CLERK_ACCOUNT_DELETION_SECRET` host-key mapping
-for that contract (vault → host → app `ACCOUNT_DELETE_CLERK_SECRET_KEY`). Do
-**not** invent a different vault object name. Do not mount until `#377` is
-merged and John pastes the value himself. No Clerk secret values in this
-runbook.
+contract). [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) is
+**Merged** and adds the `CLERK_ACCOUNT_DELETION_SECRET` host-key mapping for
+that contract (vault → host → app `ACCOUNT_DELETE_CLERK_SECRET_KEY`). Do
+**not** invent a different vault object name. Mount only after John pastes the
+value himself. No Clerk secret values in this runbook.
 
 ### Key Vault → host file names only
 
@@ -226,26 +225,27 @@ interactive shell open).
 
 **Mac paste rule (H-A / N2):** default macOS zsh has `interactivecomments`
 off, so `#` is not a comment at the prompt. Every pasteable fence below has
-**no `#` lines and no apostrophes inside the fence**. Paste into bash 3.2+ or
-default zsh. Instructions live outside the fences. Split Step A, load, and
-Step B into three fences with an explicit pause between them so Step B does
-not run before the load.
+**no `#` comment lines** (single-quoted strings and `${var#prefix}` expansions
+are fine). Paste into bash 3.2+ or default zsh. Instructions live outside the
+fences. Split Step A, rotate, load, and Step B into separate fences with an
+explicit pause between them so Step B does not run before the load.
 
 **Operator smoke (before trusting):** for each function below, feed one
 deliberately wrong input (wrong path, empty `ACCOUNT_ID`, Enabled vault, wrong
 origin) and confirm it STOPs before using it on real artifacts.
 
-#### Sitting 2 (John) — Step A, pause, load, pause, Step B (never `secret show`)
+#### Sitting 2 (John) — Step A, pause, rotate, load, pause, Step B (never `secret show`)
 
 John only. Inside the temporary public-access window, **before** restoring
 `Disabled`. **Shell:** bash 3.2+ or default macOS zsh (no `mapfile`). Agents
-never run the write. **Before any fence**, export the applied prod names in
-the shell (do **not** put placeholder assignments inside Fence 1):
+never run the write. **Before any fence**, export these once in the shell (do
+**not** put placeholder assignments or a second `KEYFILE=` inside fences):
 
 - `PROD_KV_NAME` must match `^kv-cbot-prd-[a-z0-9]+$`
 - `RG=rg-cosmabot-prod-eus2-01`
-- `KEYFILE` = a private local path for the rotated key file (mode 0600 via
-  `umask 077`; **no trailing newline**)
+- `KEYFILE` = one private local path for the rotated key file (mode 0600 via
+  `umask 077`; **no trailing newline**). Define it **once** here; fences only
+  read `"$KEYFILE"`.
 
 **Hard rule:** no step may print the production AI key or put it in shell
 history. Never assign the key to a shell variable. Never use `printf` /
@@ -253,12 +253,14 @@ history. Never assign the key to a shell variable. Never use `printf` /
 Step A STOP reasons go to **stderr** so they are not captured into
 `ACCOUNT_ID`. On any Step A failure, clear `ACCOUNT_ID`.
 
-`ACCOUNT_ID` must match the full resource-id shape ending
-`/accounts/oai-cbot-prd-[a-z0-9]{6,10}` in Fence 1, Fence 2, and Step B.
+`ACCOUNT_ID` must match this full resource-id regex (anchored with `^` and
+`$`) in Fence 1, rotate, Fence 2, and Step B:
+
+`^/subscriptions/[^/]+/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft\.CognitiveServices/accounts/oai-cbot-prd-[a-z0-9]{6,10}$`
 
 **Fence 1 — Step A** (resolve exactly one prod OpenAI account; print the
-account resource id on stdout only — not a secret). STOP on stderr; PASS only
-after a shape-valid id:
+account resource id on stdout only — not a secret). Capture, shape check, and
+PASS all live inside a wrapper so a STOP never prints PASS:
 
 ```bash
 cosmabot_llm_kv_step_a_resolve_account() {
@@ -309,46 +311,89 @@ cosmabot_llm_kv_step_a_resolve_account() {
     echo "STOP: Step A account id query failed" >&2
     return 1
   }
-  printf '%s' "$RID" | grep -Eq '/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
+  printf '%s' "$RID" | grep -Eq '^/subscriptions/[^/]+/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft\.CognitiveServices/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
     echo "STOP: Step A ACCOUNT_ID shape invalid" >&2
     return 1
   }
   printf '%s\n' "$RID"
 }
-ACCOUNT_ID=$(cosmabot_llm_kv_step_a_resolve_account) || {
-  echo "STOP: Step A failed - no usable oai-cbot-prd account id" >&2
+cosmabot_llm_kv_step_a_run() {
+  ACCOUNT_ID=$(cosmabot_llm_kv_step_a_resolve_account) || {
+    echo "STOP: Step A failed - no usable oai-cbot-prd account id" >&2
+    ACCOUNT_ID=
+    return 1
+  }
+  printf '%s' "${ACCOUNT_ID:-}" | grep -Eq '^/subscriptions/[^/]+/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft\.CognitiveServices/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
+    echo "STOP: Step A ACCOUNT_ID shape invalid after capture" >&2
+    ACCOUNT_ID=
+    return 1
+  }
+  echo "PASS: Step A resolved account resource id"
+  echo "source-account tag value (account resource id, not a secret): $ACCOUNT_ID"
+  return 0
+}
+cosmabot_llm_kv_step_a_run || {
+  echo "STOP: Step A failed" >&2
   ACCOUNT_ID=
   false
 }
-printf '%s' "${ACCOUNT_ID:-}" | grep -Eq '/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
-  echo "STOP: Step A ACCOUNT_ID shape invalid after capture" >&2
-  ACCOUNT_ID=
-  false
-}
-echo "PASS: Step A resolved account resource id"
-echo "source-account tag value (account resource id, not a secret): $ACCOUNT_ID"
 ```
 
-**Pause here.** Do not paste Fence 3 yet. Rotate the provider key with this
-**exact** no-display command (umask 077 subshell; key never on screen or in
-history; no trailing newline). Export `KEYFILE` first:
+**Pause here.** Do not paste Fence 3 yet. Rotate with the wrapper below (uses
+the already-exported `KEYFILE`; never reassigns it). Never `cat` / `echo` /
+`printf` the file contents. Then paste Fence 2 only.
 
 ```bash
-KEYFILE="${HOME}/.cosmabot-ephemeral/workspace-llm-api-key"
-mkdir -p "$(dirname "$KEYFILE")"
-( umask 077; az cognitiveservices account keys regenerate \
-  --resource-group "$RG" \
-  --name "${ACCOUNT_ID##*/}" \
-  --key-name key1 \
-  --query key1 -o tsv | tr -d '\n' > "$KEYFILE" )
+cosmabot_llm_kv_rotate_key() {
+  test -n "${KEYFILE:-}" || {
+    echo "STOP: rotate KEYFILE unset - export once before fences" >&2
+    return 1
+  }
+  test -n "${RG:-}" || {
+    echo "STOP: rotate RG unset" >&2
+    return 1
+  }
+  test -n "${ACCOUNT_ID:-}" || {
+    echo "STOP: rotate ACCOUNT_ID empty - run Fence 1 first" >&2
+    return 1
+  }
+  printf '%s' "$ACCOUNT_ID" | grep -Eq '^/subscriptions/[^/]+/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft\.CognitiveServices/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
+    echo "STOP: rotate ACCOUNT_ID shape invalid" >&2
+    return 1
+  }
+  (
+    umask 077
+    set -o pipefail
+    mkdir -p "$(dirname "$KEYFILE")" || exit 1
+    rm -f "$KEYFILE" || exit 1
+    az cognitiveservices account keys regenerate \
+      --resource-group "$RG" \
+      --name "${ACCOUNT_ID##*/}" \
+      --key-name key1 \
+      --query key1 -o tsv | tr -d '\n' > "$KEYFILE" || exit 1
+  ) || {
+    echo "STOP: rotate regenerate failed" >&2
+    rm -f "${KEYFILE:-}"
+    return 1
+  }
+  test -s "$KEYFILE" || {
+    echo "STOP: rotate KEYFILE empty or missing" >&2
+    rm -f "${KEYFILE:-}"
+    return 1
+  }
+  echo "PASS: rotate wrote KEYFILE (value not printed)"
+  return 0
+}
+cosmabot_llm_kv_rotate_key || {
+  echo "STOP: rotate failed" >&2
+  false
+}
 ```
 
-Confirm the rotate command exited 0 and `$KEYFILE` exists with mode 0600.
-Never `cat` / `echo` / `printf` the file contents. Then paste Fence 2 only.
-
 **Fence 2 — load** (John only; uses `$KEYFILE`). Wrapped in a function so
-every guard uses `|| return 1` and PASS cannot print after a STOP.
-`--output none` so the secret value is never printed:
+every guard uses `|| return 1` and PASS cannot print after a STOP. Requires a
+non-empty key file (`test -s`). `--output none` so the secret value is never
+printed:
 
 ```bash
 cosmabot_llm_kv_fence2_load() {
@@ -356,7 +401,7 @@ cosmabot_llm_kv_fence2_load() {
     echo "STOP: Fence 2 ACCOUNT_ID empty - run Fence 1 first" >&2
     return 1
   }
-  printf '%s' "$ACCOUNT_ID" | grep -Eq '/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
+  printf '%s' "$ACCOUNT_ID" | grep -Eq '^/subscriptions/[^/]+/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft\.CognitiveServices/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
     echo "STOP: Fence 2 ACCOUNT_ID shape invalid" >&2
     return 1
   }
@@ -372,8 +417,8 @@ cosmabot_llm_kv_fence2_load() {
     echo "STOP: Fence 2 KEYFILE unset" >&2
     return 1
   }
-  test -f "$KEYFILE" || {
-    echo "STOP: Fence 2 KEYFILE missing" >&2
+  test -s "$KEYFILE" || {
+    echo "STOP: Fence 2 KEYFILE missing or empty" >&2
     return 1
   }
   az keyvault secret set \
@@ -396,8 +441,9 @@ cosmabot_llm_kv_fence2_load || {
 
 **Pause here.** Confirm Fence 2 printed PASS. Then paste Fence 3.
 
-**Fence 3 — Step B** (metadata only; never `az keyvault secret show`). After
-PASS, remove `$KEYFILE`:
+**Fence 3 — Step B** (metadata only; never `az keyvault secret show`). Remove
+`$KEYFILE` **only after PASS** (leave it in place on STOP so John can retry
+Fence 2 without re-rotating, then remove it once Step B passes):
 
 ```bash
 cosmabot_llm_kv_step_b_verify_tag() {
@@ -413,7 +459,7 @@ cosmabot_llm_kv_step_b_verify_tag() {
     echo "STOP: Step B ACCOUNT_ID empty" >&2
     return 1
   }
-  printf '%s' "$ACCOUNT_ID" | grep -Eq '/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
+  printf '%s' "$ACCOUNT_ID" | grep -Eq '^/subscriptions/[^/]+/resourceGroups/rg-cosmabot-prod-eus2-01/providers/Microsoft\.CognitiveServices/accounts/oai-cbot-prd-[a-z0-9]{6,10}$' || {
     echo "STOP: Step B ACCOUNT_ID shape invalid" >&2
     return 1
   }
@@ -448,14 +494,14 @@ cosmabot_llm_kv_step_b_verify_tag() {
     return 1
   }
   echo "PASS: Step B source-account tag matches Step A"
+  rm -f "${KEYFILE:-}"
+  KEYFILE=
   return 0
 }
 cosmabot_llm_kv_step_b_verify_tag || {
-  echo "STOP: Step B failed - close vault per section 4.3" >&2
+  echo "STOP: Step B failed - close vault per section 4.3; KEYFILE left in place for retry" >&2
   false
 }
-rm -f "${KEYFILE:-}"
-KEYFILE=
 ```
 
 Then restore `publicNetworkAccess=Disabled` and empty `ipRules` (Sitting 2
@@ -518,9 +564,9 @@ cosmabot_stop_llm_http_status() {
     echo "STOP: HTTP proof RELEASE_ID unset"
     return 1
   }
-  KEYFILE="/etc/cosmabot/runtime/${RELEASE_ID}/api/WORKSPACE_LLM_API_KEY"
-  test -f "$KEYFILE" || {
-    echo "STOP: HTTP proof KEYFILE missing"
+  HOST_LLM_KEYFILE="/etc/cosmabot/runtime/${RELEASE_ID}/api/WORKSPACE_LLM_API_KEY"
+  test -f "$HOST_LLM_KEYFILE" || {
+    echo "STOP: HTTP proof HOST_LLM_KEYFILE missing"
     return 1
   }
   ENDPOINT=$WORKSPACE_LLM_ENDPOINT
@@ -537,7 +583,7 @@ cosmabot_stop_llm_http_status() {
   _prev_term=$(trap -p TERM)
   trap 'rm -f "$HDR"' EXIT INT TERM
   set +x
-  { printf 'api-key: '; cat "$KEYFILE"; printf '\n'; } >"$HDR" || {
+  { printf 'api-key: '; cat "$HOST_LLM_KEYFILE"; printf '\n'; } >"$HDR" || {
     echo "STOP: HTTP proof header file write failed"
     rm -f "$HDR"
     eval "${_prev_exit:-trap - EXIT}"
@@ -601,9 +647,11 @@ false-stop a real `CosmaBot.app`).
 
 **iPhone scan scope (H-B):** scan **only** `Info.plist` (via `plutil` exact
 extracts) and the embedded web assets directory `$APP/public` (Capacitor
-`webDir`). Do **not** scan the whole `.app` tree or Mach-O binaries. Also
-fixed-string-check the expected Clerk publishable key under `$APP/public` so
-an embedded-web staging key cannot slip past the plist-only check.
+`webDir`). Do **not** scan the whole `.app` tree or Mach-O binaries. The
+`$APP/public` Clerk publishable-key check is **presence-only** (fixed-string
+for the expected Sitting 1 `pk_live_…`): it proves the expected key is present
+and does **not** refuse a second different `pk_` elsewhere in that tree. Exact
+equality for the shipped key remains on `Info.plist` via `plutil`.
 
 Confirmed in-repo artifact names (`scripts/prepare-workspace-identity.mjs`,
 `docs/beta/WEB_RELEASE.md`, `apps/capture/ios/App/App/capacitor.config.json`):
@@ -611,7 +659,7 @@ Confirmed in-repo artifact names (`scripts/prepare-workspace-identity.mjs`,
 | File | Path | Keys checked |
 | --- | --- | --- |
 | `Info.plist` | inside reviewed `.app` | `CosmasNativeIdentity.apiOrigin`, `.frontendOrigin`, `.publishableKey` |
-| `$APP/public` | Capacitor web assets only | staging API origin forms + expected `pk_live_` (fixed-string) |
+| `$APP/public` | Capacitor web assets only | staging API origin forms + expected `pk_live_` (**presence-only** fixed-string) |
 | `web-build-arguments.json` | prepare output / `/protected/ephemeral/…` | `VITE_WORKSPACE_HOSTED_API_ORIGIN`, `VITE_CLERK_PUBLISHABLE_KEY` |
 | `web-build-env.json` | same prepare output | `VITE_API_BASE`, `VITE_WORKSPACE_HOSTED_API_ORIGIN`, `VITE_CLERK_PUBLISHABLE_KEY` |
 
@@ -754,16 +802,16 @@ cosmabot_stop_iphone_api_origin() {
   cosmabot_scan_forbidden_origins "$WEB_ASSETS" || return 1
   if command -v rg >/dev/null 2>&1; then
     rg -aF --no-ignore --hidden -q "$EXPECTED_CLERK_PUBLISHABLE_KEY" "$WEB_ASSETS" || {
-      echo "STOP: iPhone public web assets missing expected publishable key (fixed-string)"
+      echo "STOP: iPhone public web assets missing expected publishable key (presence-only)"
       return 1
     }
   else
     /usr/bin/grep -rF "$EXPECTED_CLERK_PUBLISHABLE_KEY" "$WEB_ASSETS" >/dev/null || {
-      echo "STOP: iPhone public web assets missing expected publishable key (fixed-string)"
+      echo "STOP: iPhone public web assets missing expected publishable key (presence-only)"
       return 1
     }
   fi
-  echo "PASS: iPhone Info.plist + public web assets OK"
+  echo "PASS: iPhone Info.plist + public web assets OK (Clerk key presence-only under public)"
   return 0
 }
 cosmabot_stop_web_api_origin() {
@@ -1145,7 +1193,7 @@ with no endpoint unchanged). Model/deployment/API version unchanged.
 | --- | --- |
 | `src/cosmas_os/config.py` 310–311 | Default backend `disabled`; endpoint CosmasCode |
 | `src/cosmas_os/config.py` 517–536 | `workspace_llm_available`: production-review requires `#381` prod pattern; other hosted profiles stay CosmasCode-only |
-| `src/cosmas_os/config.py` 743–761 | Backend on but unavailable / wrong profile → runtime refuse |
+| `src/cosmas_os/config.py` 743–765 | Backend on but unavailable / wrong profile → runtime refuse (incl. line 765) |
 | `src/cosmas_os/config.py` 1017–1022 | Standalone accepts either host + `/openai/v1` |
 | `src/cosmas_os/adapters/gpt41.py` 31, 171 | Default CosmasCode; constructor accepts either |
 | `scripts/prepare-operational-startup.py` 258–259 | Both host forms in binding allow-list |
@@ -1192,7 +1240,7 @@ docs PR. No model change.
 | --- | --- | --- |
 | `src/cosmas_os/config.py` | 310–311 | Default backend `disabled`; endpoint CosmasCode |
 | `src/cosmas_os/config.py` | 517–536 | Production-review requires the `#381` prod endpoint; other hosted profiles stay CosmasCode-only |
-| `src/cosmas_os/config.py` | 743–761 | Backend on but unavailable / wrong profile → runtime refuse |
+| `src/cosmas_os/config.py` | 743–765 | Backend on but unavailable / wrong profile → runtime refuse (incl. line 765) |
 | `src/cosmas_os/adapters/gpt41.py` | 31, 171 | Default CosmasCode; constructor accepts either host |
 | `src/cosmas_os/config.py` | 1017–1022 | Standalone accepts either host |
 
