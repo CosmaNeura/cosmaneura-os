@@ -233,24 +233,32 @@ bash infra/beta/review-cosmabot-prod-foundation.sh \
   --provider-mirror /absolute/path/to/verified-azurerm-mirror
 ```
 
-**Pass** means the sanitised summary is 0 add, 0 change, 0 destroy, 0 replace
-(and no import / moved / deposed), and the command exits 0. **Fail** means any
-of those actions appear: the command exits non-zero and prints the drifted
-resource addresses only (no attribute values, no secrets, no passphrase).
+**Pass** means the refreshed plan is 0 add, 0 change, 0 destroy, 0 replace
+(and no import / moved / deposed), the encrypted local state file digest is
+unchanged after the run, and the command exits 0. That proves config matches
+recorded state *and* Azure (refresh is a read against Azure). **Fail** means
+any of those actions appear: the command exits non-zero and prints the drifted
+resource addresses only on stderr (no attribute values, no secrets, no
+passphrase). Do not open the raw plan log for triage — it contains attribute
+values.
 
 Artifacts written (0600) under the private dir only:
 
+- `recheck-prepare-<UTC>.json` (reviewed source digests from prepare `--recheck`)
 - `plans/recheck-<UTC>.tfplan`
 - `recheck-plan-summary-<UTC>.json` / `recheck-plan-result-<UTC>.json` (with
   `plan_sha256` / `summary_sha256`)
 - `logs/recheck-init-<UTC>.log` / `logs/recheck-plan-<UTC>.log`
+- `tofu-data-recheck-<UTC>/` (recheck-scoped OpenTofu data dir; shared
+  `tofu-data/` is left untouched)
 
 It never overwrites `plans/first.tfplan`, recover plans/summaries/results,
-manifests, or state. OpenTofu is invoked with `-refresh=false` so the encrypted
-local state is not rewritten by a refresh, and with `-lock=true
--lock-timeout=30s` for the brief exclusive lock a consistent read-only plan
-needs. `--recheck` and `--recover` are mutually exclusive. There is no apply
-path from re-check mode; do not pass recheck plans to
+manifests, or state. OpenTofu plan uses the default refresh (no
+`-refresh=false`) so portal / out-of-band Azure drift shows up as plan actions;
+before/after digests of `state/foundation.tfstate` must still match, proving
+the state file was not rewritten. Locking uses `-lock=true -lock-timeout=30s`.
+`--recheck` and `--recover` are mutually exclusive. There is no apply path from
+re-check mode; do not pass recheck plans to
 `apply-cosmabot-prod-foundation.sh`.
 
 ## Load secrets into Key Vault (separate later secrets ticket)

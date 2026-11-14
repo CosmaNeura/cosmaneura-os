@@ -35,9 +35,11 @@ With --recover, --private-dir must already exist and hold the encrypted state
 plus passphrase from the partial first apply; the plan is written to
 plans/recover-<UTC>.tfplan and never overwrites plans/first.tfplan.
 With --recheck, --private-dir must already exist with post-apply encrypted state;
-the plan is written to plans/recheck-<UTC>.tfplan only. Recheck never applies,
-never refreshes/writes state (-refresh=false), and fails unless the plan is
-0 add / 0 change / 0 destroy / 0 replace (and no import/move/deposed).
+the plan is written to plans/recheck-<UTC>.tfplan only. Recheck never applies.
+It runs a normal refreshed plan (Azure read) and requires the encrypted local
+state file digest to stay unchanged. It fails unless the plan is 0 add /
+0 change / 0 destroy / 0 replace (and no import/move/deposed), printing
+resource addresses only on stderr.
 --recover and --recheck are mutually exclusive.
 --source-sha256 / --lock-sha256 must be operator-supplied (from a prior
 fingerprint review), not self-trusted.
@@ -260,11 +262,13 @@ print(f"enable_azure_openai (effective): {summary.get('enable_azure_openai')}")
 print(f"plan_sha256: {result['plan_sha256']}")
 print(f"summary_sha256: {result['summary_sha256']}")
 if recheck:
-    print("Post-apply re-check PASS: 0 add, 0 change, 0 destroy, 0 replace.")
+    print("Post-apply re-check PASS: refreshed plan is 0 add, 0 change, 0 destroy, 0 replace;")
+    print("encrypted local state file digest unchanged (Azure read + config/state match).")
     print(f"Plan saved under plans/recheck-<UTC>.tfplan ({Path(result['plan']).name}).")
     print(f"Summary/result: {summary_path.name} / {Path(result['result_path']).name}")
     print("Nothing was applied. State, manifests, first.tfplan, and recover artifacts were not overwritten.")
     print("This mode never applies and never prints the state passphrase or secrets.")
+    print("On drift, stderr lists resource addresses only — do not open the raw plan log.")
 elif recover:
     print("Recovery review complete. Plan saved under plans/recover-<UTC>.tfplan.")
     print(f"Summary/result: {summary_path.name} / {Path(result['result_path']).name}")
