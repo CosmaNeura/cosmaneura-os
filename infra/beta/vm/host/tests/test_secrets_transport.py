@@ -39,6 +39,13 @@ class SecretsTransportRefusals(unittest.TestCase):
                 }
             )
 
+    def test_whitespace_only_value_refused(self):
+        with self.assertRaises(transport.Refused):
+            transport.normalize_secret_value(b"\n\n")
+
+    def test_no_host_script_helper(self):
+        self.assertFalse(hasattr(transport, "render_names_only_host_script"))
+
 
 if __name__ == "__main__":
     unittest.main()

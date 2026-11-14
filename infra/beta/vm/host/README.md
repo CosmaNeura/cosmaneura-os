@@ -114,31 +114,37 @@ never touch real block devices, run package operations, query IMDS or call Azure
 ## Prod secrets transport (`secrets_transport.py`) — T-PROD-3-SECRETS
 
 Separate from `bootstrap_host.py` (prod host bootstrap retarget is a different
-ticket). This module installs Key Vault secret **names** onto the prod VM as
-mode-0400 host files under `/etc/cosmabot/runtime/<release_id>/<role>/`.
+ticket). This module stages Key Vault secret **names** on a workstation and
+installs mode-0400 host files under `/etc/cosmabot/runtime/<release_id>/<role>/`.
 
 ### Access model
 
 - **Reads the vault:** the existing off-VM release operator principal (already
-  `Key Vault Secrets Officer` on `kv-cbot-prd-*`). Not the VM runtime UAMI.
+  `Key Vault Secrets Officer` on `kv-cbot-prd-*`), from John's workstation
+  inside the temporary `/32` public-access window. Not the VM runtime UAMI.
 - **Does not widen runtime access:** no new role assignment, access policy, or
   identity for the runtime managed identity.
+- **Do not** `az login` as Secrets Officer on the prod VM (would leave a
+  privileged token on the host). That path is removed.
+- **VM access / how staged files reach the host:** **PENDING JOHN DECISION**
+  (no NSG or IaC change in this ticket).
+- After any vault window: restore/verify per runbook **§4.3**.
 - **Ownership:** secret files are owned by the **service UID** for that role
   directory (`10001` for `api` / `worker` / `prepare`, `999` for `postgres` /
   `redis`), mode `0400`, matching `runtime/entrypoint.py` `read_private`.
 - **Run Command:** refused. Values never appear in scripts or arguments
-  (CTO 11 Nov 2026). Use SSH/root with a local staging directory, or
-  `--from-vault` as the release operator (private endpoint or temporary
-  vault public-access window).
+  (CTO 11 Nov 2026).
 
 ### Hard rules
 
 - Output prints secret **names**, pass/fail, mode, owner uid, and size>0 only.
 - Refuse staging names (vault, RG, host, profile). Profile must be
   `cosmabot-vm-prod-v1`.
-- `WORKSPACE-LLM-API-KEY` requires tag `source-account` matching prod
-  `oai-cbot-prd-*`. CosmasCode / `services.ai.azure.com` markers are refused.
-- Atomic write: umask `077`, then mode `0400`. Empty value → STOP.
+- `WORKSPACE-LLM-API-KEY` requires tag / sidecar `source-account` matching prod
+  `oai-cbot-prd-*` on **every** stage and install path. CosmasCode /
+  `services.ai.azure.com` markers are refused.
+- Atomic write: umask `077`, then mode `0400`. Empty or whitespace-only value
+  → STOP. Private stage dirs are mode `700` and cleaned up explicitly.
 
 ### Operator shapes (names only in examples)
 
@@ -153,8 +159,24 @@ python3 secrets_transport.py \
   --secret-name CLERK-SECRET-KEY
 ```
 
-Install from a local staging directory of secret files (filenames = host
-names; values never on the command line):
+Workstation stage-only (John `/32` vault window; never on the prod VM):
+
+```text
+python3 secrets_transport.py \
+  --profile cosmabot-vm-prod-v1 \
+  --resource-group rg-cosmabot-prod-eus2-01 \
+  --vault-name kv-cbot-prd-<suffix> \
+  --stage-from-vault \
+  --staging-dir /path/to/mode-700-private-staging \
+  --secret-name CLERK-SECRET-KEY
+```
+
+Then restore vault public access per **§4.3**. LLM installs also write a
+non-secret sidecar `WORKSPACE_LLM_API_KEY.source-account`.
+
+Install on the host from a staging directory (filenames = host names; values
+never on the command line). How the staging directory arrives on the VM is
+**PENDING JOHN DECISION**:
 
 ```text
 python3 secrets_transport.py \
@@ -163,10 +185,11 @@ python3 secrets_transport.py \
   --vault-name kv-cbot-prd-<suffix> \
   --release-id <release_id> \
   --protected-root /etc/cosmabot/runtime/<release_id> \
-  --staging-dir /root/private-secret-staging \
+  --staging-dir /path/to/mode-700-private-staging \
+  --cleanup-staging \
   --secret-name CLERK-SECRET-KEY
 ```
 
 CI proof: `tests/unit/test_secrets_transport.py` (canary value never appears in
-stdout/stderr/scripts/exception text). Local refusals also under
+stdout/stderr/exception text). Local refusals also under
 `host/tests/test_secrets_transport.py`.

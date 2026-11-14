@@ -7,27 +7,33 @@ Access model (does not widen the VM runtime managed identity):
   (Key Vault Secrets Officer on kv-cbot-prd-*). That assignment already
   exists in prod foundation IaC. This tooling never assigns vault roles
   to the runtime UAMI.
-* Values move operator-side → host files. Azure Run Command is refused
-  as a transport (CTO 11 Nov 2026): scripts/arguments never carry values.
-* Host files are owned by the service UID for each role directory
-  (10001 api/worker/prepare, 999 postgres/redis), mode 0400, matching
+* Workstation stage-only mode runs inside John's temporary /32 vault
+  public-access window (see runbook §4.1 / §4.3). It fetches into a
+  mode-700 private directory, records the source-account check, never
+  prints values, and cleans up staged copies.
+* Do **not** `az login` as Secrets Officer on the prod VM (would leave a
+  privileged token on the host). VM access / how staged files reach the
+  host is **PENDING JOHN DECISION** — no NSG or IaC change in this ticket.
+* Host install writes service-UID-owned mode-0400 files matching
   infra/beta/vm/runtime/entrypoint.py read_private.
+* Azure Run Command is refused (CTO 11 Nov 2026).
 
 This module never prints, logs, or embeds a secret VALUE. Output is names,
 pass/fail, mode, owner uid, and size>0 only. Live Azure calls are opt-in
-via an injected VaultReader; the default CLI path that shells to `az` is
-for operators only and is never exercised by unit tests.
+via an injected VaultReader; unit tests use fakes only.
 """
 from __future__ import annotations
 
 import argparse
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -46,9 +52,10 @@ PROD_OAI_ACCOUNT_RE = re.compile(
 LLM_VAULT_NAME = "WORKSPACE-LLM-API-KEY"
 LLM_HOST_NAME = "WORKSPACE_LLM_API_KEY"
 SOURCE_ACCOUNT_TAG = "source-account"
+SOURCE_ACCOUNT_SIDECAR_SUFFIX = ".source-account"
+# Runbook §4.3 restore/verify after any vault public-access window.
+RUNBOOK_VAULT_RESTORE = "docs/runbooks/cosmabot-production-post-apply.md §4.3"
 
-# Cross-environment / shared-key needles (lowercase). Staging profile names,
-# hosts, RG, vault prefix, and CosmasCode markers are refused.
 STAGING_NEEDLES = (
     "cosmabot-vm-staging",
     "rg-cosmas-os-vm-staging-eus2-lab01",
@@ -72,6 +79,9 @@ API_UID = 10001
 DATA_UID = 999
 SECRET_LIMIT = 32768
 
+ChownFn = Callable[[str | os.PathLike[str], int, int], None]
+LstatFn = Callable[[str | os.PathLike[str]], os.stat_result]
+
 
 @dataclass(frozen=True)
 class SecretMapping:
@@ -80,8 +90,6 @@ class SecretMapping:
     roles: tuple[str, ...]
 
 
-# Names-only catalog from the prod runbook / prod README. LLM key is optional
-# until AI-on; include it when the operator requests it.
 SECRET_CATALOG: tuple[SecretMapping, ...] = (
     SecretMapping("CLERK-SECRET-KEY", "CLERK_SECRET_KEY", ("api", "worker")),
     SecretMapping(
@@ -210,6 +218,10 @@ def resolve_mappings(secret_names: list[str]) -> list[SecretMapping]:
     return resolved
 
 
+def is_llm_mapping(item: SecretMapping) -> bool:
+    return item.vault_name == LLM_VAULT_NAME or item.host_name == LLM_HOST_NAME
+
+
 def validate_llm_source_account(tags: Mapping[str, str]) -> str:
     """Require WORKSPACE-LLM-API-KEY source-account tag is the prod oai-cbot-prd-* id."""
     raw = tags.get(SOURCE_ACCOUNT_TAG, "")
@@ -224,32 +236,86 @@ def validate_llm_source_account(tags: Mapping[str, str]) -> str:
     return account
 
 
+def source_account_sidecar_path(staging_dir: Path, item: SecretMapping) -> Path | None:
+    for name in (item.host_name, item.vault_name):
+        path = staging_dir / f"{name}{SOURCE_ACCOUNT_SIDECAR_SUFFIX}"
+        if path.exists() or path.is_symlink():
+            return path
+    return None
+
+
+def load_staging_llm_tags(staging_dir: Path, item: SecretMapping) -> dict[str, str]:
+    """Load non-secret source-account sidecar required for LLM installs."""
+    path = source_account_sidecar_path(staging_dir, item)
+    require(path is not None, f"llm_source_account_sidecar_required:{item.host_name}")
+    assert path is not None
+    require(path.is_file() and not path.is_symlink(), f"llm_source_account_sidecar_invalid:{item.host_name}")
+    text = path.read_text(encoding="utf-8")
+    return {SOURCE_ACCOUNT_TAG: text.strip()}
+
+
+def write_source_account_sidecar(staging_dir: Path, item: SecretMapping, account: str) -> None:
+    path = staging_dir / f"{item.host_name}{SOURCE_ACCOUNT_SIDECAR_SUFFIX}"
+    require(not path.exists() and not path.is_symlink(), "llm_source_account_sidecar_exists")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        stream.write(account)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def enforce_llm_source_account_on_mappings(
+    mappings: list[SecretMapping],
+    *,
+    tags_for: Callable[[SecretMapping], Mapping[str, str]],
+) -> None:
+    """Call validate_llm_source_account for every LLM mapping on every install path."""
+    for item in mappings:
+        if is_llm_mapping(item):
+            validate_llm_source_account(tags_for(item))
+
+
+def normalize_secret_value(value: bytes) -> bytes:
+    """Strip all leading/trailing whitespace; empty or NUL → STOP."""
+    require(isinstance(value, (bytes, bytearray)), "secret_value_type")
+    raw = bytes(value).strip()
+    require(0 < len(raw) <= SECRET_LIMIT, "secret_value_empty_or_too_large")
+    require(b"\x00" not in raw, "secret_value_nul_refused")
+    return raw
+
+
 def protected_role_dir(protected_root: Path, role: str) -> Path:
     require(role in ROLE_UID, f"unknown_role:{role}")
     return protected_root / role
 
 
-def ensure_role_directory(path: Path, uid: int) -> None:
+def ensure_role_directory(
+    path: Path,
+    uid: int,
+    *,
+    chown_fn: ChownFn = os.chown,
+    lstat_fn: LstatFn = os.lstat,
+) -> None:
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
-    info = path.lstat()
+    info = lstat_fn(path)
     require(stat.S_ISDIR(info.st_mode) and not path.is_symlink(), "role_directory_invalid")
-    # Directory may already exist from prior install; enforce mode.
     path.chmod(0o700)
     try:
-        os.chown(path, uid, uid)
+        chown_fn(path, uid, uid)
     except PermissionError as error:
         raise Refused("role_directory_chown_requires_root") from error
 
 
-def write_secret_atomic(path: Path, value: bytes, uid: int) -> dict[str, object]:
-    """Atomically write value with umask 077 then mode 0400; empty value STOPs."""
-    require(isinstance(value, (bytes, bytearray)), "secret_value_type")
-    raw = bytes(value)
-    # Strip a single trailing newline (Key Vault / file convention); refuse empty.
-    if raw.endswith(b"\n"):
-        raw = raw[:-1]
-    require(0 < len(raw) <= SECRET_LIMIT, "secret_value_empty_or_too_large")
-    require(b"\x00" not in raw, "secret_value_nul_refused")
+def write_secret_atomic(
+    path: Path,
+    value: bytes,
+    uid: int,
+    *,
+    chown_fn: ChownFn = os.chown,
+    lstat_fn: LstatFn = os.lstat,
+) -> dict[str, object]:
+    """Atomically write value with umask 077 then mode 0400; empty/whitespace STOP."""
+    raw = normalize_secret_value(value)
     require(not path.exists() and not path.is_symlink(), f"secret_file_exists:{path.name}")
 
     old_mask = os.umask(0o077)
@@ -269,7 +335,7 @@ def write_secret_atomic(path: Path, value: bytes, uid: int) -> dict[str, object]
         finally:
             os.close(fd)
         try:
-            os.chown(tmp_path, uid, uid)
+            chown_fn(tmp_path, uid, uid)
         except PermissionError as error:
             tmp_path.unlink(missing_ok=True)
             raise Refused("secret_file_chown_requires_root") from error
@@ -281,7 +347,7 @@ def write_secret_atomic(path: Path, value: bytes, uid: int) -> dict[str, object]
         if tmp_path is not None and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
 
-    info = path.lstat()
+    info = lstat_fn(path)
     require(
         stat.S_ISREG(info.st_mode)
         and info.st_nlink == 1
@@ -305,53 +371,120 @@ def refuse_run_command_transport() -> None:
     raise Refused("run_command_secret_transport_forbidden")
 
 
-def render_names_only_host_script(
+def cleanup_private_dir(path: Path) -> None:
+    """Remove a private staging directory and its contents (best-effort)."""
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+        return
+    for child in sorted(path.rglob("*"), reverse=True):
+        try:
+            if child.is_symlink() or child.is_file():
+                child.unlink(missing_ok=True)
+            elif child.is_dir():
+                child.rmdir()
+        except OSError:
+            pass
+    try:
+        path.rmdir()
+    except OSError:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def private_work_parent(explicit: Path | None = None) -> Path:
+    """Prefer tmpfs (/dev/shm) for private work; else a mode-700 under gettempdir."""
+    if explicit is not None:
+        return explicit
+    shm = Path("/dev/shm")
+    if shm.is_dir() and os.access(shm, os.W_OK):
+        return shm / "cosmabot-secrets-work"
+    return Path(tempfile.gettempdir()) / "cosmabot-secrets-work"
+
+
+@contextmanager
+def private_work_dir(parent: Path | None = None) -> Iterator[Path]:
+    """Yield a mode-700 work directory; always clean up on exit (including errors)."""
+    base = private_work_parent(parent)
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        base.chmod(0o700)
+    except OSError as error:
+        raise Refused("private_work_parent_mode_700_required") from error
+    path = Path(tempfile.mkdtemp(prefix="stage-", dir=str(base)))
+    try:
+        path.chmod(0o700)
+        yield path
+    finally:
+        cleanup_private_dir(path)
+
+
+def ensure_staging_dir_mode_700(staging_dir: Path) -> None:
+    staging_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    require(staging_dir.is_dir() and not staging_dir.is_symlink(), "staging_dir_invalid")
+    staging_dir.chmod(0o700)
+    info = staging_dir.lstat()
+    require(stat.S_IMODE(info.st_mode) == 0o700, "staging_dir_mode_700_required")
+
+
+def stage_from_vault(
     mappings: list[SecretMapping],
     *,
-    release_id: str,
-    staging_dir: str,
-) -> str:
-    """Bash that copies from a local staging dir by NAME only — no values embedded.
+    vault_name: str,
+    staging_dir: Path,
+    reader: VaultReader,
+) -> list[dict[str, object]]:
+    """Workstation stage-only: fetch into mode-700 dir under John's /32 window.
 
-    Intended for SSH/root on the VM. Not an Azure Run Command payload.
+    Records source-account for LLM. Never prints values. Never installs on the
+    VM. Caller must cleanup_private_dir / cleanup after transfer. After the
+    vault window: restore per runbook §4.3.
     """
-    require(RELEASE_ID_RE.fullmatch(release_id) is not None, "release_id_invalid")
-    refuse_staging_names(release_id, staging_dir)
-    lines = [
-        "#!/bin/bash",
-        "set -euo pipefail",
-        "umask 077",
-        f'RELEASE_ID={release_id!r}',
-        f'STAGING={staging_dir!r}',
-        'ROOT="/etc/cosmabot/runtime/${RELEASE_ID}"',
-        'test -d "$STAGING" || { echo "STOP: staging dir missing" >&2; exit 1; }',
-        'test -d "$ROOT" || { echo "STOP: protected root missing" >&2; exit 1; }',
-    ]
-    for item in mappings:
-        for role in item.roles:
-            uid = ROLE_UID[role]
-            lines.extend(
-                [
-                    f'NAME={item.host_name!r}',
-                    f'ROLE={role!r}',
-                    f'UID_NUM={uid}',
-                    'SRC="${STAGING}/${NAME}"',
-                    'DEST="${ROOT}/${ROLE}/${NAME}"',
-                    'test -s "$SRC" || { echo "STOP: empty or missing ${NAME}" >&2; exit 1; }',
-                    'mkdir -p -m 700 "${ROOT}/${ROLE}"',
-                    'chown "${UID_NUM}:${UID_NUM}" "${ROOT}/${ROLE}"',
-                    'TMP="${DEST}.tmp.$$"',
-                    'cp -f "$SRC" "$TMP"',
-                    'chown "${UID_NUM}:${UID_NUM}" "$TMP"',
-                    'chmod 0400 "$TMP"',
-                    'mv -f "$TMP" "$DEST"',
-                    'test -s "$DEST" || { echo "STOP: ${NAME} size" >&2; exit 1; }',
-                    'test "$(stat -c \'%a\' "$DEST")" = "400" || { echo "STOP: ${NAME} mode" >&2; exit 1; }',
-                    'echo "PASS: name=${NAME} role=${ROLE} mode=0400 owner_uid=${UID_NUM} size_gt_0=true"',
-                ]
+    require(KEY_VAULT_NAME_RE.fullmatch(vault_name) is not None, "vault_name_must_be_kv-cbot-prd-*")
+    refuse_staging_names(vault_name, str(staging_dir))
+    ensure_staging_dir_mode_700(staging_dir)
+    results: list[dict[str, object]] = []
+    old_mask = os.umask(0o077)
+    try:
+        for item in mappings:
+            if is_llm_mapping(item):
+                tags = reader.read_tags(vault_name, item.vault_name)
+                account = validate_llm_source_account(tags)
+                write_source_account_sidecar(staging_dir, item, account)
+            value = normalize_secret_value(reader.read_value(vault_name, item.vault_name))
+            target = staging_dir / item.host_name
+            require(not target.exists() and not target.is_symlink(), f"staging_file_exists:{item.host_name}")
+            fd = os.open(
+                target,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
             )
-    lines.append('echo "PASS: host secret install complete (values not printed)"')
-    return "\n".join(lines) + "\n"
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(value)
+                stream.flush()
+                os.fsync(stream.fileno())
+            info = target.lstat()
+            require(
+                stat.S_ISREG(info.st_mode)
+                and stat.S_IMODE(info.st_mode) == 0o600
+                and info.st_size > 0,
+                f"staging_file_mode_failed:{item.host_name}",
+            )
+            results.append(
+                {
+                    "vault_name": item.vault_name,
+                    "host_name": item.host_name,
+                    "role": "staging",
+                    "mode": "0600",
+                    "owner_uid": info.st_uid,
+                    "size_gt_0": True,
+                    "status": "PASS",
+                    "vault_restore": RUNBOOK_VAULT_RESTORE,
+                }
+            )
+    finally:
+        os.umask(old_mask)
+    return results
 
 
 def install_from_staging(
@@ -360,95 +493,51 @@ def install_from_staging(
     protected_root: Path,
     staging_dir: Path,
     release_id: str,
-    chown_enabled: bool = True,
+    chown_fn: ChownFn = os.chown,
+    lstat_fn: LstatFn = os.lstat,
 ) -> list[dict[str, object]]:
     """Install secret files from a local staging directory (values as files, never argv)."""
     require(RELEASE_ID_RE.fullmatch(release_id) is not None, "release_id_invalid")
     refuse_staging_names(release_id, str(staging_dir), str(protected_root))
-    require(staging_dir.is_dir(), "staging_dir_required")
-    require(protected_root.is_dir(), "protected_root_required")
+    require(staging_dir.is_dir() and not staging_dir.is_symlink(), "staging_dir_required")
+    require(protected_root.is_dir() and not protected_root.is_symlink(), "protected_root_required")
+    enforce_llm_source_account_on_mappings(
+        mappings,
+        tags_for=lambda item: load_staging_llm_tags(staging_dir, item),
+    )
     results: list[dict[str, object]] = []
     for item in mappings:
         source = staging_dir / item.host_name
         if not source.exists():
             alt = staging_dir / item.vault_name
             source = alt if alt.exists() else source
-        require(source.is_file() and not source.is_symlink(), f"staging_file_missing:{item.host_name}")
-        # Read bytes for install; never print.
+        require(
+            source.is_file() and not source.is_symlink(),
+            f"staging_file_missing:{item.host_name}",
+        )
         value = source.read_bytes()
-        require(len(value) > 0 and (len(value) > 1 or value != b"\n"), f"staging_file_empty:{item.host_name}")
+        # normalize_secret_value enforces whitespace-only / empty / NUL STOP.
         for role in item.roles:
             uid = ROLE_UID[role]
             role_dir = protected_role_dir(protected_root, role)
-            if chown_enabled:
-                ensure_role_directory(role_dir, uid)
-            else:
-                role_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-                role_dir.chmod(0o700)
+            ensure_role_directory(role_dir, uid, chown_fn=chown_fn, lstat_fn=lstat_fn)
             dest = role_dir / item.host_name
-            if not chown_enabled:
-                # Unit-test path: write as current uid, still mode 0400 / non-empty.
-                result = _write_secret_atomic_test_uid(dest, value)
-            else:
-                result = write_secret_atomic(dest, value, uid)
-            result = {
-                **result,
-                "vault_name": item.vault_name,
-                "role": role,
-                "release_id": release_id,
-            }
-            results.append(result)
+            result = write_secret_atomic(
+                dest,
+                value,
+                uid,
+                chown_fn=chown_fn,
+                lstat_fn=lstat_fn,
+            )
+            results.append(
+                {
+                    **result,
+                    "vault_name": item.vault_name,
+                    "role": role,
+                    "release_id": release_id,
+                }
+            )
     return results
-
-
-def _write_secret_atomic_test_uid(path: Path, value: bytes) -> dict[str, object]:
-    """Same atomic 0400 write without chown (for non-root unit tests)."""
-    require(isinstance(value, (bytes, bytearray)), "secret_value_type")
-    raw = bytes(value)
-    if raw.endswith(b"\n"):
-        raw = raw[:-1]
-    require(0 < len(raw) <= SECRET_LIMIT, "secret_value_empty_or_too_large")
-    require(b"\x00" not in raw, "secret_value_nul_refused")
-    require(not path.exists() and not path.is_symlink(), f"secret_file_exists:{path.name}")
-    old_mask = os.umask(0o077)
-    tmp_path: Path | None = None
-    try:
-        fd, tmp_name = tempfile.mkstemp(
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            dir=str(path.parent),
-        )
-        tmp_path = Path(tmp_name)
-        try:
-            os.fchmod(fd, 0o400)
-            written = os.write(fd, raw)
-            require(written == len(raw), "secret_write_short")
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.chmod(tmp_path, 0o400)
-        os.rename(tmp_path, path)
-        tmp_path = None
-    finally:
-        os.umask(old_mask)
-        if tmp_path is not None and tmp_path.exists():
-            tmp_path.unlink(missing_ok=True)
-    info = path.lstat()
-    require(
-        stat.S_ISREG(info.st_mode)
-        and info.st_nlink == 1
-        and stat.S_IMODE(info.st_mode) == 0o400
-        and info.st_size > 0,
-        f"secret_file_mode_failed:{path.name}",
-    )
-    return {
-        "host_name": path.name,
-        "path": str(path),
-        "mode": "0400",
-        "owner_uid": info.st_uid,
-        "size_gt_0": True,
-        "status": "PASS",
-    }
 
 
 def transport_from_vault(
@@ -458,44 +547,33 @@ def transport_from_vault(
     protected_root: Path,
     release_id: str,
     reader: VaultReader,
-    chown_enabled: bool = True,
+    work_parent: Path | None = None,
+    chown_fn: ChownFn = os.chown,
+    lstat_fn: LstatFn = os.lstat,
 ) -> list[dict[str, object]]:
-    """Fetch by NAME via reader (release operator), then install. Values never printed."""
+    """Stage into a private mode-700 dir (not world-writable default temp), then install.
+
+    Always cleans up the private work dir on success or exception. CLI operators
+    should prefer stage_from_vault on the workstation under the /32 window.
+    """
     require(KEY_VAULT_NAME_RE.fullmatch(vault_name) is not None, "vault_name_must_be_kv-cbot-prd-*")
     refuse_staging_names(vault_name)
-    results: list[dict[str, object]] = []
-    with tempfile.TemporaryDirectory(prefix="cosmabot-secrets-staging-") as tmp:
-        staging = Path(tmp)
-        old_mask = os.umask(0o077)
-        try:
-            for item in mappings:
-                if item.vault_name == LLM_VAULT_NAME:
-                    tags = reader.read_tags(vault_name, item.vault_name)
-                    validate_llm_source_account(tags)
-                value = reader.read_value(vault_name, item.vault_name)
-                # Empty / whitespace-only STOP (test -s semantics).
-                stripped = value[:-1] if value.endswith(b"\n") else value
-                require(len(stripped) > 0, f"vault_secret_empty:{item.vault_name}")
-                target = staging / item.host_name
-                fd = os.open(
-                    target,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                    0o600,
-                )
-                with os.fdopen(fd, "wb") as stream:
-                    stream.write(value)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-        finally:
-            os.umask(old_mask)
-        results = install_from_staging(
+    with private_work_dir(work_parent) as staging:
+        # Fetch + LLM check into private dir, then install from that dir.
+        stage_from_vault(
+            mappings,
+            vault_name=vault_name,
+            staging_dir=staging,
+            reader=reader,
+        )
+        return install_from_staging(
             mappings,
             protected_root=protected_root,
             staging_dir=staging,
             release_id=release_id,
-            chown_enabled=chown_enabled,
+            chown_fn=chown_fn,
+            lstat_fn=lstat_fn,
         )
-    return results
 
 
 class FakeVaultReader:
@@ -518,7 +596,10 @@ class FakeVaultReader:
 
 
 class AzCliVaultReader:
-    """Operator-only: read via `az` as the release operator. Values stay off stdout."""
+    """Workstation-only: read via `az` as the release operator. Values stay off stdout.
+
+    Never run this on the prod VM (do not leave a Secrets Officer token there).
+    """
 
     def __init__(
         self,
@@ -530,7 +611,6 @@ class AzCliVaultReader:
         require(KEY_VAULT_NAME_RE.fullmatch(vault_name) is not None, "vault_name_must_be_kv-cbot-prd-*")
         refuse_staging_names(vault_name, secret_name)
         refuse_cosmascode_markers(secret_name)
-        # Capture value; do not print. --output tsv is consumed into memory only.
         result = self._runner(
             [
                 "az",
@@ -549,12 +629,10 @@ class AzCliVaultReader:
             capture_output=True,
             check=False,
         )
+        # Never print stdout/stderr (may contain the value on failure paths).
         require(result.returncode == 0, f"vault_read_failed:{secret_name}")
-        # stderr may contain az diagnostics; never echo value-bearing stdout.
         value = result.stdout if isinstance(result.stdout, bytes) else result.stdout.encode()
-        stripped = value[:-1] if value.endswith(b"\n") else value
-        require(len(stripped) > 0, f"vault_secret_empty:{secret_name}")
-        return value
+        return normalize_secret_value(value)
 
     def read_tags(self, vault_name: str, secret_name: str) -> dict[str, str]:
         require(KEY_VAULT_NAME_RE.fullmatch(vault_name) is not None, "vault_name_must_be_kv-cbot-prd-*")
@@ -604,8 +682,11 @@ def plan_lines(mappings: list[SecretMapping]) -> list[str]:
         f"vm_name={VM_NAME}",
         f"key_vault_prefix={KEY_VAULT_PREFIX}",
         "owner_model=service_uid_mode_0400",
-        "transport=release_operator_to_host_files",
+        "transport=workstation_stage_then_host_install",
         "run_command=forbidden",
+        "vm_az_login_as_secrets_officer=forbidden",
+        "vm_access_step=PENDING_JOHN_DECISION",
+        f"vault_window_restore={RUNBOOK_VAULT_RESTORE}",
     ]
     for item in mappings:
         roles = ",".join(item.roles)
@@ -639,7 +720,7 @@ def main(argv: list[str] | None = None) -> int:
         "--staging-dir",
         type=Path,
         default=None,
-        help="Local directory of secret files (names as filenames).",
+        help="Mode-700 private directory of secret files (names as filenames).",
     )
     parser.add_argument(
         "--via-run-command",
@@ -647,14 +728,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Refused: Run Command must never install secrets.",
     )
     parser.add_argument(
-        "--emit-host-script",
+        "--stage-from-vault",
         action="store_true",
-        help="Print a names-only host install script (SSH path; not Run Command).",
+        help=(
+            "Workstation only (John /32 vault window): fetch names into --staging-dir. "
+            "Never on the prod VM. Restore vault per §4.3 after."
+        ),
     )
     parser.add_argument(
-        "--from-vault",
+        "--cleanup-staging",
         action="store_true",
-        help="Fetch via az as release operator then install (operator machine / VM SSH).",
+        help="Remove --staging-dir contents after a successful install (VM or workstation).",
     )
     parser.add_argument(
         "--plan-only",
@@ -673,47 +757,42 @@ def main(argv: list[str] | None = None) -> int:
             vm_name=args.vm_name,
         )
         names = args.secret_names or [item.vault_name for item in SECRET_CATALOG]
-        # Default catalog includes LLM; operators may omit it until AI-on by
-        # passing an explicit --secret-name list without WORKSPACE-LLM-API-KEY.
         mappings = resolve_mappings(names)
         if args.plan_only:
             for line in plan_lines(mappings):
                 print(line)
             return 0
-        if args.emit_host_script:
-            require(args.release_id, "release_id_required")
+        if args.stage_from_vault:
             require(args.staging_dir is not None, "staging_dir_required")
-            script = render_names_only_host_script(
-                mappings,
-                release_id=args.release_id,
-                staging_dir=str(args.staging_dir),
-            )
-            # Script contains names/paths only; print it.
-            sys.stdout.write(script)
-            return 0
-        require(args.release_id, "release_id_required")
-        root = args.protected_root or Path("/etc/cosmabot/runtime") / args.release_id
-        if args.from_vault:
-            results = transport_from_vault(
+            results = stage_from_vault(
                 mappings,
                 vault_name=args.vault_name,
-                protected_root=root,
-                release_id=args.release_id,
+                staging_dir=args.staging_dir,
                 reader=AzCliVaultReader(),
             )
-        else:
-            require(args.staging_dir is not None, "staging_dir_required")
-            results = install_from_staging(
-                mappings,
-                protected_root=root,
-                staging_dir=args.staging_dir,
-                release_id=args.release_id,
+            for result in results:
+                print(format_result_line(result))
+            print(
+                "PASS: workstation stage complete; restore vault per "
+                f"{RUNBOOK_VAULT_RESTORE}; VM access PENDING_JOHN_DECISION"
             )
+            return 0
+        require(args.release_id, "release_id_required")
+        require(args.staging_dir is not None, "staging_dir_required")
+        root = args.protected_root or Path("/etc/cosmabot/runtime") / args.release_id
+        results = install_from_staging(
+            mappings,
+            protected_root=root,
+            staging_dir=args.staging_dir,
+            release_id=args.release_id,
+        )
         for result in results:
             print(format_result_line(result))
+        if args.cleanup_staging:
+            cleanup_private_dir(args.staging_dir)
+            print("PASS: staging cleanup complete (values not printed)")
         return 0
     except Refused as error:
-        # Refused messages are fixed codes — still scrub any accidental value leak.
         print(f"STOP: {error}", file=sys.stderr)
         return 1
 

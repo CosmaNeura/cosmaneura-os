@@ -107,8 +107,9 @@ Not John's hands-on. Still synthetic; still no staging. **One order** (same as �
 1. Host bootstrap / Postgres 16 + Redis on the VM (§3) — only after the named
    prod bootstrap retarget ticket/PR exists (**BLOCKED** until then).
 2. Install mode-0400 secret files from the names John pasted (§4) with
-   `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS). Run Command
-   still must not carry secret values (tooling refuses that path).
+   `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): workstation
+   stage under `/32`, then host install (VM access **PENDING JOHN
+   DECISION**). Run Command still must not carry secret values.
 3. Deploy-time STOP checks: §4.1 (remaining host/post-start proofs) and §4.2
    (bundle API origins). On any mismatch: **STOP and roll back** — do not flip
    AI-on flags, do not start API/worker with model traffic.
@@ -204,9 +205,11 @@ value himself. No Clerk secret values in this runbook.
 `WORKSPACE-LLM-API-KEY` is **John-only** in Sitting 2 (rotate + load with
 `source-account` tag). Agents never rotate or load. Host install of the
 `WORKSPACE_LLM_API_KEY` file (and the other §4 name-mapped secrets) uses
-`infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): release-operator
-vault read → mode-0400 service-UID host files; Run Command refused; values
-never printed.
+`infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): workstation
+`--stage-from-vault` under John's `/32` window → mode-0400 service-UID host
+files; Run Command refused; no Secrets Officer `az login` on the VM; VM
+access step **PENDING JOHN DECISION**; values never printed. Restore vault
+per §4.3 after the window.
 
 ### Clerk public values (Sitting 1)
 
@@ -1300,8 +1303,9 @@ After-14:30 host work):**
    until a named ticket/PR exists. Matches §1 After 14:30 step 1.
 5. **Install** mode-0400 secret files with
    `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS): names from
-   §4, release-operator vault read (not the runtime UAMI), service-UID
-   ownership, mode 0400, Run Command refused. Matches §1 After 14:30 step 2.
+   §4; workstation stage under John's `/32` window (not the runtime UAMI);
+   service-UID ownership; mode 0400; Run Command refused; VM access
+   **PENDING JOHN DECISION**. Matches §1 After 14:30 step 2.
 6. **STOP checks** before AI-on: §4.1 (host files) and §4.2 (exact
    `https://api.beta.cosmas.ai` + Clerk issuer/publishable key on Info.plist /
    JSON; scan `$APP/public` only; refuse configured staging API origin forms;
@@ -1322,9 +1326,10 @@ After-14:30 host work):**
 ### Other gaps
 
 1. Host 0400 install: use `infra/beta/vm/host/secrets_transport.py`
-   (T-PROD-3-SECRETS). Vault is closed after Sitting 2; reopen only under the
-   existing release-operator path (or temporary public-access window). Run
-   Command must not carry values (tooling refuses that path).
+   (T-PROD-3-SECRETS). Vault is closed after Sitting 2; workstation
+   `--stage-from-vault` uses a temporary `/32` window then §4.3 restore.
+   Do not `az login` as Secrets Officer on the VM. VM access step is
+   **PENDING JOHN DECISION**. Run Command must not carry values.
 2. **BLOCKED:** named prod host-bootstrap retarget ticket/PR (staging unit is
    `cosmabot-staging.service`). Do not invent a rename here.
 3. Endpoint kind: classic vs Foundry recreate — §7.
