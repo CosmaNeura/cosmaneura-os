@@ -712,7 +712,15 @@ cosmabot_sitting2_writer_save_traps() {
       echo "STOP: zsh TRAPxxx function traps present - run this fence in a fresh terminal" >&2
       return 1
     fi
-    _writer_trap_tmp="${TMPDIR:-/tmp}/.cosmabot-writer-traps.$$"
+    _writer_trap_tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/cosmabot-wtraps.XXXXXX") || {
+      echo "STOP: zsh trap-save mktemp failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    chmod 600 "$_writer_trap_tmp" || {
+      rm -f "$_writer_trap_tmp"
+      echo "STOP: zsh trap-save chmod failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
     trap >"$_writer_trap_tmp" || {
       rm -f "$_writer_trap_tmp"
       echo "STOP: zsh trap save failed - run this fence in a fresh terminal" >&2
@@ -730,7 +738,32 @@ cosmabot_sitting2_writer_save_traps() {
         *" HUP"|*" SIGHUP") _writer_prev_hup=$_trap_line ;;
       esac
     done <"$_writer_trap_tmp"
-    rm -f "$_writer_trap_tmp"
+    trap 'rm -f "${_writer_trap_tmp:-}"' EXIT INT TERM HUP
+    rm -f "$_writer_trap_tmp" || {
+      rm -f "$_writer_trap_tmp"
+      if test -n "${_writer_prev_exit:-}"; then eval "${_writer_prev_exit}"; else trap - EXIT; fi
+      if test -n "${_writer_prev_int:-}"; then eval "${_writer_prev_int}"; else trap - INT; fi
+      if test -n "${_writer_prev_term:-}"; then eval "${_writer_prev_term}"; else trap - TERM; fi
+      if test -n "${_writer_prev_hup:-}"; then eval "${_writer_prev_hup}"; else trap - HUP; fi
+      unset _writer_trap_tmp
+      echo "STOP: zsh trap-save temp rm failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    test ! -e "$_writer_trap_tmp" || {
+      rm -f "$_writer_trap_tmp"
+      if test -n "${_writer_prev_exit:-}"; then eval "${_writer_prev_exit}"; else trap - EXIT; fi
+      if test -n "${_writer_prev_int:-}"; then eval "${_writer_prev_int}"; else trap - INT; fi
+      if test -n "${_writer_prev_term:-}"; then eval "${_writer_prev_term}"; else trap - TERM; fi
+      if test -n "${_writer_prev_hup:-}"; then eval "${_writer_prev_hup}"; else trap - HUP; fi
+      unset _writer_trap_tmp
+      echo "STOP: zsh trap-save temp still exists - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    if test -n "${_writer_prev_exit:-}"; then eval "${_writer_prev_exit}"; else trap - EXIT; fi
+    if test -n "${_writer_prev_int:-}"; then eval "${_writer_prev_int}"; else trap - INT; fi
+    if test -n "${_writer_prev_term:-}"; then eval "${_writer_prev_term}"; else trap - TERM; fi
+    if test -n "${_writer_prev_hup:-}"; then eval "${_writer_prev_hup}"; else trap - HUP; fi
+    unset _writer_trap_tmp
   else
     _writer_prev_exit=$(trap -p EXIT)
     _writer_prev_int=$(trap -p INT)
@@ -740,8 +773,6 @@ cosmabot_sitting2_writer_save_traps() {
   return 0
 }
 cosmabot_sitting2_writer_restore_traps() {
-  # Print restore commands; caller must eval in the same function that set traps
-  # (zsh EXIT traps are function-local — a nested call cannot clear them).
   if test -n "${_writer_prev_exit:-}"; then
     printf '%s\n' 'eval "${_writer_prev_exit}"'
   else
@@ -872,7 +903,15 @@ cosmabot_sitting2_prompt_save_traps() {
       echo "STOP: zsh TRAPxxx function traps present - run this fence in a fresh terminal" >&2
       return 1
     fi
-    _prompt_trap_tmp="${TMPDIR:-/tmp}/.cosmabot-prompt-traps.$$"
+    _prompt_trap_tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/cosmabot-ptraps.XXXXXX") || {
+      echo "STOP: zsh trap-save mktemp failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    chmod 600 "$_prompt_trap_tmp" || {
+      rm -f "$_prompt_trap_tmp"
+      echo "STOP: zsh trap-save chmod failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
     trap >"$_prompt_trap_tmp" || {
       rm -f "$_prompt_trap_tmp"
       echo "STOP: zsh trap save failed - run this fence in a fresh terminal" >&2
@@ -890,7 +929,32 @@ cosmabot_sitting2_prompt_save_traps() {
         *" HUP"|*" SIGHUP") _prompt_prev_hup=$_trap_line ;;
       esac
     done <"$_prompt_trap_tmp"
-    rm -f "$_prompt_trap_tmp"
+    trap 'rm -f "${_prompt_trap_tmp:-}"' EXIT INT TERM HUP
+    rm -f "$_prompt_trap_tmp" || {
+      rm -f "$_prompt_trap_tmp"
+      if test -n "${_prompt_prev_exit:-}"; then eval "${_prompt_prev_exit}"; else trap - EXIT; fi
+      if test -n "${_prompt_prev_int:-}"; then eval "${_prompt_prev_int}"; else trap - INT; fi
+      if test -n "${_prompt_prev_term:-}"; then eval "${_prompt_prev_term}"; else trap - TERM; fi
+      if test -n "${_prompt_prev_hup:-}"; then eval "${_prompt_prev_hup}"; else trap - HUP; fi
+      unset _prompt_trap_tmp
+      echo "STOP: zsh trap-save temp rm failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    test ! -e "$_prompt_trap_tmp" || {
+      rm -f "$_prompt_trap_tmp"
+      if test -n "${_prompt_prev_exit:-}"; then eval "${_prompt_prev_exit}"; else trap - EXIT; fi
+      if test -n "${_prompt_prev_int:-}"; then eval "${_prompt_prev_int}"; else trap - INT; fi
+      if test -n "${_prompt_prev_term:-}"; then eval "${_prompt_prev_term}"; else trap - TERM; fi
+      if test -n "${_prompt_prev_hup:-}"; then eval "${_prompt_prev_hup}"; else trap - HUP; fi
+      unset _prompt_trap_tmp
+      echo "STOP: zsh trap-save temp still exists - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    if test -n "${_prompt_prev_exit:-}"; then eval "${_prompt_prev_exit}"; else trap - EXIT; fi
+    if test -n "${_prompt_prev_int:-}"; then eval "${_prompt_prev_int}"; else trap - INT; fi
+    if test -n "${_prompt_prev_term:-}"; then eval "${_prompt_prev_term}"; else trap - TERM; fi
+    if test -n "${_prompt_prev_hup:-}"; then eval "${_prompt_prev_hup}"; else trap - HUP; fi
+    unset _prompt_trap_tmp
   else
     _prompt_prev_exit=$(trap -p EXIT)
     _prompt_prev_int=$(trap -p INT)
@@ -900,8 +964,6 @@ cosmabot_sitting2_prompt_save_traps() {
   return 0
 }
 cosmabot_sitting2_prompt_restore_traps() {
-  # Print restore commands; caller must eval in the same function that set traps
-  # (zsh EXIT traps are function-local — a nested call cannot clear them).
   if test -n "${_prompt_prev_exit:-}"; then
     printf '%s\n' 'eval "${_prompt_prev_exit}"'
   else
@@ -1015,7 +1077,15 @@ cosmabot_sitting2_load_save_traps() {
       echo "STOP: zsh TRAPxxx function traps present - run this fence in a fresh terminal" >&2
       return 1
     fi
-    _load_trap_tmp="${TMPDIR:-/tmp}/.cosmabot-load-traps.$$"
+    _load_trap_tmp=$(umask 077; mktemp "${TMPDIR:-/tmp}/cosmabot-ltraps.XXXXXX") || {
+      echo "STOP: zsh trap-save mktemp failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    chmod 600 "$_load_trap_tmp" || {
+      rm -f "$_load_trap_tmp"
+      echo "STOP: zsh trap-save chmod failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
     trap >"$_load_trap_tmp" || {
       rm -f "$_load_trap_tmp"
       echo "STOP: zsh trap save failed - run this fence in a fresh terminal" >&2
@@ -1033,7 +1103,32 @@ cosmabot_sitting2_load_save_traps() {
         *" HUP"|*" SIGHUP") _load_prev_hup=$_trap_line ;;
       esac
     done <"$_load_trap_tmp"
-    rm -f "$_load_trap_tmp"
+    trap 'rm -f "${_load_trap_tmp:-}"' EXIT INT TERM HUP
+    rm -f "$_load_trap_tmp" || {
+      rm -f "$_load_trap_tmp"
+      if test -n "${_load_prev_exit:-}"; then eval "${_load_prev_exit}"; else trap - EXIT; fi
+      if test -n "${_load_prev_int:-}"; then eval "${_load_prev_int}"; else trap - INT; fi
+      if test -n "${_load_prev_term:-}"; then eval "${_load_prev_term}"; else trap - TERM; fi
+      if test -n "${_load_prev_hup:-}"; then eval "${_load_prev_hup}"; else trap - HUP; fi
+      unset _load_trap_tmp
+      echo "STOP: zsh trap-save temp rm failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    test ! -e "$_load_trap_tmp" || {
+      rm -f "$_load_trap_tmp"
+      if test -n "${_load_prev_exit:-}"; then eval "${_load_prev_exit}"; else trap - EXIT; fi
+      if test -n "${_load_prev_int:-}"; then eval "${_load_prev_int}"; else trap - INT; fi
+      if test -n "${_load_prev_term:-}"; then eval "${_load_prev_term}"; else trap - TERM; fi
+      if test -n "${_load_prev_hup:-}"; then eval "${_load_prev_hup}"; else trap - HUP; fi
+      unset _load_trap_tmp
+      echo "STOP: zsh trap-save temp still exists - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    if test -n "${_load_prev_exit:-}"; then eval "${_load_prev_exit}"; else trap - EXIT; fi
+    if test -n "${_load_prev_int:-}"; then eval "${_load_prev_int}"; else trap - INT; fi
+    if test -n "${_load_prev_term:-}"; then eval "${_load_prev_term}"; else trap - TERM; fi
+    if test -n "${_load_prev_hup:-}"; then eval "${_load_prev_hup}"; else trap - HUP; fi
+    unset _load_trap_tmp
   else
     _load_prev_exit=$(trap -p EXIT)
     _load_prev_int=$(trap -p INT)
@@ -1043,8 +1138,6 @@ cosmabot_sitting2_load_save_traps() {
   return 0
 }
 cosmabot_sitting2_load_restore_traps() {
-  # Print restore commands; caller must eval in the same function that set traps
-  # (zsh EXIT traps are function-local — a nested call cannot clear them).
   if test -n "${_load_prev_exit:-}"; then
     printf '%s\n' 'eval "${_load_prev_exit}"'
   else
@@ -1336,6 +1429,8 @@ Record the **HTTP status code only** (never body, headers dump, or key value).
 Operator supplies `WORKSPACE_LLM_ENDPOINT` from the reviewed **public** AI-on
 profile (same string as `#381`); do not invent it from module base URL alone.
 Feed the auth header from a **file**, never argv / process list.
+
+Run on the Linux VM under bash.
 
 ```bash
 cosmabot_stop_llm_http_status() {
@@ -2002,11 +2097,16 @@ Step A, rotate, Fence 2, Step B, host-files, HTTP status, bundle-checks,
 baseline, kv-closed verify, abandon-sitting cleanup, dead-terminal dir
 recovery). Real evidence that a pasted interactive zsh prompt will not treat
 `#` as a comment is that the fences contain **no `#` comment lines**
-(parameter expansions like `${var#prefix}` are fine). Do **not** claim that
+(parameter expansions like `${var#prefix}` are fine). The agent harness fails
+if any line whose first non-space character is `#` appears inside a John-pasted
+\`\`\`bash fence (Mac Sitting 2 paste path). VM-only fences
+(`cosmabot_stop_llm_host_files`, `cosmabot_stop_llm_http_status`) run under
+bash on the Linux VM and are out of that Mac-paste check scope, but still must
+parse under `bash -n` / `zsh -n` and must not introduce `#` comment lines. Do **not** claim that
 `zsh -n` honours a parent `unsetopt interactivecomments` — `zsh -n` always
 treats `#` as a comment inside a file. Proof: extract each fence and run
 `bash -n` / `zsh -n`; results for this revision are in the PR body / agent
-artifact for **T-392-FU** / PR **#392** follow-up (this revision).
+artifact for **T-392-FU** / PR **#393** (this revision).
 
 ---
 
