@@ -1,3 +1,49 @@
+cosmabot_guarded_rm_local_staging() {
+  test -n "${LOCAL_STAGING:-}" || {
+    echo "STOP: guarded-rm LOCAL_STAGING unset" >&2
+    return 1
+  }
+  case "$LOCAL_STAGING" in
+    /*) ;;
+    *)
+      echo "STOP: guarded-rm LOCAL_STAGING must be absolute" >&2
+      return 1
+      ;;
+  esac
+  printf '%s' "$LOCAL_STAGING" | grep -Eq '^/(tmp|var/tmp|dev/shm)/cosmabot-staging\.[A-Za-z0-9._-]+$' || {
+    echo "STOP: guarded-rm LOCAL_STAGING must match mktemp cosmabot-staging.XXXXXX under /tmp|/var/tmp|/dev/shm" >&2
+    return 1
+  }
+  test -d "$LOCAL_STAGING" || {
+    echo "STOP: guarded-rm LOCAL_STAGING not a directory" >&2
+    return 1
+  }
+  _gs_mode=$(stat -c '%a' "$LOCAL_STAGING" 2>/dev/null || stat -f '%Lp' "$LOCAL_STAGING") || {
+    echo "STOP: guarded-rm LOCAL_STAGING stat failed" >&2
+    return 1
+  }
+  test "$_gs_mode" = "700" || {
+    echo "STOP: guarded-rm LOCAL_STAGING mode not 0700" >&2
+    return 1
+  }
+  _gs_owner=$(stat -c '%u' "$LOCAL_STAGING" 2>/dev/null || stat -f '%u' "$LOCAL_STAGING") || {
+    echo "STOP: guarded-rm LOCAL_STAGING owner stat failed" >&2
+    return 1
+  }
+  test "$_gs_owner" = "$(id -u)" || {
+    echo "STOP: guarded-rm LOCAL_STAGING not owned by current user" >&2
+    return 1
+  }
+  rm -rf "${LOCAL_STAGING:?}" || {
+    echo "STOP: guarded-rm LOCAL_STAGING remove failed" >&2
+    return 1
+  }
+  test ! -e "$LOCAL_STAGING" || {
+    echo "STOP: guarded-rm LOCAL_STAGING still present" >&2
+    return 1
+  }
+  return 0
+}
 cosmabot_ssh_secrets_install() {
   command -v az >/dev/null || {
     echo "STOP: ssh-install needs az" >&2
@@ -210,9 +256,8 @@ cosmabot_ssh_secrets_install() {
     }
     echo "PASS: installed name=${base} via ssh stdin (value not printed)"
   done
-  rm -rf "${LOCAL_STAGING:?}"
-  test ! -e "$LOCAL_STAGING" || {
-    echo "STOP: local staging still present" >&2
+  cosmabot_guarded_rm_local_staging || {
+    echo "STOP: ssh-install guarded local staging remove failed" >&2
     rm -f "$SSH_KNOWN_HOSTS_FILE"
     return 1
   }

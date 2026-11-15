@@ -25,22 +25,6 @@ cosmabot_ssh_nsg_recovery_if_stranded() {
     echo "STOP: ssh-nsg-recovery needs jq after delete (rule delete attempted rc=${_delete_rc})" >&2
     return 1
   }
-  test -n "${LOCAL_STAGING:-}" || {
-    echo "STOP: ssh-nsg-recovery LOCAL_STAGING unset - export the mode-700 staging path (same rule as KEYFILE)" >&2
-    return 1
-  }
-  test -d "$LOCAL_STAGING" || {
-    echo "STOP: ssh-nsg-recovery LOCAL_STAGING missing or not a directory (empty/partial)" >&2
-    return 1
-  }
-  rm -rf "${LOCAL_STAGING:?}" || {
-    echo "STOP: ssh-nsg-recovery LOCAL_STAGING remove failed" >&2
-    return 1
-  }
-  test ! -e "$LOCAL_STAGING" || {
-    echo "STOP: ssh-nsg-recovery LOCAL_STAGING still present" >&2
-    return 1
-  }
   RULES_JSON=$(az network nsg rule list \
     --resource-group "$RG" \
     --nsg-name nsg-cosmabot-prod-eus2-01 \
@@ -61,7 +45,16 @@ cosmabot_ssh_nsg_recovery_if_stranded() {
     echo "STOP: recovery deny-all-other-ingress missing or not Deny priority 4000" >&2
     return 1
   }
-  echo "PASS: recovery deleted TEMP-JOHN-SSH-SECRETS-INSTALL; local staging removed; deny-all intact"
+  if test -n "${LOCAL_STAGING:-}" && test -d "${LOCAL_STAGING}"; then
+    if cosmabot_guarded_rm_local_staging 2>/dev/null; then
+      echo "NOTE: recovery removed local staging path (values not printed)"
+    else
+      echo "NOTE: LOCAL_STAGING present but failed guarded rm - leave for operator; NSG already verified closed"
+    fi
+  else
+    echo "NOTE: LOCAL_STAGING unset or already gone - NSG close verified without staging cleanup"
+  fi
+  echo "PASS: recovery deleted TEMP-JOHN-SSH-SECRETS-INSTALL; deny-all intact"
   echo "NOTE: out-of-band NSG rules drift the next Terraform plan; close-and-verify is MANDATORY before any plan or apply"
   return 0
 }

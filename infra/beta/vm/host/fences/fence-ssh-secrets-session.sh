@@ -61,6 +61,31 @@ cosmabot_ssh_secrets_session() {
     echo "STOP: session needs cosmabot_ssh_nsg_close_and_verify sourced" >&2
     return 1
   }
+  command -v python3 >/dev/null || {
+    echo "STOP: session needs python3" >&2
+    return 1
+  }
+  test -n "${SECRETS_TRANSPORT_PY:-}" || {
+    echo "STOP: session SECRETS_TRANSPORT_PY unset" >&2
+    return 1
+  }
+  test -n "${PROD_KV_NAME:-}" || {
+    echo "STOP: session PROD_KV_NAME unset" >&2
+    return 1
+  }
+  test -n "${LOCAL_STAGING:-}" || {
+    echo "STOP: session LOCAL_STAGING unset - empty staging must STOP before SSH opens" >&2
+    return 1
+  }
+  python3 "$SECRETS_TRANSPORT_PY" \
+    --profile cosmabot-vm-prod-v1 \
+    --resource-group rg-cosmabot-prod-eus2-01 \
+    --vault-name "$PROD_KV_NAME" \
+    --check-staging-complete \
+    --staging-dir "$LOCAL_STAGING" || {
+    echo "STOP: staging incomplete or empty - SSH NSG not opened; no PASS" >&2
+    return 1
+  }
   _cosmabot_ssh_session_done=0
   _cosmabot_ssh_session_cleanup() {
     if test "${_cosmabot_ssh_session_done}" = "1"; then
@@ -68,7 +93,7 @@ cosmabot_ssh_secrets_session() {
     fi
     _cosmabot_ssh_session_done=1
     if test -n "${LOCAL_STAGING:-}" && test -e "${LOCAL_STAGING}"; then
-      rm -rf "${LOCAL_STAGING:?}"
+      command -v cosmabot_guarded_rm_local_staging >/dev/null && cosmabot_guarded_rm_local_staging
     fi
     if test -n "${SSH_KNOWN_HOSTS_FILE:-}" && test -e "${SSH_KNOWN_HOSTS_FILE}"; then
       rm -f "${SSH_KNOWN_HOSTS_FILE}"

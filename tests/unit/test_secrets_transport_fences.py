@@ -9,6 +9,7 @@ import os
 import shutil
 import stat
 import subprocess
+import tempfile
 import textwrap
 from pathlib import Path
 
@@ -22,6 +23,20 @@ CANARY = "CANARY_SECRET_VALUE_9f3a2c7b1e8d4a06_NEVER_PRINT"
 JOHN_CIDR = "203.0.113.10/32"
 ADMIN_USERNAME = "reviewed-admin"
 IDENTITY_NAME = "id_ed25519_synth"
+PROD_ACCOUNT = (
+    "/subscriptions/00000000-0000-4000-8000-000000000001"
+    "/resourceGroups/rg-cosmabot-prod-eus2-01"
+    "/providers/Microsoft.CognitiveServices/accounts/oai-cbot-prd-abc123"
+)
+CATALOG_HOST_NAMES = (
+    "CLERK_SECRET_KEY",
+    "CLERK_ACCOUNT_DELETION_SECRET",
+    "DATABASE_PASSWORD",
+    "POSTGRES_PASSWORD",
+    "REDIS_PASSWORD",
+    "HUMAN_DEPLOY_EVIDENCE_REF",
+    "WORKSPACE_LLM_API_KEY",
+)
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -32,13 +47,27 @@ def _write_executable(path: Path, body: str) -> None:
 def _require_real_jq() -> str:
     jq = shutil.which("jq")
     assert jq, "real jq required on CI runner / agent PATH"
-    # Must not be our stub — resolve and ensure it is the system tool.
     assert "bin/jq" not in jq or jq.startswith("/usr"), jq
     probe = subprocess.run(
         [jq, "-n", "1+1"], capture_output=True, text=True, check=False
     )
     assert probe.returncode == 0 and probe.stdout.strip() == "2"
     return jq
+
+
+def _mk_staging() -> Path:
+    path = Path(tempfile.mkdtemp(prefix="cosmabot-staging.", dir="/tmp"))
+    os.chmod(path, 0o700)
+    return path
+
+
+def _fill_complete_staging(staging: Path, *, canary_name: str | None = "CLERK_SECRET_KEY") -> None:
+    for name in CATALOG_HOST_NAMES:
+        if name == canary_name:
+            (staging / name).write_bytes(CANARY.encode())
+        else:
+            (staging / name).write_bytes(f"synthetic-{name}-fixture".encode())
+    (staging / "WORKSPACE_LLM_API_KEY.source-account").write_text(PROD_ACCOUNT)
 
 
 def _stub_bin(
@@ -48,6 +77,7 @@ def _stub_bin(
     install_fail: bool = False,
     hide_jq_after_open: bool = False,
     jq_missing: bool = False,
+    probe_auth_fail: bool = False,
 ) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -83,6 +113,8 @@ def _stub_bin(
     (state / "open_count").write_text("0")
     (state / "argv.log").write_text("")
     (state / "ssh_argv.log").write_text("")
+    (state / "ssh_remote.log").write_text("")
+    (state / "python_argv.log").write_text("")
 
     real_jq = _require_real_jq()
     if jq_missing:
@@ -91,14 +123,27 @@ def _stub_bin(
             "#!/bin/bash\necho \"STOP: jq missing (stub)\" >&2\nexit 127\n",
         )
     else:
-        # Real jq first on PATH (absolute symlink). Shadow /usr/bin/jq.
         os.symlink(real_jq, bin_dir / "jq")
 
     _write_executable(bin_dir / "curl", "#!/bin/bash\necho 203.0.113.10\n")
     _write_executable(bin_dir / "sha256sum", "#!/bin/bash\nexec /usr/bin/sha256sum \"$@\"\n")
     _write_executable(bin_dir / "install", "#!/bin/bash\nexec /usr/bin/install \"$@\"\n")
+    real_python = shutil.which("python3") or "/usr/bin/python3"
+    _write_executable(
+        bin_dir / "python3",
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            STATE="{state}"
+            echo "python3 $*" >>"$STATE/python_argv.log"
+            echo "python3 $*" >>"$STATE/argv.log"
+            exec {real_python} "$@"
+            """
+        ),
+    )
 
     install_fail_lit = "true" if install_fail else "false"
+    probe_auth_lit = "true" if probe_auth_fail else "false"
     az_helper = bin_dir / "_az_stub.py"
     az_helper.write_text(
         textwrap.dedent(
@@ -183,6 +228,8 @@ def _stub_bin(
             STATE="{state}"
             echo "ssh $*" >>"$STATE/ssh_argv.log"
             echo "ssh $*" >>"$STATE/argv.log"
+            REMOTE="${{@: -1}}"
+            printf '%s\\n' "$REMOTE" >>"$STATE/ssh_remote.log"
             if [[ "$*" != *"StrictHostKeyChecking=yes"* ]]; then
               echo "STOP: StrictHostKeyChecking=yes required" >&2
               exit 1
@@ -196,6 +243,10 @@ def _stub_bin(
               exit 1
             fi
             if [[ "$*" == *"ConnectTimeout=3"* ]]; then
+              if [[ "{probe_auth_lit}" == "true" ]]; then
+                echo "Permission denied (publickey)." >&2
+                exit 255
+              fi
               echo "ssh: connect to host 203.0.113.50 port 22: Connection refused" >&2
               exit 255
             fi
@@ -224,7 +275,6 @@ def _identity(tmp_path: Path) -> Path:
 
 def _env(bin_dir: Path, tmp_path: Path, staging: Path, identity: Path) -> dict[str, str]:
     env = dict(os.environ)
-    # Put stub bin first but keep /usr/bin so real jq remains reachable if symlink removed.
     env["PATH"] = f"{bin_dir}:/usr/bin:/bin"
     env["RG"] = "rg-cosmabot-prod-eus2-01"
     env["VM_PUBLIC_IP"] = "203.0.113.50"
@@ -259,12 +309,10 @@ def test_fence_session_always_close_verify_and_never_leaks_canary(tmp_path, mode
         install_fail=(mode == "install_fail"),
     )
     identity = _identity(tmp_path)
-    staging = tmp_path / "staging"
-    staging.mkdir(mode=0o700)
-    (staging / "CLERK_SECRET_KEY").write_bytes(CANARY.encode())
+    staging = _mk_staging()
+    _fill_complete_staging(staging)
     script = tmp_path / "run-session.sh"
     if mode == "sigint":
-        # Real session wrapper: INT during install still closes via session traps.
         script.write_text(
             textwrap.dedent(
                 f"""\
@@ -307,23 +355,30 @@ def test_fence_session_always_close_verify_and_never_leaks_canary(tmp_path, mode
     assert all(r.get("name") != "TEMP-JOHN-SSH-SECRETS-INSTALL" for r in rules)
     close_count = int((tmp_path / "state" / "close_count").read_text() or "0")
     assert close_count >= 1
+    assert not staging.exists(), f"staging must be gone on mode={mode}"
     if mode == "success":
         assert result.returncode == 0, out
         assert "PASS: secrets SSH session complete" in result.stdout
         ssh_log = (tmp_path / "state" / "ssh_argv.log").read_text()
+        remote = (tmp_path / "state" / "ssh_remote.log").read_text()
         assert "StrictHostKeyChecking=yes" in ssh_log
         assert str(identity) in ssh_log
         assert ADMIN_USERNAME in ssh_log
-        assert "temp SSH rule closed" in out or "TEMP-JOHN-SSH-SECRETS-INSTALL gone" in out
-        assert "secrets_transport.py" in ssh_log
-        assert not staging.exists()
+        assert "secrets_transport.py" in remote
+        assert "install -d -o root -g root -m 0700" in remote
+        assert "sha256sum" in remote
+        assert "--install-from-stdin" in remote
+        py_log = (tmp_path / "state" / "python_argv.log").read_text()
+        assert "--check-ssh-closed" in py_log
+        assert "--check-ssh-probe" in py_log
+        # Real closed/probe gate: python classifiers ran; PASS is not a bare fence echo alone.
+        assert "SSH connection refused or connect timeout" in result.stdout
 
 
 def test_tool_missing_before_open_never_opens(tmp_path):
     bin_dir = _stub_bin(tmp_path, jq_missing=True)
     identity = _identity(tmp_path)
-    staging = tmp_path / "staging"
-    staging.mkdir(mode=0o700)
+    staging = _mk_staging()
     script = tmp_path / "no-jq-before.sh"
     script.write_text(
         textwrap.dedent(
@@ -354,9 +409,8 @@ def test_tool_missing_before_open_never_opens(tmp_path):
 def test_tool_missing_after_open_still_deletes_rule(tmp_path):
     bin_dir = _stub_bin(tmp_path, hide_jq_after_open=True)
     identity = _identity(tmp_path)
-    staging = tmp_path / "staging"
-    staging.mkdir(mode=0o700)
-    (staging / "CLERK_SECRET_KEY").write_bytes(CANARY.encode())
+    staging = _mk_staging()
+    _fill_complete_staging(staging)
     script = tmp_path / "jq-gone-after.sh"
     script.write_text(
         textwrap.dedent(
@@ -385,13 +439,11 @@ def test_tool_missing_after_open_still_deletes_rule(tmp_path):
     assert "needs jq after delete" in (result.stdout + result.stderr)
 
 
-def test_recovery_runs_for_real_and_staging_rules(tmp_path):
+def test_recovery_runs_for_real_and_removes_staging(tmp_path):
     bin_dir = _stub_bin(tmp_path)
     identity = _identity(tmp_path)
-    staging = tmp_path / "staging"
-    staging.mkdir(mode=0o700)
-    (staging / "CLERK_SECRET_KEY").write_bytes(CANARY.encode())
-    # Seed an open rule then recover.
+    staging = _mk_staging()
+    _fill_complete_staging(staging)
     script = tmp_path / "recovery.sh"
     script.write_text(
         textwrap.dedent(
@@ -421,21 +473,20 @@ def test_recovery_runs_for_real_and_staging_rules(tmp_path):
     assert all(r.get("name") != "TEMP-JOHN-SSH-SECRETS-INSTALL" for r in rules)
 
 
-@pytest.mark.parametrize("mode", ["unset", "empty", "partial"])
-def test_recovery_local_staging_unset_empty_partial_stops(tmp_path, mode):
+@pytest.mark.parametrize("mode", ["unset", "empty", "gone"])
+def test_recovery_missing_staging_is_note_still_verifies_nsg(tmp_path, mode):
+    """Missing staging is a NOTE; recovery still deletes then verifies NSG and may PASS."""
     bin_dir = _stub_bin(tmp_path)
     identity = _identity(tmp_path)
-    staging = tmp_path / "staging"
-    if mode == "partial":
-        staging.mkdir(mode=0o700)
-        # partial: path points at a file, not a directory
-        staging.rmdir()
-        staging.write_text("not-a-dir")
+    staging = _mk_staging()
+    _fill_complete_staging(staging)
+    if mode == "gone":
+        shutil.rmtree(staging)
     script = tmp_path / f"recovery-{mode}.sh"
     staging_export = {
         "unset": "unset LOCAL_STAGING",
         "empty": 'export LOCAL_STAGING=""',
-        "partial": f'export LOCAL_STAGING="{staging}"',
+        "gone": f'export LOCAL_STAGING="{staging}"',
     }[mode]
     script.write_text(
         textwrap.dedent(
@@ -457,19 +508,153 @@ def test_recovery_local_staging_unset_empty_partial_stops(tmp_path, mode):
         ["/bin/bash", str(script)], capture_output=True, text=True, check=False, env=env
     )
     out = result.stdout + result.stderr
-    assert result.returncode != 0
-    assert "STOP:" in out
-    assert "PASS: recovery" not in result.stdout
-    # Rule still deleted first even when staging STOP follows.
+    assert result.returncode == 0, out
+    assert "PASS: recovery deleted" in result.stdout
+    assert "NOTE:" in result.stdout
+    assert "STOP:" not in out or "STOP: unexpected" not in out
     rules = json.loads((tmp_path / "state" / "rules.json").read_text())
     assert all(r.get("name") != "TEMP-JOHN-SSH-SECRETS-INSTALL" for r in rules)
+    assert int((tmp_path / "state" / "close_count").read_text() or "0") >= 1
+
+
+def test_empty_staging_stops_before_ssh_open_never_pass(tmp_path):
+    bin_dir = _stub_bin(tmp_path)
+    identity = _identity(tmp_path)
+    staging = _mk_staging()
+    script = tmp_path / "empty-stage.sh"
+    script.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            set -u
+            {_source_all()}
+            cosmabot_ssh_secrets_session
+            """
+        )
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_env(bin_dir, tmp_path, staging, identity),
+    )
+    out = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "staging incomplete" in out or "STOP: staging" in out
+    assert "PASS: secrets SSH session complete" not in result.stdout
+    assert "PASS: staging complete" not in result.stdout
+    assert int((tmp_path / "state" / "open_count").read_text() or "0") == 0
+    assert int((tmp_path / "state" / "close_count").read_text() or "0") == 0
+    assert staging.exists()
+
+
+def test_partial_staging_stops_before_ssh_open_never_pass(tmp_path):
+    bin_dir = _stub_bin(tmp_path)
+    identity = _identity(tmp_path)
+    staging = _mk_staging()
+    (staging / "CLERK_SECRET_KEY").write_bytes(CANARY.encode())
+    script = tmp_path / "partial-stage.sh"
+    script.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            set -u
+            {_source_all()}
+            cosmabot_ssh_secrets_session
+            """
+        )
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_env(bin_dir, tmp_path, staging, identity),
+    )
+    out = result.stdout + result.stderr
+    assert CANARY not in out
+    assert result.returncode != 0
+    assert "staging incomplete" in out or "STOP: staging" in out
+    assert "PASS: secrets SSH session complete" not in result.stdout
+    assert int((tmp_path / "state" / "open_count").read_text() or "0") == 0
+    assert int((tmp_path / "state" / "close_count").read_text() or "0") == 0
+
+
+def test_close_probe_auth_failure_fails_real_check_not_pass_echo(tmp_path):
+    """Probe auth failure must FAIL via --check-ssh-probe, not a fence PASS echo."""
+    bin_dir = _stub_bin(tmp_path, probe_auth_fail=True)
+    identity = _identity(tmp_path)
+    staging = _mk_staging()
+    _fill_complete_staging(staging)
+    script = tmp_path / "auth-fail-close.sh"
+    script.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            set -u
+            {_source_all()}
+            cosmabot_ssh_nsg_open || exit 1
+            cosmabot_ssh_nsg_close_and_verify
+            """
+        )
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_env(bin_dir, tmp_path, staging, identity),
+    )
+    out = result.stdout + result.stderr
+    py_log = (tmp_path / "state" / "python_argv.log").read_text()
+    assert "--check-ssh-closed" in py_log
+    assert "--check-ssh-probe" in py_log
+    assert result.returncode != 0
+    assert "SSH still reachable" in out or "ssh_still_reachable" in out
+    assert "PASS: TEMP-JOHN-SSH-SECRETS-INSTALL gone" not in result.stdout
+    # Rule was still deleted first.
+    rules = json.loads((tmp_path / "state" / "rules.json").read_text())
+    assert all(r.get("name") != "TEMP-JOHN-SSH-SECRETS-INSTALL" for r in rules)
+
+
+def test_guarded_rm_refuses_non_mktemp_path(tmp_path):
+    bin_dir = _stub_bin(tmp_path)
+    identity = _identity(tmp_path)
+    bad = tmp_path / "not-mktemp-staging"
+    bad.mkdir(mode=0o700)
+    script = tmp_path / "bad-rm.sh"
+    script.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            set -u
+            {_source_all()}
+            export LOCAL_STAGING="{bad}"
+            cosmabot_guarded_rm_local_staging
+            """
+        )
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_env(bin_dir, tmp_path, bad, identity),
+    )
+    assert result.returncode != 0
+    assert "STOP: guarded-rm" in (result.stdout + result.stderr)
+    assert bad.exists()
 
 
 def test_sourcing_fences_does_not_open_or_close(tmp_path):
     bin_dir = _stub_bin(tmp_path)
     identity = _identity(tmp_path)
-    staging = tmp_path / "staging"
-    staging.mkdir(mode=0o700)
+    staging = _mk_staging()
     script = tmp_path / "source-only.sh"
     script.write_text(
         textwrap.dedent(
@@ -493,11 +678,13 @@ def test_sourcing_fences_does_not_open_or_close(tmp_path):
     assert int((tmp_path / "state" / "close_count").read_text() or "0") == 0
 
 
-def test_fence_release_root_uses_install_d_0700_not_mkdir_p():
+def test_fence_release_root_uses_install_d_0700_after_etc_cosmabot_precheck():
     install = (FENCES / "fence-ssh-secrets-install.sh").read_text()
     assert "install -d -o root -g root -m 0700" in install
-    assert "mkdir -p" not in install
+    assert "test -d /etc/cosmabot" in install
     assert "/etc/cosmabot missing" in install
+    assert "cosmabot_guarded_rm_local_staging" in install
+    assert "mkdir -p" not in install
     assert "ADMIN_USERNAME" in install
     assert 'ssh -i "$SSH_IDENTITY_PATH"' in install
     assert "RELEASE_ID shape" in install
@@ -511,3 +698,4 @@ def test_session_uses_command_v_and_portable_traps():
     assert "cosmabot_ssh_session_save_traps" in session
     assert "trap -p" in session
     assert "|| true" not in session
+    assert "--check-staging-complete" in session

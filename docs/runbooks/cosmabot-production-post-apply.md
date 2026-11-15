@@ -84,7 +84,7 @@ Hands-on only. Exact order:
 | Who | Work |
 | --- | --- |
 | Agents | Read-only verify RG/VM/IP/OpenAI names; draft DNS record text (do not publish) |
-| Agents | Prod host bootstrap tooling and unit **file** exist (T-PROD-2 / `#389`). Do not run staging-hardwired names against prod. Do not install the unit yet (after secrets + acceptance; see After 14:30). |
+| Agents | Prod host bootstrap tooling and unit **file** exist (T-PROD-2 / `#389`). Do not run staging-hardwired names against prod. Do not install the unit yet (after secrets + acceptance; see after-secrets-closed agents). |
 | Agents | Advance [`#383`](https://github.com/CosmaNeura/cosmaneura-os/pull/383) toward green; do not merge without John (`#377` / `#381` already Merged) |
 | Agents | Prepare Key Vault **names** checklist and mode-600 password-file instructions for Sitting 2 (John loads; agents never rotate or load vault secrets) |
 | Agents | No Run Command with secrets; no staging changes |
@@ -94,16 +94,17 @@ Hands-on only. Exact order:
 | # | John does | ~Min | Gate |
 | --- | --- | --- | ---: |
 | 1 | Key Vault secret pastes (**names only** — §4): temporary public-access window from John's own `/32` (vault is RBAC; `publicNetworkAccess` starts Disabled — every vault write sits inside this window). **John only, §4.1:** export `KEYFILE=$HOME/.cosmabot-sitting2/llm-key1` once → open vault `/32` → Step A → **pause** → rotate **key1** → Fence 2 → **pause** → Step B → generate mode-600 password file (CSPRNG; never printed) → load the other six vault secrets (`--file` / no-echo prompt; `--output none`) → **then** close vault + verify. Close-and-verify is mandatory even after a STOP. **If interrupted/abandoned:** close vault first, then abandon `$KEYFILE` cleanup (§4.3). Agents never rotate or load. | 30 | **"yes, KV secrets loaded and public access disabled"** |
-| 2 | **One order** (same as After 14:30 / §9 (b) / checklist): `#389` host bootstrap (`bootstrap_host.py --profile cosmabot-vm-prod-v1`, prod receipt; unit file not enabled yet) → **second vault window** (row 1 already closed the vault) re-open §4.1 → workstation `--stage-from-vault` → `TEMP-JOHN-SSH-SECRETS-INSTALL` (John `/32`) → ssh-stdin install (`#388`) → close-and-verify vault (§4.1) and NSG (**§4.5**). SSH host / user / `-i` identity from tofu `foundation.public_ip`, reviewed `admin_username`, and the private key that matches `admin_ssh_public_key` (placeholders only). Never via Azure Run Command for values. Close-and-verify before any tofu plan/apply. | 10 | **"yes, host secrets path closed; vault Disabled; no port-22 allow"** |
-| 3 | Type **yes** to format the new empty data disk (prod IDs only) | 5 | **"yes, format the new empty data disk"** |
-| 4 | Publish Cloudflare DNS (proxy **off**): `beta.cosmas.ai` A, `api.beta.cosmas.ai` A → public IP; `clerk.beta.cosmas.ai` CNAME from Clerk | 10 | — |
-| 5 | Decide §9 (b) path (recommended: AI-on first start after endpoint-allow PR) and type **yes** for agents to continue host prep / data services after this sitting | 5 | **"yes, continue host prep"** |
+| 2 | Type **yes** to format the new empty data disk (prod IDs only) | 5 | **"yes, format the new empty data disk"** |
+| 3 | Publish Cloudflare DNS (proxy **off**): `beta.cosmas.ai` A, `api.beta.cosmas.ai` A → public IP; `clerk.beta.cosmas.ai` CNAME from Clerk | 10 | — |
+| 4 | Decide §9 (b) path (recommended: AI-on first start after endpoint-allow PR) and type **yes** for agents to continue host prep / data services after this sitting | 5 | **"yes, continue host prep"** |
+| 5 | **John's hands-on — one order** (same as §9 (b) / host README / checklist; needs John's `/32`, vault window, and SSH key): `#389` host bootstrap (`bootstrap_host.py --profile cosmabot-vm-prod-v1`, prod receipt; unit file not enabled yet) → **second vault window** (row 1 already closed the vault) re-open §4.1 → workstation `--stage-from-vault` (all expected names present and non-empty, or STOP before SSH) → `TEMP-JOHN-SSH-SECRETS-INSTALL` (John `/32`) → ssh-stdin install (`#388`) → close-and-verify vault (§4.1) and NSG (**§4.5**). SSH host / user / `-i` identity from tofu `foundation.public_ip`, reviewed `admin_username`, and the private key that matches `admin_ssh_public_key` (placeholders only). Never via Azure Run Command for values. Close-and-verify before any tofu plan/apply. | 10 | **"yes, host secrets path closed; vault Disabled; no port-22 allow"** |
 | 6 | Optional: merge `#383` when green (recover path only; `#377` / `#381` already Merged) | 5 | Owner merge only |
 
-### After 14:30 ET — agents (same day if John said yes)
+### After continue-prep yes — John's hands-on (bootstrap + secrets)
 
-Not John's hands-on. Still synthetic; still no staging. **One order** (same as
-Sitting 2 row 2 / §9 (b) / checklist):
+Same day as Sitting 2 row 5. **John's hands-on** — needs John's `/32`, second
+vault window, and SSH identity. Still synthetic; still no staging names.
+**One order** (Sitting 2 row 5 / §9 (b) / host README / checklist):
 
 1. `#389` host bootstrap on the VM (§3) — run
    `infra/beta/vm/host/bootstrap_host.py --profile cosmabot-vm-prod-v1` with the
@@ -114,23 +115,32 @@ Sitting 2 row 2 / §9 (b) / checklist):
 2. Install mode-0400 secret files from the names John pasted (§4) with
    `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS / `#388`):
    **second vault window** + `TEMP-JOHN-SSH-SECRETS-INSTALL` — re-open with
-   §4.1 `cosmabot_kv_open_john_32` → workstation `--stage-from-vault` → §4.5
-   temporary SSH `/32` open → ssh-stdin install (no VM value staging;
-   `install -d -o root -g root -m 0700` release root) → close-and-verify vault
-   (§4.1) and NSG (§4.5) (John, 14 Nov 2026 9:45am ET). Run Command must not
-   carry secret values (host-key public fetch only).
-3. Deploy-time STOP checks: §4.1 (remaining host/post-start proofs) and §4.2
+   §4.1 `cosmabot_kv_open_john_32` → workstation `--stage-from-vault` →
+   `--check-staging-complete` (empty/partial → STOP; SSH not opened; no PASS) →
+   §4.5 temporary SSH `/32` open → ssh-stdin install (no VM value staging;
+   pre-check `/etc/cosmabot` exists, then `install -d -o root -g root -m 0700`
+   for release root) → close-and-verify vault (§4.1) and NSG (§4.5)
+   (John, 14 Nov 2026 9:45am ET). Run Command must not carry secret values
+   (host-key public fetch only).
+
+### After secrets closed — agents (not John's hands-on)
+
+Agents continue only after Sitting 2 row 5 gate
+(**"yes, host secrets path closed; vault Disabled; no port-22 allow"**).
+No John `/32`, vault window, or SSH key required for these steps:
+
+1. Deploy-time STOP checks: §4.1 (remaining host/post-start proofs) and §4.2
    (bundle API origins). On any mismatch: **STOP and roll back** — do not flip
    AI-on flags, do not start API/worker with model traffic.
-4. When checks pass and John chose AI-on (`#377` + `#381` already Merged): flip
+2. When checks pass and John chose AI-on (`#377` + `#381` already Merged): flip
    runnable profile flags per §9 (b), including
    `WORKSPACE_LLM_BACKEND=azure_gpt41`, `WORKSPACE_LLM_USDZ_ENABLED=true`,
    and `WORKSPACE_LLM_API_KEY` in `secret_names` (**prod** account only).
-5. Render + `start.sh data` → `prepare` → `run`.
-6. §4.1 post-start value-free HTTP status proof against the prod OpenAI
+3. Render + `start.sh data` → `prepare` → `run`.
+4. §4.1 post-start value-free HTTP status proof against the prod OpenAI
    endpoint (status code only). Then `/ready`, `/version.json`, smoke, eight
    backend switches `'false'` (§8). Admit smoke only after John's separate yes.
-7. After secrets are on the host and acceptance above passes: the
+5. After secrets are on the host and acceptance above passes: the
    `cosmabot-prod.service` **file** may be placed with a root-owned
    `/etc/cosmabot/active-release` (matches host/runtime READMEs). **Do NOT
    enable** `cosmabot-prod.service` until **T-PROD-5** (backup units) and
@@ -1157,17 +1167,21 @@ Full pasteable fences and ssh-stdin install live in **§4.5**
 (`infra/beta/vm/host/fences/`, `secrets_transport.py`). Do not invent a second
 transport here.
 
-**One order:** `#389` bootstrap → **second vault window** +
+**One order** (Sitting 2 row 5 / after format-disk yes + continue-prep yes /
+host README / checklist): `#389` bootstrap → **second vault window** +
 `TEMP-JOHN-SSH-SECRETS-INSTALL` → install → close-and-verify → **§4.5**.
 Sitting 2 row 1 already closed the vault and deleted local sitting2 files.
 For host install (`#388`):
 
-0. `#389` host bootstrap so `/etc/cosmabot` exists (release root
-   `install -d -o root -g root -m 0700` refuses to mkdir parents).
+0. `#389` host bootstrap so `/etc/cosmabot` exists. Remote path pre-checks
+   `/etc/cosmabot`, then `install -d -o root -g root -m 0700` for the release
+   root (does not invent `/etc/cosmabot`; bootstrap must have created it).
 1. Re-open the vault with the **same** §4.1 open fence
    (`cosmabot_kv_open_john_32`).
 2. Workstation `--stage-from-vault` into a new/empty local mode-700 dir (values
-   never printed).
+   never printed). `--check-staging-complete` / session gate: every expected
+   catalog host name must be present and non-empty — empty or partial staging
+   is STOP before SSH open (nothing opened; no PASS).
 3. §4.5: open `TEMP-JOHN-SSH-SECRETS-INSTALL` (John `/32`, priority 200) →
    ssh-stdin install to final mode-0400 destinations (no VM `/tmp` or `/root`
    value staging; no `scp` of values; `ADMIN_USERNAME` + `-i` identity
@@ -1175,9 +1189,10 @@ For host install (`#388`):
 4. Close the vault with the **same** §4.1 close-first fence
    (`cosmabot_kv_close_john_32`) and the read-only verify — Disabled first,
    remove every listed rule, verify last.
-5. If the terminal closed partway: §4.5 recovery deletes
-   `TEMP-JOHN-SSH-SECRETS-INSTALL` and re-verifies (LOCAL_STAGING unset/empty/
-   partial → STOP, never PASS); also close the vault.
+5. If the terminal closed partway: §4.5 recovery **always** deletes
+   `TEMP-JOHN-SSH-SECRETS-INSTALL`, verifies NSG closed, and prints the result.
+   Missing LOCAL_STAGING is a **NOTE**, not a STOP before verify; also close
+   the vault.
 
 **Close-and-verify (vault + NSG) is MANDATORY before any tofu plan or apply** —
 otherwise the temporary NSG rule shows as drift and/or the vault stays open.
@@ -1892,12 +1907,14 @@ still close-and-verify. Use `command -v`, not `type -t`.
 
 John: "Yes, open sign-in to my address for the install, then close it."
 
-**Prerequisite — one order:** `#389` bootstrap first (so `/etc/cosmabot` exists),
-then this §4.5 path. Sitting 2 already closed the vault — **second vault window**
+**Prerequisite — one order** (Sitting 2 row 5 / after format-disk yes +
+continue-prep yes): `#389` bootstrap first (so `/etc/cosmabot` exists), then
+this §4.5 path. Sitting 2 already closed the vault — **second vault window**
 required: re-open with §4.1 `cosmabot_kv_open_john_32`, run workstation
-`--stage-from-vault`, open `TEMP-JOHN-SSH-SECRETS-INSTALL`, install, then
-close-and-verify NSG here and vault with §4.1 `cosmabot_kv_close_john_32`.
-See §4.1 “Server access for secrets install”.
+`--stage-from-vault` (complete staging or STOP before open), open
+`TEMP-JOHN-SSH-SECRETS-INSTALL`, install, then close-and-verify NSG here and
+vault with §4.1 `cosmabot_kv_close_john_32`. See §4.1 “Server access for
+secrets install”. John's hands-on: `/32`, vault window, SSH key.
 
 No Bastion. No Secrets Officer `az login` on the VM. No permanent NSG/Terraform
 change. Fixed rule name `TEMP-JOHN-SSH-SECRETS-INSTALL`, priority `200`
@@ -1919,7 +1936,8 @@ ed25519 host key via `az vm run-command` (public key only) into a per-session
 and SIGINT. An out-of-band NSG rule shows as drift on the next Terraform plan —
 finish close-and-verify before any plan or apply. Close requires deny-all at
 priority `4000`, Python `--check-ssh-closed`, and an SSH probe that PASSes only
-on connection refused or timeout (auth failure = still reachable = FAIL).
+on connection refused or connect timeout (banner-exchange timeout and auth
+failure = still reachable = FAIL).
 
 Define-only fence files (no `#` comment lines; sourcing has zero side effects)
 live in `infra/beta/vm/host/fences/`:
@@ -2037,7 +2055,7 @@ API surface: Azure OpenAI **v1** path (`/openai/v1/...`), not `?api-version=`.
 
 ## 8. Verification and rollback
 
-### Verification (after agents finish post-14:30 work; John's admit yes)
+### Verification (after agents finish post-secrets-closed work; John's admit yes)
 
 1. `GET …/ready` (API + local) — DB up; no secrets in body
 2. `GET …/version.json` — reviewed commit
@@ -2115,8 +2133,8 @@ and [`#377`](https://github.com/CosmaNeura/cosmaneura-os/pull/377) are
    treat `#356` disabled profile as foundation-only.
 2. **Alternative:** separate runtime PR allowing AI-off first start (not `#356`).
 
-**Order for first `/ready` (path 1) — same clock as §1 (Sitting 2 before
-After-14:30 host work):**
+**Order for first `/ready` (path 1) — same clock as §1 (Sitting 2 format +
+continue-prep yes, then John's hands-on bootstrap/secrets, then agents):**
 
 1. `#381` (§9 (a) decided) **and** `#377` (VM-runtime delete host-key mapping
    + production-review name allowance) are already **Merged**.
@@ -2126,23 +2144,25 @@ After-14:30 host work):**
    (including `CLERK-ACCOUNT-DELETION-SECRET`) → **then** kv-close + verify;
    abandon `$KEYFILE` cleanup on interrupt (unset → STOP / re-export §4.1
    path). Host reach via `TEMP-JOHN-SSH-SECRETS-INSTALL` (#388 / §4.5).
-4. **One order** (Sitting 2 row 2 / After 14:30 / checklist): `#389` prod host
-   bootstrap with `--profile cosmabot-vm-prod-v1` and the prod creation receipt
+4. **One order — John's hands-on** (Sitting 2 row 5 / after format-disk yes +
+   continue-prep yes / checklist): `#389` prod host bootstrap with
+   `--profile cosmabot-vm-prod-v1` and the prod creation receipt
    (`infra/beta/vm/host/bootstrap_host.py`,
    `infra/beta/vm/host/creation-receipt.prod.example.json`) so `/etc/cosmabot`
    exists. The `cosmabot-prod.service` **file** exists; enable only after
-   secrets and acceptance (step 10). Matches §1 After 14:30 step 1.
-5. **Install** mode-0400 secret files with
+   secrets and acceptance (step 10). Matches §1 John's hands-on step 1.
+5. **Install — John's hands-on** mode-0400 secret files with
    `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS / `#388`):
    **second vault window** + `TEMP-JOHN-SSH-SECRETS-INSTALL` — re-open §4.1 →
-   `--stage-from-vault` → §4.5 SSH open → ssh-stdin install (sha256-pinned
-   module; no VM `/tmp`/`/root` value staging) → close-and-verify vault + NSG
-   (§4.5); service-UID ownership; mode 0400; Run Command refused for values.
-   Matches §1 After 14:30 step 2.
-6. **STOP checks** before AI-on: §4.1 (host files) and §4.2 (exact
-   `https://api.beta.cosmas.ai` + Clerk issuer/publishable key on Info.plist /
-   JSON; scan `$APP/public` only; refuse configured staging API origin forms;
-   compare to known-good baseline). On failure: roll back; do not flip AI-on.
+   `--stage-from-vault` (complete or STOP) → §4.5 SSH open → ssh-stdin install
+   (sha256-pinned module; no VM `/tmp`/`/root` value staging) →
+   close-and-verify vault + NSG (§4.5); service-UID ownership; mode 0400; Run
+   Command refused for values. Matches §1 John's hands-on step 2.
+6. **STOP checks** (agents, after secrets closed) before AI-on: §4.1 (host
+   files) and §4.2 (exact `https://api.beta.cosmas.ai` + Clerk
+   issuer/publishable key on Info.plist / JSON; scan `$APP/public` only; refuse
+   configured staging API origin forms; compare to known-good baseline). On
+   failure: roll back; do not flip AI-on.
 7. **Flag flip:** `WORKSPACE_LLM_BACKEND=azure_gpt41`;
    `WORKSPACE_LLM_USDZ_ENABLED=true` (required for `gpt-4.1-dzus` per `#356`
    README later LLM cutover item 3 / `config.py` reviewed-deployment set);
@@ -2157,8 +2177,8 @@ After-14:30 host work):**
    `/version.json` shows reviewed commit.
 10. After secrets + acceptance: place `cosmabot-prod.service` with
     `/etc/cosmabot/active-release`, but **do NOT enable** it until **T-PROD-5**
-    (backup units) and **T-PROD-6** (probe) are merged. Matches §1 After 14:30
-    step 7. Once enabling is allowed: `systemctl start cosmabot-prod.service`,
+    (backup units) and **T-PROD-6** (probe) are merged. Matches §1 agents step
+    5. Once enabling is allowed: `systemctl start cosmabot-prod.service`,
     then `systemctl restart cosmabot-prod.service`, then reboot, then confirm
     `systemctl is-active cosmabot-prod.service` and that `/run/cosmabot` exists.
     Note: `host-preflight.py`'s `mountpoint -q /var/lib/cosmabot` is not
@@ -2168,13 +2188,15 @@ After-14:30 host work):**
 
 ### Other gaps
 
-1. Host 0400 install: **one order** — `#389` bootstrap first, then
+1. Host 0400 install: **one order** (Sitting 2 row 5 / after format-disk yes +
+   continue-prep yes) — `#389` bootstrap first, then
    `infra/beta/vm/host/secrets_transport.py` (T-PROD-3-SECRETS / `#388`).
    Sitting 2 already closed the vault — open a **second vault window** (§4.1)
-   for `--stage-from-vault`, then `TEMP-JOHN-SSH-SECRETS-INSTALL` → ssh-stdin
-   install → close-and-verify vault + NSG (**§4.5**; mandatory before any
-   plan/apply). Do not `az login` as Secrets Officer on the VM. No Bastion.
-   Run Command must not carry values.
+   for `--stage-from-vault` (complete staging or STOP before SSH), then
+   `TEMP-JOHN-SSH-SECRETS-INSTALL` → ssh-stdin install → close-and-verify vault
+   + NSG (**§4.5**; mandatory before any plan/apply). John's hands-on: `/32`,
+   vault window, SSH key. Do not `az login` as Secrets Officer on the VM. No
+   Bastion. Run Command must not carry values.
 2. **T-PROD-4:** `infra/beta/vm/runtime/render.py` `SCRIPT_NAMES` still lists
    only `cosmabot-staging.service` (prod unit file exists but is not copied
    into rendered releases yet).
@@ -2199,9 +2221,9 @@ After-14:30 host work):**
 - [ ] Agents: runbook PR green; `#383` watched (`#377` / `#381` Merged)
 - [ ] Sitting 1: plan-hash yes → `#356` apply **or** `#383` `--recover` → IP recorded → Clerk public values sent
 - [ ] Between: agent prep only (no secrets, no staging); host bootstrap tooling ready (T-PROD-2 / `#389`); do not install prod unit yet
-- [ ] Sitting 2: export `KEYFILE=$HOME/.cosmabot-sitting2/llm-key1` once → kv-open `/32` → Fence 1 → pause → rotate **key1** → Fence 2 (`--file`, `--encoding utf-8`, `--output none`) → pause → Step B (tag proof; rm + `! -e` `$KEYFILE`) → mode-600 password file → load other six secrets → kv-close + verify → disk-format yes → DNS proxy off → continue-prep yes
+- [ ] Sitting 2: export `KEYFILE=$HOME/.cosmabot-sitting2/llm-key1` once → kv-open `/32` → Fence 1 → pause → rotate **key1** → Fence 2 (`--file`, `--encoding utf-8`, `--output none`) → pause → Step B (tag proof; rm + `! -e` `$KEYFILE`) → mode-600 password file → load other six secrets → kv-close + verify → disk-format yes → DNS proxy off → continue-prep yes → **John's hands-on one order** (`#389` bootstrap → second vault window → complete stage → `TEMP-JOHN-SSH-SECRETS-INSTALL` → ssh-stdin install → close-and-verify)
 - [ ] §4.3 if interrupted/abandoned: kv-close mandatory even after STOP; verify access+count only; abandon `$KEYFILE` cleanup (unset → STOP, re-export §4.1 path; never PASS)
-- [ ] After 14:30 (= Sitting 2 row 2 / §9 (b) steps 4–10) **one order**: `#389` bootstrap → **second vault window** + `TEMP-JOHN-SSH-SECRETS-INSTALL` → `secrets_transport.py` install → close-and-verify → **§4.5** → checks → flag flip → render/start → accept → place prod unit file; enable only after T-PROD-5 + T-PROD-6
+- [ ] After secrets closed (= Sitting 2 row 5 / §9 (b) agent steps) **one order already done by John**; agents: STOP checks → flag flip → render/start → accept → place prod unit file; enable only after T-PROD-5 + T-PROD-6
 - [ ] §4.1: kv-open/close; Fence 1 wrapper (no PASS after STOP); fail-closed rotate (`key1` only; `key2` later); `test -s`; anchored ACCOUNT_ID `^…$`; `--output none`; Step B tag-only; passwords before close; no key on screen/history; HTTP proof no `cat` of key file
 - [ ] §4.2: Info.plist + `$APP/public` only; pk_live decode; `$APP/public` Clerk key **presence-only**; web `-F` key; staging host class `[a-z0-9.-]+`; baseline **Pending**
 - [ ] `#377` / `#381` Merged; `#383` merged before any recover apply

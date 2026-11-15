@@ -115,7 +115,7 @@ cosmabot_ssh_nsg_close_and_verify() {
     return 1
   }
   rm -f "$PROBE_ERR"
-  echo "PASS: TEMP-JOHN-SSH-SECRETS-INSTALL gone; no port-22 Allow; deny-all priority 4000; SSH refused-or-timeout"
+  echo "PASS: TEMP-JOHN-SSH-SECRETS-INSTALL gone; no port-22 Allow; deny-all priority 4000; SSH connection refused or connect timeout"
   echo "NOTE: out-of-band NSG rules drift the next Terraform plan; close-and-verify is MANDATORY before any plan or apply"
   return 0
 }

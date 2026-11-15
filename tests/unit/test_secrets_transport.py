@@ -600,7 +600,7 @@ def test_cli_check_ssh_closed(tmp_path):
     assert "mandatory before Terraform" in out.getvalue()
 
 
-def test_fence_files_declare_fixed_rule_name():
+def test_fence_files_declare_fixed_rule_name_and_no_hash_comment_lines():
     fences = REPO / "infra/beta/vm/host/fences"
     for name in (
         "fence-ssh-nsg-open.sh",
@@ -611,9 +611,10 @@ def test_fence_files_declare_fixed_rule_name():
     ):
         text = (fences / name).read_text()
         assert transport.TEMP_SSH_NSG_RULE_NAME in text or name.endswith("session.sh")
-        assert "#" not in [
-            line for line in text.splitlines() if line.strip().startswith("#")
+        comment_lines = [
+            line for line in text.splitlines() if line.lstrip().startswith("#")
         ]
+        assert comment_lines == [], f"{name} has John-paste # comment lines: {comment_lines}"
 
 
 # --- private work dir for transport_from_vault ---
@@ -945,8 +946,18 @@ def test_ssh_probe_refused_or_timeout_pass_auth_fail():
     assert transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="Connection timed out"
     )
+    assert transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="ssh: connect to host x port 22: connect timed out"
+    )
     assert not transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="Permission denied (publickey)."
+    )
+    assert not transport.ssh_probe_indicates_closed(
+        exit_code=255,
+        stderr_text="Connection timed out during banner exchange",
+    )
+    assert not transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="kex_exchange_identification: banner exchange timed out"
     )
     with pytest.raises(transport.Refused, match="ssh_still_reachable_after_close"):
         transport.require_ssh_unreachable(
@@ -1018,6 +1029,116 @@ def test_install_from_stdin_success_canary_absent_from_status(tmp_path):
     lines = [transport.format_result_line(r) for r in results]
     _assert_canary_absent(stdout, stderr, *lines)
     assert (root / "api" / "CLERK_SECRET_KEY").read_bytes() == CANARY.encode()
+
+
+def test_install_from_stdin_workspace_llm_api_key_synthetic(tmp_path):
+    """Cheap Medium: stdin install of WORKSPACE_LLM_API_KEY with synthetic value."""
+    root = tmp_path / "runtime" / "rel-llm-stdin"
+    root.mkdir(parents=True)
+    chown_fn, lstat_fn, _ = _fake_fs()
+    synth = b"synthetic-workspace-llm-stdin-fixture-01"
+    results, stdout, stderr, exc = _capture(
+        transport.install_from_stdin,
+        host_name=transport.LLM_HOST_NAME,
+        value=synth,
+        protected_root=root,
+        release_id="rel-llm-stdin",
+        llm_source_account=PROD_ACCOUNT,
+        chown_fn=chown_fn,
+        lstat_fn=lstat_fn,
+    )
+    assert exc is None, stderr
+    assert results
+    lines = [transport.format_result_line(r) for r in results]
+    assert synth.decode() not in stdout and synth.decode() not in stderr
+    assert all(synth.decode() not in line for line in lines)
+    assert (root / "api" / transport.LLM_HOST_NAME).read_bytes() == synth
+
+
+def test_install_from_stdin_wires_ensure_protected_release_root(tmp_path):
+    """ensure_protected_release_root is on the install path when cosmabot_etc is set."""
+    etc = tmp_path / "etc-cosmabot"
+    etc.mkdir()
+    root = etc / "runtime" / "rel-ensure"
+    assert not root.exists()
+    chown_fn, lstat_fn, owners = _fake_fs()
+    results, stdout, stderr, exc = _capture(
+        transport.install_from_stdin,
+        host_name="CLERK_SECRET_KEY",
+        value=CANARY.encode(),
+        protected_root=root,
+        release_id="rel-ensure",
+        chown_fn=chown_fn,
+        lstat_fn=lstat_fn,
+        cosmabot_etc=etc,
+    )
+    assert exc is None, stderr
+    assert results
+    assert root.is_dir()
+    assert owners.get(str(root)) == 0 or owners.get(str(root / "api")) == transport.API_UID
+    _assert_canary_absent(stdout, stderr)
+    assert (root / "api" / "CLERK_SECRET_KEY").read_bytes() == CANARY.encode()
+
+
+def test_require_staging_complete_empty_and_partial(tmp_path):
+    empty = tmp_path / "stage-empty"
+    empty.mkdir(mode=0o700)
+    with pytest.raises(transport.Refused, match="staging_incomplete"):
+        transport.require_staging_complete(empty)
+    partial = tmp_path / "stage-partial"
+    partial.mkdir(mode=0o700)
+    (partial / "CLERK_SECRET_KEY").write_bytes(b"synthetic-clerk-partial-only")
+    with pytest.raises(transport.Refused, match="staging_incomplete"):
+        transport.require_staging_complete(partial)
+    complete = tmp_path / "stage-complete"
+    complete.mkdir(mode=0o700)
+    for item in transport.SECRET_CATALOG:
+        (complete / item.host_name).write_bytes(f"synthetic-{item.host_name}".encode())
+    transport.require_staging_complete(complete)
+
+
+def test_cli_check_staging_complete_failed_and_partial(tmp_path):
+    empty = tmp_path / "cli-empty"
+    empty.mkdir(mode=0o700)
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = transport.main(
+            [
+                "--profile",
+                transport.PROFILE,
+                "--resource-group",
+                transport.RESOURCE_GROUP,
+                "--vault-name",
+                "kv-cbot-prd-lab01",
+                "--check-staging-complete",
+                "--staging-dir",
+                str(empty),
+            ]
+        )
+    assert code == 1
+    assert "staging_incomplete" in err.getvalue()
+    assert "PASS:" not in out.getvalue()
+    partial = tmp_path / "cli-partial"
+    partial.mkdir(mode=0o700)
+    (partial / "CLERK_SECRET_KEY").write_bytes(b"synthetic-only-one")
+    out2, err2 = io.StringIO(), io.StringIO()
+    with redirect_stdout(out2), redirect_stderr(err2):
+        code2 = transport.main(
+            [
+                "--profile",
+                transport.PROFILE,
+                "--resource-group",
+                transport.RESOURCE_GROUP,
+                "--vault-name",
+                "kv-cbot-prd-lab01",
+                "--check-staging-complete",
+                "--staging-dir",
+                str(partial),
+            ]
+        )
+    assert code2 == 1
+    assert "staging_incomplete" in err2.getvalue()
+    assert "PASS:" not in out2.getvalue()
 
 
 def test_fence_files_are_define_only_on_source():
@@ -1177,7 +1298,7 @@ def test_stage_from_vault_requires_empty_0700_and_removes_only_created(tmp_path)
     assert list(staging2.iterdir()) == []
 
 
-def test_ssh_probe_only_refused_or_timeout_pass():
+def test_ssh_probe_only_refused_or_connect_timeout_pass():
     assert transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="Connection refused"
     )
@@ -1192,6 +1313,12 @@ def test_ssh_probe_only_refused_or_timeout_pass():
     )
     assert not transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="Permission denied (publickey)."
+    )
+    assert not transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Operation timed out"
+    )
+    assert not transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Connection timed out during banner exchange"
     )
 
 

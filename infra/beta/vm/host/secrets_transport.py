@@ -578,18 +578,21 @@ def require_ssh_install_ready(
 
 
 def ssh_probe_indicates_closed(*, exit_code: int, stderr_text: str) -> bool:
-    """True only for connection refused or timeout. Auth failure = still reachable.
+    """True only for connection refused or connect timeout. Auth failure = reachable.
 
-    Only two PASS strings: connection refused, or timeout. No other wording
-    (including no-route / unreachable) counts as closed.
+    PASS only on: "connection refused", or a connect-phase timeout
+    ("connection timed out" / "connect timed out"). Banner-exchange timeouts
+    and bare "timeout"/"timed out" do not count as closed.
     """
-    del exit_code  # exit code alone never proves closed without refuse/timeout text
+    del exit_code  # exit code alone never proves closed without refuse/connect-timeout text
     text = (stderr_text or "").lower()
     if "permission denied" in text or "authentication failed" in text:
         return False
+    if "banner" in text and ("timed out" in text or "timeout" in text):
+        return False
     if "connection refused" in text:
         return True
-    if "connection timed out" in text or "timed out" in text or "timeout" in text:
+    if "connection timed out" in text or "connect timed out" in text:
         return True
     return False
 
@@ -701,8 +704,11 @@ def ensure_protected_release_root(
 ) -> dict[str, object]:
     """Create release root root:root mode 0700. STOP if cosmabot_etc missing.
 
-    Matches render.py protected_root_permissions. Never mkdir -p parents: the
-    bootstrap (#389) must already have created cosmabot_etc (/etc/cosmabot).
+    Matches render.py protected_root_permissions. Bootstrap (#389) must already
+    have created cosmabot_etc (/etc/cosmabot) — this never creates that parent.
+    Intermediates under cosmabot_etc (e.g. runtime/<release_id>) are created one
+    level at a time with mode 0700 (same contract as remote `install -d -o root
+    -g root -m 0700` after the /etc/cosmabot pre-check).
     """
     require(
         cosmabot_etc.is_dir() and not cosmabot_etc.is_symlink(),
@@ -739,6 +745,28 @@ def ensure_protected_release_root(
         "owner_uid": 0,
         "status": "PASS",
     }
+
+
+def require_staging_complete(
+    staging_dir: Path,
+    mappings: list[SecretMapping] | None = None,
+) -> None:
+    """STOP if staging is empty or any expected host secret file is missing/empty.
+
+    Call after --stage-from-vault and before any SSH NSG open. Never prints values.
+    """
+    expected = mappings if mappings is not None else list(SECRET_CATALOG)
+    require(bool(expected), "staging_expected_names_required")
+    require(
+        staging_dir.is_dir() and not staging_dir.is_symlink(),
+        "staging_dir_required",
+    )
+    missing: list[str] = []
+    for item in expected:
+        path = staging_dir / item.host_name
+        if not path.is_file() or path.is_symlink() or path.stat().st_size <= 0:
+            missing.append(item.host_name)
+    require(not missing, f"staging_incomplete:{','.join(missing)}")
 
 
 def _unlink_created_paths(paths: list[Path]) -> None:
@@ -832,11 +860,23 @@ def install_secret_value(
     release_id: str,
     chown_fn: ChownFn = os.chown,
     lstat_fn: LstatFn = os.lstat,
+    cosmabot_etc: Path | None = None,
 ) -> list[dict[str, object]]:
     """Write one catalog secret to all role destinations (stdin/install path)."""
     require(RELEASE_ID_RE.fullmatch(release_id) is not None, "release_id_invalid")
     refuse_staging_names(release_id, str(protected_root), item.host_name, item.vault_name)
-    require(protected_root.is_dir() and not protected_root.is_symlink(), "protected_root_required")
+    if cosmabot_etc is not None:
+        ensure_protected_release_root(
+            protected_root,
+            cosmabot_etc=cosmabot_etc,
+            chown_fn=chown_fn,
+            lstat_fn=lstat_fn,
+        )
+    else:
+        require(
+            protected_root.is_dir() and not protected_root.is_symlink(),
+            "protected_root_required",
+        )
     results: list[dict[str, object]] = []
     for role in item.roles:
         uid = ROLE_UID[role]
@@ -870,6 +910,7 @@ def install_from_stdin(
     llm_source_account: str | None = None,
     chown_fn: ChownFn = os.chown,
     lstat_fn: LstatFn = os.lstat,
+    cosmabot_etc: Path | None = None,
 ) -> list[dict[str, object]]:
     """Root VM writer: read value from caller (stdin); never stage under /tmp or /root."""
     by_host = catalog_by_host()
@@ -890,6 +931,7 @@ def install_from_stdin(
         release_id=release_id,
         chown_fn=chown_fn,
         lstat_fn=lstat_fn,
+        cosmabot_etc=cosmabot_etc,
     )
 
 
@@ -1193,7 +1235,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--check-ssh-probe",
         action="store_true",
-        help="Classify an SSH probe: refuse/timeout PASS; auth failure FAIL.",
+        help=(
+            "Classify an SSH probe: connection refused or connect timeout PASS; "
+            "auth failure / banner timeout FAIL."
+        ),
+    )
+    parser.add_argument(
+        "--check-staging-complete",
+        action="store_true",
+        help=(
+            "Workstation gate before SSH open: every expected catalog host "
+            "secret file is present and non-empty under --staging-dir."
+        ),
     )
     parser.add_argument(
         "--ssh-probe-exit-code",
@@ -1262,7 +1315,7 @@ def main(argv: list[str] | None = None) -> int:
                 exit_code=args.ssh_probe_exit_code,
                 stderr_text=stderr_text,
             )
-            print("PASS: SSH probe indicates closed (refused or timeout)")
+            print("PASS: SSH probe indicates closed (connection refused or connect timeout)")
             return 0
         require(bool(args.profile), "profile_required")
         require(bool(args.resource_group), "resource_group_required")
@@ -1277,7 +1330,14 @@ def main(argv: list[str] | None = None) -> int:
             require(args.release_id, "release_id_required")
             require(args.host_name.strip(), "host_name_required")
             root = args.protected_root or Path("/etc/cosmabot/runtime") / args.release_id
-            require(root.is_dir() and not root.is_symlink(), "protected_root_required")
+            cosmabot_etc = Path("/etc/cosmabot")
+            etc_arg = (
+                cosmabot_etc
+                if cosmabot_etc.is_dir() and not cosmabot_etc.is_symlink()
+                else None
+            )
+            if etc_arg is None:
+                require(root.is_dir() and not root.is_symlink(), "protected_root_required")
             value = sys.stdin.buffer.read()
             results = install_from_stdin(
                 host_name=args.host_name.strip(),
@@ -1285,6 +1345,7 @@ def main(argv: list[str] | None = None) -> int:
                 protected_root=root,
                 release_id=args.release_id,
                 llm_source_account=args.llm_source_account or None,
+                cosmabot_etc=etc_arg,
             )
             for result in results:
                 print(format_result_line(result))
@@ -1294,6 +1355,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.plan_only:
             for line in plan_lines(mappings):
                 print(line)
+            return 0
+        if args.check_staging_complete:
+            require(args.staging_dir is not None, "staging_dir_required")
+            require_staging_complete(args.staging_dir, mappings)
+            print(
+                f"PASS: staging complete for {len(mappings)} secret names "
+                "(values not printed); SSH open may proceed"
+            )
             return 0
         if args.check_ssh_install_ready or args.check_ssh_closed:
             require(args.nsg_rules_json is not None, "nsg_rules_json_required")
@@ -1323,6 +1392,7 @@ def main(argv: list[str] | None = None) -> int:
                 staging_dir=args.staging_dir,
                 reader=AzCliVaultReader(),
             )
+            require_staging_complete(args.staging_dir, mappings)
             for result in results:
                 print(format_result_line(result))
             print(
