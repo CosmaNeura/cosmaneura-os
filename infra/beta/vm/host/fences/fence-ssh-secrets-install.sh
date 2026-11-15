@@ -31,6 +31,10 @@ cosmabot_ssh_secrets_install() {
     echo "STOP: ssh-install RELEASE_ID unset" >&2
     return 1
   }
+  printf '%s' "$RELEASE_ID" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$' || {
+    echo "STOP: ssh-install RELEASE_ID shape invalid" >&2
+    return 1
+  }
   test -n "${LOCAL_STAGING:-}" || {
     echo "STOP: ssh-install LOCAL_STAGING unset" >&2
     return 1
@@ -49,6 +53,18 @@ cosmabot_ssh_secrets_install() {
   }
   test -f "$SECRETS_TRANSPORT_PY" || {
     echo "STOP: ssh-install SECRETS_TRANSPORT_PY missing" >&2
+    return 1
+  }
+  test -n "${ADMIN_USERNAME:-}" || {
+    echo "STOP: ssh-install ADMIN_USERNAME unset - export reviewed admin_username" >&2
+    return 1
+  }
+  test -n "${SSH_IDENTITY_PATH:-}" || {
+    echo "STOP: ssh-install SSH_IDENTITY_PATH unset - export -i identity path" >&2
+    return 1
+  }
+  test -f "$SSH_IDENTITY_PATH" || {
+    echo "STOP: ssh-install SSH_IDENTITY_PATH missing" >&2
     return 1
   }
   test -n "${SECRETS_TRANSPORT_SHA256_PIN:-}" || {
@@ -83,7 +99,7 @@ cosmabot_ssh_secrets_install() {
   RULES_JSON=$(az network nsg rule list \
     --resource-group "$RG" \
     --nsg-name nsg-cosmabot-prod-eus2-01 \
-    --query "[].{name:name,port:destinationPortRange,access:access,priority:priority,protocol:protocol,source:sourceAddressPrefix}" \
+    --query "[].{name:name,port:destinationPortRange,destinationPortRanges:destinationPortRanges,access:access,priority:priority,protocol:protocol,source:sourceAddressPrefix}" \
     -o json) || {
     echo "STOP: ssh-install nsg list failed" >&2
     return 1
@@ -100,7 +116,7 @@ cosmabot_ssh_secrets_install() {
   printf '%s' "$RULES_JSON" | jq -e \
     --arg n TEMP-JOHN-SSH-SECRETS-INSTALL \
     --arg src "$JOHN_SSH_CIDR" \
-    'map(select(.name==$n and .port=="22" and .access=="Allow" and ((.protocol|ascii_downcase)=="tcp") and .source==$src and (.priority|tonumber)==200)) | length == 1' \
+    'map(select(.name==$n and ((.port=="22") or ((.destinationPortRanges // []) | index("22"))) and .access=="Allow" and ((.protocol|ascii_downcase)=="tcp") and .source==$src and (.priority|tonumber)==200)) | length == 1' \
     >/dev/null || {
     echo "STOP: ssh-install TEMP-JOHN-SSH-SECRETS-INSTALL not Allow Tcp/22 priority 200 from JOHN_SSH_CIDR" >&2
     rm -f "$RULES_FILE"
@@ -159,11 +175,11 @@ cosmabot_ssh_secrets_install() {
   PINNED_SHA=$(tr -d ' \n\r\t' <"$SECRETS_TRANSPORT_SHA256_PIN")
   REMOTE_MODULE="/opt/cosmabot/host/secrets_transport.py"
   REMOTE_ROOT="/etc/cosmabot/runtime/${RELEASE_ID}"
-  ssh -o BatchMode=yes -o ConnectTimeout=15 \
+  ssh -i "$SSH_IDENTITY_PATH" -o BatchMode=yes -o ConnectTimeout=15 \
     -o StrictHostKeyChecking=yes \
     -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}" \
-    "cosmasoperator@${VM_PUBLIC_IP}" \
-    "set -euo pipefail; sudo mkdir -p -m 755 /opt/cosmabot/host '${REMOTE_ROOT}'; sudo tee '${REMOTE_MODULE}' >/dev/null; sudo chmod 0644 '${REMOTE_MODULE}'; test \"\$(sudo sha256sum '${REMOTE_MODULE}' | awk '{print \$1}')\" = '${PINNED_SHA}'" \
+    "${ADMIN_USERNAME}@${VM_PUBLIC_IP}" \
+    "set -euo pipefail; test -d /etc/cosmabot || { echo STOP: /etc/cosmabot missing - run number-389 bootstrap first >&2; exit 1; }; sudo install -d -o root -g root -m 0755 /opt/cosmabot/host; sudo install -d -o root -g root -m 0700 '${REMOTE_ROOT}'; sudo tee '${REMOTE_MODULE}' >/dev/null; sudo chmod 0644 '${REMOTE_MODULE}'; test \"\$(sudo sha256sum '${REMOTE_MODULE}' | awk '{print \$1}')\" = '${PINNED_SHA}'" \
     <"$SECRETS_TRANSPORT_PY" || {
     echo "STOP: ssh-install ship module or remote sha256 failed" >&2
     rm -f "$SSH_KNOWN_HOSTS_FILE"
@@ -182,10 +198,10 @@ cosmabot_ssh_secrets_install() {
       LLM_ACCT=$(tr -d '\n' <"$SIDE")
       REMOTE_CMD="${REMOTE_CMD} --llm-source-account $(printf '%q' "$LLM_ACCT")"
     fi
-    ssh -o BatchMode=yes -o ConnectTimeout=15 \
+    ssh -i "$SSH_IDENTITY_PATH" -o BatchMode=yes -o ConnectTimeout=15 \
       -o StrictHostKeyChecking=yes \
       -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}" \
-      "cosmasoperator@${VM_PUBLIC_IP}" \
+      "${ADMIN_USERNAME}@${VM_PUBLIC_IP}" \
       "$REMOTE_CMD" \
       <"$staged" || {
       echo "STOP: ssh-install stdin write failed for name=${base} (value not printed)" >&2

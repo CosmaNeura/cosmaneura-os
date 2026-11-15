@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import os
 import re
 import shutil
@@ -341,6 +342,10 @@ def _secret_file_valid(info: object, uid: int) -> bool:
     )
 
 
+def _digest_bytes(raw: bytes) -> bytes:
+    return hashlib.sha256(raw).digest()
+
+
 def write_secret_atomic(
     path: Path,
     value: bytes,
@@ -351,25 +356,34 @@ def write_secret_atomic(
 ) -> dict[str, object]:
     """Atomically write value with umask 077 then mode 0400; empty/whitespace STOP.
 
-    Idempotent on rerun: if the destination already exists with mode 0400,
-    correct owner uid, and size>0, return PASS without rewriting. Invalid
-    existing files are replaced atomically (partial-write recovery).
+    Compare content digests (sha256 via hmac.compare_digest). If the destination
+    already exists with mode 0400, correct owner uid, size>0, and the same
+    digest, return PASS idempotent without rewriting. Different content is
+    rewritten atomically (rotated-secret / partial-write recovery). Result
+    never includes a secret value.
     """
     raw = normalize_secret_value(value)
+    want = _digest_bytes(raw)
     if path.exists() or path.is_symlink():
         require(not path.is_symlink(), f"secret_file_symlink_refused:{path.name}")
         existing = lstat_fn(path)
         if _secret_file_valid(existing, uid):
-            return {
-                "host_name": path.name,
-                "path": str(path),
-                "mode": "0400",
-                "owner_uid": uid,
-                "size_gt_0": True,
-                "status": "PASS",
-                "idempotent": True,
-            }
-        # Invalid leftover from a partial write — remove then rewrite.
+            try:
+                current = path.read_bytes()
+            except OSError as error:
+                raise Refused(f"secret_file_read_failed:{path.name}") from error
+            if hmac.compare_digest(_digest_bytes(current), want):
+                return {
+                    "host_name": path.name,
+                    "path": str(path),
+                    "mode": "0400",
+                    "owner_uid": uid,
+                    "size_gt_0": True,
+                    "status": "PASS",
+                    "idempotent": True,
+                    "write_result": "idempotent",
+                }
+        # Different digest, invalid mode/owner, or partial write — replace.
         path.unlink(missing_ok=True)
 
     old_mask = os.umask(0o077)
@@ -410,6 +424,7 @@ def write_secret_atomic(
         "owner_uid": uid,
         "size_gt_0": True,
         "status": "PASS",
+        "write_result": "rewritten",
     }
 
 
@@ -421,6 +436,43 @@ def refuse_run_command_transport() -> None:
 def _rule_port(rule: Mapping[str, object]) -> str:
     port = rule.get("port", rule.get("destinationPortRange", ""))
     return str(port)
+
+
+def _rule_port_tokens(rule: Mapping[str, object]) -> list[str]:
+    """Collect singular port and destinationPortRanges tokens (no secret values)."""
+    tokens: list[str] = []
+    singular = rule.get("port", rule.get("destinationPortRange", None))
+    if singular is not None and singular != "":
+        tokens.append(str(singular).strip())
+    ranges = rule.get("destinationPortRanges", rule.get("destination_port_ranges", None))
+    if isinstance(ranges, list):
+        tokens.extend(str(item).strip() for item in ranges if str(item).strip())
+    elif ranges is not None and str(ranges).strip():
+        tokens.append(str(ranges).strip())
+    return tokens
+
+
+def _port_token_covers_ssh(token: str) -> bool:
+    text = token.strip().lower()
+    if not text:
+        return False
+    if text in {"*", "22"}:
+        return True
+    if "-" in text and not text.startswith("-"):
+        left, _, right = text.partition("-")
+        if left.isdigit() and right.isdigit():
+            lo, hi = int(left), int(right)
+            if lo > hi:
+                lo, hi = hi, lo
+            return lo <= 22 <= hi
+    return False
+
+
+def rule_allows_ssh_port(rule: Mapping[str, object]) -> bool:
+    """True when an Allow rule covers TCP/22 via *, 22, a range, or destinationPortRanges."""
+    if str(rule.get("access", "")) != "Allow":
+        return False
+    return any(_port_token_covers_ssh(token) for token in _rule_port_tokens(rule))
 
 
 def _rule_protocol(rule: Mapping[str, object]) -> str:
@@ -458,7 +510,10 @@ def require_temp_ssh_rule_open(
     require(len(matches) == 1, "temp_ssh_nsg_rule_missing")
     rule = matches[0]
     require(str(rule.get("access", "")) == "Allow", "temp_ssh_nsg_rule_not_allow")
-    require(_rule_port(rule) == "22", "temp_ssh_nsg_rule_port_not_22")
+    require(
+        any(token.strip() == "22" for token in _rule_port_tokens(rule)),
+        "temp_ssh_nsg_rule_port_not_22",
+    )
     try:
         priority = int(rule.get("priority", -1))
     except (TypeError, ValueError) as error:
@@ -468,6 +523,12 @@ def require_temp_ssh_rule_open(
         and priority < DENY_ALL_INGRESS_PRIORITY,
         "temp_ssh_nsg_rule_priority_invalid",
     )
+    source = _rule_source(rule)
+    if source:
+        require(
+            IPV4_CIDR_32_RE.fullmatch(source) is not None,
+            "temp_ssh_nsg_rule_source_wider_than_32",
+        )
     if expected_source_cidr is not None:
         require(
             IPV4_CIDR_32_RE.fullmatch(expected_source_cidr) is not None,
@@ -475,7 +536,7 @@ def require_temp_ssh_rule_open(
         )
         require(_rule_protocol(rule) == "tcp", "temp_ssh_nsg_rule_protocol_not_tcp")
         require(
-            _rule_source(rule) == expected_source_cidr,
+            source == expected_source_cidr,
             "temp_ssh_nsg_rule_source_not_john_32",
         )
 
@@ -488,10 +549,7 @@ def require_temp_ssh_rule_closed(rules: list[Mapping[str, object]]) -> None:
         "temp_ssh_nsg_rule_still_present",
     )
     require(
-        all(
-            not (_rule_port(rule) == "22" and str(rule.get("access", "")) == "Allow")
-            for rule in rules
-        ),
+        all(not rule_allows_ssh_port(rule) for rule in rules),
         "port_22_allow_still_present",
     )
     deny = [
@@ -520,27 +578,19 @@ def require_ssh_install_ready(
 
 
 def ssh_probe_indicates_closed(*, exit_code: int, stderr_text: str) -> bool:
-    """True only for connection refused or timeout. Auth failure = still reachable."""
+    """True only for connection refused or timeout. Auth failure = still reachable.
+
+    Only two PASS strings: connection refused, or timeout. No other wording
+    (including no-route / unreachable) counts as closed.
+    """
+    del exit_code  # exit code alone never proves closed without refuse/timeout text
     text = (stderr_text or "").lower()
     if "permission denied" in text or "authentication failed" in text:
         return False
     if "connection refused" in text:
         return True
-    if "timed out" in text or "timeout" in text or "connection timed out" in text:
+    if "connection timed out" in text or "timed out" in text or "timeout" in text:
         return True
-    # OpenSSH BatchMode often exits 255 on refuse/timeout without stable wording.
-    if exit_code in (255, 124) and "permission denied" not in text:
-        if any(
-            needle in text
-            for needle in (
-                "connection refused",
-                "no route to host",
-                "network is unreachable",
-                "timed out",
-                "timeout",
-            )
-        ):
-            return True
     return False
 
 
@@ -628,23 +678,77 @@ def private_work_dir(parent: Path | None = None) -> Iterator[Path]:
 
 
 def ensure_staging_dir_mode_700(staging_dir: Path) -> None:
-    staging_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    """Require a new or empty mode-0700 staging directory (do not mkdir parents)."""
+    require(not staging_dir.is_symlink(), "staging_dir_invalid")
+    if not staging_dir.exists():
+        parent = staging_dir.parent
+        require(parent.is_dir() and not parent.is_symlink(), "staging_dir_parent_required")
+        staging_dir.mkdir(mode=0o700, parents=False, exist_ok=False)
     require(staging_dir.is_dir() and not staging_dir.is_symlink(), "staging_dir_invalid")
     staging_dir.chmod(0o700)
     info = staging_dir.lstat()
     require(stat.S_IMODE(info.st_mode) == 0o700, "staging_dir_mode_700_required")
+    leftover = [child.name for child in staging_dir.iterdir()]
+    require(not leftover, "staging_dir_must_be_empty")
 
 
-def _wipe_staging_contents(staging_dir: Path) -> None:
-    """Remove staged files inside staging_dir; keep the directory itself if possible."""
-    if not staging_dir.exists():
-        return
-    for child in sorted(staging_dir.iterdir(), reverse=True):
+def ensure_protected_release_root(
+    protected_root: Path,
+    *,
+    cosmabot_etc: Path,
+    chown_fn: ChownFn = os.chown,
+    lstat_fn: LstatFn = os.lstat,
+) -> dict[str, object]:
+    """Create release root root:root mode 0700. STOP if cosmabot_etc missing.
+
+    Matches render.py protected_root_permissions. Never mkdir -p parents: the
+    bootstrap (#389) must already have created cosmabot_etc (/etc/cosmabot).
+    """
+    require(
+        cosmabot_etc.is_dir() and not cosmabot_etc.is_symlink(),
+        "cosmabot_etc_required_run_bootstrap_first",
+    )
+    require(
+        cosmabot_etc in protected_root.parents or protected_root == cosmabot_etc,
+        "protected_root_must_be_under_cosmabot_etc",
+    )
+    cursor = cosmabot_etc
+    parts = protected_root.relative_to(cosmabot_etc).parts
+    for part in parts:
+        cursor = cursor / part
+        if cursor.exists() or cursor.is_symlink():
+            require(cursor.is_dir() and not cursor.is_symlink(), "protected_root_invalid")
+            continue
+        cursor.mkdir(mode=0o700, parents=False, exist_ok=False)
         try:
-            if child.is_symlink() or child.is_file():
-                child.unlink(missing_ok=True)
-            elif child.is_dir():
-                cleanup_private_dir(child)
+            chown_fn(cursor, 0, 0)
+        except PermissionError as error:
+            raise Refused("protected_root_chown_requires_root") from error
+        os.chmod(cursor, 0o700)
+    info = lstat_fn(protected_root)
+    require(
+        stat.S_ISDIR(info.st_mode)
+        and not stat.S_ISLNK(info.st_mode)
+        and int(info.st_uid) == 0
+        and stat.S_IMODE(info.st_mode) == 0o700,
+        "protected_root_permissions",
+    )
+    return {
+        "path": str(protected_root),
+        "mode": "0700",
+        "owner_uid": 0,
+        "status": "PASS",
+    }
+
+
+def _unlink_created_paths(paths: list[Path]) -> None:
+    """Remove only paths this run created (files first, then empty dirs)."""
+    for path in sorted(paths, key=lambda item: len(item.parts), reverse=True):
+        try:
+            if path.is_symlink() or path.is_file():
+                path.unlink(missing_ok=True)
+            elif path.is_dir():
+                path.rmdir()
         except OSError:
             pass
 
@@ -658,15 +762,15 @@ def stage_from_vault(
 ) -> list[dict[str, object]]:
     """Workstation stage-only: fetch into mode-700 dir under John's /32 window.
 
-    Records source-account for LLM. Never prints values. Never installs on the
-    VM. On any STOP (including LLM-tag refusal after earlier values), wipe
-    staged contents so no partial values remain. After the vault window:
-    restore per runbook §4.3.
+    Requires a new or empty 0700 staging dir. Records source-account for LLM.
+    Never prints values. Never installs on the VM. On any STOP, remove only
+    files this run created. After the vault window: restore per runbook §4.3.
     """
     require(KEY_VAULT_NAME_RE.fullmatch(vault_name) is not None, "vault_name_must_be_kv-cbot-prd-*")
     refuse_staging_names(vault_name, str(staging_dir))
     ensure_staging_dir_mode_700(staging_dir)
     results: list[dict[str, object]] = []
+    created: list[Path] = []
     old_mask = os.umask(0o077)
     try:
         try:
@@ -674,7 +778,9 @@ def stage_from_vault(
                 if is_llm_mapping(item):
                     tags = reader.read_tags(vault_name, item.vault_name)
                     account = validate_llm_source_account(tags)
+                    sidecar = staging_dir / f"{item.host_name}{SOURCE_ACCOUNT_SIDECAR_SUFFIX}"
                     write_source_account_sidecar(staging_dir, item, account)
+                    created.append(sidecar)
                 value = normalize_secret_value(reader.read_value(vault_name, item.vault_name))
                 target = staging_dir / item.host_name
                 require(
@@ -686,6 +792,7 @@ def stage_from_vault(
                     os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                     0o600,
                 )
+                created.append(target)
                 with os.fdopen(fd, "wb") as stream:
                     stream.write(value)
                     stream.flush()
@@ -710,7 +817,7 @@ def stage_from_vault(
                     }
                 )
         except Exception:
-            _wipe_staging_contents(staging_dir)
+            _unlink_created_paths(created)
             raise
     finally:
         os.umask(old_mask)
@@ -956,7 +1063,11 @@ class AzCliVaultReader:
 
 
 def format_result_line(result: Mapping[str, object]) -> str:
-    """Public status line: names / mode / owner / size flag only."""
+    """Public status line: names / mode / owner / size / write_result only."""
+    write_result = result.get("write_result")
+    if write_result is None and result.get("idempotent") is True:
+        write_result = "idempotent"
+    suffix = f" write_result={write_result}" if write_result else ""
     return (
         f"PASS: vault_name={result.get('vault_name', '')} "
         f"host_name={result.get('host_name', '')} "
@@ -964,6 +1075,7 @@ def format_result_line(result: Mapping[str, object]) -> str:
         f"mode={result.get('mode', '')} "
         f"owner_uid={result.get('owner_uid', '')} "
         f"size_gt_0={result.get('size_gt_0', False)}"
+        f"{suffix}"
     )
 
 

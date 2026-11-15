@@ -3,10 +3,6 @@ cosmabot_ssh_nsg_recovery_if_stranded() {
     echo "STOP: ssh-nsg-recovery needs az" >&2
     return 1
   }
-  command -v jq >/dev/null || {
-    echo "STOP: ssh-nsg-recovery needs jq" >&2
-    return 1
-  }
   test -n "${RG:-}" || {
     echo "STOP: ssh-nsg-recovery RG unset - export rg-cosmabot-prod-eus2-01" >&2
     return 1
@@ -15,25 +11,45 @@ cosmabot_ssh_nsg_recovery_if_stranded() {
     echo "STOP: ssh-nsg-recovery RG must be rg-cosmabot-prod-eus2-01" >&2
     return 1
   }
-  echo "PASS: recovering TEMP-JOHN-SSH-SECRETS-INSTALL by fixed name (terminal closed partway)"
+  _delete_rc=0
   az network nsg rule delete \
     --resource-group "$RG" \
     --nsg-name nsg-cosmabot-prod-eus2-01 \
     --name TEMP-JOHN-SSH-SECRETS-INSTALL \
-    --output none 2>/dev/null || true
-  if test -n "${LOCAL_STAGING:-}" && test -e "${LOCAL_STAGING}"; then
-    rm -rf "${LOCAL_STAGING:?}"
-    echo "PASS: recovery removed local staging path (values not printed)"
-  fi
+    --output none || _delete_rc=$?
+  command -v jq >/dev/null || {
+    echo "STOP: ssh-nsg-recovery needs jq after delete (rule delete attempted rc=${_delete_rc})" >&2
+    return 1
+  }
+  jq -n 'true' >/dev/null 2>&1 || {
+    echo "STOP: ssh-nsg-recovery needs jq after delete (rule delete attempted rc=${_delete_rc})" >&2
+    return 1
+  }
+  test -n "${LOCAL_STAGING:-}" || {
+    echo "STOP: ssh-nsg-recovery LOCAL_STAGING unset - export the mode-700 staging path (same rule as KEYFILE)" >&2
+    return 1
+  }
+  test -d "$LOCAL_STAGING" || {
+    echo "STOP: ssh-nsg-recovery LOCAL_STAGING missing or not a directory (empty/partial)" >&2
+    return 1
+  }
+  rm -rf "${LOCAL_STAGING:?}" || {
+    echo "STOP: ssh-nsg-recovery LOCAL_STAGING remove failed" >&2
+    return 1
+  }
+  test ! -e "$LOCAL_STAGING" || {
+    echo "STOP: ssh-nsg-recovery LOCAL_STAGING still present" >&2
+    return 1
+  }
   RULES_JSON=$(az network nsg rule list \
     --resource-group "$RG" \
     --nsg-name nsg-cosmabot-prod-eus2-01 \
-    --query "[].{name:name,port:destinationPortRange,access:access,priority:priority}" \
+    --query "[].{name:name,port:destinationPortRange,destinationPortRanges:destinationPortRanges,access:access,priority:priority}" \
     -o json) || {
     echo "STOP: ssh-nsg-recovery rule list failed" >&2
     return 1
   }
-  printf '%s\n' "$RULES_JSON" | jq -r '.[] | "name=\(.name) port=\(.port) access=\(.access) priority=\(.priority)"' || {
+  printf '%s\n' "$RULES_JSON" | jq -r '.[] | "name=\(.name) port=\(.port // .destinationPortRanges) access=\(.access) priority=\(.priority)"' || {
     echo "STOP: ssh-nsg-recovery rule print failed" >&2
     return 1
   }
@@ -45,7 +61,7 @@ cosmabot_ssh_nsg_recovery_if_stranded() {
     echo "STOP: recovery deny-all-other-ingress missing or not Deny priority 4000" >&2
     return 1
   }
-  echo "PASS: recovery deleted TEMP-JOHN-SSH-SECRETS-INSTALL; deny-all intact"
+  echo "PASS: recovery deleted TEMP-JOHN-SSH-SECRETS-INSTALL; local staging removed; deny-all intact"
   echo "NOTE: out-of-band NSG rules drift the next Terraform plan; close-and-verify is MANDATORY before any plan or apply"
   return 0
 }

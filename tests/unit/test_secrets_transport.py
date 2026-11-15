@@ -1036,3 +1036,240 @@ def test_fence_files_are_define_only_on_source():
         assert "scp " not in text
         assert "/tmp/cosmabot-secret-staging" not in text
         assert "/root/cosmabot-secret-staging" not in text
+        assert "|| true" not in text
+
+
+def test_require_temp_ssh_rule_closed_treats_star_ranges_and_port_ranges_as_open():
+    star = _baseline_nsg_rules(with_temp=False) + [
+        {"name": "wide", "port": "*", "access": "Allow", "priority": 250}
+    ]
+    with pytest.raises(transport.Refused, match="port_22_allow_still_present"):
+        transport.require_temp_ssh_rule_closed(star)
+    ranged = _baseline_nsg_rules(with_temp=False) + [
+        {"name": "range", "port": "20-25", "access": "Allow", "priority": 250}
+    ]
+    with pytest.raises(transport.Refused, match="port_22_allow_still_present"):
+        transport.require_temp_ssh_rule_closed(ranged)
+    plural = _baseline_nsg_rules(with_temp=False) + [
+        {
+            "name": "plural",
+            "destinationPortRanges": ["443", "22"],
+            "access": "Allow",
+            "priority": 250,
+        }
+    ]
+    with pytest.raises(transport.Refused, match="port_22_allow_still_present"):
+        transport.require_temp_ssh_rule_closed(plural)
+
+
+def test_require_temp_ssh_rule_open_negatives_deny_port_priority_cidr_deny_all():
+    deny = _baseline_nsg_rules(with_temp=True)
+    for rule in deny:
+        if rule["name"] == transport.TEMP_SSH_NSG_RULE_NAME:
+            rule["access"] = "Deny"
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_not_allow"):
+        transport.require_temp_ssh_rule_open(deny, expected_source_cidr=JOHN_CIDR)
+    wrong_port = _baseline_nsg_rules(with_temp=True)
+    for rule in wrong_port:
+        if rule["name"] == transport.TEMP_SSH_NSG_RULE_NAME:
+            rule["port"] = "2222"
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_port_not_22"):
+        transport.require_temp_ssh_rule_open(wrong_port, expected_source_cidr=JOHN_CIDR)
+    wrong_pri = _baseline_nsg_rules(with_temp=True)
+    for rule in wrong_pri:
+        if rule["name"] == transport.TEMP_SSH_NSG_RULE_NAME:
+            rule["priority"] = 500
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_priority_invalid"):
+        transport.require_temp_ssh_rule_open(wrong_pri, expected_source_cidr=JOHN_CIDR)
+    wide = _baseline_nsg_rules(with_temp=True, source="203.0.113.0/24")
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_source_wider_than_32"):
+        transport.require_temp_ssh_rule_open(wide, expected_source_cidr=JOHN_CIDR)
+    # Allow temp present with deny-all intact is the happy path; flipping deny-all
+    # access to Allow while keeping temp still fails closed-check, and open still
+    # requires exact /32 Allow — prove open refuses source "*".
+    allow_star = _baseline_nsg_rules(with_temp=True, source="*")
+    with pytest.raises(transport.Refused, match="temp_ssh_nsg_rule_source_wider_than_32"):
+        transport.require_temp_ssh_rule_open(allow_star, expected_source_cidr=JOHN_CIDR)
+
+
+def test_write_secret_atomic_rewrites_when_rotated(tmp_path):
+    root = tmp_path / "runtime" / "rel-rot"
+    root.mkdir(parents=True)
+    chown_fn, lstat_fn, _ = _fake_fs()
+    dest_dir = root / "api"
+    dest_dir.mkdir()
+    path = dest_dir / "CLERK_SECRET_KEY"
+    first = transport.write_secret_atomic(
+        path, b"synthetic-secret-v1", 10001, chown_fn=chown_fn, lstat_fn=lstat_fn
+    )
+    assert first.get("write_result") == "rewritten"
+    second = transport.write_secret_atomic(
+        path, b"synthetic-secret-v1", 10001, chown_fn=chown_fn, lstat_fn=lstat_fn
+    )
+    assert second.get("write_result") == "idempotent"
+    assert second.get("idempotent") is True
+    rotated = transport.write_secret_atomic(
+        path, b"synthetic-secret-v2-rotated", 10001, chown_fn=chown_fn, lstat_fn=lstat_fn
+    )
+    assert rotated.get("write_result") == "rewritten"
+    assert path.read_bytes() == b"synthetic-secret-v2-rotated"
+    line = transport.format_result_line({**rotated, "vault_name": "CLERK-SECRET-KEY", "role": "api"})
+    assert "write_result=rewritten" in line
+    assert "synthetic-secret" not in line
+
+
+def test_ensure_protected_release_root_mode_owner_and_bootstrap_fence(tmp_path):
+    etc = tmp_path / "etc-cosmabot"
+    etc.mkdir(mode=0o700)
+    release = etc / "runtime" / "rel-0700"
+    chown_fn, lstat_fn, owners = _fake_fs()
+    owners[str(etc)] = 0
+    result = transport.ensure_protected_release_root(
+        release, cosmabot_etc=etc, chown_fn=chown_fn, lstat_fn=lstat_fn
+    )
+    assert result["mode"] == "0700"
+    assert result["owner_uid"] == 0
+    info = lstat_fn(release)
+    assert stat.S_IMODE(info.st_mode) == 0o700
+    assert info.st_uid == 0
+    missing = tmp_path / "missing-etc"
+    with pytest.raises(transport.Refused, match="cosmabot_etc_required_run_bootstrap_first"):
+        transport.ensure_protected_release_root(
+            missing / "runtime" / "rel-x",
+            cosmabot_etc=missing,
+            chown_fn=chown_fn,
+            lstat_fn=lstat_fn,
+        )
+
+
+def test_stage_from_vault_requires_empty_0700_and_removes_only_created(tmp_path):
+    staging = tmp_path / "stage-empty"
+    staging.mkdir(mode=0o700)
+    foreign = staging / "preexisting.txt"
+    foreign.write_text("keep-me")
+    reader = transport.FakeVaultReader(values={"CLERK-SECRET-KEY": CANARY.encode()})
+    with pytest.raises(transport.Refused, match="staging_dir_must_be_empty"):
+        transport.stage_from_vault(
+            transport.resolve_mappings(["CLERK-SECRET-KEY"]),
+            vault_name="kv-cbot-prd-lab01",
+            staging_dir=staging,
+            reader=reader,
+        )
+    assert foreign.read_text() == "keep-me"
+    foreign.unlink()
+    # LLM stop after creating clerk file removes only created paths.
+    staging2 = tmp_path / "stage-wipe2"
+    staging2.mkdir(mode=0o700)
+    reader2 = transport.FakeVaultReader(
+        values={
+            "CLERK-SECRET-KEY": CANARY.encode(),
+            "WORKSPACE-LLM-API-KEY": b"synthetic-llm-later",
+        },
+        tags={"WORKSPACE-LLM-API-KEY": {transport.SOURCE_ACCOUNT_TAG: COSMASCODE_ACCOUNT}},
+    )
+    with pytest.raises(transport.Refused):
+        transport.stage_from_vault(
+            transport.resolve_mappings(["CLERK-SECRET-KEY", "WORKSPACE-LLM-API-KEY"]),
+            vault_name="kv-cbot-prd-lab01",
+            staging_dir=staging2,
+            reader=reader2,
+        )
+    assert list(staging2.iterdir()) == []
+
+
+def test_ssh_probe_only_refused_or_timeout_pass():
+    assert transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Connection refused"
+    )
+    assert transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Connection timed out"
+    )
+    assert not transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="No route to host"
+    )
+    assert not transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Network is unreachable"
+    )
+    assert not transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Permission denied (publickey)."
+    )
+
+
+def test_cli_main_install_from_stdin_and_stage_from_vault_canary(tmp_path, monkeypatch):
+    staging = tmp_path / "cli-stage"
+    root = tmp_path / "runtime" / "rel-cli"
+    root.mkdir(parents=True)
+    reader = transport.FakeVaultReader(values={"CLERK-SECRET-KEY": CANARY.encode()})
+    monkeypatch.setattr(transport, "AzCliVaultReader", lambda: reader)
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        code = transport.main(
+            [
+                "--profile",
+                transport.PROFILE,
+                "--resource-group",
+                transport.RESOURCE_GROUP,
+                "--vault-name",
+                "kv-cbot-prd-lab01",
+                "--stage-from-vault",
+                "--staging-dir",
+                str(staging),
+                "--secret-name",
+                "CLERK-SECRET-KEY",
+            ]
+        )
+    assert code == 0, err.getvalue()
+    _assert_canary_absent(out.getvalue(), err.getvalue())
+    assert (staging / "CLERK_SECRET_KEY").read_bytes() == CANARY.encode()
+
+    seen: dict[str, object] = {}
+
+    def fake_install_from_stdin(**kwargs):
+        value = kwargs["value"]
+        seen["host_name"] = kwargs["host_name"]
+        seen["release_id"] = kwargs["release_id"]
+        assert value == CANARY.encode()
+        return [
+            {
+                "vault_name": "CLERK-SECRET-KEY",
+                "host_name": "CLERK_SECRET_KEY",
+                "role": "api",
+                "mode": "0400",
+                "owner_uid": 10001,
+                "size_gt_0": True,
+                "status": "PASS",
+                "write_result": "rewritten",
+                "release_id": kwargs["release_id"],
+            }
+        ]
+
+    monkeypatch.setattr(transport, "install_from_stdin", fake_install_from_stdin)
+
+    class _Stdin:
+        buffer = io.BytesIO(CANARY.encode())
+
+    monkeypatch.setattr(sys, "stdin", _Stdin())
+    out2, err2 = io.StringIO(), io.StringIO()
+    with redirect_stdout(out2), redirect_stderr(err2):
+        code2 = transport.main(
+            [
+                "--profile",
+                transport.PROFILE,
+                "--resource-group",
+                transport.RESOURCE_GROUP,
+                "--vault-name",
+                "kv-cbot-prd-lab01",
+                "--release-id",
+                "rel-cli",
+                "--protected-root",
+                str(root),
+                "--install-from-stdin",
+                "--host-name",
+                "CLERK_SECRET_KEY",
+            ]
+        )
+    assert code2 == 0, err2.getvalue()
+    assert seen["host_name"] == "CLERK_SECRET_KEY"
+    _assert_canary_absent(out2.getvalue(), err2.getvalue())
+    assert "write_result=rewritten" in out2.getvalue()
+

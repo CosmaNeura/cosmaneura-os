@@ -3,18 +3,6 @@ cosmabot_ssh_nsg_close_and_verify() {
     echo "STOP: ssh-nsg-close needs az" >&2
     return 1
   }
-  command -v jq >/dev/null || {
-    echo "STOP: ssh-nsg-close needs jq" >&2
-    return 1
-  }
-  command -v python3 >/dev/null || {
-    echo "STOP: ssh-nsg-close needs python3" >&2
-    return 1
-  }
-  command -v ssh >/dev/null || {
-    echo "STOP: ssh-nsg-close needs ssh" >&2
-    return 1
-  }
   test -n "${RG:-}" || {
     echo "STOP: ssh-nsg-close RG unset - export rg-cosmabot-prod-eus2-01" >&2
     return 1
@@ -23,28 +11,45 @@ cosmabot_ssh_nsg_close_and_verify() {
     echo "STOP: ssh-nsg-close RG must be rg-cosmabot-prod-eus2-01" >&2
     return 1
   }
-  test -n "${SECRETS_TRANSPORT_PY:-}" || {
-    echo "STOP: ssh-nsg-close SECRETS_TRANSPORT_PY unset" >&2
-    return 1
-  }
-  test -f "$SECRETS_TRANSPORT_PY" || {
-    echo "STOP: ssh-nsg-close SECRETS_TRANSPORT_PY missing" >&2
-    return 1
-  }
+  _delete_rc=0
   az network nsg rule delete \
     --resource-group "$RG" \
     --nsg-name nsg-cosmabot-prod-eus2-01 \
     --name TEMP-JOHN-SSH-SECRETS-INSTALL \
-    --output none 2>/dev/null || true
+    --output none || _delete_rc=$?
+  command -v jq >/dev/null || {
+    echo "STOP: ssh-nsg-close needs jq after delete (rule delete attempted rc=${_delete_rc})" >&2
+    return 1
+  }
+  jq -n 'true' >/dev/null 2>&1 || {
+    echo "STOP: ssh-nsg-close needs jq after delete (rule delete attempted rc=${_delete_rc})" >&2
+    return 1
+  }
+  command -v python3 >/dev/null || {
+    echo "STOP: ssh-nsg-close needs python3 after delete (rule delete attempted rc=${_delete_rc})" >&2
+    return 1
+  }
+  command -v ssh >/dev/null || {
+    echo "STOP: ssh-nsg-close needs ssh after delete (rule delete attempted rc=${_delete_rc})" >&2
+    return 1
+  }
+  test -n "${SECRETS_TRANSPORT_PY:-}" || {
+    echo "STOP: ssh-nsg-close SECRETS_TRANSPORT_PY unset after delete" >&2
+    return 1
+  }
+  test -f "$SECRETS_TRANSPORT_PY" || {
+    echo "STOP: ssh-nsg-close SECRETS_TRANSPORT_PY missing after delete" >&2
+    return 1
+  }
   RULES_JSON=$(az network nsg rule list \
     --resource-group "$RG" \
     --nsg-name nsg-cosmabot-prod-eus2-01 \
-    --query "[].{name:name,port:destinationPortRange,access:access,priority:priority,protocol:protocol,source:sourceAddressPrefix}" \
+    --query "[].{name:name,port:destinationPortRange,destinationPortRanges:destinationPortRanges,access:access,priority:priority,protocol:protocol,source:sourceAddressPrefix}" \
     -o json) || {
     echo "STOP: ssh-nsg-close rule list failed" >&2
     return 1
   }
-  printf '%s\n' "$RULES_JSON" | jq -r '.[] | "name=\(.name) port=\(.port) access=\(.access) priority=\(.priority)"' || {
+  printf '%s\n' "$RULES_JSON" | jq -r '.[] | "name=\(.name) port=\(.port // .destinationPortRanges) access=\(.access) priority=\(.priority)"' || {
     echo "STOP: ssh-nsg-close rule print failed" >&2
     return 1
   }
@@ -54,10 +59,6 @@ cosmabot_ssh_nsg_close_and_verify() {
   }
   test "$(printf '%s' "$RULES_JSON" | jq -r '[.[] | select(.name=="deny-all-other-ingress" and .access=="Deny" and (.priority|tonumber)==4000)] | length')" = "1" || {
     echo "STOP: deny-all-other-ingress missing or not Deny priority 4000" >&2
-    return 1
-  }
-  test "$(printf '%s' "$RULES_JSON" | jq -r '[.[] | select((.port=="22" or .port==22) and .access=="Allow")] | length')" = "0" || {
-    echo "STOP: port-22 Allow rule still present" >&2
     return 1
   }
   RULES_FILE=$(mktemp "${TMPDIR:-/tmp}/nsg-rules-close.XXXXXX") || {
@@ -85,15 +86,23 @@ cosmabot_ssh_nsg_close_and_verify() {
     echo "STOP: ssh-nsg-close VM_PUBLIC_IP unset" >&2
     return 1
   }
+  test -n "${ADMIN_USERNAME:-}" || {
+    echo "STOP: ssh-nsg-close ADMIN_USERNAME unset" >&2
+    return 1
+  }
+  test -n "${SSH_IDENTITY_PATH:-}" || {
+    echo "STOP: ssh-nsg-close SSH_IDENTITY_PATH unset" >&2
+    return 1
+  }
   PROBE_ERR=$(mktemp "${TMPDIR:-/tmp}/ssh-probe-err.XXXXXX") || {
     echo "STOP: ssh-nsg-close probe mktemp failed" >&2
     return 1
   }
   PROBE_RC=0
-  ssh -o BatchMode=yes -o ConnectTimeout=3 \
+  ssh -i "$SSH_IDENTITY_PATH" -o BatchMode=yes -o ConnectTimeout=3 \
     -o StrictHostKeyChecking=yes \
     -o UserKnownHostsFile="${SSH_KNOWN_HOSTS_FILE:-/dev/null}" \
-    "cosmasoperator@${VM_PUBLIC_IP}" true >"$PROBE_ERR" 2>&1 || PROBE_RC=$?
+    "${ADMIN_USERNAME}@${VM_PUBLIC_IP}" true >"$PROBE_ERR" 2>&1 || PROBE_RC=$?
   python3 "$SECRETS_TRANSPORT_PY" \
     --profile cosmabot-vm-prod-v1 \
     --resource-group rg-cosmabot-prod-eus2-01 \
