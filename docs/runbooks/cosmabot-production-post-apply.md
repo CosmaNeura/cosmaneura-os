@@ -693,9 +693,77 @@ happens **before** public network access is disabled again).
 values). Writes three distinct URL-safe password files under the mode-`700`
 dir `$HOME/.cosmabot-sitting2/` (never the default tmp dir; file mode `600`)
 named for vault secrets `DATABASE-PASSWORD`, `POSTGRES-PASSWORD`, and
-`REDIS-PASSWORD`. Trap on `EXIT`/`INT`/`TERM` removes those files on interrupt:
+`REDIS-PASSWORD`. Trap on `EXIT`/`INT`/`TERM`/`HUP` removes those files on
+interrupt. Trap save is shell-portable (bash: `trap -p`; zsh: `trap` listing —
+never `trap -p` in zsh, which sets a trap to the command `-p`). Restore only
+reinstalls what was saved, or clears the signal when save showed none; it never
+clears a trap it did not capture. In zsh, `EXIT` traps set inside a function are
+function-local, so restore runs via `eval` in that same function. If zsh
+`TRAPxxx` function traps are already set, STOP and run this fence in a **fresh
+terminal**:
 
 ```bash
+cosmabot_sitting2_writer_save_traps() {
+  if test -n "${ZSH_VERSION:-}"; then
+    if typeset -f TRAPINT >/dev/null 2>&1 \
+      || typeset -f TRAPTERM >/dev/null 2>&1 \
+      || typeset -f TRAPHUP >/dev/null 2>&1 \
+      || typeset -f TRAPEXIT >/dev/null 2>&1; then
+      echo "STOP: zsh TRAPxxx function traps present - run this fence in a fresh terminal" >&2
+      return 1
+    fi
+    _writer_trap_tmp="${TMPDIR:-/tmp}/.cosmabot-writer-traps.$$"
+    trap >"$_writer_trap_tmp" || {
+      rm -f "$_writer_trap_tmp"
+      echo "STOP: zsh trap save failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    _writer_prev_exit=
+    _writer_prev_int=
+    _writer_prev_term=
+    _writer_prev_hup=
+    while IFS= read -r _trap_line || test -n "${_trap_line:-}"; do
+      case "$_trap_line" in
+        *" EXIT") _writer_prev_exit=$_trap_line ;;
+        *" INT"|*" SIGINT") _writer_prev_int=$_trap_line ;;
+        *" TERM"|*" SIGTERM") _writer_prev_term=$_trap_line ;;
+        *" HUP"|*" SIGHUP") _writer_prev_hup=$_trap_line ;;
+      esac
+    done <"$_writer_trap_tmp"
+    rm -f "$_writer_trap_tmp"
+  else
+    _writer_prev_exit=$(trap -p EXIT)
+    _writer_prev_int=$(trap -p INT)
+    _writer_prev_term=$(trap -p TERM)
+    _writer_prev_hup=$(trap -p HUP)
+  fi
+  return 0
+}
+cosmabot_sitting2_writer_restore_traps() {
+  # Print restore commands; caller must eval in the same function that set traps
+  # (zsh EXIT traps are function-local — a nested call cannot clear them).
+  if test -n "${_writer_prev_exit:-}"; then
+    printf '%s\n' 'eval "${_writer_prev_exit}"'
+  else
+    printf '%s\n' 'trap - EXIT'
+  fi
+  if test -n "${_writer_prev_int:-}"; then
+    printf '%s\n' 'eval "${_writer_prev_int}"'
+  else
+    printf '%s\n' 'trap - INT'
+  fi
+  if test -n "${_writer_prev_term:-}"; then
+    printf '%s\n' 'eval "${_writer_prev_term}"'
+  else
+    printf '%s\n' 'trap - TERM'
+  fi
+  if test -n "${_writer_prev_hup:-}"; then
+    printf '%s\n' 'eval "${_writer_prev_hup}"'
+  else
+    printf '%s\n' 'trap - HUP'
+  fi
+  printf '%s\n' 'unset _writer_prev_exit _writer_prev_int _writer_prev_term _writer_prev_hup'
+}
 cosmabot_sitting2_write_password_file() {
   command -v openssl >/dev/null || {
     echo "STOP: password file needs openssl" >&2
@@ -706,10 +774,7 @@ cosmabot_sitting2_write_password_file() {
   DBF="$SITDIR/DATABASE-PASSWORD.value"
   PGF="$SITDIR/POSTGRES-PASSWORD.value"
   RDF="$SITDIR/REDIS-PASSWORD.value"
-  _prev_exit=$(trap -p EXIT)
-  _prev_int=$(trap -p INT)
-  _prev_term=$(trap -p TERM)
-  _prev_hup=$(trap -p HUP)
+  cosmabot_sitting2_writer_save_traps || return 1
   trap 'rm -f "$DBF" "$PGF" "$RDF"' EXIT INT TERM HUP
   (
     umask 077
@@ -723,36 +788,24 @@ cosmabot_sitting2_write_password_file() {
   ) || {
     echo "STOP: password file write failed" >&2
     rm -f "$DBF" "$PGF" "$RDF"
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_writer_restore_traps)"
     return 1
   }
   for _pf in "$DBF" "$PGF" "$RDF"; do
     _mode=$(stat -c '%a' "$_pf" 2>/dev/null || stat -f '%Lp' "$_pf") || {
       echo "STOP: password file stat failed" >&2
       rm -f "$DBF" "$PGF" "$RDF"
-      eval "${_prev_exit:-trap - EXIT}"
-      eval "${_prev_int:-trap - INT}"
-      eval "${_prev_term:-trap - TERM}"
-      eval "${_prev_hup:-trap - HUP}"
+      eval "$(cosmabot_sitting2_writer_restore_traps)"
       return 1
     }
     test "$_mode" = "600" || {
       echo "STOP: password file not mode 600" >&2
       rm -f "$DBF" "$PGF" "$RDF"
-      eval "${_prev_exit:-trap - EXIT}"
-      eval "${_prev_int:-trap - INT}"
-      eval "${_prev_term:-trap - TERM}"
-      eval "${_prev_hup:-trap - HUP}"
+      eval "$(cosmabot_sitting2_writer_restore_traps)"
       return 1
     }
   done
-  eval "${_prev_exit:-trap - EXIT}"
-  eval "${_prev_int:-trap - INT}"
-  eval "${_prev_term:-trap - TERM}"
-  eval "${_prev_hup:-trap - HUP}"
+  eval "$(cosmabot_sitting2_writer_restore_traps)"
   echo "PASS: mode-600 password files written (values not printed)"
   return 0
 }
@@ -772,10 +825,17 @@ under `$HOME/.cosmabot-sitting2/` (**never** default tmp), loads it, then
 The prompt helper and this load fence use **separate** saved-trap variables
 (`_prompt_prev_*` vs `_load_prev_*`) and each restores/clears every signal it
 set (including `HUP`), so no `rm` trap is left in John's interactive shell and
-nothing lingers into kv-close or a second vault window.
+nothing lingers into kv-close or a second vault window. Trap save is
+shell-portable (bash: `trap -p`; zsh: `trap` listing — never `trap -p` in zsh).
+Restore only reinstalls what was saved, or clears the signal when save showed
+none; it never clears a trap it did not capture. Restore is `eval "$(…_restore_traps)"`
+in the same function that set the traps (zsh `EXIT` is function-local). If zsh `TRAPxxx` function
+traps are already set, STOP and run this fence in a **fresh terminal**.
 On **any** STOP — including when `PROD_KV_NAME` is unset — this fence sets the
 three password-file paths first, then calls `cosmabot_sitting2_rm_password_files`
 (`rm` + `test ! -e` each) before returning (do not leave that to abandon).
+After any load STOP the password files are **gone**, so a retry must re-run the
+password-file fence first.
 `printf '%s' "$_val" >file` is the allowed write path (builtin; not argv):
 
 ```bash
@@ -803,6 +863,67 @@ cosmabot_kv_set_from_file() {
   echo "PASS: loaded $_name (value not printed)"
   return 0
 }
+cosmabot_sitting2_prompt_save_traps() {
+  if test -n "${ZSH_VERSION:-}"; then
+    if typeset -f TRAPINT >/dev/null 2>&1 \
+      || typeset -f TRAPTERM >/dev/null 2>&1 \
+      || typeset -f TRAPHUP >/dev/null 2>&1 \
+      || typeset -f TRAPEXIT >/dev/null 2>&1; then
+      echo "STOP: zsh TRAPxxx function traps present - run this fence in a fresh terminal" >&2
+      return 1
+    fi
+    _prompt_trap_tmp="${TMPDIR:-/tmp}/.cosmabot-prompt-traps.$$"
+    trap >"$_prompt_trap_tmp" || {
+      rm -f "$_prompt_trap_tmp"
+      echo "STOP: zsh trap save failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    _prompt_prev_exit=
+    _prompt_prev_int=
+    _prompt_prev_term=
+    _prompt_prev_hup=
+    while IFS= read -r _trap_line || test -n "${_trap_line:-}"; do
+      case "$_trap_line" in
+        *" EXIT") _prompt_prev_exit=$_trap_line ;;
+        *" INT"|*" SIGINT") _prompt_prev_int=$_trap_line ;;
+        *" TERM"|*" SIGTERM") _prompt_prev_term=$_trap_line ;;
+        *" HUP"|*" SIGHUP") _prompt_prev_hup=$_trap_line ;;
+      esac
+    done <"$_prompt_trap_tmp"
+    rm -f "$_prompt_trap_tmp"
+  else
+    _prompt_prev_exit=$(trap -p EXIT)
+    _prompt_prev_int=$(trap -p INT)
+    _prompt_prev_term=$(trap -p TERM)
+    _prompt_prev_hup=$(trap -p HUP)
+  fi
+  return 0
+}
+cosmabot_sitting2_prompt_restore_traps() {
+  # Print restore commands; caller must eval in the same function that set traps
+  # (zsh EXIT traps are function-local — a nested call cannot clear them).
+  if test -n "${_prompt_prev_exit:-}"; then
+    printf '%s\n' 'eval "${_prompt_prev_exit}"'
+  else
+    printf '%s\n' 'trap - EXIT'
+  fi
+  if test -n "${_prompt_prev_int:-}"; then
+    printf '%s\n' 'eval "${_prompt_prev_int}"'
+  else
+    printf '%s\n' 'trap - INT'
+  fi
+  if test -n "${_prompt_prev_term:-}"; then
+    printf '%s\n' 'eval "${_prompt_prev_term}"'
+  else
+    printf '%s\n' 'trap - TERM'
+  fi
+  if test -n "${_prompt_prev_hup:-}"; then
+    printf '%s\n' 'eval "${_prompt_prev_hup}"'
+  else
+    printf '%s\n' 'trap - HUP'
+  fi
+  printf '%s\n' 'unset _prompt_prev_exit _prompt_prev_int _prompt_prev_term _prompt_prev_hup'
+}
 cosmabot_kv_set_from_prompt_file() {
   _name=$1
   set +x
@@ -815,17 +936,11 @@ cosmabot_kv_set_from_prompt_file() {
     return 1
   }
   _tmp="$SITDIR/prompt-${_name}.tmp"
-  _prompt_prev_exit=$(trap -p EXIT)
-  _prompt_prev_int=$(trap -p INT)
-  _prompt_prev_term=$(trap -p TERM)
-  _prompt_prev_hup=$(trap -p HUP)
+  cosmabot_sitting2_prompt_save_traps || return 1
   trap 'rm -f "$_tmp"' EXIT INT TERM HUP
   rm -f "$_tmp" || {
     echo "STOP: kv-set prompt pre-rm failed for $_name" >&2
-    eval "${_prompt_prev_exit:-trap - EXIT}"
-    eval "${_prompt_prev_int:-trap - INT}"
-    eval "${_prompt_prev_term:-trap - TERM}"
-    eval "${_prompt_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_prompt_restore_traps)"
     return 1
   }
   (
@@ -835,20 +950,14 @@ cosmabot_kv_set_from_prompt_file() {
   ) || {
     rm -f "$_tmp"
     echo "STOP: kv-set prompt chmod failed for $_name" >&2
-    eval "${_prompt_prev_exit:-trap - EXIT}"
-    eval "${_prompt_prev_int:-trap - INT}"
-    eval "${_prompt_prev_term:-trap - TERM}"
-    eval "${_prompt_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_prompt_restore_traps)"
     return 1
   }
   printf 'Paste value for %s (no echo), then Enter: ' "$_name" >&2
   read -rs _val || {
     rm -f "$_tmp"
     echo "STOP: kv-set prompt read failed for $_name" >&2
-    eval "${_prompt_prev_exit:-trap - EXIT}"
-    eval "${_prompt_prev_int:-trap - INT}"
-    eval "${_prompt_prev_term:-trap - TERM}"
-    eval "${_prompt_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_prompt_restore_traps)"
     return 1
   }
   printf '\n' >&2
@@ -856,41 +965,26 @@ cosmabot_kv_set_from_prompt_file() {
     unset _val
     rm -f "$_tmp"
     echo "STOP: kv-set prompt write failed for $_name" >&2
-    eval "${_prompt_prev_exit:-trap - EXIT}"
-    eval "${_prompt_prev_int:-trap - INT}"
-    eval "${_prompt_prev_term:-trap - TERM}"
-    eval "${_prompt_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_prompt_restore_traps)"
     return 1
   }
   unset _val
   cosmabot_kv_set_from_file "$_name" "$_tmp" || {
     rm -f "$_tmp"
-    eval "${_prompt_prev_exit:-trap - EXIT}"
-    eval "${_prompt_prev_int:-trap - INT}"
-    eval "${_prompt_prev_term:-trap - TERM}"
-    eval "${_prompt_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_prompt_restore_traps)"
     return 1
   }
   rm -f "$_tmp" || {
     echo "STOP: kv-set prompt temp rm failed for $_name" >&2
-    eval "${_prompt_prev_exit:-trap - EXIT}"
-    eval "${_prompt_prev_int:-trap - INT}"
-    eval "${_prompt_prev_term:-trap - TERM}"
-    eval "${_prompt_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_prompt_restore_traps)"
     return 1
   }
   test ! -e "$_tmp" || {
     echo "STOP: kv-set prompt temp still exists for $_name" >&2
-    eval "${_prompt_prev_exit:-trap - EXIT}"
-    eval "${_prompt_prev_int:-trap - INT}"
-    eval "${_prompt_prev_term:-trap - TERM}"
-    eval "${_prompt_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_prompt_restore_traps)"
     return 1
   }
-  eval "${_prompt_prev_exit:-trap - EXIT}"
-  eval "${_prompt_prev_int:-trap - INT}"
-  eval "${_prompt_prev_term:-trap - TERM}"
-  eval "${_prompt_prev_hup:-trap - HUP}"
+  eval "$(cosmabot_sitting2_prompt_restore_traps)"
   return 0
 }
 cosmabot_sitting2_rm_password_files() {
@@ -912,6 +1006,67 @@ cosmabot_sitting2_rm_password_files() {
   }
   return 0
 }
+cosmabot_sitting2_load_save_traps() {
+  if test -n "${ZSH_VERSION:-}"; then
+    if typeset -f TRAPINT >/dev/null 2>&1 \
+      || typeset -f TRAPTERM >/dev/null 2>&1 \
+      || typeset -f TRAPHUP >/dev/null 2>&1 \
+      || typeset -f TRAPEXIT >/dev/null 2>&1; then
+      echo "STOP: zsh TRAPxxx function traps present - run this fence in a fresh terminal" >&2
+      return 1
+    fi
+    _load_trap_tmp="${TMPDIR:-/tmp}/.cosmabot-load-traps.$$"
+    trap >"$_load_trap_tmp" || {
+      rm -f "$_load_trap_tmp"
+      echo "STOP: zsh trap save failed - run this fence in a fresh terminal" >&2
+      return 1
+    }
+    _load_prev_exit=
+    _load_prev_int=
+    _load_prev_term=
+    _load_prev_hup=
+    while IFS= read -r _trap_line || test -n "${_trap_line:-}"; do
+      case "$_trap_line" in
+        *" EXIT") _load_prev_exit=$_trap_line ;;
+        *" INT"|*" SIGINT") _load_prev_int=$_trap_line ;;
+        *" TERM"|*" SIGTERM") _load_prev_term=$_trap_line ;;
+        *" HUP"|*" SIGHUP") _load_prev_hup=$_trap_line ;;
+      esac
+    done <"$_load_trap_tmp"
+    rm -f "$_load_trap_tmp"
+  else
+    _load_prev_exit=$(trap -p EXIT)
+    _load_prev_int=$(trap -p INT)
+    _load_prev_term=$(trap -p TERM)
+    _load_prev_hup=$(trap -p HUP)
+  fi
+  return 0
+}
+cosmabot_sitting2_load_restore_traps() {
+  # Print restore commands; caller must eval in the same function that set traps
+  # (zsh EXIT traps are function-local — a nested call cannot clear them).
+  if test -n "${_load_prev_exit:-}"; then
+    printf '%s\n' 'eval "${_load_prev_exit}"'
+  else
+    printf '%s\n' 'trap - EXIT'
+  fi
+  if test -n "${_load_prev_int:-}"; then
+    printf '%s\n' 'eval "${_load_prev_int}"'
+  else
+    printf '%s\n' 'trap - INT'
+  fi
+  if test -n "${_load_prev_term:-}"; then
+    printf '%s\n' 'eval "${_load_prev_term}"'
+  else
+    printf '%s\n' 'trap - TERM'
+  fi
+  if test -n "${_load_prev_hup:-}"; then
+    printf '%s\n' 'eval "${_load_prev_hup}"'
+  else
+    printf '%s\n' 'trap - HUP'
+  fi
+  printf '%s\n' 'unset _load_prev_exit _load_prev_int _load_prev_term _load_prev_hup'
+}
 cosmabot_sitting2_load_other_secrets() {
   set +x
   SITDIR="$HOME/.cosmabot-sitting2"
@@ -923,103 +1078,70 @@ cosmabot_sitting2_load_other_secrets() {
     cosmabot_sitting2_rm_password_files
     return 1
   }
-  _load_prev_exit=$(trap -p EXIT)
-  _load_prev_int=$(trap -p INT)
-  _load_prev_term=$(trap -p TERM)
-  _load_prev_hup=$(trap -p HUP)
+  cosmabot_sitting2_load_save_traps || {
+    cosmabot_sitting2_rm_password_files
+    return 1
+  }
   trap 'rm -f "$DBF" "$PGF" "$RDF" "$SITDIR/prompt-CLERK-SECRET-KEY.tmp" "$SITDIR/prompt-CLERK-ACCOUNT-DELETION-SECRET.tmp" "$SITDIR/prompt-HUMAN-DEPLOY-EVIDENCE-REF.tmp"' EXIT INT TERM HUP
   cosmabot_kv_set_from_file DATABASE-PASSWORD "$DBF" || {
     cosmabot_sitting2_rm_password_files
-    eval "${_load_prev_exit:-trap - EXIT}"
-    eval "${_load_prev_int:-trap - INT}"
-    eval "${_load_prev_term:-trap - TERM}"
-    eval "${_load_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_load_restore_traps)"
     return 1
   }
   cosmabot_kv_set_from_file POSTGRES-PASSWORD "$PGF" || {
     cosmabot_sitting2_rm_password_files
-    eval "${_load_prev_exit:-trap - EXIT}"
-    eval "${_load_prev_int:-trap - INT}"
-    eval "${_load_prev_term:-trap - TERM}"
-    eval "${_load_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_load_restore_traps)"
     return 1
   }
   cosmabot_kv_set_from_file REDIS-PASSWORD "$RDF" || {
     cosmabot_sitting2_rm_password_files
-    eval "${_load_prev_exit:-trap - EXIT}"
-    eval "${_load_prev_int:-trap - INT}"
-    eval "${_load_prev_term:-trap - TERM}"
-    eval "${_load_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_load_restore_traps)"
     return 1
   }
   cosmabot_sitting2_rm_password_files || {
-    eval "${_load_prev_exit:-trap - EXIT}"
-    eval "${_load_prev_int:-trap - INT}"
-    eval "${_load_prev_term:-trap - TERM}"
-    eval "${_load_prev_hup:-trap - HUP}"
+    eval "$(cosmabot_sitting2_load_restore_traps)"
     return 1
   }
   if test -n "${CLERK_SECRET_KEY_FILE:-}" && test -s "${CLERK_SECRET_KEY_FILE}"; then
     cosmabot_kv_set_from_file CLERK-SECRET-KEY "$CLERK_SECRET_KEY_FILE" || {
       cosmabot_sitting2_rm_password_files
-      eval "${_load_prev_exit:-trap - EXIT}"
-      eval "${_load_prev_int:-trap - INT}"
-      eval "${_load_prev_term:-trap - TERM}"
-      eval "${_load_prev_hup:-trap - HUP}"
+      eval "$(cosmabot_sitting2_load_restore_traps)"
       return 1
     }
   else
     cosmabot_kv_set_from_prompt_file CLERK-SECRET-KEY || {
       cosmabot_sitting2_rm_password_files
-      eval "${_load_prev_exit:-trap - EXIT}"
-      eval "${_load_prev_int:-trap - INT}"
-      eval "${_load_prev_term:-trap - TERM}"
-      eval "${_load_prev_hup:-trap - HUP}"
+      eval "$(cosmabot_sitting2_load_restore_traps)"
       return 1
     }
   fi
   if test -n "${CLERK_ACCOUNT_DELETION_SECRET_FILE:-}" && test -s "${CLERK_ACCOUNT_DELETION_SECRET_FILE}"; then
     cosmabot_kv_set_from_file CLERK-ACCOUNT-DELETION-SECRET "$CLERK_ACCOUNT_DELETION_SECRET_FILE" || {
       cosmabot_sitting2_rm_password_files
-      eval "${_load_prev_exit:-trap - EXIT}"
-      eval "${_load_prev_int:-trap - INT}"
-      eval "${_load_prev_term:-trap - TERM}"
-      eval "${_load_prev_hup:-trap - HUP}"
+      eval "$(cosmabot_sitting2_load_restore_traps)"
       return 1
     }
   else
     cosmabot_kv_set_from_prompt_file CLERK-ACCOUNT-DELETION-SECRET || {
       cosmabot_sitting2_rm_password_files
-      eval "${_load_prev_exit:-trap - EXIT}"
-      eval "${_load_prev_int:-trap - INT}"
-      eval "${_load_prev_term:-trap - TERM}"
-      eval "${_load_prev_hup:-trap - HUP}"
+      eval "$(cosmabot_sitting2_load_restore_traps)"
       return 1
     }
   fi
   if test -n "${HUMAN_DEPLOY_EVIDENCE_REF_FILE:-}" && test -s "${HUMAN_DEPLOY_EVIDENCE_REF_FILE}"; then
     cosmabot_kv_set_from_file HUMAN-DEPLOY-EVIDENCE-REF "$HUMAN_DEPLOY_EVIDENCE_REF_FILE" || {
       cosmabot_sitting2_rm_password_files
-      eval "${_load_prev_exit:-trap - EXIT}"
-      eval "${_load_prev_int:-trap - INT}"
-      eval "${_load_prev_term:-trap - TERM}"
-      eval "${_load_prev_hup:-trap - HUP}"
+      eval "$(cosmabot_sitting2_load_restore_traps)"
       return 1
     }
   else
     cosmabot_kv_set_from_prompt_file HUMAN-DEPLOY-EVIDENCE-REF || {
       cosmabot_sitting2_rm_password_files
-      eval "${_load_prev_exit:-trap - EXIT}"
-      eval "${_load_prev_int:-trap - INT}"
-      eval "${_load_prev_term:-trap - TERM}"
-      eval "${_load_prev_hup:-trap - HUP}"
+      eval "$(cosmabot_sitting2_load_restore_traps)"
       return 1
     }
   fi
-  eval "${_load_prev_exit:-trap - EXIT}"
-  eval "${_load_prev_int:-trap - INT}"
-  eval "${_load_prev_term:-trap - TERM}"
-  eval "${_load_prev_hup:-trap - HUP}"
+  eval "$(cosmabot_sitting2_load_restore_traps)"
   echo "PASS: other six vault secrets loaded (values not printed)"
   return 0
 }
@@ -1884,7 +2006,7 @@ recovery). Real evidence that a pasted interactive zsh prompt will not treat
 `zsh -n` honours a parent `unsetopt interactivecomments` — `zsh -n` always
 treats `#` as a comment inside a file. Proof: extract each fence and run
 `bash -n` / `zsh -n`; results for this revision are in the PR body / agent
-artifact for **T-386-LOWS-FU**.
+artifact for **T-392-FU** / PR **#392** follow-up (this revision).
 
 ---
 
