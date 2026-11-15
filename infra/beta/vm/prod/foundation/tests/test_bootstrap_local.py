@@ -3068,10 +3068,58 @@ class RecheckMode(unittest.TestCase):
             return value
 
         with patch.object(bootstrap, "read_json", side_effect=counting_read):
-            _manifest, _inputs, recheck_prepare = bootstrap._verify_prepared_recheck(self.folder)
+            prepare_path, validated = bootstrap._latest_recheck_prepare(self.folder)
+            _manifest, _inputs, recheck_prepare = bootstrap._verify_prepared_recheck(
+                self.folder, prepare_path, validated
+            )
         self.assertEqual(len(recheck_reads), 1)
         self.assertEqual(recheck_prepare["source"], good["source"])
         self.assertEqual(recheck_prepare["source"], bootstrap.fingerprint())
+
+    def test_plan_recheck_uses_single_verified_prepare_path(self):
+        """CTO: plan_recheck must call _latest_recheck_prepare once; result keeps that path."""
+        self._seed_applied_private_dir()
+        verified_stamp = "20261114T165000Z"
+        self._recheck_prepare(stamp=verified_stamp)
+        verified_path = self.folder / f"recheck-prepare-{verified_stamp}.json"
+        prepare_calls: list[str] = []
+        real_latest = bootstrap._latest_recheck_prepare
+
+        def counting_latest(folder):
+            path, record = real_latest(folder)
+            prepare_calls.append(str(path))
+            return path, record
+
+        def run(argv, **kwargs):
+            # After verification, plant a NEWER prepare file so a second glob
+            # would name a different path than the one already verified.
+            if argv[1] == "init":
+                newer = self.folder / "recheck-prepare-20261114T165999Z.json"
+                bootstrap.write_private(
+                    newer,
+                    bootstrap.json_bytes(
+                        {
+                            "recheck": True,
+                            "private_directory": str(self.folder),
+                            "source": bootstrap.fingerprint(),
+                            "source_sha256": "n" * 64,
+                            "tofu_sha256": bootstrap.digest(self.tofu),
+                        }
+                    ),
+                )
+            return self._mock_tofu_run(self._noop_plan_json())(argv, **kwargs)
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "_latest_recheck_prepare", side_effect=counting_latest
+        ), patch.object(bootstrap, "command", side_effect=run), patch.object(
+            bootstrap, "utc_plan_stamp", return_value="20261114T165100Z"
+        ):
+            result = bootstrap.plan(self.folder, recheck=True)
+        self.assertEqual(len(prepare_calls), 1)
+        self.assertEqual(result["prepare_path"], str(verified_path))
+        self.assertEqual(Path(result["prepare_path"]).name, f"recheck-prepare-{verified_stamp}.json")
+        # Newer file exists on disk but must not win the result's prepare_path.
+        self.assertTrue((self.folder / "recheck-prepare-20261114T165999Z.json").is_file())
 
     def test_plan_recheck_refuses_missing_prepare(self):
         self._seed_applied_private_dir()
