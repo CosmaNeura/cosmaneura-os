@@ -1393,10 +1393,11 @@ For host install (`#388`):
    root (does not invent `/etc/cosmabot`; bootstrap must have created it).
 1. Re-open the vault with the **same** §4.1 open fence
    (`cosmabot_kv_open_john_32`).
-2. Workstation `--stage-from-vault` into a new/empty local mode-700 dir (values
-   never printed). `--check-staging-complete` / session gate: every expected
-   catalog host name must be present and non-empty — empty or partial staging
-   is STOP before SSH open (nothing opened; no PASS).
+2. Workstation: `LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)` then
+   `--stage-from-vault` into that new/empty mode-700 dir (values never printed).
+   Path shape + `--check-staging-complete` / session gate: every expected
+   catalog host name must be present and non-empty — bad path, empty, or
+   partial staging is STOP before SSH open (nothing opened; no PASS).
 3. §4.5: open `TEMP-JOHN-SSH-SECRETS-INSTALL` (John `/32`, priority 200) →
    ssh-stdin install to final mode-0400 destinations (no VM `/tmp` or `/root`
    value staging; no `scp` of values; `ADMIN_USERNAME` + `-i` identity
@@ -2153,8 +2154,9 @@ ed25519 host key via `az vm run-command` (public key only) into a per-session
 and SIGINT. An out-of-band NSG rule shows as drift on the next Terraform plan —
 finish close-and-verify before any plan or apply. Close requires deny-all at
 priority `4000`, Python `--check-ssh-closed`, and an SSH probe that PASSes only
-on connection refused or connect timeout (banner-exchange timeout and auth
-failure = still reachable = FAIL).
+on connection refused or connect/operation timeout (macOS `Operation timed out`
+counts; banner-exchange timeout, auth prompt, and password prompt = still
+reachable = FAIL).
 
 Define-only fence files (no `#` comment lines; sourcing has zero side effects)
 live in `infra/beta/vm/host/fences/`:
@@ -2167,11 +2169,14 @@ live in `infra/beta/vm/host/fences/`:
 | Session (always closes) | `fence-ssh-secrets-session.sh` → `cosmabot_ssh_secrets_session` |
 | Terminal closed partway | `fence-ssh-nsg-recovery.sh` → `cosmabot_ssh_nsg_recovery_if_stranded` |
 
-**Order:** source the open/install/close fences, then invoke the session
-wrapper (it traps EXIT/INT/TERM/ERR so close-and-verify always runs):
+**Order:** create staging with the exact mktemp line below, source the
+open/install/close fences, then invoke the session wrapper (it traps
+EXIT/INT/TERM so close-and-verify always runs):
 
-```text
-export RG=rg-cosmabot-prod-eus2-01 VM_PUBLIC_IP=… RELEASE_ID=… LOCAL_STAGING=… PROD_KV_NAME=… SECRETS_TRANSPORT_PY=…/secrets_transport.py ADMIN_USERNAME=… SSH_IDENTITY_PATH=…/id_ed25519
+```bash
+LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)
+chmod 700 "$LOCAL_STAGING"
+export RG=rg-cosmabot-prod-eus2-01 VM_PUBLIC_IP=… RELEASE_ID=… LOCAL_STAGING PROD_KV_NAME=… SECRETS_TRANSPORT_PY=…/secrets_transport.py ADMIN_USERNAME=… SSH_IDENTITY_PATH=…/id_ed25519
 source infra/beta/vm/host/fences/fence-ssh-nsg-open.sh
 source infra/beta/vm/host/fences/fence-ssh-secrets-install.sh
 source infra/beta/vm/host/fences/fence-ssh-nsg-close-verify.sh
@@ -2179,15 +2184,21 @@ source infra/beta/vm/host/fences/fence-ssh-secrets-session.sh
 cosmabot_ssh_secrets_session
 ```
 
+`LOCAL_STAGING` must match `mktemp -d /tmp/cosmabot-staging.XXXXXX` (six random
+characters under `/tmp` or macOS `/private/tmp` only — never `/var/folders`).
+Shape is checked before any secret write and before SSH opens.
+
 Sourcing alone must never open or close the NSG rule. Secrets stay with John;
 fences print names / rule metadata / pass-fail only.
 
 #### Terminal closed partway — recovery
 
 If the session dies while `TEMP-JOHN-SSH-SECRETS-INSTALL` may still exist, source
-and invoke `cosmabot_ssh_nsg_recovery_if_stranded` (deletes the rule by fixed
-name, verifies absence + deny-all at 4000, removes stranded local staging).
-Then do not plan/apply until that PASS prints.
+**only** `fence-ssh-nsg-recovery.sh` (self-contained) and invoke
+`cosmabot_ssh_nsg_recovery_if_stranded` (deletes the rule by fixed name,
+verifies absence + deny-all at 4000, removes stranded local staging via its own
+guarded rm). If staging remains afterwards: STOP, never PASS. Then do not
+plan/apply until that PASS prints.
 
 ### 4.4 Mac-side fence syntax proof
 

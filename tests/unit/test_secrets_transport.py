@@ -9,6 +9,7 @@ import importlib.util
 import io
 import os
 import stat
+import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -105,6 +106,17 @@ def _write_llm_sidecar(staging: Path, account: str = PROD_ACCOUNT) -> None:
     (staging / f"{transport.LLM_HOST_NAME}{transport.SOURCE_ACCOUNT_SIDECAR_SUFFIX}").write_text(
         account
     )
+
+
+def _mk_local_staging() -> Path:
+    """Exact workstation shape: mktemp -d /tmp/cosmabot-staging.XXXXXX + mode 0700."""
+    path = Path(
+        subprocess.check_output(
+            ["mktemp", "-d", "/tmp/cosmabot-staging.XXXXXX"], text=True
+        ).strip()
+    )
+    os.chmod(path, 0o700)
+    return path
 
 
 # --- plan / CLI canaries (seeded via staging files the path must not read) ---
@@ -357,7 +369,8 @@ def test_cli_install_llm_without_sidecar_stops(tmp_path):
 
 
 def test_stage_from_vault_writes_mode_700_dir_and_sidecar(tmp_path):
-    staging = tmp_path / "private-stage"
+    del tmp_path  # workstation staging must use mktemp shape, not pytest tmp
+    staging = _mk_local_staging()
     reader = transport.FakeVaultReader(
         values={"WORKSPACE-LLM-API-KEY": CANARY.encode()},
         tags={"WORKSPACE-LLM-API-KEY": {transport.SOURCE_ACCOUNT_TAG: PROD_ACCOUNT}},
@@ -383,7 +396,8 @@ def test_stage_from_vault_writes_mode_700_dir_and_sidecar(tmp_path):
 
 
 def test_stage_from_vault_refuses_cosmascode(tmp_path):
-    staging = tmp_path / "private-stage"
+    del tmp_path
+    staging = _mk_local_staging()
     reader = transport.FakeVaultReader(
         values={"WORKSPACE-LLM-API-KEY": CANARY.encode()},
         tags={"WORKSPACE-LLM-API-KEY": {transport.SOURCE_ACCOUNT_TAG: COSMASCODE_ACCOUNT}},
@@ -896,8 +910,8 @@ def test_module_source_never_hardcodes_live_secret_values():
 
 
 def test_stage_from_vault_wipes_on_llm_tag_stop(tmp_path):
-    staging = tmp_path / "stage-wipe"
-    staging.mkdir(mode=0o700)
+    del tmp_path
+    staging = _mk_local_staging()
     reader = transport.FakeVaultReader(
         values={
             "CLERK-SECRET-KEY": CANARY.encode(),
@@ -948,6 +962,9 @@ def test_ssh_probe_refused_or_timeout_pass_auth_fail():
     )
     assert transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="ssh: connect to host x port 22: connect timed out"
+    )
+    assert transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Operation timed out"
     )
     assert not transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="Permission denied (publickey)."
@@ -1081,25 +1098,23 @@ def test_install_from_stdin_wires_ensure_protected_release_root(tmp_path):
 
 
 def test_require_staging_complete_empty_and_partial(tmp_path):
-    empty = tmp_path / "stage-empty"
-    empty.mkdir(mode=0o700)
+    del tmp_path
+    empty = _mk_local_staging()
     with pytest.raises(transport.Refused, match="staging_incomplete"):
         transport.require_staging_complete(empty)
-    partial = tmp_path / "stage-partial"
-    partial.mkdir(mode=0o700)
+    partial = _mk_local_staging()
     (partial / "CLERK_SECRET_KEY").write_bytes(b"synthetic-clerk-partial-only")
     with pytest.raises(transport.Refused, match="staging_incomplete"):
         transport.require_staging_complete(partial)
-    complete = tmp_path / "stage-complete"
-    complete.mkdir(mode=0o700)
+    complete = _mk_local_staging()
     for item in transport.SECRET_CATALOG:
         (complete / item.host_name).write_bytes(f"synthetic-{item.host_name}".encode())
     transport.require_staging_complete(complete)
 
 
 def test_cli_check_staging_complete_failed_and_partial(tmp_path):
-    empty = tmp_path / "cli-empty"
-    empty.mkdir(mode=0o700)
+    del tmp_path
+    empty = _mk_local_staging()
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
         code = transport.main(
@@ -1118,8 +1133,7 @@ def test_cli_check_staging_complete_failed_and_partial(tmp_path):
     assert code == 1
     assert "staging_incomplete" in err.getvalue()
     assert "PASS:" not in out.getvalue()
-    partial = tmp_path / "cli-partial"
-    partial.mkdir(mode=0o700)
+    partial = _mk_local_staging()
     (partial / "CLERK_SECRET_KEY").write_bytes(b"synthetic-only-one")
     out2, err2 = io.StringIO(), io.StringIO()
     with redirect_stdout(out2), redirect_stderr(err2):
@@ -1139,6 +1153,48 @@ def test_cli_check_staging_complete_failed_and_partial(tmp_path):
     assert code2 == 1
     assert "staging_incomplete" in err2.getvalue()
     assert "PASS:" not in out2.getvalue()
+
+
+def test_local_staging_path_shape_accepts_tmp_and_private_tmp_refuses_var_folders():
+    transport.require_local_staging_path_shape(Path("/tmp/cosmabot-staging.Ab12Cd"))
+    transport.require_local_staging_path_shape(Path("/private/tmp/cosmabot-staging.Ab12Cd"))
+    with pytest.raises(transport.Refused, match="staging_path_shape_invalid"):
+        transport.require_local_staging_path_shape(
+            Path("/var/folders/xx/yy/T/cosmabot-staging.Ab12Cd")
+        )
+    with pytest.raises(transport.Refused, match="staging_path_shape_invalid"):
+        transport.require_local_staging_path_shape(Path("/var/tmp/cosmabot-staging.Ab12Cd"))
+    with pytest.raises(transport.Refused, match="staging_path_shape_invalid"):
+        transport.require_local_staging_path_shape(Path("/tmp/cosmabot-staging.tooLong7"))
+    with pytest.raises(transport.Refused, match="staging_path_shape_invalid"):
+        transport.require_local_staging_path_shape(Path("/tmp/other-staging.Ab12Cd"))
+
+
+def test_stage_from_vault_bad_path_stops_before_any_write(tmp_path):
+    """2a: bad staging shape STOP before secret write (reader never called)."""
+    bad = tmp_path / "not-mktemp-staging"
+    bad.mkdir(mode=0o700)
+    calls: list[str] = []
+
+    class _Reader(transport.FakeVaultReader):
+        def read_value(self, vault_name, secret_name):  # noqa: ANN001
+            calls.append(f"value:{secret_name}")
+            return super().read_value(vault_name, secret_name)
+
+        def read_tags(self, vault_name, secret_name):  # noqa: ANN001
+            calls.append(f"tags:{secret_name}")
+            return super().read_tags(vault_name, secret_name)
+
+    reader = _Reader(values={"CLERK-SECRET-KEY": CANARY.encode()})
+    with pytest.raises(transport.Refused, match="staging_path_shape_invalid"):
+        transport.stage_from_vault(
+            transport.resolve_mappings(["CLERK-SECRET-KEY"]),
+            vault_name="kv-cbot-prd-lab01",
+            staging_dir=bad,
+            reader=reader,
+        )
+    assert calls == []
+    assert list(bad.iterdir()) == []
 
 
 def test_fence_files_are_define_only_on_source():
@@ -1264,8 +1320,8 @@ def test_ensure_protected_release_root_mode_owner_and_bootstrap_fence(tmp_path):
 
 
 def test_stage_from_vault_requires_empty_0700_and_removes_only_created(tmp_path):
-    staging = tmp_path / "stage-empty"
-    staging.mkdir(mode=0o700)
+    del tmp_path
+    staging = _mk_local_staging()
     foreign = staging / "preexisting.txt"
     foreign.write_text("keep-me")
     reader = transport.FakeVaultReader(values={"CLERK-SECRET-KEY": CANARY.encode()})
@@ -1279,8 +1335,7 @@ def test_stage_from_vault_requires_empty_0700_and_removes_only_created(tmp_path)
     assert foreign.read_text() == "keep-me"
     foreign.unlink()
     # LLM stop after creating clerk file removes only created paths.
-    staging2 = tmp_path / "stage-wipe2"
-    staging2.mkdir(mode=0o700)
+    staging2 = _mk_local_staging()
     reader2 = transport.FakeVaultReader(
         values={
             "CLERK-SECRET-KEY": CANARY.encode(),
@@ -1298,12 +1353,47 @@ def test_stage_from_vault_requires_empty_0700_and_removes_only_created(tmp_path)
     assert list(staging2.iterdir()) == []
 
 
+def test_ssh_probe_pass_and_stop_wordings():
+    """Round 5 item 1: each pass wording and each stop wording."""
+    pass_wordings = (
+        "ssh: connect to host x port 22: Connection refused",
+        "Connection timed out",
+        "ssh: connect to host x port 22: connect timed out",
+        "Operation timed out",
+        "ssh: connect to host x port 22: Operation timed out",
+    )
+    for text in pass_wordings:
+        assert transport.ssh_probe_indicates_closed(exit_code=255, stderr_text=text), text
+    stop_wordings = (
+        "Permission denied (publickey).",
+        "Authentication failed.",
+        "john@host's password:",
+        "Enter passphrase for key '/Users/john/.ssh/id_ed25519':",
+        "Connection timed out during banner exchange",
+        "kex_exchange_identification: banner exchange timed out",
+        "No route to host",
+        "Network is unreachable",
+        "Connection timed out\nPermission denied (publickey).",
+    )
+    for text in stop_wordings:
+        assert not transport.ssh_probe_indicates_closed(
+            exit_code=255, stderr_text=text
+        ), text
+    with pytest.raises(transport.Refused, match="ssh_still_reachable_after_close"):
+        transport.require_ssh_unreachable(
+            exit_code=255, stderr_text="john@host's password:"
+        )
+
+
 def test_ssh_probe_only_refused_or_connect_timeout_pass():
     assert transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="Connection refused"
     )
     assert transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="Connection timed out"
+    )
+    assert transport.ssh_probe_indicates_closed(
+        exit_code=255, stderr_text="Operation timed out"
     )
     assert not transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="No route to host"
@@ -1315,15 +1405,12 @@ def test_ssh_probe_only_refused_or_connect_timeout_pass():
         exit_code=255, stderr_text="Permission denied (publickey)."
     )
     assert not transport.ssh_probe_indicates_closed(
-        exit_code=255, stderr_text="Operation timed out"
-    )
-    assert not transport.ssh_probe_indicates_closed(
         exit_code=255, stderr_text="Connection timed out during banner exchange"
     )
 
 
 def test_cli_main_install_from_stdin_and_stage_from_vault_canary(tmp_path, monkeypatch):
-    staging = tmp_path / "cli-stage"
+    staging = _mk_local_staging()
     root = tmp_path / "runtime" / "rel-cli"
     root.mkdir(parents=True)
     reader = transport.FakeVaultReader(values={"CLERK-SECRET-KEY": CANARY.encode()})

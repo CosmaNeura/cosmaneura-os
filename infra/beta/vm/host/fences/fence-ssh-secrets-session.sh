@@ -73,8 +73,12 @@ cosmabot_ssh_secrets_session() {
     echo "STOP: session PROD_KV_NAME unset" >&2
     return 1
   }
-  test -n "${LOCAL_STAGING:-}" || {
-    echo "STOP: session LOCAL_STAGING unset - empty staging must STOP before SSH opens" >&2
+  command -v cosmabot_require_local_staging_shape >/dev/null || {
+    echo "STOP: session needs cosmabot_require_local_staging_shape sourced (install fence)" >&2
+    return 1
+  }
+  cosmabot_require_local_staging_shape || {
+    echo "STOP: session LOCAL_STAGING shape refused - SSH NSG not opened; no write; no PASS" >&2
     return 1
   }
   python3 "$SECRETS_TRANSPORT_PY" \

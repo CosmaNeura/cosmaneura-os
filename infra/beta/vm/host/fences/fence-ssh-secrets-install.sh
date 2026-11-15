@@ -1,19 +1,23 @@
-cosmabot_guarded_rm_local_staging() {
+cosmabot_require_local_staging_shape() {
   test -n "${LOCAL_STAGING:-}" || {
-    echo "STOP: guarded-rm LOCAL_STAGING unset" >&2
+    echo "STOP: LOCAL_STAGING unset - use mktemp -d /tmp/cosmabot-staging.XXXXXX" >&2
     return 1
   }
   case "$LOCAL_STAGING" in
     /*) ;;
     *)
-      echo "STOP: guarded-rm LOCAL_STAGING must be absolute" >&2
+      echo "STOP: LOCAL_STAGING must be absolute" >&2
       return 1
       ;;
   esac
-  printf '%s' "$LOCAL_STAGING" | grep -Eq '^/(tmp|var/tmp|dev/shm)/cosmabot-staging\.[A-Za-z0-9._-]+$' || {
-    echo "STOP: guarded-rm LOCAL_STAGING must match mktemp cosmabot-staging.XXXXXX under /tmp|/var/tmp|/dev/shm" >&2
+  printf '%s' "$LOCAL_STAGING" | grep -Eq '^(/private)?/tmp/cosmabot-staging\.[A-Za-z0-9]{6}$' || {
+    echo "STOP: LOCAL_STAGING must match mktemp -d /tmp/cosmabot-staging.XXXXXX (/tmp or /private/tmp only; never /var/folders)" >&2
     return 1
   }
+  return 0
+}
+cosmabot_guarded_rm_local_staging() {
+  cosmabot_require_local_staging_shape || return 1
   test -d "$LOCAL_STAGING" || {
     echo "STOP: guarded-rm LOCAL_STAGING not a directory" >&2
     return 1
@@ -81,8 +85,8 @@ cosmabot_ssh_secrets_install() {
     echo "STOP: ssh-install RELEASE_ID shape invalid" >&2
     return 1
   }
-  test -n "${LOCAL_STAGING:-}" || {
-    echo "STOP: ssh-install LOCAL_STAGING unset" >&2
+  cosmabot_require_local_staging_shape || {
+    echo "STOP: ssh-install LOCAL_STAGING shape refused before any SSH" >&2
     return 1
   }
   test -d "$LOCAL_STAGING" || {

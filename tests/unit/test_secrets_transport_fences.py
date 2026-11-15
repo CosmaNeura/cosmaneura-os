@@ -9,7 +9,6 @@ import os
 import shutil
 import stat
 import subprocess
-import tempfile
 import textwrap
 from pathlib import Path
 
@@ -56,7 +55,11 @@ def _require_real_jq() -> str:
 
 
 def _mk_staging() -> Path:
-    path = Path(tempfile.mkdtemp(prefix="cosmabot-staging.", dir="/tmp"))
+    path = Path(
+        subprocess.check_output(
+            ["mktemp", "-d", "/tmp/cosmabot-staging.XXXXXX"], text=True
+        ).strip()
+    )
     os.chmod(path, 0o700)
     return path
 
@@ -372,7 +375,7 @@ def test_fence_session_always_close_verify_and_never_leaks_canary(tmp_path, mode
         assert "--check-ssh-closed" in py_log
         assert "--check-ssh-probe" in py_log
         # Real closed/probe gate: python classifiers ran; PASS is not a bare fence echo alone.
-        assert "SSH connection refused or connect timeout" in result.stdout
+        assert "SSH connection refused or connect/operation timeout" in result.stdout
 
 
 def test_tool_missing_before_open_never_opens(tmp_path):
@@ -647,8 +650,135 @@ def test_guarded_rm_refuses_non_mktemp_path(tmp_path):
         env=_env(bin_dir, tmp_path, bad, identity),
     )
     assert result.returncode != 0
-    assert "STOP: guarded-rm" in (result.stdout + result.stderr)
+    out = result.stdout + result.stderr
+    assert "STOP:" in out
+    assert "mktemp -d /tmp/cosmabot-staging.XXXXXX" in out or "LOCAL_STAGING must match" in out
     assert bad.exists()
+
+
+def test_bad_staging_path_stops_before_ssh_open_and_before_write(tmp_path):
+    """2a: bad LOCAL_STAGING shape → STOP before open; no secret write path."""
+    bin_dir = _stub_bin(tmp_path)
+    identity = _identity(tmp_path)
+    bad = tmp_path / "var-folders-like"
+    bad.mkdir(mode=0o700)
+    (bad / "CLERK_SECRET_KEY").write_bytes(CANARY.encode())
+    script = tmp_path / "bad-shape-session.sh"
+    script.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            set -u
+            {_source_all()}
+            cosmabot_ssh_secrets_session
+            """
+        )
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_env(bin_dir, tmp_path, bad, identity),
+    )
+    out = result.stdout + result.stderr
+    assert CANARY not in out
+    assert result.returncode != 0
+    assert "shape refused" in out or "LOCAL_STAGING must match" in out
+    assert "PASS: secrets SSH session complete" not in result.stdout
+    assert int((tmp_path / "state" / "open_count").read_text() or "0") == 0
+    assert int((tmp_path / "state" / "close_count").read_text() or "0") == 0
+    assert (bad / "CLERK_SECRET_KEY").read_bytes() == CANARY.encode()
+
+
+def test_recovery_only_fence_removes_staging_fresh_shell(tmp_path):
+    """2c: fresh shell sources ONLY recovery fence; staging removed; PASS."""
+    bin_dir = _stub_bin(tmp_path)
+    identity = _identity(tmp_path)
+    staging = _mk_staging()
+    _fill_complete_staging(staging)
+    script = tmp_path / "recovery-only.sh"
+    script.write_text(
+        textwrap.dedent(
+            f"""\
+            #!/bin/bash
+            set -u
+            source "{FENCES / "fence-ssh-nsg-recovery.sh"}"
+            command -v cosmabot_guarded_rm_local_staging >/dev/null
+            command -v cosmabot_ssh_secrets_install >/dev/null && exit 97
+            az network nsg rule create \
+              --resource-group "$RG" \
+              --nsg-name nsg-cosmabot-prod-eus2-01 \
+              --name TEMP-JOHN-SSH-SECRETS-INSTALL \
+              --priority 200 \
+              --output none
+            cosmabot_ssh_nsg_recovery_if_stranded
+            """
+        )
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    result = subprocess.run(
+        ["/bin/bash", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_env(bin_dir, tmp_path, staging, identity),
+    )
+    out = result.stdout + result.stderr
+    assert CANARY not in out
+    assert result.returncode == 0, out
+    assert "PASS: recovery deleted" in result.stdout
+    assert not staging.exists()
+    recovery_text = (FENCES / "fence-ssh-nsg-recovery.sh").read_text()
+    assert "cosmabot_guarded_rm_local_staging 2>/dev/null" not in recovery_text
+    assert "if cosmabot_guarded_rm_local_staging 2>/dev/null" not in recovery_text
+
+
+@pytest.mark.parametrize("shell", ["/bin/bash", "/bin/zsh"])
+def test_recovery_leftover_staging_fails_not_pass(tmp_path, shell):
+    """2c negative: leftover staging after failed guarded rm → STOP, no PASS."""
+    if not Path(shell).exists():
+        pytest.skip(f"{shell} not available")
+    bin_dir = _stub_bin(tmp_path)
+    identity = _identity(tmp_path)
+    staging = _mk_staging()
+    _fill_complete_staging(staging)
+    script = tmp_path / f"recovery-leftover-{Path(shell).name}.sh"
+    script.write_text(
+        textwrap.dedent(
+            f"""\
+            #!{shell}
+            set -u
+            source "{FENCES / "fence-ssh-nsg-recovery.sh"}"
+            cosmabot_guarded_rm_local_staging() {{
+              echo "STOP: stub guarded rm refuses to remove" >&2
+              return 1
+            }}
+            az network nsg rule create \
+              --resource-group "$RG" \
+              --nsg-name nsg-cosmabot-prod-eus2-01 \
+              --name TEMP-JOHN-SSH-SECRETS-INSTALL \
+              --priority 200 \
+              --output none
+            cosmabot_ssh_nsg_recovery_if_stranded
+            """
+        )
+    )
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    result = subprocess.run(
+        [shell, str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=_env(bin_dir, tmp_path, staging, identity),
+    )
+    out = result.stdout + result.stderr
+    assert CANARY not in out
+    assert result.returncode != 0
+    assert "PASS: recovery deleted" not in result.stdout
+    assert "STOP:" in out
+    assert staging.exists()
 
 
 def test_sourcing_fences_does_not_open_or_close(tmp_path):
@@ -684,10 +814,14 @@ def test_fence_release_root_uses_install_d_0700_after_etc_cosmabot_precheck():
     assert "test -d /etc/cosmabot" in install
     assert "/etc/cosmabot missing" in install
     assert "cosmabot_guarded_rm_local_staging" in install
+    assert "cosmabot_require_local_staging_shape" in install
     assert "mkdir -p" not in install
     assert "ADMIN_USERNAME" in install
     assert 'ssh -i "$SSH_IDENTITY_PATH"' in install
     assert "RELEASE_ID shape" in install
+    recovery = (FENCES / "fence-ssh-nsg-recovery.sh").read_text()
+    assert "cosmabot_guarded_rm_local_staging()" in recovery
+    assert "cosmabot_guarded_rm_local_staging 2>/dev/null" not in recovery
 
 
 def test_session_uses_command_v_and_portable_traps():
@@ -699,3 +833,4 @@ def test_session_uses_command_v_and_portable_traps():
     assert "trap -p" in session
     assert "|| true" not in session
     assert "--check-staging-complete" in session
+    assert "cosmabot_require_local_staging_shape" in session

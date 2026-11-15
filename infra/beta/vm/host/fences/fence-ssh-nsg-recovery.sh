@@ -1,3 +1,53 @@
+cosmabot_require_local_staging_shape() {
+  test -n "${LOCAL_STAGING:-}" || {
+    echo "STOP: LOCAL_STAGING unset - use mktemp -d /tmp/cosmabot-staging.XXXXXX" >&2
+    return 1
+  }
+  case "$LOCAL_STAGING" in
+    /*) ;;
+    *)
+      echo "STOP: LOCAL_STAGING must be absolute" >&2
+      return 1
+      ;;
+  esac
+  printf '%s' "$LOCAL_STAGING" | grep -Eq '^(/private)?/tmp/cosmabot-staging\.[A-Za-z0-9]{6}$' || {
+    echo "STOP: LOCAL_STAGING must match mktemp -d /tmp/cosmabot-staging.XXXXXX (/tmp or /private/tmp only; never /var/folders)" >&2
+    return 1
+  }
+  return 0
+}
+cosmabot_guarded_rm_local_staging() {
+  cosmabot_require_local_staging_shape || return 1
+  test -d "$LOCAL_STAGING" || {
+    echo "STOP: guarded-rm LOCAL_STAGING not a directory" >&2
+    return 1
+  }
+  _gs_mode=$(stat -c '%a' "$LOCAL_STAGING" 2>/dev/null || stat -f '%Lp' "$LOCAL_STAGING") || {
+    echo "STOP: guarded-rm LOCAL_STAGING stat failed" >&2
+    return 1
+  }
+  test "$_gs_mode" = "700" || {
+    echo "STOP: guarded-rm LOCAL_STAGING mode not 0700" >&2
+    return 1
+  }
+  _gs_owner=$(stat -c '%u' "$LOCAL_STAGING" 2>/dev/null || stat -f '%u' "$LOCAL_STAGING") || {
+    echo "STOP: guarded-rm LOCAL_STAGING owner stat failed" >&2
+    return 1
+  }
+  test "$_gs_owner" = "$(id -u)" || {
+    echo "STOP: guarded-rm LOCAL_STAGING not owned by current user" >&2
+    return 1
+  }
+  rm -rf "${LOCAL_STAGING:?}" || {
+    echo "STOP: guarded-rm LOCAL_STAGING remove failed" >&2
+    return 1
+  }
+  test ! -e "$LOCAL_STAGING" || {
+    echo "STOP: guarded-rm LOCAL_STAGING still present" >&2
+    return 1
+  }
+  return 0
+}
 cosmabot_ssh_nsg_recovery_if_stranded() {
   command -v az >/dev/null || {
     echo "STOP: ssh-nsg-recovery needs az" >&2
@@ -45,12 +95,16 @@ cosmabot_ssh_nsg_recovery_if_stranded() {
     echo "STOP: recovery deny-all-other-ingress missing or not Deny priority 4000" >&2
     return 1
   }
-  if test -n "${LOCAL_STAGING:-}" && test -d "${LOCAL_STAGING}"; then
-    if cosmabot_guarded_rm_local_staging 2>/dev/null; then
-      echo "NOTE: recovery removed local staging path (values not printed)"
-    else
-      echo "NOTE: LOCAL_STAGING present but failed guarded rm - leave for operator; NSG already verified closed"
-    fi
+  if test -n "${LOCAL_STAGING:-}" && test -e "${LOCAL_STAGING}"; then
+    cosmabot_guarded_rm_local_staging || {
+      echo "STOP: recovery could not remove LOCAL_STAGING - NSG verified closed but staging remains; no PASS" >&2
+      return 1
+    }
+    test ! -e "${LOCAL_STAGING}" || {
+      echo "STOP: recovery LOCAL_STAGING still present after guarded rm; no PASS" >&2
+      return 1
+    }
+    echo "NOTE: recovery removed local staging path (values not printed)"
   else
     echo "NOTE: LOCAL_STAGING unset or already gone - NSG close verified without staging cleanup"
   fi

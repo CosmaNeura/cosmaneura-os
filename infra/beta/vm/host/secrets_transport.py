@@ -80,6 +80,11 @@ IPV4_CIDR_32_RE = re.compile(
 # Pin file next to this module; fence verifies before remote run.
 SHA256_PIN_NAME = "secrets_transport.sha256"
 REMOTE_MODULE_PATH = "/opt/cosmabot/host/secrets_transport.py"
+# Exact shape from `mktemp -d /tmp/cosmabot-staging.XXXXXX` (6 random chars).
+# macOS may print /tmp/... or resolve to /private/tmp/...; never /var/folders.
+LOCAL_STAGING_PATH_RE = re.compile(
+    r"^(/private)?/tmp/cosmabot-staging\.[A-Za-z0-9]{6}$"
+)
 
 STAGING_NEEDLES = (
     "cosmabot-vm-staging",
@@ -578,21 +583,28 @@ def require_ssh_install_ready(
 
 
 def ssh_probe_indicates_closed(*, exit_code: int, stderr_text: str) -> bool:
-    """True only for connection refused or connect timeout. Auth failure = reachable.
+    """True only for connection refused or connect/operation timeout.
 
     PASS only on: "connection refused", or a connect-phase timeout
-    ("connection timed out" / "connect timed out"). Banner-exchange timeouts
-    and bare "timeout"/"timed out" do not count as closed.
+    ("connection timed out" / "connect timed out" / macOS "operation timed out").
+    Auth prompts, password prompts, banner-exchange timeouts, and bare
+    "timeout"/"timed out" do not count as closed.
     """
     del exit_code  # exit code alone never proves closed without refuse/connect-timeout text
     text = (stderr_text or "").lower()
     if "permission denied" in text or "authentication failed" in text:
         return False
+    if "password:" in text or "enter passphrase" in text or "passphrase for key" in text:
+        return False
     if "banner" in text and ("timed out" in text or "timeout" in text):
         return False
     if "connection refused" in text:
         return True
-    if "connection timed out" in text or "connect timed out" in text:
+    if (
+        "connection timed out" in text
+        or "connect timed out" in text
+        or "operation timed out" in text
+    ):
         return True
     return False
 
@@ -747,6 +759,19 @@ def ensure_protected_release_root(
     }
 
 
+def require_local_staging_path_shape(staging_dir: Path) -> None:
+    """STOP unless path matches `mktemp -d /tmp/cosmabot-staging.XXXXXX`.
+
+    Accepts /tmp/... and macOS /private/tmp/... only. Never /var/folders.
+    Call before any secret write and before any SSH NSG open.
+    """
+    text = str(staging_dir)
+    require(
+        LOCAL_STAGING_PATH_RE.fullmatch(text) is not None,
+        "staging_path_shape_invalid_use_mktemp_-d_/tmp/cosmabot-staging.XXXXXX",
+    )
+
+
 def require_staging_complete(
     staging_dir: Path,
     mappings: list[SecretMapping] | None = None,
@@ -755,6 +780,7 @@ def require_staging_complete(
 
     Call after --stage-from-vault and before any SSH NSG open. Never prints values.
     """
+    require_local_staging_path_shape(staging_dir)
     expected = mappings if mappings is not None else list(SECRET_CATALOG)
     require(bool(expected), "staging_expected_names_required")
     require(
@@ -787,14 +813,20 @@ def stage_from_vault(
     vault_name: str,
     staging_dir: Path,
     reader: VaultReader,
+    enforce_local_staging_shape: bool = True,
 ) -> list[dict[str, object]]:
     """Workstation stage-only: fetch into mode-700 dir under John's /32 window.
 
     Requires a new or empty 0700 staging dir. Records source-account for LLM.
     Never prints values. Never installs on the VM. On any STOP, remove only
     files this run created. After the vault window: restore per runbook §4.3.
+    Workstation LOCAL_STAGING must match mktemp -d /tmp/cosmabot-staging.XXXXXX
+    (enforce_local_staging_shape=True). Private transport_from_vault work dirs
+    pass False.
     """
     require(KEY_VAULT_NAME_RE.fullmatch(vault_name) is not None, "vault_name_must_be_kv-cbot-prd-*")
+    if enforce_local_staging_shape:
+        require_local_staging_path_shape(staging_dir)
     refuse_staging_names(vault_name, str(staging_dir))
     ensure_staging_dir_mode_700(staging_dir)
     results: list[dict[str, object]] = []
@@ -1006,6 +1038,7 @@ def transport_from_vault(
             vault_name=vault_name,
             staging_dir=staging,
             reader=reader,
+            enforce_local_staging_shape=False,
         )
         return install_from_staging(
             mappings,
@@ -1236,8 +1269,8 @@ def main(argv: list[str] | None = None) -> int:
         "--check-ssh-probe",
         action="store_true",
         help=(
-            "Classify an SSH probe: connection refused or connect timeout PASS; "
-            "auth failure / banner timeout FAIL."
+            "Classify an SSH probe: connection refused or connect/operation "
+            "timeout PASS; auth/password prompt / banner timeout FAIL."
         ),
     )
     parser.add_argument(
@@ -1315,7 +1348,10 @@ def main(argv: list[str] | None = None) -> int:
                 exit_code=args.ssh_probe_exit_code,
                 stderr_text=stderr_text,
             )
-            print("PASS: SSH probe indicates closed (connection refused or connect timeout)")
+            print(
+                "PASS: SSH probe indicates closed "
+                "(connection refused or connect/operation timeout)"
+            )
             return 0
         require(bool(args.profile), "profile_required")
         require(bool(args.resource_group), "resource_group_required")

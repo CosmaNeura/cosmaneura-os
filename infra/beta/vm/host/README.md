@@ -200,15 +200,16 @@ non-secret sidecar `WORKSPACE_LLM_API_KEY.source-account`.
 
 **One order** (runbook Sitting 2 row 5 / after format-disk yes + continue-prep
 yes / checklist): `#389` bootstrap so `/etc/cosmabot` exists → second vault
-window → `--stage-from-vault` (all expected names present and non-empty, or
+window → `LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)` →
+`--stage-from-vault` (path shape + all expected names present and non-empty, or
 STOP before SSH) → `TEMP-JOHN-SSH-SECRETS-INSTALL` → ssh-stdin install →
 close-and-verify. John's hands-on: `/32`, vault window, SSH key.
 
 SSH install window (John `/32` only; see runbook §4.5 and `fences/`):
 
 1. Source define-only fences, then invoke `cosmabot_ssh_secrets_session`
-   (traps EXIT/INT/TERM so close-and-verify always runs). Session runs
-   `--check-staging-complete` before OPEN.
+   (traps EXIT/INT/TERM so close-and-verify always runs). Session checks
+   staging path shape and `--check-staging-complete` before OPEN.
 2. OPEN creates `TEMP-JOHN-SSH-SECRETS-INSTALL` (Tcp, John's `/32`, priority 200).
 3. INSTALL ships `secrets_transport.py` (sha256 pin
    `secrets_transport.sha256`), pins the VM ed25519 host key via Run Command
@@ -216,13 +217,16 @@ SSH install window (John `/32` only; see runbook §4.5 and `fences/`):
    `install -d -o root -g root -m 0700` for the release root, pipes each secret
    value over `ssh` stdin into `--install-from-stdin` as root. No `scp` of
    values; no VM `/tmp` or `/root` secret staging. Local staging remove is
-   guarded (`cosmabot-staging.*` under `/tmp`|`/var/tmp`|`/dev/shm`, mode 0700,
-   owned by us).
+   guarded (`/tmp` or `/private/tmp` `cosmabot-staging.XXXXXX` with 6 random
+   chars, mode 0700, owned by us — never `/var/folders`).
 4. CLOSE AND VERIFY deletes the rule, requires deny-all at 4000, runs
-   `--check-ssh-closed`, and probes SSH (connection refused or connect timeout
-   PASS; banner-exchange timeout / auth failure FAIL).
-5. If the terminal closed partway: `cosmabot_ssh_nsg_recovery_if_stranded`
-   always deletes then verifies NSG; missing LOCAL_STAGING is a NOTE.
+   `--check-ssh-closed`, and probes SSH (connection refused or
+   connect/operation timeout PASS; banner-exchange / auth / password prompt
+   FAIL).
+5. If the terminal closed partway: source only
+   `fence-ssh-nsg-recovery.sh` (self-contained guarded rm) then
+   `cosmabot_ssh_nsg_recovery_if_stranded` — always deletes then verifies NSG;
+   leftover staging → STOP not PASS; missing LOCAL_STAGING is a NOTE.
 
 Sourcing a fence file has zero side effects (never opens or closes the NSG).
 
