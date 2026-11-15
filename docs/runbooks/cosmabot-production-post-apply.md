@@ -769,8 +769,13 @@ values John already holds in local mode-600 files, point the `*_FILE` exports
 at those paths. For a no-echo prompt path, the helper writes a mode-600 file
 under `$HOME/.cosmabot-sitting2/` (**never** default tmp), loads it, then
 `rm` + `test ! -e`, with trap cleanup on `EXIT`/`INT`/`TERM`/`HUP`.
-On any STOP, this fence itself removes the three password files and checks each
-with `! -e` before returning (do not leave that to abandon).
+The prompt helper and this load fence use **separate** saved-trap variables
+(`_prompt_prev_*` vs `_load_prev_*`) and each restores/clears every signal it
+set (including `HUP`), so no `rm` trap is left in John's interactive shell and
+nothing lingers into kv-close or a second vault window.
+On **any** STOP — including when `PROD_KV_NAME` is unset — this fence sets the
+three password-file paths first, then calls `cosmabot_sitting2_rm_password_files`
+(`rm` + `test ! -e` each) before returning (do not leave that to abandon).
 `printf '%s' "$_val" >file` is the allowed write path (builtin; not argv):
 
 ```bash
@@ -810,17 +815,17 @@ cosmabot_kv_set_from_prompt_file() {
     return 1
   }
   _tmp="$SITDIR/prompt-${_name}.tmp"
-  _prev_exit=$(trap -p EXIT)
-  _prev_int=$(trap -p INT)
-  _prev_term=$(trap -p TERM)
-  _prev_hup=$(trap -p HUP)
+  _prompt_prev_exit=$(trap -p EXIT)
+  _prompt_prev_int=$(trap -p INT)
+  _prompt_prev_term=$(trap -p TERM)
+  _prompt_prev_hup=$(trap -p HUP)
   trap 'rm -f "$_tmp"' EXIT INT TERM HUP
   rm -f "$_tmp" || {
     echo "STOP: kv-set prompt pre-rm failed for $_name" >&2
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_prompt_prev_exit:-trap - EXIT}"
+    eval "${_prompt_prev_int:-trap - INT}"
+    eval "${_prompt_prev_term:-trap - TERM}"
+    eval "${_prompt_prev_hup:-trap - HUP}"
     return 1
   }
   (
@@ -830,20 +835,20 @@ cosmabot_kv_set_from_prompt_file() {
   ) || {
     rm -f "$_tmp"
     echo "STOP: kv-set prompt chmod failed for $_name" >&2
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_prompt_prev_exit:-trap - EXIT}"
+    eval "${_prompt_prev_int:-trap - INT}"
+    eval "${_prompt_prev_term:-trap - TERM}"
+    eval "${_prompt_prev_hup:-trap - HUP}"
     return 1
   }
   printf 'Paste value for %s (no echo), then Enter: ' "$_name" >&2
   read -rs _val || {
     rm -f "$_tmp"
     echo "STOP: kv-set prompt read failed for $_name" >&2
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_prompt_prev_exit:-trap - EXIT}"
+    eval "${_prompt_prev_int:-trap - INT}"
+    eval "${_prompt_prev_term:-trap - TERM}"
+    eval "${_prompt_prev_hup:-trap - HUP}"
     return 1
   }
   printf '\n' >&2
@@ -851,41 +856,41 @@ cosmabot_kv_set_from_prompt_file() {
     unset _val
     rm -f "$_tmp"
     echo "STOP: kv-set prompt write failed for $_name" >&2
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_prompt_prev_exit:-trap - EXIT}"
+    eval "${_prompt_prev_int:-trap - INT}"
+    eval "${_prompt_prev_term:-trap - TERM}"
+    eval "${_prompt_prev_hup:-trap - HUP}"
     return 1
   }
   unset _val
   cosmabot_kv_set_from_file "$_name" "$_tmp" || {
     rm -f "$_tmp"
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_prompt_prev_exit:-trap - EXIT}"
+    eval "${_prompt_prev_int:-trap - INT}"
+    eval "${_prompt_prev_term:-trap - TERM}"
+    eval "${_prompt_prev_hup:-trap - HUP}"
     return 1
   }
   rm -f "$_tmp" || {
     echo "STOP: kv-set prompt temp rm failed for $_name" >&2
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_prompt_prev_exit:-trap - EXIT}"
+    eval "${_prompt_prev_int:-trap - INT}"
+    eval "${_prompt_prev_term:-trap - TERM}"
+    eval "${_prompt_prev_hup:-trap - HUP}"
     return 1
   }
   test ! -e "$_tmp" || {
     echo "STOP: kv-set prompt temp still exists for $_name" >&2
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_prompt_prev_exit:-trap - EXIT}"
+    eval "${_prompt_prev_int:-trap - INT}"
+    eval "${_prompt_prev_term:-trap - TERM}"
+    eval "${_prompt_prev_hup:-trap - HUP}"
     return 1
   }
-  eval "${_prev_exit:-trap - EXIT}"
-  eval "${_prev_int:-trap - INT}"
-  eval "${_prev_term:-trap - TERM}"
-  eval "${_prev_hup:-trap - HUP}"
+  eval "${_prompt_prev_exit:-trap - EXIT}"
+  eval "${_prompt_prev_int:-trap - INT}"
+  eval "${_prompt_prev_term:-trap - TERM}"
+  eval "${_prompt_prev_hup:-trap - HUP}"
   return 0
 }
 cosmabot_sitting2_rm_password_files() {
@@ -909,111 +914,112 @@ cosmabot_sitting2_rm_password_files() {
 }
 cosmabot_sitting2_load_other_secrets() {
   set +x
-  test -n "${PROD_KV_NAME:-}" || {
-    echo "STOP: other-secrets PROD_KV_NAME unset" >&2
-    return 1
-  }
   SITDIR="$HOME/.cosmabot-sitting2"
   DBF="$SITDIR/DATABASE-PASSWORD.value"
   PGF="$SITDIR/POSTGRES-PASSWORD.value"
   RDF="$SITDIR/REDIS-PASSWORD.value"
-  _prev_exit=$(trap -p EXIT)
-  _prev_int=$(trap -p INT)
-  _prev_term=$(trap -p TERM)
-  _prev_hup=$(trap -p HUP)
+  test -n "${PROD_KV_NAME:-}" || {
+    echo "STOP: other-secrets PROD_KV_NAME unset" >&2
+    cosmabot_sitting2_rm_password_files
+    return 1
+  }
+  _load_prev_exit=$(trap -p EXIT)
+  _load_prev_int=$(trap -p INT)
+  _load_prev_term=$(trap -p TERM)
+  _load_prev_hup=$(trap -p HUP)
   trap 'rm -f "$DBF" "$PGF" "$RDF" "$SITDIR/prompt-CLERK-SECRET-KEY.tmp" "$SITDIR/prompt-CLERK-ACCOUNT-DELETION-SECRET.tmp" "$SITDIR/prompt-HUMAN-DEPLOY-EVIDENCE-REF.tmp"' EXIT INT TERM HUP
   cosmabot_kv_set_from_file DATABASE-PASSWORD "$DBF" || {
     cosmabot_sitting2_rm_password_files
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_load_prev_exit:-trap - EXIT}"
+    eval "${_load_prev_int:-trap - INT}"
+    eval "${_load_prev_term:-trap - TERM}"
+    eval "${_load_prev_hup:-trap - HUP}"
     return 1
   }
   cosmabot_kv_set_from_file POSTGRES-PASSWORD "$PGF" || {
     cosmabot_sitting2_rm_password_files
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_load_prev_exit:-trap - EXIT}"
+    eval "${_load_prev_int:-trap - INT}"
+    eval "${_load_prev_term:-trap - TERM}"
+    eval "${_load_prev_hup:-trap - HUP}"
     return 1
   }
   cosmabot_kv_set_from_file REDIS-PASSWORD "$RDF" || {
     cosmabot_sitting2_rm_password_files
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_load_prev_exit:-trap - EXIT}"
+    eval "${_load_prev_int:-trap - INT}"
+    eval "${_load_prev_term:-trap - TERM}"
+    eval "${_load_prev_hup:-trap - HUP}"
     return 1
   }
   cosmabot_sitting2_rm_password_files || {
-    eval "${_prev_exit:-trap - EXIT}"
-    eval "${_prev_int:-trap - INT}"
-    eval "${_prev_term:-trap - TERM}"
-    eval "${_prev_hup:-trap - HUP}"
+    eval "${_load_prev_exit:-trap - EXIT}"
+    eval "${_load_prev_int:-trap - INT}"
+    eval "${_load_prev_term:-trap - TERM}"
+    eval "${_load_prev_hup:-trap - HUP}"
     return 1
   }
   if test -n "${CLERK_SECRET_KEY_FILE:-}" && test -s "${CLERK_SECRET_KEY_FILE}"; then
     cosmabot_kv_set_from_file CLERK-SECRET-KEY "$CLERK_SECRET_KEY_FILE" || {
       cosmabot_sitting2_rm_password_files
-      eval "${_prev_exit:-trap - EXIT}"
-      eval "${_prev_int:-trap - INT}"
-      eval "${_prev_term:-trap - TERM}"
-      eval "${_prev_hup:-trap - HUP}"
+      eval "${_load_prev_exit:-trap - EXIT}"
+      eval "${_load_prev_int:-trap - INT}"
+      eval "${_load_prev_term:-trap - TERM}"
+      eval "${_load_prev_hup:-trap - HUP}"
       return 1
     }
   else
     cosmabot_kv_set_from_prompt_file CLERK-SECRET-KEY || {
       cosmabot_sitting2_rm_password_files
-      eval "${_prev_exit:-trap - EXIT}"
-      eval "${_prev_int:-trap - INT}"
-      eval "${_prev_term:-trap - TERM}"
-      eval "${_prev_hup:-trap - HUP}"
+      eval "${_load_prev_exit:-trap - EXIT}"
+      eval "${_load_prev_int:-trap - INT}"
+      eval "${_load_prev_term:-trap - TERM}"
+      eval "${_load_prev_hup:-trap - HUP}"
       return 1
     }
   fi
   if test -n "${CLERK_ACCOUNT_DELETION_SECRET_FILE:-}" && test -s "${CLERK_ACCOUNT_DELETION_SECRET_FILE}"; then
     cosmabot_kv_set_from_file CLERK-ACCOUNT-DELETION-SECRET "$CLERK_ACCOUNT_DELETION_SECRET_FILE" || {
       cosmabot_sitting2_rm_password_files
-      eval "${_prev_exit:-trap - EXIT}"
-      eval "${_prev_int:-trap - INT}"
-      eval "${_prev_term:-trap - TERM}"
-      eval "${_prev_hup:-trap - HUP}"
+      eval "${_load_prev_exit:-trap - EXIT}"
+      eval "${_load_prev_int:-trap - INT}"
+      eval "${_load_prev_term:-trap - TERM}"
+      eval "${_load_prev_hup:-trap - HUP}"
       return 1
     }
   else
     cosmabot_kv_set_from_prompt_file CLERK-ACCOUNT-DELETION-SECRET || {
       cosmabot_sitting2_rm_password_files
-      eval "${_prev_exit:-trap - EXIT}"
-      eval "${_prev_int:-trap - INT}"
-      eval "${_prev_term:-trap - TERM}"
-      eval "${_prev_hup:-trap - HUP}"
+      eval "${_load_prev_exit:-trap - EXIT}"
+      eval "${_load_prev_int:-trap - INT}"
+      eval "${_load_prev_term:-trap - TERM}"
+      eval "${_load_prev_hup:-trap - HUP}"
       return 1
     }
   fi
   if test -n "${HUMAN_DEPLOY_EVIDENCE_REF_FILE:-}" && test -s "${HUMAN_DEPLOY_EVIDENCE_REF_FILE}"; then
     cosmabot_kv_set_from_file HUMAN-DEPLOY-EVIDENCE-REF "$HUMAN_DEPLOY_EVIDENCE_REF_FILE" || {
       cosmabot_sitting2_rm_password_files
-      eval "${_prev_exit:-trap - EXIT}"
-      eval "${_prev_int:-trap - INT}"
-      eval "${_prev_term:-trap - TERM}"
-      eval "${_prev_hup:-trap - HUP}"
+      eval "${_load_prev_exit:-trap - EXIT}"
+      eval "${_load_prev_int:-trap - INT}"
+      eval "${_load_prev_term:-trap - TERM}"
+      eval "${_load_prev_hup:-trap - HUP}"
       return 1
     }
   else
     cosmabot_kv_set_from_prompt_file HUMAN-DEPLOY-EVIDENCE-REF || {
       cosmabot_sitting2_rm_password_files
-      eval "${_prev_exit:-trap - EXIT}"
-      eval "${_prev_int:-trap - INT}"
-      eval "${_prev_term:-trap - TERM}"
-      eval "${_prev_hup:-trap - HUP}"
+      eval "${_load_prev_exit:-trap - EXIT}"
+      eval "${_load_prev_int:-trap - INT}"
+      eval "${_load_prev_term:-trap - TERM}"
+      eval "${_load_prev_hup:-trap - HUP}"
       return 1
     }
   fi
-  eval "${_prev_exit:-trap - EXIT}"
-  eval "${_prev_int:-trap - INT}"
-  eval "${_prev_term:-trap - TERM}"
-  eval "${_prev_hup:-trap - HUP}"
+  eval "${_load_prev_exit:-trap - EXIT}"
+  eval "${_load_prev_int:-trap - INT}"
+  eval "${_load_prev_term:-trap - TERM}"
+  eval "${_load_prev_hup:-trap - HUP}"
   echo "PASS: other six vault secrets loaded (values not printed)"
   return 0
 }
@@ -1027,8 +1033,10 @@ cosmabot_sitting2_load_other_secrets || {
 after a STOP partway through** this sitting, including from a **new shell**.
 Order is fixed: (1) set `publicNetworkAccess=Disabled` **first**, (2) remove
 **every** IP rule from `az keyvault network-rule list` (and the `/32` saved in
-`$HOME/.cosmabot-sitting2/john-32.ip` if present), (3) verify **last** that
-access is Disabled **and** rule count is 0. Close must **not** depend on
+`$HOME/.cosmabot-sitting2/john-32.ip` if present; at most 32 successful
+removes, then STOP only if a rule still remains), (3) verify **last** that
+access is Disabled **and** rule count is 0, then `rm` + `test ! -e` the
+saved `john-32.ip` on the success path. Close must **not** depend on
 `MY_IP`, ipify, or the current shell. A failed lookup or dead terminal must
 never leave the vault Enabled:
 
@@ -1067,7 +1075,6 @@ cosmabot_kv_close_john_32() {
   fi
   _n=0
   while test "$_n" -lt 32; do
-    _n=$((_n + 1))
     _ip=$(az keyvault network-rule list \
       --name "$PROD_KV_NAME" \
       --resource-group "$RG" \
@@ -1081,11 +1088,16 @@ cosmabot_kv_close_john_32() {
       echo "STOP: kv-close network-rule remove failed" >&2
       return 1
     }
+    _n=$((_n + 1))
   done
-  test "$_n" -lt 32 || {
+  _ip=$(az keyvault network-rule list \
+    --name "$PROD_KV_NAME" \
+    --resource-group "$RG" \
+    --query "ipRules[0].value" -o tsv 2>/dev/null) || _ip=
+  if test -n "$_ip"; then
     echo "STOP: kv-close rule remove loop bound exceeded" >&2
     return 1
-  }
+  fi
   ACCESS=$(az keyvault show --name "$PROD_KV_NAME" --resource-group "$RG" \
     --query properties.publicNetworkAccess -o tsv) || {
     echo "STOP: kv-close verify access failed" >&2
@@ -1103,6 +1115,14 @@ cosmabot_kv_close_john_32() {
   }
   test "$COUNT" = "0" || {
     echo "STOP: kv-close ipRules not empty" >&2
+    return 1
+  }
+  rm -f "$IPFILE" || {
+    echo "STOP: kv-close john-32.ip rm failed" >&2
+    return 1
+  }
+  test ! -e "$IPFILE" || {
+    echo "STOP: kv-close john-32.ip still exists" >&2
     return 1
   }
   echo "PASS: vault public access Disabled and ipRules empty"
