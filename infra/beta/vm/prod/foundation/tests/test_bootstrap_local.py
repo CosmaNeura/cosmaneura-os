@@ -3040,7 +3040,7 @@ class RecheckMode(unittest.TestCase):
         )
 
     def test_verify_prepared_recheck_uses_validated_record_without_reread(self):
-        """CTO: validated record from _latest_recheck_prepare must not be re-read."""
+        """CTO: plan_recheck must not re-read recheck-prepare after the validated load."""
         self._seed_applied_private_dir()
         self._recheck_prepare(stamp="20261114T160500Z")
         prepare_path = self.folder / "recheck-prepare-20261114T160500Z.json"
@@ -3067,14 +3067,16 @@ class RecheckMode(unittest.TestCase):
                     )
             return value
 
-        with patch.object(bootstrap, "read_json", side_effect=counting_read):
-            prepare_path, validated = bootstrap._latest_recheck_prepare(self.folder)
-            _manifest, _inputs, recheck_prepare = bootstrap._verify_prepared_recheck(
-                self.folder, prepare_path, validated
-            )
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "read_json", side_effect=counting_read
+        ), patch.object(
+            bootstrap, "command", side_effect=self._mock_tofu_run(self._noop_plan_json())
+        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261114T160600Z"):
+            result = bootstrap.plan(self.folder, recheck=True)
         self.assertEqual(len(recheck_reads), 1)
-        self.assertEqual(recheck_prepare["source"], good["source"])
-        self.assertEqual(recheck_prepare["source"], bootstrap.fingerprint())
+        self.assertEqual(result["prepare_path"], str(prepare_path))
+        self.assertEqual(result["source_sha256"], good["source_sha256"])
+        self.assertTrue(result["recheck"])
 
     def test_plan_recheck_uses_single_verified_prepare_path(self):
         """CTO: plan_recheck must call _latest_recheck_prepare once; result keeps that path."""
@@ -3120,6 +3122,36 @@ class RecheckMode(unittest.TestCase):
         self.assertEqual(Path(result["prepare_path"]).name, f"recheck-prepare-{verified_stamp}.json")
         # Newer file exists on disk but must not win the result's prepare_path.
         self.assertTrue((self.folder / "recheck-prepare-20261114T165999Z.json").is_file())
+
+    def test_plan_recheck_refuses_relative_private_directory(self):
+        """Opus: relative folder must refuse via private_directory before prepare glob."""
+        self._seed_applied_private_dir()
+        self._recheck_prepare(stamp="20261114T166000Z")
+        relative = Path(os.path.relpath(self.folder, Path.cwd()))
+        self.assertFalse(relative.is_absolute())
+        with patch.object(bootstrap, "owner_context", return_value=self.context), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(relative, recheck=True)
+        self._assert_refused_message(
+            err, "Use an absolute canonical private directory outside the repository"
+        )
+
+    def test_plan_recheck_refuses_symlink_private_directory(self):
+        """Opus: symlink folder must refuse via private_directory before prepare glob."""
+        self._seed_applied_private_dir()
+        self._recheck_prepare(stamp="20261114T166100Z")
+        link = self.root / "symlink-private"
+        link.symlink_to(self.folder)
+        self.assertTrue(link.is_symlink())
+        self.assertNotEqual(link.resolve(), link)
+        with patch.object(bootstrap, "owner_context", return_value=self.context), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.plan(link, recheck=True)
+        self._assert_refused_message(
+            err, "Use an absolute canonical private directory outside the repository"
+        )
 
     def test_plan_recheck_refuses_missing_prepare(self):
         self._seed_applied_private_dir()
@@ -3272,7 +3304,25 @@ class RecheckMode(unittest.TestCase):
             bootstrap.plan(self.folder, recheck=True)
         return err.exception
 
+    def _run_recheck_post_write_mutating(self, mutate, *, stamp):
+        """Run plan --recheck; call mutate() after recheck artifacts are written (post-run)."""
+        real_write = bootstrap.write_private
+
+        def write_then_maybe_mutate(path, data):
+            real_write(path, data)
+            if Path(path).name.startswith("recheck-plan-result-"):
+                mutate()
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=self._mock_tofu_run(self._noop_plan_json())
+        ), patch.object(bootstrap, "utc_plan_stamp", return_value=stamp), patch.object(
+            bootstrap, "write_private", side_effect=write_then_maybe_mutate
+        ), self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.plan(self.folder, recheck=True)
+        return err.exception
+
     def test_plan_recheck_refuses_first_tfplan_mutation(self):
+        """Mid-run first.tfplan check alone (distinct from post-run message)."""
         self._seed_applied_private_dir()
         self._recheck_prepare(stamp="20261114T163000Z")
         target = self.folder / "plans/first.tfplan"
@@ -3292,7 +3342,32 @@ class RecheckMode(unittest.TestCase):
         err = self._run_recheck_mutating(mutate, stamp="20261114T163100Z")
         self.assertEqual(str(err), "Post-apply re-check must not overwrite plans/first.tfplan")
 
+    def test_plan_recheck_refuses_first_tfplan_post_run_mutation(self):
+        """Post-run first.tfplan check alone (distinct mid-run message)."""
+        self._seed_applied_private_dir()
+        self._recheck_prepare(stamp="20261114T163050Z")
+        target = self.folder / "plans/first.tfplan"
+
+        def mutate():
+            bootstrap.replace_private(
+                target,
+                bootstrap.json_bytes(
+                    {
+                        "encryption_version": "v0",
+                        "encrypted_data": "invented-first-plan-post-mutated",
+                        "meta": {},
+                    }
+                ),
+            )
+
+        err = self._run_recheck_post_write_mutating(mutate, stamp="20261114T163150Z")
+        self.assertEqual(
+            str(err),
+            "Post-apply re-check left plans/first.tfplan changed after writing recheck artifacts",
+        )
+
     def test_plan_recheck_refuses_manifest_mutation(self):
+        """Mid-run manifest check alone (distinct from post-run message)."""
         self._seed_applied_private_dir()
         self._recheck_prepare(stamp="20261114T163200Z")
         target = self.folder / "manifest.json"
@@ -3304,6 +3379,23 @@ class RecheckMode(unittest.TestCase):
 
         err = self._run_recheck_mutating(mutate, stamp="20261114T163300Z")
         self.assertEqual(str(err), "Post-apply re-check must not modify manifest.json")
+
+    def test_plan_recheck_refuses_manifest_post_run_mutation(self):
+        """Post-run manifest check alone (refusal after recheck artifacts written)."""
+        self._seed_applied_private_dir()
+        self._recheck_prepare(stamp="20261114T163250Z")
+        target = self.folder / "manifest.json"
+
+        def mutate():
+            manifest = json.loads(target.read_text())
+            manifest["tampered_post"] = True
+            bootstrap.replace_private(target, bootstrap.json_bytes(manifest))
+
+        err = self._run_recheck_post_write_mutating(mutate, stamp="20261114T163350Z")
+        self.assertEqual(
+            str(err),
+            "Post-apply re-check left manifest.json changed after writing recheck artifacts",
+        )
 
     def test_plan_recheck_refuses_passphrase_mutation(self):
         self._seed_applied_private_dir()

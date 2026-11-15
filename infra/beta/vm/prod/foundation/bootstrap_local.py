@@ -1428,6 +1428,8 @@ def plan_recheck(folder: Path) -> dict:
       ``init -reconfigure`` never mutates the shared ``tofu-data/`` used by
       first-apply / recover.
     """
+    # Canonicalize before any recheck-prepare glob/read; never reuse the raw argument.
+    folder = private_directory(folder)
     # Exactly one glob+read of recheck-prepare for this plan path; reuse path+record.
     prepare_path, recheck_prepare = _latest_recheck_prepare(folder)
     manifest, inputs, recheck_prepare = _verify_prepared_recheck(
@@ -1589,7 +1591,9 @@ def plan_recheck(folder: Path) -> dict:
             result_path.unlink()
         raise
     if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
-        raise Refused("Post-apply re-check must not overwrite plans/first.tfplan")
+        raise Refused(
+            "Post-apply re-check left plans/first.tfplan changed after writing recheck artifacts"
+        )
     if first_summary_sha is not None and digest(first_summary) != first_summary_sha:
         raise Refused("Post-apply re-check must not overwrite first-apply plan-summary.json")
     if first_result_sha is not None and digest(first_result) != first_result_sha:
