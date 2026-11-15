@@ -691,11 +691,14 @@ happens **before** public network access is disabled again).
 
 **Fence — generate mode-600 password files** (workstation; CSPRNG; never print
 values). Writes three distinct URL-safe password files under the mode-`700`
-dir `$HOME/.cosmabot-sitting2/` (never the default tmp dir; file mode `600`)
-named for vault secrets `DATABASE-PASSWORD`, `POSTGRES-PASSWORD`, and
-`REDIS-PASSWORD`. Trap on `EXIT`/`INT`/`TERM`/`HUP` removes those files on
-interrupt. Trap save is shell-portable (bash: `trap -p`; zsh: `trap` listing —
-never `trap -p` in zsh, which sets a trap to the command `-p`). Restore only
+dir `$HOME/.cosmabot-sitting2/` (password value files stay out of the default
+tmp dir; file mode `600`) named for vault secrets `DATABASE-PASSWORD`,
+`POSTGRES-PASSWORD`, and `REDIS-PASSWORD`. Trap on `EXIT`/`INT`/`TERM`/`HUP`
+removes those files on interrupt. Trap save is shell-portable (bash: `trap -p`;
+zsh: `trap` listing — never `trap -p` in zsh, which sets a trap to the command
+`-p`). In zsh the short-lived trap-listing scratch file uses `mktemp` under
+`${TMPDIR:-/tmp}` (mode `600`) and is removed before return, or by a cleanup
+trap armed before the parse loop if that loop is interrupted. Restore only
 reinstalls what was saved, or clears the signal when save showed none; it never
 clears a trap it did not capture. In zsh, `EXIT` traps set inside a function are
 function-local, so restore runs via `eval` in that same function. If zsh
@@ -730,6 +733,7 @@ cosmabot_sitting2_writer_save_traps() {
     _writer_prev_int=
     _writer_prev_term=
     _writer_prev_hup=
+    trap 'rm -f "${_writer_trap_tmp:-}"' EXIT INT TERM HUP
     while IFS= read -r _trap_line || test -n "${_trap_line:-}"; do
       case "$_trap_line" in
         *" EXIT") _writer_prev_exit=$_trap_line ;;
@@ -738,7 +742,6 @@ cosmabot_sitting2_writer_save_traps() {
         *" HUP"|*" SIGHUP") _writer_prev_hup=$_trap_line ;;
       esac
     done <"$_writer_trap_tmp"
-    trap 'rm -f "${_writer_trap_tmp:-}"' EXIT INT TERM HUP
     rm -f "$_writer_trap_tmp" || {
       rm -f "$_writer_trap_tmp"
       if test -n "${_writer_prev_exit:-}"; then eval "${_writer_prev_exit}"; else trap - EXIT; fi
@@ -921,6 +924,7 @@ cosmabot_sitting2_prompt_save_traps() {
     _prompt_prev_int=
     _prompt_prev_term=
     _prompt_prev_hup=
+    trap 'rm -f "${_prompt_trap_tmp:-}"' EXIT INT TERM HUP
     while IFS= read -r _trap_line || test -n "${_trap_line:-}"; do
       case "$_trap_line" in
         *" EXIT") _prompt_prev_exit=$_trap_line ;;
@@ -929,7 +933,6 @@ cosmabot_sitting2_prompt_save_traps() {
         *" HUP"|*" SIGHUP") _prompt_prev_hup=$_trap_line ;;
       esac
     done <"$_prompt_trap_tmp"
-    trap 'rm -f "${_prompt_trap_tmp:-}"' EXIT INT TERM HUP
     rm -f "$_prompt_trap_tmp" || {
       rm -f "$_prompt_trap_tmp"
       if test -n "${_prompt_prev_exit:-}"; then eval "${_prompt_prev_exit}"; else trap - EXIT; fi
@@ -1095,6 +1098,7 @@ cosmabot_sitting2_load_save_traps() {
     _load_prev_int=
     _load_prev_term=
     _load_prev_hup=
+    trap 'rm -f "${_load_trap_tmp:-}"' EXIT INT TERM HUP
     while IFS= read -r _trap_line || test -n "${_trap_line:-}"; do
       case "$_trap_line" in
         *" EXIT") _load_prev_exit=$_trap_line ;;
@@ -1103,7 +1107,6 @@ cosmabot_sitting2_load_save_traps() {
         *" HUP"|*" SIGHUP") _load_prev_hup=$_trap_line ;;
       esac
     done <"$_load_trap_tmp"
-    trap 'rm -f "${_load_trap_tmp:-}"' EXIT INT TERM HUP
     rm -f "$_load_trap_tmp" || {
       rm -f "$_load_trap_tmp"
       if test -n "${_load_prev_exit:-}"; then eval "${_load_prev_exit}"; else trap - EXIT; fi
