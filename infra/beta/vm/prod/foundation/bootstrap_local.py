@@ -737,7 +737,15 @@ def _verify_prepared(folder: Path) -> tuple[dict, dict]:
     return manifest, read_json(folder / "inputs.json")
 
 
-def _latest_recheck_prepare(folder: Path) -> Path:
+def _latest_recheck_prepare(folder: Path) -> tuple[Path, dict]:
+    """Return the latest recheck-prepare path and the record already read/validated.
+
+    ``plan_recheck`` must call this exactly once, pass the returned pair into
+    ``_verify_prepared_recheck``, and reuse the same path for the result's
+    ``prepare_path``. Callers must use the returned ``record`` and must not
+    ``read_json`` or re-glob the file again — a second look could observe a
+    swapped/tampered or newer artifact.
+    """
     matches = sorted(
         path
         for path in folder.glob("recheck-prepare-*.json")
@@ -755,17 +763,25 @@ def _latest_recheck_prepare(folder: Path) -> Path:
         raise Refused(
             "recheck-prepare private_directory does not match this private directory"
         )
-    return latest
+    return latest, record
 
 
-def _verify_prepared_recheck(folder: Path) -> tuple[dict, dict, dict]:
+def _verify_prepared_recheck(
+    folder: Path,
+    prepare_path: Path,
+    recheck_prepare: dict,
+) -> tuple[dict, dict, dict]:
     """Like ``_verify_prepared``, but do not require ``manifest.source == fingerprint()``.
 
-    Re-check binds the reviewed source digests via ``recheck-prepare-<UTC>.json``
-    written by ``prepare --recheck``. That record's ``source`` must equal the
-    running ``fingerprint()`` and ``private_directory`` must equal this folder.
-    Private module ``*.tf`` files must still match that reviewed fingerprint.
-    Manifest ``source`` may still reflect an older prepare --recover head.
+    Re-check binds the reviewed source digests via the ``prepare_path`` /
+    ``recheck_prepare`` already returned by ``_latest_recheck_prepare``. Callers
+    (``plan_recheck``) must invoke ``_latest_recheck_prepare`` exactly once and
+    pass that same ``(path, record)`` here — this function must not glob or
+    ``read_json`` any ``recheck-prepare-*.json`` itself. That record's
+    ``source`` must equal the running ``fingerprint()`` and
+    ``private_directory`` must equal this folder. Private module ``*.tf`` files
+    must still match that reviewed fingerprint. Manifest ``source`` may still
+    reflect an older prepare --recover head.
     """
     folder = private_directory(folder)
     for name in ("manifest.json", "inputs.json", "backend.hcl", "tofurc", "encryption.passphrase"):
@@ -786,15 +802,10 @@ def _verify_prepared_recheck(folder: Path) -> tuple[dict, dict, dict]:
     for name, expected in manifest["protected_files"].items():
         if digest(folder / name) != expected:
             raise Refused("Prepared bootstrap inputs changed")
-    prepare_path = _latest_recheck_prepare(folder)
     secure_file(prepare_path)
-    recheck_prepare = read_json(prepare_path)
+    # Use the caller-provided validated record — do not re-glob or re-read.
     if not recheck_prepare.get("recheck") or not isinstance(recheck_prepare.get("source"), dict):
         raise Refused("recheck-prepare artifact is missing reviewed source digests")
-    if recheck_prepare.get("private_directory") != str(folder):
-        raise Refused(
-            "recheck-prepare private_directory does not match this private directory"
-        )
     if recheck_prepare.get("source") != fingerprint():
         raise Refused(
             "recheck-prepare source digests do not match the running foundation fingerprint"
@@ -1417,7 +1428,13 @@ def plan_recheck(folder: Path) -> dict:
       ``init -reconfigure`` never mutates the shared ``tofu-data/`` used by
       first-apply / recover.
     """
-    manifest, inputs, recheck_prepare = _verify_prepared_recheck(folder)
+    # Canonicalize before any recheck-prepare glob/read; never reuse the raw argument.
+    folder = private_directory(folder)
+    # Exactly one glob+read of recheck-prepare for this plan path; reuse path+record.
+    prepare_path, recheck_prepare = _latest_recheck_prepare(folder)
+    manifest, inputs, recheck_prepare = _verify_prepared_recheck(
+        folder, prepare_path, recheck_prepare
+    )
     passphrase = folder / "encryption.passphrase"
     state_path = folder / "state/foundation.tfstate"
     if not passphrase.exists():
@@ -1549,7 +1566,7 @@ def plan_recheck(folder: Path) -> dict:
             "plan": str(plan_path),
             "summary_path": str(summary_path),
             "result_path": str(result_path),
-            "prepare_path": str(_latest_recheck_prepare(folder)),
+            "prepare_path": str(prepare_path),
             "plan_sha256": plan_sha,
             "summary_sha256": summary["summary_sha256"],
             "enable_azure_openai": summary["enable_azure_openai"],
@@ -1574,7 +1591,9 @@ def plan_recheck(folder: Path) -> dict:
             result_path.unlink()
         raise
     if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
-        raise Refused("Post-apply re-check must not overwrite plans/first.tfplan")
+        raise Refused(
+            "Post-apply re-check left plans/first.tfplan changed after writing recheck artifacts"
+        )
     if first_summary_sha is not None and digest(first_summary) != first_summary_sha:
         raise Refused("Post-apply re-check must not overwrite first-apply plan-summary.json")
     if first_result_sha is not None and digest(first_result) != first_result_sha:
