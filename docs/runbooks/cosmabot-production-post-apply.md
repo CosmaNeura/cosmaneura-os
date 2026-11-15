@@ -2172,12 +2172,14 @@ live in `infra/beta/vm/host/fences/`:
 | Session (always closes) | `fence-ssh-secrets-session.sh` → `cosmabot_ssh_secrets_session` |
 | Terminal closed partway | `fence-ssh-nsg-recovery.sh` → `cosmabot_ssh_nsg_recovery_if_stranded` |
 
-**Order:** create staging with the exact mktemp line below, source the
-open/install/close fences, then invoke the session wrapper (it traps
-EXIT/INT/TERM so close-and-verify always runs):
+Use the same terminal and the same `$LOCAL_STAGING` folder from §4.1 step 2
+(do not run `mktemp` again — a second folder would orphan the staged secrets).
+
+**Order:** with that `$LOCAL_STAGING` still set, source the open/install/close
+fences, then invoke the session wrapper (it traps EXIT/INT/TERM so
+close-and-verify always runs):
 
 ```bash
-LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)
 chmod 700 "$LOCAL_STAGING"
 export RG=rg-cosmabot-prod-eus2-01 VM_PUBLIC_IP=… RELEASE_ID=… LOCAL_STAGING PROD_KV_NAME=… SECRETS_TRANSPORT_PY=…/secrets_transport.py ADMIN_USERNAME=… SSH_IDENTITY_PATH=…/id_ed25519
 source infra/beta/vm/host/fences/fence-ssh-nsg-open.sh

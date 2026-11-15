@@ -191,7 +191,7 @@ python3 secrets_transport.py \
   --resource-group rg-cosmabot-prod-eus2-01 \
   --vault-name kv-cbot-prd-<suffix> \
   --stage-from-vault \
-  --staging-dir /path/to/mode-700-private-staging \
+  --staging-dir /tmp/cosmabot-staging.XXXXXX \
   --secret-name CLERK-SECRET-KEY
 ```
 
