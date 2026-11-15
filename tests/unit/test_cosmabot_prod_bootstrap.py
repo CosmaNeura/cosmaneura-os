@@ -18,3 +18,4 @@ spec.loader.exec_module(module)
 # EncryptionProof needs a pinned tofu binary; keep it out of the unit suite.
 BootstrapSafety = module.BootstrapSafety
 RecoveryMode = module.RecoveryMode
+RecheckMode = module.RecheckMode
