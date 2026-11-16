@@ -298,25 +298,23 @@ unset mid-sitting, STOP and re-paste this box (never print PASS for an unset
 az login
 az account show --query "{name:name, id:id}" -o json
 export RG=rg-cosmabot-prod-eus2-01
-_kv_matches=$(az keyvault list --resource-group "$RG" --query "[?starts_with(name, 'kv-cbot-prd-')].name" -o tsv) || {
+if ! _kv_matches=$(az keyvault list --resource-group "$RG" --query "[?starts_with(name, 'kv-cbot-prd-')].name" -o tsv); then
   echo "STOP: Sitting 2 start az keyvault list failed" >&2
-  false
-}
-_kv_count=$(printf '%s\n' "$_kv_matches" | sed '/^$/d' | wc -l | tr -d '[:space:]')
-test "$_kv_count" = "1" || {
+elif
+  _kv_count=$(printf '%s\n' "$_kv_matches" | sed '/^$/d' | wc -l | tr -d '[:space:]')
+  ! test "$_kv_count" = "1"
+then
   echo "STOP: Sitting 2 start expected exactly one kv-cbot-prd-* vault in $RG (found ${_kv_count})" >&2
   unset _kv_matches _kv_count PROD_KV_NAME
-  false
-}
-export PROD_KV_NAME="$_kv_matches"
-printf '%s' "$PROD_KV_NAME" | grep -Eq '^kv-cbot-prd-[a-z0-9]+$' || {
+elif ! printf '%s' "$_kv_matches" | grep -Eq '^kv-cbot-prd-[a-z0-9]+$'; then
   echo "STOP: Sitting 2 start PROD_KV_NAME must match kv-cbot-prd-<suffix>" >&2
   unset _kv_matches _kv_count PROD_KV_NAME
-  false
-}
-export KEYFILE=$HOME/.cosmabot-sitting2/llm-key1
-unset _kv_matches _kv_count
-echo "PASS: Sitting 2 start exports set (RG PROD_KV_NAME KEYFILE; values not printed beyond account name/id)"
+else
+  export PROD_KV_NAME="$_kv_matches"
+  export KEYFILE=$HOME/.cosmabot-sitting2/llm-key1
+  unset _kv_matches _kv_count
+  echo "PASS: Sitting 2 start exports set (RG PROD_KV_NAME KEYFILE; values not printed beyond account name/id)"
+fi
 ```
 
 **SSH reach (host install only; not vault):** derive `VM_PUBLIC_IP` in the
@@ -1451,46 +1449,32 @@ should see both already set, then the bootstrap JSON receipt print (no secret
 values). Do **not** enable `cosmabot-prod.service` yet:
 
 ```bash
-test -f bootstrap_host.py || {
+if ! test -f bootstrap_host.py; then
   echo "STOP: bootstrap_host.py missing - cd to the directory that holds the reviewed script first" >&2
-  false
-}
-test -n "${BOOTSTRAP_CREATION_RECEIPT:-}" || {
+elif ! test -n "${BOOTSTRAP_CREATION_RECEIPT:-}"; then
   echo "STOP: bootstrap BOOTSTRAP_CREATION_RECEIPT unset - export the reviewed root-owned receipt path first" >&2
-  false
-}
-test -n "${BOOTSTRAP_CREATION_RECEIPT_SHA256:-}" || {
+elif ! test -n "${BOOTSTRAP_CREATION_RECEIPT_SHA256:-}"; then
   echo "STOP: bootstrap BOOTSTRAP_CREATION_RECEIPT_SHA256 unset - export the reviewed receipt sha256 first" >&2
-  false
-}
-test -f "$BOOTSTRAP_CREATION_RECEIPT" || {
+elif ! test -f "$BOOTSTRAP_CREATION_RECEIPT"; then
   echo "STOP: bootstrap creation receipt file missing" >&2
-  false
-}
-BOOTSTRAP_EXPECTED_DEVICE=$(readlink -f /dev/disk/azure/scsi1/lun0) || {
+elif ! BOOTSTRAP_EXPECTED_DEVICE=$(readlink -f /dev/disk/azure/scsi1/lun0); then
   echo "STOP: bootstrap could not resolve /dev/disk/azure/scsi1/lun0" >&2
-  false
-}
-printf '%s' "$BOOTSTRAP_EXPECTED_DEVICE" | grep -Eq '^/dev/sd[a-z]+$' || {
+elif ! printf '%s' "$BOOTSTRAP_EXPECTED_DEVICE" | grep -Eq '^/dev/sd[a-z]+$'; then
   echo "STOP: bootstrap expected device must be /dev/sdX from lun0" >&2
-  false
-}
-BOOTSTRAP_VM_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["vm_id"])' "$BOOTSTRAP_CREATION_RECEIPT") || {
+elif ! BOOTSTRAP_VM_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["vm_id"])' "$BOOTSTRAP_CREATION_RECEIPT"); then
   echo "STOP: bootstrap could not read vm_id from receipt" >&2
-  false
-}
-BOOTSTRAP_DISK_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["disk_id"])' "$BOOTSTRAP_CREATION_RECEIPT") || {
+elif ! BOOTSTRAP_DISK_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["disk_id"])' "$BOOTSTRAP_CREATION_RECEIPT"); then
   echo "STOP: bootstrap could not read disk_id from receipt" >&2
-  false
-}
-python3 bootstrap_host.py \
-  --profile cosmabot-vm-prod-v1 \
-  --vm-id "$BOOTSTRAP_VM_ID" \
-  --disk-id "$BOOTSTRAP_DISK_ID" \
-  --expected-device "$BOOTSTRAP_EXPECTED_DEVICE" \
-  --creation-receipt "$BOOTSTRAP_CREATION_RECEIPT" \
-  --creation-receipt-sha256 "$BOOTSTRAP_CREATION_RECEIPT_SHA256" \
-  --format-new-empty-disk "$BOOTSTRAP_DISK_ID"
+else
+  python3 bootstrap_host.py \
+    --profile cosmabot-vm-prod-v1 \
+    --vm-id "$BOOTSTRAP_VM_ID" \
+    --disk-id "$BOOTSTRAP_DISK_ID" \
+    --expected-device "$BOOTSTRAP_EXPECTED_DEVICE" \
+    --creation-receipt "$BOOTSTRAP_CREATION_RECEIPT" \
+    --creation-receipt-sha256 "$BOOTSTRAP_CREATION_RECEIPT_SHA256" \
+    --format-new-empty-disk "$BOOTSTRAP_DISK_ID"
+fi
 ```
 
 **Paste — workstation `--stage-from-vault` (full secret set)** (after the
@@ -1502,33 +1486,25 @@ this same `$LOCAL_STAGING` for §4.5 (do not run `mktemp` again). You should see
 printed):
 
 ```bash
-test -n "${RG:-}" || {
+if ! test -n "${RG:-}"; then
   echo "STOP: stage-from-vault RG unset - paste Sitting 2 start box first" >&2
-  false
-}
-test -n "${PROD_KV_NAME:-}" || {
+elif ! test -n "${PROD_KV_NAME:-}"; then
   echo "STOP: stage-from-vault PROD_KV_NAME unset - paste Sitting 2 start box first" >&2
-  false
-}
-test -f infra/beta/vm/host/secrets_transport.py || {
+elif ! test -f infra/beta/vm/host/secrets_transport.py; then
   echo "STOP: stage-from-vault secrets_transport.py missing - run from the repo root" >&2
-  false
-}
-LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX) || {
+elif ! LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX); then
   echo "STOP: stage-from-vault mktemp failed" >&2
-  false
-}
-export LOCAL_STAGING
-chmod 700 "$LOCAL_STAGING" || {
+elif ! chmod 700 "$LOCAL_STAGING"; then
   echo "STOP: stage-from-vault chmod 700 failed" >&2
-  false
-}
-python3 infra/beta/vm/host/secrets_transport.py \
-  --profile cosmabot-vm-prod-v1 \
-  --resource-group "$RG" \
-  --vault-name "$PROD_KV_NAME" \
-  --stage-from-vault \
-  --staging-dir "$LOCAL_STAGING"
+else
+  export LOCAL_STAGING
+  python3 infra/beta/vm/host/secrets_transport.py \
+    --profile cosmabot-vm-prod-v1 \
+    --resource-group "$RG" \
+    --vault-name "$PROD_KV_NAME" \
+    --stage-from-vault \
+    --staging-dir "$LOCAL_STAGING"
+fi
 ```
 
 **Close-and-verify (vault + NSG) is MANDATORY before any tofu plan or apply** —
@@ -2306,55 +2282,37 @@ fences, then invoke the session wrapper (it traps EXIT/INT/TERM so
 close-and-verify always runs):
 
 ```bash
-test -n "${LOCAL_STAGING:-}" || {
+if ! test -n "${LOCAL_STAGING:-}"; then
   echo "STOP: session LOCAL_STAGING unset - paste the stage-from-vault box first" >&2
-  false
-}
-chmod 700 "$LOCAL_STAGING"
-test -n "${RG:-}" || {
+elif ! test -n "${RG:-}"; then
   echo "STOP: session RG unset - paste Sitting 2 start box first" >&2
-  false
-}
-test -n "${PROD_KV_NAME:-}" || {
+elif ! test -n "${PROD_KV_NAME:-}"; then
   echo "STOP: session PROD_KV_NAME unset - paste Sitting 2 start box first" >&2
-  false
-}
-test -n "${RELEASE_ID:-}" || {
+elif ! test -n "${RELEASE_ID:-}"; then
   echo "STOP: session RELEASE_ID unset - export the reviewed release id first" >&2
-  false
-}
-test -n "${ADMIN_USERNAME:-}" || {
+elif ! test -n "${ADMIN_USERNAME:-}"; then
   echo "STOP: session ADMIN_USERNAME unset - export the reviewed admin_username first" >&2
-  false
-}
-test -n "${SSH_IDENTITY_PATH:-}" || {
+elif ! test -n "${SSH_IDENTITY_PATH:-}"; then
   echo "STOP: session SSH_IDENTITY_PATH unset - export the private key path matching admin_ssh_public_key first" >&2
-  false
-}
-test -f "$SSH_IDENTITY_PATH" || {
+elif ! test -f "$SSH_IDENTITY_PATH"; then
   echo "STOP: session SSH_IDENTITY_PATH missing" >&2
-  false
-}
-export RELEASE_ID ADMIN_USERNAME SSH_IDENTITY_PATH LOCAL_STAGING RG PROD_KV_NAME
-VM_PUBLIC_IP=$(az network public-ip show --resource-group "$RG" --name pip-cosmabot-prod-eus2-01 --query ipAddress -o tsv) || {
-  echo "STOP: session could not read pip-cosmabot-prod-eus2-01" >&2
-  false
-}
-test -n "$VM_PUBLIC_IP" || {
-  echo "STOP: session VM_PUBLIC_IP empty" >&2
-  false
-}
-export VM_PUBLIC_IP
-test -f infra/beta/vm/host/secrets_transport.py || {
+elif ! test -f infra/beta/vm/host/secrets_transport.py; then
   echo "STOP: session secrets_transport.py missing - run from the repo root" >&2
-  false
-}
-export SECRETS_TRANSPORT_PY="$PWD/infra/beta/vm/host/secrets_transport.py"
-source infra/beta/vm/host/fences/fence-ssh-nsg-open.sh
-source infra/beta/vm/host/fences/fence-ssh-secrets-install.sh
-source infra/beta/vm/host/fences/fence-ssh-nsg-close-verify.sh
-source infra/beta/vm/host/fences/fence-ssh-secrets-session.sh
-cosmabot_ssh_secrets_session
+elif ! VM_PUBLIC_IP=$(az network public-ip show --resource-group "$RG" --name pip-cosmabot-prod-eus2-01 --query ipAddress -o tsv); then
+  echo "STOP: session could not read pip-cosmabot-prod-eus2-01" >&2
+elif ! test -n "$VM_PUBLIC_IP"; then
+  echo "STOP: session VM_PUBLIC_IP empty" >&2
+elif ! chmod 700 "$LOCAL_STAGING"; then
+  echo "STOP: session chmod 700 LOCAL_STAGING failed" >&2
+else
+  export RELEASE_ID ADMIN_USERNAME SSH_IDENTITY_PATH LOCAL_STAGING RG PROD_KV_NAME VM_PUBLIC_IP
+  export SECRETS_TRANSPORT_PY="$PWD/infra/beta/vm/host/secrets_transport.py"
+  source infra/beta/vm/host/fences/fence-ssh-nsg-open.sh
+  source infra/beta/vm/host/fences/fence-ssh-secrets-install.sh
+  source infra/beta/vm/host/fences/fence-ssh-nsg-close-verify.sh
+  source infra/beta/vm/host/fences/fence-ssh-secrets-session.sh
+  cosmabot_ssh_secrets_session
+fi
 ```
 
 `LOCAL_STAGING` must match `mktemp -d /tmp/cosmabot-staging.XXXXXX` (six random
@@ -2380,22 +2338,22 @@ plan/apply until that PASS prints. Also close the vault (§4.1 /
 `cosmabot_kv_close_john_32`) if it is still open.
 
 ```bash
-test -n "${LOCAL_STAGING:-}" || {
+if ! test -n "${LOCAL_STAGING:-}"; then
   echo "STOP: recovery LOCAL_STAGING unset - in a new terminal, export LOCAL_STAGING to the folder from section 4.1 step 2" >&2
-  false
-}
-printf '%s' "$LOCAL_STAGING" | grep -Eq '^(/private)?/tmp/cosmabot-staging\.[A-Za-z0-9]{6}$' || {
+elif ! printf '%s' "$LOCAL_STAGING" | grep -Eq '^(/private)?/tmp/cosmabot-staging\.[A-Za-z0-9]{6}$'; then
   echo "STOP: recovery LOCAL_STAGING must match /tmp/cosmabot-staging.XXXXXX or /private/tmp/cosmabot-staging.XXXXXX" >&2
-  false
-}
-test -n "${RG:-}" || export RG=rg-cosmabot-prod-eus2-01
-printf '%s' "$RG" | grep -Eq '^rg-cosmabot-prod-eus2-01$' || {
-  echo "STOP: recovery RG must be rg-cosmabot-prod-eus2-01" >&2
-  false
-}
-export RG LOCAL_STAGING
-source infra/beta/vm/host/fences/fence-ssh-nsg-recovery.sh
-cosmabot_ssh_nsg_recovery_if_stranded
+else
+  if test -z "${RG:-}"; then
+    RG=rg-cosmabot-prod-eus2-01
+  fi
+  if ! printf '%s' "$RG" | grep -Eq '^rg-cosmabot-prod-eus2-01$'; then
+    echo "STOP: recovery RG must be rg-cosmabot-prod-eus2-01" >&2
+  else
+    export RG LOCAL_STAGING
+    source infra/beta/vm/host/fences/fence-ssh-nsg-recovery.sh
+    cosmabot_ssh_nsg_recovery_if_stranded
+  fi
+fi
 ```
 
 ### 4.4 Mac-side fence syntax proof
