@@ -88,12 +88,15 @@ On a non-root Mac it writes the local files for review and may print helper
 root-install lines. For Sitting 2, **do not** run those printed `sudo install`
 lines and **do not** create `/etc/cosmabot` or place the receipt under it before
 bootstrap. Use the runbook **receipt-place** paste instead: it pipes the local
-JSON over ssh into a root-owned mode-0600 regular file at the fixed path
-`/root/cosmabot-creation-receipt.json` (outside `/etc/cosmabot`), verifies
-remote `sha256sum` against the local `.sha256` sidecar, and prints the two
-`export` lines for the VM root shell. `bootstrap_host.py` accepts any
-root-owned mode `0600` or `0400` regular receipt file; bootstrap itself creates
-`/etc/cosmabot` (including `host-bootstrap.json`).
+JSON over pinned-host-key ssh into a root-owned mode-0600 regular file at the
+fixed path `/root/cosmabot-creation-receipt.json` (outside `/etc/cosmabot`),
+verifies remote `sudo sha256sum` against the local `.sha256` sidecar (ssh exit
+status checked before parsing), and prints the two `export` lines for the VM
+root shell. `bootstrap_host.py` accepts any root-owned mode `0600` or `0400`
+regular receipt file; bootstrap itself creates `/etc/cosmabot` (including
+`host-bootstrap.json`). Bootstrap-close always runs close-and-verify of the
+temporary SSH rule; the `host-bootstrap.json` check uses `sudo test` before
+that close so a missing file still leaves the rule closed.
 
 Use the printed `sha256=` value (or the runbook export line) with
 `--creation-receipt-sha256`. Local proof:
@@ -269,13 +272,11 @@ receipt-place paste to `/root/cosmabot-creation-receipt.json` (sha256 verified;
 do not create `/etc/cosmabot` yet) → root shell with the printed export lines
 and hand-set `FORMAT_APPROVAL_DISK_ID` → `#389` bootstrap so `/etc/cosmabot`
 exists (`apply_started_utc` under 24 hours, or STOP and tell the CTO) →
-close-and-verify that SSH rule and require
-`/etc/cosmabot/host-bootstrap.json` before any second vault/secrets window →
-second vault window → `LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)`
-→ `--stage-from-vault` without `--secret-name` (path shape + all expected names
-present and non-empty, or STOP before SSH) → `TEMP-JOHN-SSH-SECRETS-INSTALL` →
-ssh-stdin install → close-and-verify. John's hands-on: `/32`, vault window,
-SSH key.
+bootstrap-close (always close-and-verify the TEMP SSH rule; `sudo test` for
+`/etc/cosmabot/host-bootstrap.json` before that close; secrets blocked if
+missing) → second vault window → stage-from-vault (STOP if `LOCAL_STAGING`
+already set and exists) → `TEMP-JOHN-SSH-SECRETS-INSTALL` → ssh-stdin install →
+close-and-verify. John's hands-on: `/32`, vault window, SSH key.
 
 SSH install window (John `/32` only; see runbook §4.5 and `fences/`):
 
