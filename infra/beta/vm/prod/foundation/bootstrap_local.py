@@ -1842,7 +1842,7 @@ def _assert_recreate_commands_safe(
     *,
     replace_addresses: frozenset[str] | set[str] | None = None,
 ) -> None:
-    """Refuse planted apply / missing allow var / illegal -replace before tofu runs."""
+    """Refuse planted apply / missing plan / missing allow var / illegal -replace before tofu runs."""
     expected_replaces = (
         frozenset(replace_addresses)
         if replace_addresses is not None

@@ -4353,6 +4353,29 @@ class RecreateWorkloadMode(unittest.TestCase):
             bootstrap._assert_recreate_commands_safe(missing_replace)
         self.assertIn("azurerm_managed_disk.data", str(missing_err.exception))
         self.assertIn("must match state presence", str(missing_err.exception))
+        planted_apply = [
+            ("init", ["init", "-input=false"]),
+            (
+                "plan",
+                [
+                    "plan",
+                    "-var=allow_workload_recreate=true",
+                    "-replace=azurerm_linux_virtual_machine.workload",
+                    "-replace=azurerm_managed_disk.data",
+                    "-out=/tmp/x.tfplan",
+                ],
+            ),
+            ("apply", ["apply", "-auto-approve", "/tmp/x.tfplan"]),
+        ]
+        with self.assertRaises(bootstrap.Refused) as apply_err:
+            bootstrap._assert_recreate_commands_safe(planted_apply)
+        self.assertIn("must not invoke tofu apply", str(apply_err.exception).lower())
+        missing_plan = [
+            ("init", ["init", "-input=false"]),
+        ]
+        with self.assertRaises(bootstrap.Refused) as plan_err:
+            bootstrap._assert_recreate_commands_safe(missing_plan)
+        self.assertIn("missing plan", str(plan_err.exception).lower())
 
     def test_assert_recreate_accepts_exact_set_and_lists_addresses(self):
         plan = self._exact_recreate_plan(with_alerts=True)
@@ -5344,7 +5367,7 @@ class RecreateWorkloadMode(unittest.TestCase):
             )
         self.assertIn("source/lock differs", str(bad_lock.exception).lower())
 
-        # Unsanctioned path in the private-module diff refuses.
+        # Unsanctioned path outside the reviewed set refuses.
         bootstrap.write_private(
             self.folder / "module" / "unsanctioned-extra.tf",
             b'# synthetic unsanctioned drift\n',
@@ -5365,6 +5388,48 @@ class RecreateWorkloadMode(unittest.TestCase):
             )
         self.assertIn("already matches", str(matched.exception).lower())
         self.assertIn("nothing to refresh", str(matched.exception).lower())
+
+    def test_refresh_refuses_reviewed_unsanctioned_path_and_missing_sanctioned_file(self):
+        """Kill allow-list deletion: reviewed *.tf outside SANCTIONED must refuse.
+
+        Also covers the missing sanctioned-file branch. Mutation: drop
+        SANCTIONED_MODULE_REFRESH_PATHS (or the membership check) → the
+        reviewed-but-unsanctioned case no longer refuses.
+        """
+        work = self._synthetic_origin_main_worktree()
+        self._seed_private_dir()
+        fp = bootstrap.fingerprint()
+        reviewed_unsanctioned = "network.tf"
+        self.assertIn(reviewed_unsanctioned, fp["files"])
+        self.assertNotIn(reviewed_unsanctioned, bootstrap.SANCTIONED_MODULE_REFRESH_PATHS)
+        for sanctioned in bootstrap.SANCTIONED_MODULE_REFRESH_PATHS:
+            self.assertIn(sanctioned, fp["files"])
+
+        private_net = self.folder / "module" / reviewed_unsanctioned
+        bootstrap.replace_private(
+            private_net, private_net.read_bytes() + b"\n# synthetic reviewed-unsanctioned drift\n"
+        )
+        with patch.object(bootstrap, "REPO", work), patch.object(
+            bootstrap, "_operator_print"
+        ), self.assertRaises(bootstrap.Refused) as unsanctioned:
+            bootstrap.refresh_module_snapshot(
+                self.folder, fp["source_sha256"], fp["lock_sha256"], confirm_refresh=True
+            )
+        self.assertIn("sanctioned", str(unsanctioned.exception).lower())
+        self.assertIn(reviewed_unsanctioned, str(unsanctioned.exception))
+
+        # Restore the unsanctioned path, then delete a sanctioned file (missing branch).
+        bootstrap.replace_private(private_net, (MODULE / reviewed_unsanctioned).read_bytes())
+        (self.folder / "module" / "compute.tf").unlink()
+        self.assertFalse((self.folder / "module" / "compute.tf").exists())
+        with patch.object(bootstrap, "REPO", work), patch.object(
+            bootstrap, "_operator_print"
+        ), self.assertRaises(bootstrap.Refused) as missing:
+            bootstrap.refresh_module_snapshot(
+                self.folder, fp["source_sha256"], fp["lock_sha256"], confirm_refresh=True
+            )
+        self.assertIn("missing", str(missing.exception).lower())
+        self.assertIn("compute.tf", str(missing.exception))
 
     def test_apply_completed_os_disk_failure_is_apply_attempted(self):
         """Post-apply OS-disk refuse after tofu exit 0 must be ApplyAttempted (exit 2 path)."""
@@ -5466,11 +5531,13 @@ class RecreateWorkloadMode(unittest.TestCase):
         self.assertIn("fail-closed", str(list_err.exception).lower())
 
     def test_prevent_destroy_plan_fixture_false_blocks_true_lifts(self):
-        """Validated plan-JSON fixture: false refuses destroy/replace; true allows it.
+        """Proves the Python allow-var flag and the HCL prevent_destroy pin, not live OpenTofu.
 
-        Mirrors the real tofu probe shape without requiring OpenTofu on the CI
-        python-tests-migrate image (EncryptionProof stays out of the unit re-export
-        for the same reason). Mutation: drop the false refusal → this fails.
+        False refuses destroy/replace; true allows the exact recreate set. The HCL
+        pin ``prevent_destroy = !var.allow_workload_recreate`` is counted in
+        compute.tf. The real OpenTofu probe (PreventDestroyTofuProbe) runs
+        locally only and stays out of CI (not re-exported into tests/unit).
+        Mutation: drop the false refusal or the HCL pin count → this fails.
         """
         sub = self.inputs["subscription_id"]
         destroy_plan = {
