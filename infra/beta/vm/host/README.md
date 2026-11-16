@@ -41,14 +41,21 @@ inputs or evidence:
 }
 ```
 
-The disk creation time must fall within that completed apply, started less than
-24 hours ago. For staging, IDs must identify only
-`rg-cosmas-os-vm-staging-eus2-lab01`, `vm-cosmabot-staging-eus2-lab01` and
-`data-vm-cosmabot-staging-eus2-lab01`. For production (`--profile cosmabot-vm-prod-v1`),
-IDs must identify only `rg-cosmabot-prod-eus2-01`, `vm-cosmabot-prod-eus2-01` and
+The disk creation time must fall within that completed apply. The 24-hour
+window is the receipt field `apply_started_utc`: bootstrap refuses (and the
+Sitting 2 runbook paste STOPs before any host change) when that timestamp is
+older than 24 hours or in the future. If the window has passed, stop and tell
+the CTO; do not invent a re-apply step in the paste path. For staging, IDs must
+identify only `rg-cosmas-os-vm-staging-eus2-lab01`,
+`vm-cosmabot-staging-eus2-lab01` and `data-vm-cosmabot-staging-eus2-lab01`. For
+production (`--profile cosmabot-vm-prod-v1`), IDs must identify only
+`rg-cosmabot-prod-eus2-01`, `vm-cosmabot-prod-eus2-01` and
 `data-vm-cosmabot-prod-eus2-01` (see `creation-receipt.prod.example.json`). The
 receipt is operator-supplied provenance; its hash binds the reviewed bytes. The
 script does not independently authenticate a fabricated receipt against ARM.
+Run from a tree that keeps `host/` beside `logging/` so
+`../logging/retention.py` and `../logging/retention.json` resolve (Sitting 2
+copies both under `/opt/cosmabot/vm/` before bootstrap).
 
 At execution it reads **compute metadata only**, without proxies or an identity
 token. Actual IMDS VM instance/resource IDs, region, size, managed disk ID, size,
@@ -202,8 +209,11 @@ Then restore vault public access per **§4.3**. LLM installs also write a
 non-secret sidecar `WORKSPACE_LLM_API_KEY.source-account`.
 
 **One order** (runbook Sitting 2 row 5 / after format-disk yes + continue-prep
-yes / checklist): `#389` bootstrap so `/etc/cosmabot` exists → second vault
-window → `LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)` →
+yes / checklist): open temporary SSH `/32` with the existing open fence → root
+shell → copy `host/` + sibling `logging/` to `/opt/cosmabot/vm/` → `#389`
+bootstrap so `/etc/cosmabot` exists (`apply_started_utc` under 24 hours, or
+STOP and tell the CTO) → close-and-verify that SSH rule → second vault window →
+`LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)` →
 `--stage-from-vault` without `--secret-name` (path shape + all expected names
 present and non-empty, or STOP before SSH) → `TEMP-JOHN-SSH-SECRETS-INSTALL` →
 ssh-stdin install → close-and-verify. John's hands-on: `/32`, vault window,
@@ -229,8 +239,11 @@ SSH install window (John `/32` only; see runbook §4.5 and `fences/`):
    FAIL).
 5. If the terminal closed partway: source only
    `fence-ssh-nsg-recovery.sh` (self-contained guarded rm) then
-   `cosmabot_ssh_nsg_recovery_if_stranded` — always deletes then verifies NSG;
-   leftover staging → STOP not PASS; missing LOCAL_STAGING is a NOTE.
+   `cosmabot_ssh_nsg_recovery_if_stranded` — always deletes then verifies NSG.
+   Wrong-shape `LOCAL_STAGING` → STOP before recovery runs. Unset
+   `LOCAL_STAGING` → NOTE that any leftover staging folder must be checked and
+   removed by hand, then still run recovery so the SSH `/32` rule is deleted.
+   Valid shape → guarded staging rm as now; leftover staging → STOP not PASS.
 
 Sourcing a fence file has zero side effects (never opens or closes the NSG).
 
