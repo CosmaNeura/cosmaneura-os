@@ -1416,12 +1416,14 @@ Sitting 2 row 1 already closed the vault and deleted local sitting2 files.
 For host install (`#388`):
 
 0. `#389` host bootstrap so `/etc/cosmabot` exists (paste boxes below; before any
-   SSH secrets install). Open a temporary SSH `/32` with the existing §4.5 open
-   fence, get a root shell, copy the reviewed `host/` + sibling `logging/` tree
-   onto the VM, then run bootstrap. Close-and-verify that SSH rule before the
-   secrets session re-opens the same rule name. Remote path pre-checks
-   `/etc/cosmabot`, then `install -d -o root -g root -m 0700` for the release
-   root (does not invent `/etc/cosmabot`; bootstrap must have created it).
+   SSH secrets install). Build the creation receipt on the workstation with
+   `build_creation_receipt.py` (receipt-tool paste), open a temporary SSH `/32`
+   with the existing §4.5 open fence, get a root shell, copy the reviewed
+   `host/` + sibling `logging/` tree onto the VM, place the receipt root-owned,
+   then run bootstrap. Close-and-verify that SSH rule before the secrets
+   session re-opens the same rule name. Remote path pre-checks `/etc/cosmabot`,
+   then `install -d -o root -g root -m 0700` for the release root (does not
+   invent `/etc/cosmabot`; bootstrap must have created it).
 1. Re-open the vault with the **same** §4.1 open fence
    (`cosmabot_kv_open_john_32`).
 2. Workstation stage-from-vault paste box below (`LOCAL_STAGING` + full catalog;
@@ -1450,14 +1452,51 @@ succeeds) before you paste. `RG` comes from the Sitting 2 start box.
 `bootstrap_host.py` reads `../logging/retention.py` and
 `../logging/retention.json` relative to the script file, so the copy box places
 the whole `infra/beta/vm/host` tree beside `infra/beta/vm/logging` under
-`/opt/cosmabot/vm/` on the VM. The creation receipt remains the
-operator-reviewed root-owned file (mode `0400` or `0600`) whose field template
-is `infra/beta/vm/host/creation-receipt.prod.example.json`; export its path as
-`BOOTSTRAP_CREATION_RECEIPT` and its reviewed SHA256 as
+`/opt/cosmabot/vm/` on the VM. Build the creation receipt first with the
+receipt-tool paste below (`build_creation_receipt.py`, same flags as
+`infra/beta/vm/host/README.md`). That paste exports
+`BOOTSTRAP_CREATION_RECEIPT` and `BOOTSTRAP_CREATION_RECEIPT_SHA256` from the
+local files under `$HOME/.cosmabot-sitting2/`. After SSH is open, copy the
+local receipt to the VM and place it root-owned with the exact `sudo install`
+commands the tool prints (also in that README): mode `0600` (or `0400`) at
+`/etc/cosmabot/creation-receipt.json`. On the VM root shell, point
+`BOOTSTRAP_CREATION_RECEIPT` at that path and keep the same
 `BOOTSTRAP_CREATION_RECEIPT_SHA256` before the bootstrap paste. The receipt
 field `apply_started_utc` must be less than 24 hours old; the bootstrap paste
 STOPs before any host change when that window has passed (stop and tell the
 CTO; do not invent a re-apply step here).
+
+**Paste — build creation receipt** (workstation; after Sitting 2 start / `az
+login`). Calls `build_creation_receipt.py` exactly as
+`infra/beta/vm/host/README.md` documents (`--profile cosmabot-vm-prod-v1`,
+`--out-dir "$HOME/.cosmabot-sitting2"`). Read-only `az vm show` / `az disk
+show` only; no Azure writes. You should see the tool `PASS:` lines plus
+`PASS: creation receipt built` with exports set (sha256 value not re-printed
+by this wrapper):
+
+```bash
+if ! test -f infra/beta/vm/host/build_creation_receipt.py; then
+  echo "STOP: build-creation-receipt build_creation_receipt.py missing - run from the repo root" >&2
+elif ! mkdir -p "$HOME/.cosmabot-sitting2"; then
+  echo "STOP: build-creation-receipt mkdir out-dir failed" >&2
+elif ! chmod 700 "$HOME/.cosmabot-sitting2"; then
+  echo "STOP: build-creation-receipt chmod 700 out-dir failed" >&2
+elif ! python3 infra/beta/vm/host/build_creation_receipt.py --profile cosmabot-vm-prod-v1 --out-dir "$HOME/.cosmabot-sitting2"; then
+  echo "STOP: build-creation-receipt tool failed" >&2
+elif ! test -f "$HOME/.cosmabot-sitting2/creation-receipt.json"; then
+  echo "STOP: build-creation-receipt creation-receipt.json missing after tool" >&2
+elif ! test -f "$HOME/.cosmabot-sitting2/creation-receipt.sha256"; then
+  echo "STOP: build-creation-receipt creation-receipt.sha256 missing after tool" >&2
+elif ! BOOTSTRAP_CREATION_RECEIPT_SHA256=$(tr -d '[:space:]' < "$HOME/.cosmabot-sitting2/creation-receipt.sha256"); then
+  echo "STOP: build-creation-receipt could not read creation-receipt.sha256" >&2
+elif ! test -n "$BOOTSTRAP_CREATION_RECEIPT_SHA256"; then
+  echo "STOP: build-creation-receipt sha256 empty" >&2
+else
+  export BOOTSTRAP_CREATION_RECEIPT="$HOME/.cosmabot-sitting2/creation-receipt.json"
+  export BOOTSTRAP_CREATION_RECEIPT_SHA256
+  echo "PASS: creation receipt built; BOOTSTRAP_CREATION_RECEIPT and BOOTSTRAP_CREATION_RECEIPT_SHA256 exported"
+fi
+```
 
 **Paste — open SSH `/32` and root shell for `#389` bootstrap** (workstation;
 uses the existing §4.5 open fence and the same SSH variables the session box

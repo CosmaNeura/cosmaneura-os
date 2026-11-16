@@ -254,12 +254,15 @@ Then restore vault public access per **§4.3**. LLM installs also write a
 non-secret sidecar `WORKSPACE_LLM_API_KEY.source-account`.
 
 **One order** (runbook Sitting 2 row 5 / after format-disk yes + continue-prep
-yes / checklist): open temporary SSH `/32` with the existing open fence → root
-shell → copy `host/` + sibling `logging/` to `/opt/cosmabot/vm/` → `#389`
-bootstrap so `/etc/cosmabot` exists (`apply_started_utc` under 24 hours, or
-STOP and tell the CTO) → close-and-verify that SSH rule → second vault window →
-`LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)` →
-`--stage-from-vault` without `--secret-name` (path shape + all expected names
+yes / checklist): workstation receipt-tool paste
+(`build_creation_receipt.py --profile cosmabot-vm-prod-v1 --out-dir
+"$HOME/.cosmabot-sitting2"`) → open temporary SSH `/32` with the existing open
+fence → root shell → copy `host/` + sibling `logging/` to `/opt/cosmabot/vm/`
+→ place the receipt root-owned on the VM with the printed `sudo install`
+commands → `#389` bootstrap so `/etc/cosmabot` exists (`apply_started_utc`
+under 24 hours, or STOP and tell the CTO) → close-and-verify that SSH rule →
+second vault window → `LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)`
+→ `--stage-from-vault` without `--secret-name` (path shape + all expected names
 present and non-empty, or STOP before SSH) → `TEMP-JOHN-SSH-SECRETS-INSTALL` →
 ssh-stdin install → close-and-verify. John's hands-on: `/32`, vault window,
 SSH key.
