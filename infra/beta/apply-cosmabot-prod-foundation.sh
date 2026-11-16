@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Apply a previously reviewed CosmaBot production foundation plan.
 # First-apply-only by default. Pass --recover for the separately reviewed
-# partial-apply recovery path. Requires --confirm-apply and --approval PATH.
+# partial-apply recovery path. Pass --recreate-workload for the off-by-default
+# VM+data-disk recreate path. Requires --confirm-apply and --approval PATH.
 # Agents must not run this.
 set -euo pipefail
 
@@ -11,10 +12,12 @@ confirm=0
 private_dir=""
 approval=""
 recover=0
+recreate_workload=0
 
 usage() {
   cat <<EOF
-Usage: $0 --confirm-apply --approval PATH --private-dir PATH [--recover]
+Usage: $0 --confirm-apply --approval PATH --private-dir PATH
+          [--recover | --recreate-workload]
 
 First-apply-only by default. Applies the encrypted plan at PATH/plans/first.tfplan
 for rg-cosmabot-prod-eus2-01 after John binds an approval file to that plan's
@@ -23,6 +26,11 @@ sha256 (and the sanitised plan-summary sha256).
 With --recover, applies PATH/plans/recover-<UTC>.tfplan after the same four-key
 approval binding to that recover plan's hashes. Never overwrites or reapplies
 plans/first.tfplan. On failure: stop, keep artifacts, do not retry.
+
+With --recreate-workload, applies PATH/plans/recreate-workload-<UTC>.tfplan
+after the same four-key approval binding. Post-apply checks that
+osdisk-vm-cosmabot-prod-eus2-01 is not left as an unattached orphan.
+--recover and --recreate-workload are mutually exclusive.
 
 Requires both --confirm-apply and --approval. The approval file must be a
 private 0600 JSON outside the repo with reviewer, review_reference,
@@ -47,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --private-dir) private_dir="${2:-}"; shift 2 ;;
     --approval) approval="${2:-}"; shift 2 ;;
     --recover) recover=1; shift ;;
+    --recreate-workload) recreate_workload=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -56,6 +65,9 @@ done
 [[ -n "$private_dir" ]] || die "pass --private-dir"
 [[ -n "$approval" ]] || die "pass --approval PATH"
 [[ -d "$private_dir" ]] || die "private directory missing"
+if [[ "$recover" -eq 1 && "$recreate_workload" -eq 1 ]]; then
+  die "--recover and --recreate-workload are mutually exclusive"
+fi
 
 args=(apply --private-dir "$private_dir" --approval "$approval")
 if [[ "$confirm" -eq 1 ]]; then
@@ -63,6 +75,9 @@ if [[ "$confirm" -eq 1 ]]; then
 fi
 if [[ "$recover" -eq 1 ]]; then
   args+=(--recover)
+fi
+if [[ "$recreate_workload" -eq 1 ]]; then
+  args+=(--recreate-workload)
 fi
 python3 "$foundation_dir/bootstrap_local.py" "${args[@]}"
 printf 'Apply finished for %s.\n' "rg-cosmabot-prod-eus2-01"

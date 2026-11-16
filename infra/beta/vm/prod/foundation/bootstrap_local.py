@@ -4,9 +4,12 @@ First-apply-only tooling by default. Pass --recover for the separately reviewed
 partial-apply recovery path (reuse encrypted state/passphrase in place; ADD-ONLY
 plans under plans/recover-<UTC>.tfplan). Pass --recheck for a print-only
 post-apply re-check (same reviewed inputs + existing private dir; writes only
-plans/recheck-<UTC>.tfplan and matching summary/result; never apply). OpenAI
-opt-in must be in the first apply's inputs or wait for a separately reviewed
-day-2 tool. Do not run raw tofu by hand.
+plans/recheck-<UTC>.tfplan and matching summary/result; never apply). Pass
+--recreate-workload for the off-by-default path that replaces only
+azurerm_linux_virtual_machine.workload and azurerm_managed_disk.data (plus the
+data-disk attachment) under plans/recreate-workload-<UTC>.tfplan with
+-var=allow_workload_recreate=true. OpenAI opt-in must be in the first apply's
+inputs or wait for a separately reviewed day-2 tool. Do not run raw tofu by hand.
 """
 from __future__ import annotations
 
@@ -97,6 +100,58 @@ RECHECK_PLAN_NAME = re.compile(r"^recheck-\d{8}T\d{6}Z\.tfplan$")
 RECHECK_SUMMARY_NAME = re.compile(r"^recheck-plan-summary-\d{8}T\d{6}Z\.json$")
 RECHECK_RESULT_NAME = re.compile(r"^recheck-plan-result-\d{8}T\d{6}Z\.json$")
 RECHECK_PREPARE_NAME = re.compile(r"^recheck-prepare-\d{8}T\d{6}Z\.json$")
+RECREATE_PLAN_NAME = re.compile(r"^recreate-workload-\d{8}T\d{6}Z\.tfplan$")
+RECREATE_SUMMARY_NAME = re.compile(r"^recreate-workload-plan-summary-\d{8}T\d{6}Z\.json$")
+RECREATE_RESULT_NAME = re.compile(r"^recreate-workload-plan-result-\d{8}T\d{6}Z\.json$")
+RECREATE_VM_ADDRESS = "azurerm_linux_virtual_machine.workload"
+RECREATE_DISK_ADDRESS = "azurerm_managed_disk.data"
+RECREATE_ATTACHMENT_ADDRESS = "azurerm_virtual_machine_data_disk_attachment.data"
+RECREATE_REQUIRED_REPLACE_ADDRESSES = frozenset(
+    {
+        RECREATE_VM_ADDRESS,
+        RECREATE_DISK_ADDRESS,
+        RECREATE_ATTACHMENT_ADDRESS,
+    }
+)
+RECREATE_ALLOWED_ALERT_ADDRESSES = frozenset(
+    {
+        'azurerm_monitor_metric_alert.vm["unavailable"]',
+        'azurerm_monitor_metric_alert.vm["cpu"]',
+        'azurerm_monitor_metric_alert.vm["disk_iops"]',
+    }
+)
+# Types that must never appear as create/update/replace/delete in a recreate plan.
+RECREATE_FORBIDDEN_TOUCH_TYPES = frozenset(
+    {
+        "azurerm_public_ip",
+        "azurerm_network_interface",
+        "azurerm_user_assigned_identity",
+        "azurerm_role_assignment",
+        "azurerm_key_vault",
+        "azurerm_storage_account",
+        "azurerm_storage_container",
+        "azurerm_container_registry",
+        "azurerm_cognitive_account",
+        "azurerm_cognitive_deployment",
+        "azurerm_virtual_network",
+        "azurerm_subnet",
+        "azurerm_subnet_network_security_group_association",
+        "azurerm_network_security_group",
+        "azurerm_private_dns_zone",
+        "azurerm_private_dns_zone_virtual_network_link",
+        "azurerm_private_endpoint",
+        "azurerm_resource_group",
+        "azurerm_log_analytics_workspace",
+        "azurerm_monitor_action_group",
+        "azurerm_monitor_data_collection_rule",
+        "azurerm_monitor_data_collection_rule_association",
+        "azurerm_monitor_scheduled_query_rules_alert_v2",
+        "azurerm_virtual_machine_extension",
+        "terraform_data",
+    }
+)
+OS_DISK_NAME = "osdisk-vm-cosmabot-prod-eus2-01"
+ALLOW_WORKLOAD_RECREATE_VAR = "allow_workload_recreate=true"
 ARM_SUBSCRIPTION_RE = re.compile(r"/subscriptions/([^/]+)", re.IGNORECASE)
 ARM_RESOURCE_GROUP_RE = re.compile(
     r"/subscriptions/([^/]+)/resourceGroups/([^/]+)",
@@ -269,9 +324,20 @@ def command(argv, *, env, cwd=None, timeout=120):
     )
 
 
-def owner_context(env: dict, inputs: dict, *, recover: bool = False, recheck: bool = False) -> dict:
-    if recover and recheck:
-        raise Refused("--recover and --recheck are mutually exclusive")
+def _assert_single_mode(*, recover: bool = False, recheck: bool = False, recreate_workload: bool = False) -> None:
+    if sum(1 for flag in (recover, recheck, recreate_workload) if flag) > 1:
+        raise Refused("--recover, --recheck, and --recreate-workload are mutually exclusive")
+
+
+def owner_context(
+    env: dict,
+    inputs: dict,
+    *,
+    recover: bool = False,
+    recheck: bool = False,
+    recreate_workload: bool = False,
+) -> dict:
+    _assert_single_mode(recover=recover, recheck=recheck, recreate_workload=recreate_workload)
     result = command(["az", "account", "show", "--output", "json", "--only-show-errors"], env=env)
     if result.returncode:
         raise Refused("Cannot verify the current owner Azure CLI context")
@@ -303,9 +369,14 @@ def owner_context(env: dict, inputs: dict, *, recover: bool = False, recheck: bo
         env=env,
     )
     present = None if exists.returncode else json.loads(exists.stdout)
-    if recover or recheck:
+    if recover or recheck or recreate_workload:
         if present is not True:
-            label = "Recovery" if recover else "Post-apply re-check"
+            if recreate_workload:
+                label = "Workload recreate"
+            elif recover:
+                label = "Recovery"
+            else:
+                label = "Post-apply re-check"
             raise Refused(
                 f"{label} requires the existing workload resource group "
                 f"{RESOURCE_GROUP} to already be present"
@@ -342,6 +413,11 @@ def normalize_inputs(inputs: dict) -> dict:
     if not isinstance(inputs, dict) or not REQUIRED <= set(inputs):
         raise Refused(
             "Provide the explicit reviewed public foundation inputs only; no generated encryption/state field or secret"
+        )
+    if "allow_workload_recreate" in inputs:
+        raise Refused(
+            "allow_workload_recreate must not be stored in inputs.json; "
+            "recreate plans pass -var=allow_workload_recreate=true only"
         )
     unknown = set(inputs) - REQUIRED - OPTIONAL - OPTIONAL_BOOLS
     if unknown:
@@ -388,13 +464,17 @@ def prepare(
     *,
     recover: bool = False,
     recheck: bool = False,
+    recreate_workload: bool = False,
 ) -> dict:
-    if recover and recheck:
-        raise Refused("--recover and --recheck are mutually exclusive")
+    _assert_single_mode(recover=recover, recheck=recheck, recreate_workload=recreate_workload)
     if recheck:
         return prepare_recheck(folder, inputs_path, expected_source, expected_lock, tofu, mirror)
     if recover:
         return prepare_recover(folder, inputs_path, expected_source, expected_lock, tofu, mirror)
+    if recreate_workload:
+        return prepare_recreate_workload(
+            folder, inputs_path, expected_source, expected_lock, tofu, mirror
+        )
     env = clean_environment()
     actual = fingerprint()
     if actual["source_sha256"] != expected_source or actual["lock_sha256"] != expected_lock:
@@ -675,6 +755,132 @@ def prepare_recheck(
         "cloud_mutations": False,
         "first_apply_only": False,
         "applied": False,
+    }
+
+
+def prepare_recreate_workload(
+    folder: Path,
+    inputs_path: Path,
+    expected_source: str,
+    expected_lock: str,
+    tofu: Path,
+    mirror: Path,
+) -> dict:
+    """Reuse an existing private dir for VM+data-disk recreate. Never regenerate the passphrase."""
+    env = clean_environment()
+    actual = fingerprint()
+    if actual["source_sha256"] != expected_source or actual["lock_sha256"] != expected_lock:
+        raise Refused("Foundation source/lock differs from the reviewed hashes")
+    inputs = normalize_inputs(read_json(inputs_path))
+    context = owner_context(env, inputs, recreate_workload=True)
+    tofu = _verify_tofu_mirror(tofu, mirror, env)
+    folder = private_directory(folder, fresh=False)
+    passphrase = folder / "encryption.passphrase"
+    state_path = folder / "state/foundation.tfstate"
+    if not passphrase.exists():
+        raise Refused("Workload recreate requires the existing encryption.passphrase file")
+    if not state_path.exists():
+        raise Refused("Workload recreate requires existing state/foundation.tfstate")
+    for name in ("manifest.json", "inputs.json", "backend.hcl", "tofurc", "encryption.passphrase"):
+        secure_file(folder / name)
+    ciphertext(state_path)
+    for name in ("module", "state", "plans", "workspaces", "logs"):
+        private_directory(folder / name)
+    prior = read_json(folder / "manifest.json")
+    if (
+        prior.get("version") != 1
+        or prior.get("profile") != NAMESPACE
+        or prior.get("resource_group") != RESOURCE_GROUP
+    ):
+        raise Refused("Prepared bootstrap no longer matches the reviewed source/namespace")
+    if set(prior.get("protected_files", {})) != PROTECTED_FILES:
+        raise Refused("Prepared bootstrap file bindings are incomplete")
+    for name, expected in prior["protected_files"].items():
+        if digest(folder / name) != expected:
+            raise Refused("Prepared bootstrap inputs changed")
+    expected_module = {
+        name: value
+        for name, value in actual["files"].items()
+        if name != "bootstrap_local.py" and not name.startswith("extra/")
+    }
+    actual_module = {
+        path.relative_to(folder / "module").as_posix(): digest(path)
+        for path in (folder / "module").rglob("*")
+        if path.is_file()
+    }
+    if actual_module != expected_module:
+        raise Refused("Private module snapshot changed")
+    bound = dict(inputs)
+    bound["state_namespace"] = NAMESPACE
+    if read_json(folder / "inputs.json") != bound:
+        raise Refused("Workload recreate inputs must match the existing private inputs.json")
+    if "allow_workload_recreate" in bound:
+        raise Refused(
+            "allow_workload_recreate must not be stored in inputs.json; "
+            "recreate plans pass -var=allow_workload_recreate=true only"
+        )
+    first_apply_path = folder / "manifest.first-apply.json"
+    if first_apply_path.exists():
+        secure_file(first_apply_path)
+        first_apply = read_json(first_apply_path)
+    else:
+        if prior.get("recreate_workload") or prior.get("recover"):
+            raise Refused("manifest.first-apply.json is required before a second recreate prepare")
+        write_private(first_apply_path, json_bytes(prior))
+        first_apply = prior
+    tofu_sha = digest(tofu)
+    if first_apply.get("tofu_sha256") != tofu_sha:
+        raise Refused(
+            "Workload recreate tofu_sha256 differs from first-apply manifest: "
+            f"first_apply={first_apply.get('tofu_sha256')} recreate={tofu_sha}"
+        )
+    if first_apply.get("context") != context:
+        raise Refused(
+            "Workload recreate owner context differs from first-apply manifest: "
+            f"first_apply={first_apply.get('context')} recreate={context}"
+        )
+    stamp = utc_plan_stamp()
+    state_backup = folder / "state" / f"foundation.tfstate.pre-recreate-workload-{stamp}"
+    write_private(state_backup, state_path.read_bytes())
+    secure_file(state_backup)
+    ciphertext(state_backup)
+    first_plan = folder / "plans/first.tfplan"
+    first_plan_sha = digest(first_plan) if first_plan.is_file() else None
+    state_sha = digest(state_path)
+    manifest = {
+        "version": 1,
+        "profile": NAMESPACE,
+        "resource_group": RESOURCE_GROUP,
+        "source": actual,
+        "tofu": str(tofu),
+        "tofu_sha256": tofu_sha,
+        "context": context,
+        "protected_files": {name: digest(folder / name) for name in sorted(PROTECTED_FILES)},
+        "first_apply_only": True,
+        "recreate_workload": True,
+        "recreate_workload_backups": {
+            "state_pre_recreate": str(state_backup),
+            "state_pre_recreate_sha256": digest(state_backup),
+            "state_sha256_at_prepare": state_sha,
+            "manifest_first_apply": str(first_apply_path),
+            "manifest_first_apply_sha256": digest(first_apply_path),
+        },
+    }
+    replace_private(folder / "manifest.json", json_bytes(manifest))
+    if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
+        raise Refused("Workload recreate prepare must not modify plans/first.tfplan")
+    if digest(passphrase) != prior["protected_files"]["encryption.passphrase"]:
+        raise Refused("Workload recreate prepare must not modify encryption.passphrase")
+    if digest(state_path) != state_sha:
+        raise Refused("Workload recreate prepare must not modify state/foundation.tfstate")
+    return {
+        "prepared": True,
+        "recreate_workload": True,
+        "private_directory": str(folder),
+        "source_sha256": expected_source,
+        "state_backend": "local-encrypted",
+        "cloud_mutations": False,
+        "first_apply_only": True,
     }
 
 
@@ -1204,13 +1410,246 @@ def sanitize_recheck_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256:
     return summary
 
 
-def plan(folder: Path, *, recover: bool = False, recheck: bool = False) -> dict:
-    if recover and recheck:
-        raise Refused("--recover and --recheck are mutually exclusive")
+def assert_recreate_allow_var(allow_workload_recreate: bool) -> None:
+    """Workload recreate must refuse unless allow_workload_recreate is exactly true."""
+    if allow_workload_recreate is not True:
+        raise Refused(
+            "Workload recreate requires allow_workload_recreate=true; "
+            "the mode refuses when the variable is false"
+        )
+
+
+def _is_replace_actions(actions: list) -> bool:
+    return isinstance(actions, list) and "delete" in actions and "create" in actions
+
+
+def assert_recreate_workload_changeset(
+    plan_json: dict, *, subscription_id: str, allow_workload_recreate: bool = True
+) -> dict[str, list[str]]:
+    """Hard-fail unless the plan is exactly VM+data-disk(+attachment) replace.
+
+    Allowed non-noop actions:
+    - replace azurerm_linux_virtual_machine.workload
+    - replace azurerm_managed_disk.data
+    - replace azurerm_virtual_machine_data_disk_attachment.data
+    - optional in-place updates of the three azurerm_monitor_metric_alert.vm[...] only
+
+    Everything else must be no-op/read. Public IP, NIC, identity, role assignments,
+    Key Vault, storage, registry, OpenAI, network, DNS, and staging are refused on
+    any create/update/replace/delete.
+    """
+    assert_recreate_allow_var(allow_workload_recreate)
+    if not isinstance(subscription_id, str) or not subscription_id:
+        raise Refused("Workload recreate plan validation requires subscription_id")
+    changes = plan_json.get("resource_changes") or []
+    replace_addresses: list[str] = []
+    update_addresses: list[str] = []
+    for change in changes:
+        if not isinstance(change, dict):
+            raise Refused("Workload recreate resource_changes entries must be objects")
+        rtype = _assert_recover_entry_type_guards(change)
+        address = str(change.get("address") or rtype)
+        if change.get("importing") is not None:
+            raise Refused("Workload recreate plan must not import resources into state")
+        previous = change.get("previous_address")
+        if previous is not None and previous != change.get("address"):
+            raise Refused("Workload recreate plan must not move/rename resources in state")
+        if change.get("deposed") is not None:
+            raise Refused("Workload recreate plan must not include deposed resource instances")
+        change_body = change.get("change")
+        if not isinstance(change_body, dict):
+            raise Refused("Workload recreate plan change body is missing")
+        if "actions" not in change_body:
+            raise Refused("Workload recreate plan change is missing actions")
+        actions = change_body.get("actions")
+        if not isinstance(actions, list) or not actions:
+            raise Refused("Workload recreate plan change has empty or invalid actions")
+        after = change_body.get("after") or {}
+        if not isinstance(after, dict):
+            after = {}
+        candidates = [
+            str(change.get("address") or ""),
+            str(change.get("name") or ""),
+            str(change.get("module_address") or ""),
+            *(_string_candidates(after)),
+        ]
+        for raw in candidates:
+            if STAGING_RG_NEEDLE in raw.lower():
+                raise Refused("Workload recreate plan touches staging resource group names")
+        try:
+            refuse_cross_environment("production", candidates)
+        except NameGuardError as exc:
+            raise Refused(f"Workload recreate plan touches staging names: {exc}") from exc
+        if actions == ["no-op"] or actions == ["read"]:
+            continue
+        if rtype in RECREATE_FORBIDDEN_TOUCH_TYPES:
+            raise Refused(
+                "Workload recreate refuses changes to public IP, NIC, identity, role "
+                f"assignments, Key Vault, storage, registry, OpenAI, network, DNS, or "
+                f"other non-workload resources: {address}"
+            )
+        if _is_replace_actions(actions):
+            if address not in RECREATE_REQUIRED_REPLACE_ADDRESSES:
+                raise Refused(f"Workload recreate plan has unexpected replace: {address}")
+            replace_addresses.append(address)
+            continue
+        if actions == ["update"]:
+            if address not in RECREATE_ALLOWED_ALERT_ADDRESSES:
+                raise Refused(
+                    "Workload recreate allows in-place updates only for the three "
+                    f"azurerm_monitor_metric_alert.vm[...] resources; refused: {address}"
+                )
+            update_addresses.append(address)
+            continue
+        if actions == ["create"]:
+            raise Refused(f"Workload recreate plan must not create extra resources: {address}")
+        if actions == ["delete"] or "delete" in actions:
+            raise Refused(f"Workload recreate plan must not destroy extra resources: {address}")
+        raise Refused(f"Workload recreate plan refused actions {actions} on {address}")
+    missing = RECREATE_REQUIRED_REPLACE_ADDRESSES - set(replace_addresses)
+    if missing:
+        raise Refused(
+            "Workload recreate plan is missing required replaces: "
+            + ", ".join(sorted(missing))
+        )
+    if set(replace_addresses) != RECREATE_REQUIRED_REPLACE_ADDRESSES:
+        raise Refused(
+            "Workload recreate plan replace set must be exactly "
+            + ", ".join(sorted(RECREATE_REQUIRED_REPLACE_ADDRESSES))
+        )
+    unexpected_alerts = set(update_addresses) - RECREATE_ALLOWED_ALERT_ADDRESSES
+    if unexpected_alerts:
+        raise Refused(
+            "Workload recreate plan has unexpected alert updates: "
+            + ", ".join(sorted(unexpected_alerts))
+        )
+    return {
+        "replace_addresses": sorted(replace_addresses),
+        "update_addresses": sorted(update_addresses),
+    }
+
+
+def sanitize_recreate_workload_plan_summary(
+    plan_json: dict, *, inputs: dict, plan_sha256: str, allow_workload_recreate: bool = True
+) -> dict:
+    addressed = assert_recreate_workload_changeset(
+        plan_json,
+        subscription_id=str(inputs["subscription_id"]),
+        allow_workload_recreate=allow_workload_recreate,
+    )
+    enabled = bool(inputs.get("enable_azure_openai", False))
+    replace_counts: Counter = Counter()
+    for address in addressed["replace_addresses"]:
+        if address.startswith("azurerm_linux_virtual_machine."):
+            replace_counts["azurerm_linux_virtual_machine"] += 1
+        elif address.startswith("azurerm_managed_disk."):
+            replace_counts["azurerm_managed_disk"] += 1
+        elif address.startswith("azurerm_virtual_machine_data_disk_attachment."):
+            replace_counts["azurerm_virtual_machine_data_disk_attachment"] += 1
+    update_counts: Counter = Counter()
+    if addressed["update_addresses"]:
+        update_counts["azurerm_monitor_metric_alert"] = len(addressed["update_addresses"])
+    summary = {
+        "create": {},
+        "update": dict(sorted(update_counts.items())),
+        "replace": dict(sorted(replace_counts.items())),
+        "delete": {},
+        "replace_addresses": addressed["replace_addresses"],
+        "update_addresses": addressed["update_addresses"],
+        "enable_azure_openai": enabled,
+        "subscription_id": inputs["subscription_id"],
+        "tenant_id": inputs["tenant_id"],
+        "plan_sha256": plan_sha256,
+        "resource_group": RESOURCE_GROUP,
+        "first_apply_only": False,
+        "recreate_workload": True,
+        "allow_workload_recreate": True,
+    }
+    summary["summary_sha256"] = hashlib.sha256(json_bytes(summary)).hexdigest()
+    return summary
+
+
+def _assert_recreate_commands_safe(commands: list[tuple[str, list[str]]]) -> None:
+    """Refuse planted apply / missing -replace / missing allow var before tofu runs."""
+    saw_plan = False
+    for _name, args in commands:
+        if not isinstance(args, list) or not args:
+            raise Refused("Workload recreate command list is invalid")
+        if args[0] == "apply" or "apply" in args[1:]:
+            raise Refused("Workload recreate command builder must not invoke tofu apply here")
+        if args[0] != "plan":
+            continue
+        saw_plan = True
+        joined = " ".join(args)
+        if "-var=allow_workload_recreate=false" in args or "allow_workload_recreate=false" in joined:
+            raise Refused(
+                "Workload recreate requires allow_workload_recreate=true; "
+                "the mode refuses when the variable is false"
+            )
+        if f"-var={ALLOW_WORKLOAD_RECREATE_VAR}" not in args and (
+            "-var" not in args or ALLOW_WORKLOAD_RECREATE_VAR not in joined
+        ):
+            # Accept either -var=allow_workload_recreate=true or -var allow_workload_recreate=true
+            has_flag = False
+            for index, item in enumerate(args):
+                if item == f"-var={ALLOW_WORKLOAD_RECREATE_VAR}":
+                    has_flag = True
+                    break
+                if item == "-var" and index + 1 < len(args) and args[index + 1] == ALLOW_WORKLOAD_RECREATE_VAR:
+                    has_flag = True
+                    break
+            if not has_flag:
+                raise Refused(
+                    "Workload recreate plan must pass -var=allow_workload_recreate=true"
+                )
+        for address in (RECREATE_VM_ADDRESS, RECREATE_DISK_ADDRESS):
+            if f"-replace={address}" not in args:
+                raise Refused(f"Workload recreate plan must pass -replace={address}")
+    if not saw_plan:
+        raise Refused("Workload recreate command list is missing plan")
+
+
+def _recreate_workload_tofu_commands(
+    *, backend_hcl: Path, inputs: Path, plan_out: Path
+) -> list[tuple[str, list[str]]]:
+    commands = [
+        (
+            "init",
+            [
+                "init",
+                "-input=false",
+                "-lockfile=readonly",
+                "-reconfigure",
+                "-backend-config=" + str(backend_hcl),
+            ],
+        ),
+        (
+            "plan",
+            [
+                "plan",
+                "-input=false",
+                "-lock=true",
+                "-lock-timeout=30s",
+                "-var-file=" + str(inputs),
+                f"-var={ALLOW_WORKLOAD_RECREATE_VAR}",
+                f"-replace={RECREATE_VM_ADDRESS}",
+                f"-replace={RECREATE_DISK_ADDRESS}",
+                "-out=" + str(plan_out),
+            ],
+        ),
+    ]
+    _assert_recreate_commands_safe(commands)
+    return commands
+
+
+def plan(folder: Path, *, recover: bool = False, recheck: bool = False, recreate_workload: bool = False) -> dict:
+    _assert_single_mode(recover=recover, recheck=recheck, recreate_workload=recreate_workload)
     if recheck:
         return plan_recheck(folder)
     if recover:
         return plan_recover(folder)
+    if recreate_workload:
+        return plan_recreate_workload(folder)
     manifest, inputs = _verify_prepared(folder)
     if (folder / "tofu-data").exists() or any((folder / "state").iterdir()) or any(
         (folder / "plans").iterdir()
@@ -1411,6 +1850,146 @@ def plan_recover(folder: Path) -> dict:
         raise Refused("Recovery plan must not overwrite first-apply plan-result.json")
     if digest(state_path) != expected_state_sha:
         raise Refused("Recovery plan left state/foundation.tfstate changed after writing recover artifacts")
+    assert result is not None
+    return result
+
+
+def plan_recreate_workload(folder: Path) -> dict:
+    """Plan exact VM + data-disk recreate with -var=allow_workload_recreate=true and -replace."""
+    assert_recreate_allow_var(True)
+    manifest, inputs = _verify_prepared(folder)
+    if not manifest.get("recreate_workload"):
+        raise Refused(
+            "Workload recreate plan requires prepare --recreate-workload on this private directory"
+        )
+    backups = manifest.get("recreate_workload_backups") or {}
+    expected_state_sha = backups.get("state_sha256_at_prepare")
+    if not isinstance(expected_state_sha, str) or not expected_state_sha:
+        raise Refused("Workload recreate manifest is missing state_sha256_at_prepare backup binding")
+    passphrase = folder / "encryption.passphrase"
+    state_path = folder / "state/foundation.tfstate"
+    if not passphrase.exists():
+        raise Refused("Workload recreate requires the existing encryption.passphrase file")
+    if not state_path.exists():
+        raise Refused("Workload recreate requires existing state/foundation.tfstate")
+    secure_file(passphrase)
+    ciphertext(state_path)
+    if digest(state_path) != expected_state_sha:
+        raise Refused("Workload recreate state/foundation.tfstate changed since prepare --recreate-workload")
+    if "allow_workload_recreate" in inputs:
+        raise Refused(
+            "allow_workload_recreate must not be stored in inputs.json; "
+            "recreate plans pass -var=allow_workload_recreate=true only"
+        )
+    first_plan = folder / "plans/first.tfplan"
+    first_plan_sha = digest(first_plan) if first_plan.is_file() else None
+    first_summary = folder / "plan-summary.json"
+    first_result = folder / "plan-result.json"
+    first_summary_sha = digest(first_summary) if first_summary.is_file() else None
+    first_result_sha = digest(first_result) if first_result.is_file() else None
+    stamp = utc_plan_stamp()
+    plan_path = folder / "plans" / f"recreate-workload-{stamp}.tfplan"
+    summary_path = folder / f"recreate-workload-plan-summary-{stamp}.json"
+    result_path = folder / f"recreate-workload-plan-result-{stamp}.json"
+    if plan_path.name == "first.tfplan" or plan_path.resolve() == (folder / "plans/first.tfplan").resolve():
+        raise Refused("Workload recreate plan must not overwrite plans/first.tfplan")
+    if plan_path.exists() or summary_path.exists() or result_path.exists():
+        raise Refused("Workload recreate plan path already exists; refuse overwrite")
+    tofu = Path(manifest["tofu"])
+    if digest(tofu) != manifest["tofu_sha256"]:
+        raise Refused("Pinned OpenTofu executable changed")
+    env = execution_environment(folder)
+    if owner_context(clean_environment(), inputs, recreate_workload=True) != manifest["context"]:
+        raise Refused("Owner CLI context changed since preparation")
+    commands = _recreate_workload_tofu_commands(
+        backend_hcl=folder / "backend.hcl",
+        inputs=folder / "inputs.json",
+        plan_out=plan_path,
+    )
+    summary = None
+    result = None
+    try:
+        for name, args in commands:
+            cmd_result = command([str(tofu), *args], cwd=folder / "module", env=env, timeout=300)
+            write_private(
+                folder / "logs" / f"recreate-workload-{name}-{stamp}.log",
+                cmd_result.stdout + cmd_result.stderr,
+            )
+            if cmd_result.returncode:
+                raise Refused(
+                    "Workload recreate " + name + " failed; private logs retained, no apply was attempted"
+                )
+            if name == "init":
+                backend = read_json(folder / "tofu-data/terraform.tfstate").get("backend", {})
+                config = backend.get("config", {})
+                if (
+                    backend.get("type") != "local"
+                    or config.get("path") != str(folder / "state/foundation.tfstate")
+                    or config.get("workspace_dir") != str(folder / "workspaces")
+                ):
+                    raise Refused("Initialized backend differs from the fixed local paths")
+                workspace_file = folder / "tofu-data/environment"
+                if workspace_file.exists() and workspace_file.read_text().strip() != "default":
+                    raise Refused("Only the default workspace is supported")
+        if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
+            raise Refused("Workload recreate plan must not overwrite plans/first.tfplan")
+        if digest(state_path) != expected_state_sha:
+            raise Refused("Workload recreate plan modified state/foundation.tfstate")
+        ciphertext(plan_path)
+        plan_sha = digest(plan_path)
+        show = command(
+            [str(tofu), "show", "-json", str(plan_path)],
+            cwd=folder / "module",
+            env=env,
+            timeout=120,
+        )
+        if show.returncode:
+            raise Refused(
+                "Unable to render sanitised workload recreate plan summary; no apply was attempted"
+            )
+        summary = sanitize_recreate_workload_plan_summary(
+            json.loads(show.stdout),
+            inputs=inputs,
+            plan_sha256=plan_sha,
+            allow_workload_recreate=True,
+        )
+        result = {
+            "planned": True,
+            "recreate_workload": True,
+            "stamp": stamp,
+            "plan": str(plan_path),
+            "summary_path": str(summary_path),
+            "result_path": str(result_path),
+            "plan_sha256": plan_sha,
+            "summary_sha256": summary["summary_sha256"],
+            "enable_azure_openai": summary["enable_azure_openai"],
+            "replace_addresses": summary["replace_addresses"],
+            "update_addresses": summary["update_addresses"],
+            "source_sha256": manifest["source"]["source_sha256"],
+            "state_backend": "local-encrypted",
+            "applied": False,
+            "first_apply_only": False,
+        }
+        write_private(summary_path, json_bytes(summary))
+        write_private(result_path, json_bytes(result))
+    except Exception:
+        if plan_path.exists():
+            plan_path.unlink()
+        if summary_path.exists():
+            summary_path.unlink()
+        if result_path.exists():
+            result_path.unlink()
+        raise
+    if first_plan_sha is not None and digest(first_plan) != first_plan_sha:
+        raise Refused("Workload recreate plan must not overwrite plans/first.tfplan")
+    if first_summary_sha is not None and digest(first_summary) != first_summary_sha:
+        raise Refused("Workload recreate plan must not overwrite first-apply plan-summary.json")
+    if first_result_sha is not None and digest(first_result) != first_result_sha:
+        raise Refused("Workload recreate plan must not overwrite first-apply plan-result.json")
+    if digest(state_path) != expected_state_sha:
+        raise Refused(
+            "Workload recreate plan left state/foundation.tfstate changed after writing recreate artifacts"
+        )
     assert result is not None
     return result
 
@@ -1662,50 +2241,100 @@ def _latest_recover_result(folder: Path) -> Path:
     return matches[-1]
 
 
-def _resolve_apply_artifacts(folder: Path, *, recover: bool) -> tuple[Path, Path, Path, dict, dict]:
+def _latest_recreate_result(folder: Path) -> Path:
+    matches = sorted(
+        path
+        for path in folder.glob("recreate-workload-plan-result-*.json")
+        if path.is_file() and RECREATE_RESULT_NAME.match(path.name)
+    )
+    if not matches:
+        raise Refused(
+            "Reviewed recreate-workload-plan-result-<UTC>.json is required before recreate apply"
+        )
+    return matches[-1]
+
+
+def _resolve_mode_apply_artifacts(
+    folder: Path,
+    *,
+    mode: str,
+    result_glob: str,
+    result_name_re: re.Pattern[str],
+    summary_name_re: re.Pattern[str],
+    plan_name_re: re.Pattern[str],
+    latest_result,
+    marker: str,
+) -> tuple[Path, Path, Path, dict, dict]:
+    result_path = latest_result(folder)
+    secure_file(result_path)
+    plan_result = read_json(result_path)
+    summary_value = plan_result.get("summary_path")
+    if isinstance(summary_value, str) and summary_value:
+        summary_path = Path(summary_value)
+    else:
+        stamp = plan_result.get("stamp")
+        if not isinstance(stamp, str) or not stamp:
+            raise Refused(f"{mode}-plan-result is missing stamp/summary_path")
+        summary_path = folder / f"{mode}-plan-summary-{stamp}.json"
+    if not summary_path.is_absolute():
+        raise Refused(f"{mode} summary path must be absolute")
+    if summary_path.parent.resolve() != folder.resolve():
+        raise Refused(f"{mode} summary must live in the private directory root")
+    if not summary_name_re.match(summary_path.name):
+        raise Refused(f"{mode} summary name must be {mode}-plan-summary-<UTC>.json")
+    if not summary_path.is_file():
+        raise Refused(f"Reviewed {mode}-plan-summary-<UTC>.json is required before {mode} apply")
+    secure_file(summary_path)
+    summary = read_json(summary_path)
+    plan_value = plan_result.get("plan")
+    if not isinstance(plan_value, str) or not plan_value:
+        raise Refused(f"{mode}-plan-result is missing the {mode} plan path")
+    plan_path = Path(plan_value)
+    if not plan_path.is_absolute():
+        raise Refused(f"{mode} plan path must be absolute")
+    plans_dir = (folder / "plans").resolve()
+    resolved_plan = plan_path.resolve()
+    if resolved_plan.parent != plans_dir:
+        raise Refused(f"{mode} plan must live under the private plans/ directory")
+    if resolved_plan.name == "first.tfplan" or not plan_name_re.match(resolved_plan.name):
+        raise Refused(
+            f"{mode} apply refuses plans/first.tfplan; use plans/{mode}-<UTC>.tfplan"
+        )
+    if plan_result.get("recheck") or summary.get("recheck"):
+        raise Refused(f"{mode} apply refuses recheck plans; post-apply re-check is print-only")
+    if not resolved_plan.is_file():
+        raise Refused(f"Reviewed {mode} plan file is required before apply")
+    if not plan_result.get(marker) or not summary.get(marker):
+        raise Refused(f"{mode} apply requires {marker}-marked plan artifacts")
+    return resolved_plan, result_path, summary_path, plan_result, summary
+
+
+def _resolve_apply_artifacts(
+    folder: Path, *, recover: bool = False, recreate_workload: bool = False
+) -> tuple[Path, Path, Path, dict, dict]:
+    _assert_single_mode(recover=recover, recreate_workload=recreate_workload)
     if recover:
-        result_path = _latest_recover_result(folder)
-        secure_file(result_path)
-        plan_result = read_json(result_path)
-        summary_value = plan_result.get("summary_path")
-        if isinstance(summary_value, str) and summary_value:
-            summary_path = Path(summary_value)
-        else:
-            stamp = plan_result.get("stamp")
-            if not isinstance(stamp, str) or not stamp:
-                raise Refused("recover-plan-result is missing stamp/summary_path")
-            summary_path = folder / f"recover-plan-summary-{stamp}.json"
-        if not summary_path.is_absolute():
-            raise Refused("recover summary path must be absolute")
-        if summary_path.parent.resolve() != folder.resolve():
-            raise Refused("recover summary must live in the private directory root")
-        if not RECOVER_SUMMARY_NAME.match(summary_path.name):
-            raise Refused("recover summary name must be recover-plan-summary-<UTC>.json")
-        if not summary_path.is_file():
-            raise Refused("Reviewed recover-plan-summary-<UTC>.json is required before recovery apply")
-        secure_file(summary_path)
-        summary = read_json(summary_path)
-        plan_value = plan_result.get("plan")
-        if not isinstance(plan_value, str) or not plan_value:
-            raise Refused("recover-plan-result is missing the recover plan path")
-        plan_path = Path(plan_value)
-        if not plan_path.is_absolute():
-            raise Refused("recover plan path must be absolute")
-        plans_dir = (folder / "plans").resolve()
-        resolved_plan = plan_path.resolve()
-        if resolved_plan.parent != plans_dir:
-            raise Refused("recover plan must live under the private plans/ directory")
-        if resolved_plan.name == "first.tfplan" or not RECOVER_PLAN_NAME.match(resolved_plan.name):
-            raise Refused("Recovery apply refuses plans/first.tfplan; use plans/recover-<UTC>.tfplan")
-        # A recover-named plan can still carry recheck=true if an operator swaps
-        # the result JSON; refuse that print-only marker before apply.
-        if plan_result.get("recheck") or summary.get("recheck"):
-            raise Refused("Recovery apply refuses recheck plans; post-apply re-check is print-only")
-        if not resolved_plan.is_file():
-            raise Refused("Reviewed recover plan file is required before apply")
-        if not plan_result.get("recover") or not summary.get("recover"):
-            raise Refused("Recovery apply requires recover-marked plan artifacts")
-        return resolved_plan, result_path, summary_path, plan_result, summary
+        return _resolve_mode_apply_artifacts(
+            folder,
+            mode="recover",
+            result_glob="recover-plan-result-*.json",
+            result_name_re=RECOVER_RESULT_NAME,
+            summary_name_re=RECOVER_SUMMARY_NAME,
+            plan_name_re=RECOVER_PLAN_NAME,
+            latest_result=_latest_recover_result,
+            marker="recover",
+        )
+    if recreate_workload:
+        return _resolve_mode_apply_artifacts(
+            folder,
+            mode="recreate-workload",
+            result_glob="recreate-workload-plan-result-*.json",
+            result_name_re=RECREATE_RESULT_NAME,
+            summary_name_re=RECREATE_SUMMARY_NAME,
+            plan_name_re=RECREATE_PLAN_NAME,
+            latest_result=_latest_recreate_result,
+            marker="recreate_workload",
+        )
     plan_path = folder / "plans/first.tfplan"
     result_path = folder / "plan-result.json"
     summary_path = folder / "plan-summary.json"
@@ -1718,11 +2347,58 @@ def _resolve_apply_artifacts(folder: Path, *, recover: bool) -> tuple[Path, Path
     summary = read_json(summary_path)
     if plan_result.get("recheck") or summary.get("recheck"):
         raise Refused("Apply refuses recheck plan artifacts; post-apply re-check is print-only")
+    if plan_result.get("recreate_workload") or summary.get("recreate_workload"):
+        raise Refused("First-apply path refuses recreate-workload plan artifacts; pass --recreate-workload")
     return plan_path, result_path, summary_path, plan_result, summary
 
 
+def assert_no_orphaned_os_disk(env: dict, inputs: dict) -> None:
+    """Post-recreate check: refuse if osdisk-vm-cosmabot-prod-eus2-01 is left unattached."""
+    result = command(
+        [
+            "az",
+            "disk",
+            "list",
+            "--resource-group",
+            RESOURCE_GROUP,
+            "--subscription",
+            inputs["subscription_id"],
+            "--query",
+            f"[?name=='{OS_DISK_NAME}'].{{name:name,managedBy:managedBy}}",
+            "--output",
+            "json",
+            "--only-show-errors",
+        ],
+        env=env,
+        timeout=120,
+    )
+    if result.returncode:
+        raise Refused("Workload recreate post-apply could not list OS disks to check for orphans")
+    disks = json.loads(result.stdout or b"[]")
+    if not isinstance(disks, list):
+        raise Refused("Workload recreate post-apply OS disk list was not a JSON array")
+    orphans = [
+        disk
+        for disk in disks
+        if isinstance(disk, dict)
+        and disk.get("name") == OS_DISK_NAME
+        and not disk.get("managedBy")
+    ]
+    if orphans:
+        raise Refused(
+            f"Workload recreate left orphaned OS disk {OS_DISK_NAME} (managedBy empty); "
+            "stop and investigate before Sitting 2"
+        )
 
-def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bool = False) -> dict:
+
+def apply(
+    folder: Path,
+    *,
+    confirm_apply: bool,
+    approval_path: Path,
+    recover: bool = False,
+    recreate_workload: bool = False,
+) -> dict:
     logs = folder / "logs"
     if logs.is_dir() and any(logs.glob("apply-*.log")):
         _operator_print(
@@ -1731,6 +2407,7 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bo
     if not confirm_apply:
         raise Refused("refusing apply without --confirm-apply")
     os.umask(0o077)
+    _assert_single_mode(recover=recover, recreate_workload=recreate_workload)
     manifest, inputs = _verify_prepared(folder)
     if manifest.get("resource_group") != RESOURCE_GROUP:
         raise Refused(f"manifest resource_group is not production: {manifest.get('resource_group')}")
@@ -1740,21 +2417,33 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bo
         raise Refused("Recovery apply requires prepare --recover on this private directory")
     if not recover and manifest.get("recover"):
         raise Refused("Private directory was prepared for recovery; pass --recover to apply")
+    if recreate_workload and not manifest.get("recreate_workload"):
+        raise Refused(
+            "Workload recreate apply requires prepare --recreate-workload on this private directory"
+        )
+    if not recreate_workload and manifest.get("recreate_workload"):
+        raise Refused(
+            "Private directory was prepared for workload recreate; pass --recreate-workload to apply"
+        )
     plan_path, result_path, summary_path, plan_result, summary = _resolve_apply_artifacts(
-        folder, recover=recover
+        folder, recover=recover, recreate_workload=recreate_workload
     )
     secure_file(plan_path)
     plan_sha = digest(plan_path)
-    mismatch_label = result_path.name if recover else "plan-result.json"
-    summary_label = summary_path.name if recover else "plan-summary.json"
+    if recover or recreate_workload:
+        mismatch_label = result_path.name
+        summary_label = summary_path.name
+    else:
+        mismatch_label = "plan-result.json"
+        summary_label = "plan-summary.json"
     expected_plan_name = plan_path.name
-    if recover:
+    if recover or recreate_workload:
         if plan_result.get("plan_sha256") != plan_sha:
             raise Refused(f"{mismatch_label} plan_sha256 does not match {expected_plan_name}")
         if summary.get("plan_sha256") != plan_sha or summary.get("summary_sha256") != plan_result.get(
             "summary_sha256"
         ):
-            raise Refused(f"{summary_label} does not match the reviewed recover plan result")
+            raise Refused(f"{summary_label} does not match the reviewed {('recover' if recover else 'recreate')} plan result")
     else:
         if plan_result.get("plan_sha256") != plan_sha:
             raise Refused("plan-result.json plan_sha256 does not match plans/first.tfplan")
@@ -1780,11 +2469,33 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bo
         secure_file(backup_path)
         if digest(backup_path) != backup_sha:
             raise Refused("Recovery pre-recover state backup sha256 mismatch")
+    if recreate_workload:
+        backups = manifest.get("recreate_workload_backups") or {}
+        backup_value = backups.get("state_pre_recreate")
+        backup_sha = backups.get("state_pre_recreate_sha256")
+        if not isinstance(backup_value, str) or not backup_value:
+            raise Refused("Workload recreate apply requires state_pre_recreate backup path")
+        if not isinstance(backup_sha, str) or not backup_sha:
+            raise Refused("Workload recreate apply requires state_pre_recreate_sha256")
+        backup_path = Path(backup_value)
+        if not backup_path.is_file():
+            raise Refused("Workload recreate pre-recreate state backup is missing")
+        secure_file(backup_path)
+        if digest(backup_path) != backup_sha:
+            raise Refused("Workload recreate pre-recreate state backup sha256 mismatch")
     version = command([str(tofu), "version", "-json"], env=clean_environment())
     if version.returncode or json.loads(version.stdout).get("terraform_version") != TOFU_VERSION:
         raise Refused("OpenTofu must be the pinned version 1.12.5")
     env = execution_environment(folder)
-    if owner_context(clean_environment(), inputs, recover=recover) != manifest["context"]:
+    if (
+        owner_context(
+            clean_environment(),
+            inputs,
+            recover=recover,
+            recreate_workload=recreate_workload,
+        )
+        != manifest["context"]
+    ):
         raise Refused("Owner CLI context changed since preparation")
     # Recompute the sanitised summary from the hashed plan before apply.
     show = command(
@@ -1795,12 +2506,25 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bo
     )
     if show.returncode:
         raise Refused("Cannot re-show the reviewed plan before apply")
-    sanitize = sanitize_recover_plan_summary if recover else sanitize_plan_summary
-    recomputed = sanitize(
-        json.loads(show.stdout),
-        inputs=inputs,
-        plan_sha256=plan_sha,
-    )
+    if recreate_workload:
+        recomputed = sanitize_recreate_workload_plan_summary(
+            json.loads(show.stdout),
+            inputs=inputs,
+            plan_sha256=plan_sha,
+            allow_workload_recreate=True,
+        )
+    elif recover:
+        recomputed = sanitize_recover_plan_summary(
+            json.loads(show.stdout),
+            inputs=inputs,
+            plan_sha256=plan_sha,
+        )
+    else:
+        recomputed = sanitize_plan_summary(
+            json.loads(show.stdout),
+            inputs=inputs,
+            plan_sha256=plan_sha,
+        )
     if recomputed != summary:
         raise Refused(f"Recomputed plan summary does not match {summary_label}")
     if recomputed["summary_sha256"] != plan_result.get("summary_sha256"):
@@ -1808,7 +2532,12 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bo
     if recomputed["summary_sha256"] != read_json(approval_path)["summary_sha256"]:
         raise Refused("Recomputed plan summary does not match approval summary_sha256")
     logs.mkdir(mode=0o700, exist_ok=True)
-    log_prefix = "recover-apply" if recover else "apply"
+    if recreate_workload:
+        log_prefix = "recreate-workload-apply"
+    elif recover:
+        log_prefix = "recover-apply"
+    else:
+        log_prefix = "apply"
     log_path = logs / f"{log_prefix}-{secrets.token_hex(8)}.log"
     _operator_print(f"Apply log path: {log_path}")
     argv = [
@@ -1914,10 +2643,15 @@ def apply(folder: Path, *, confirm_apply: bool, approval_path: Path, recover: bo
         "applied": True,
         "plan_sha256": plan_sha,
         "resource_group": RESOURCE_GROUP,
-        "first_apply_only": not recover,
+        "first_apply_only": not recover and not recreate_workload,
     }
     if recover:
         outcome["recover"] = True
+    if recreate_workload:
+        outcome["recreate_workload"] = True
+        assert_no_orphaned_os_disk(env, inputs)
+        outcome["orphaned_os_disk_check"] = "passed"
+        outcome["os_disk_name"] = OS_DISK_NAME
     return outcome
 
 
@@ -1932,15 +2666,18 @@ def main() -> None:
     first.add_argument("--lock-sha256", required=True)
     first.add_argument("--recover", action="store_true")
     first.add_argument("--recheck", action="store_true")
+    first.add_argument("--recreate-workload", action="store_true")
     later = commands.add_parser("plan")
     later.add_argument("--private-dir", type=Path, required=True)
     later.add_argument("--recover", action="store_true")
     later.add_argument("--recheck", action="store_true")
+    later.add_argument("--recreate-workload", action="store_true")
     apply_cmd = commands.add_parser("apply")
     apply_cmd.add_argument("--private-dir", type=Path, required=True)
     apply_cmd.add_argument("--confirm-apply", action="store_true")
     apply_cmd.add_argument("--approval", type=Path, required=True)
     apply_cmd.add_argument("--recover", action="store_true")
+    apply_cmd.add_argument("--recreate-workload", action="store_true")
     # Intentionally no --recheck on apply: re-check is print-only and must never apply.
     args = parser.parse_args()
     os.umask(0o077)
@@ -1949,8 +2686,11 @@ def main() -> None:
         if args.command == "fingerprint":
             result = fingerprint()
         elif args.command == "prepare":
-            if args.recover and args.recheck:
-                raise Refused("--recover and --recheck are mutually exclusive")
+            _assert_single_mode(
+                recover=args.recover,
+                recheck=args.recheck,
+                recreate_workload=args.recreate_workload,
+            )
             result = prepare(
                 args.private_dir,
                 args.inputs,
@@ -1960,17 +2700,27 @@ def main() -> None:
                 args.provider_mirror,
                 recover=args.recover,
                 recheck=args.recheck,
+                recreate_workload=args.recreate_workload,
             )
         elif args.command == "plan":
-            if args.recover and args.recheck:
-                raise Refused("--recover and --recheck are mutually exclusive")
-            result = plan(args.private_dir, recover=args.recover, recheck=args.recheck)
+            _assert_single_mode(
+                recover=args.recover,
+                recheck=args.recheck,
+                recreate_workload=args.recreate_workload,
+            )
+            result = plan(
+                args.private_dir,
+                recover=args.recover,
+                recheck=args.recheck,
+                recreate_workload=args.recreate_workload,
+            )
         else:
             result = apply(
                 args.private_dir,
                 confirm_apply=args.confirm_apply,
                 approval_path=args.approval,
                 recover=args.recover,
+                recreate_workload=args.recreate_workload,
             )
         try:
             print(json.dumps(result, sort_keys=True))

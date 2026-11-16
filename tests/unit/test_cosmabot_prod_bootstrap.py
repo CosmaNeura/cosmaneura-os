@@ -19,3 +19,4 @@ spec.loader.exec_module(module)
 BootstrapSafety = module.BootstrapSafety
 RecoveryMode = module.RecoveryMode
 RecheckMode = module.RecheckMode
+RecreateWorkloadMode = module.RecreateWorkloadMode
