@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -120,7 +121,8 @@ class FakeAz:
 
 class BuildCreationReceiptTests(unittest.TestCase):
     def setUp(self):
-        self.now = dt.datetime(2026, 11, 16, 15, 0, tzinfo=dt.UTC)
+        # Prefer timezone.utc over the 3.11+ UTC alias so stock macOS python3 (3.9) works.
+        self.now = dt.datetime(2026, 11, 16, 15, 0, tzinfo=dt.timezone.utc)  # noqa: UP017
         self.profile = host.PROD_PROFILE
         self.vm_id, self.disk_id, self.vm_uuid, self.disk_uuid = _synthetic_ids(self.profile)
 
@@ -396,6 +398,17 @@ class BuildCreationReceiptTests(unittest.TestCase):
                 uid=501,
             )
         self.assertEqual(code, 1)
+
+    def test_mac_stock_python39_uses_timezone_utc_not_datetime_UTC(self):
+        """Fail if the 3.11+ UTC alias is reintroduced — stock macOS python3 is 3.9."""
+        source = Path(builder.__file__).read_text(encoding="utf-8")
+        # Drop comments so this pin targets call sites only.
+        code = re.sub(r"#.*", "", source)
+        self.assertIn("dt.timezone.utc", code)
+        self.assertNotIn("dt.UTC", code)
+        self.assertNotIn("datetime.UTC", code)
+        aware = dt.datetime.now(dt.timezone.utc)  # noqa: UP017
+        self.assertIsNotNone(aware.tzinfo)
 
     def test_az_runner_requires_argv0_az(self):
         with self.assertRaises(builder.Stop) as ctx:

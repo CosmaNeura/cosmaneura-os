@@ -114,7 +114,8 @@ def normalize_utc(value: str, *, field: str) -> str:
             stop(f"Unreadable ARM timestamp for {field}: {value!r} ({exc})")
     if parsed.tzinfo is None:
         stop(f"ARM timestamp for {field} lacks a timezone: {value!r}")
-    parsed = parsed.astimezone(dt.UTC).replace(microsecond=0)
+    # Prefer timezone.utc over the 3.11+ UTC alias so stock macOS python3 (3.9) works.
+    parsed = parsed.astimezone(dt.timezone.utc).replace(microsecond=0)  # noqa: UP017
     return parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -328,7 +329,7 @@ def build_receipt(
         apply_started = started_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         apply_completed = completed_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    clock = now if now is not None else dt.datetime.now(dt.UTC)
+    clock = now if now is not None else dt.datetime.now(dt.timezone.utc)  # noqa: UP017
     if clock.tzinfo is None:
         stop("Internal clock must be timezone-aware")
     age = clock - parse_utc(apply_started)
