@@ -84,21 +84,19 @@ Workstation paste (after `az login`, profile names fixed by `--profile`):
 python3 infra/beta/vm/host/build_creation_receipt.py --profile cosmabot-vm-prod-v1 --out-dir "$HOME/.cosmabot-sitting2"
 ```
 
-On a non-root Mac it writes the local files for review and prints the exact
-root install commands for the VM. `bootstrap_host.py` requires the receipt on
-the VM to be a private **root-owned** regular file with mode `0600` or `0400`:
+On a non-root Mac it writes the local files for review and may print helper
+root-install lines. For Sitting 2, **do not** run those printed `sudo install`
+lines and **do not** create `/etc/cosmabot` or place the receipt under it before
+bootstrap. Use the runbook **receipt-place** paste instead: it pipes the local
+JSON over ssh into a root-owned mode-0600 regular file at the fixed path
+`/root/cosmabot-creation-receipt.json` (outside `/etc/cosmabot`), verifies
+remote `sha256sum` against the local `.sha256` sidecar, and prints the two
+`export` lines for the VM root shell. `bootstrap_host.py` accepts any
+root-owned mode `0600` or `0400` regular receipt file; bootstrap itself creates
+`/etc/cosmabot` (including `host-bootstrap.json`).
 
-```text
-sudo install -d -o root -g root -m 0700 /etc/cosmabot
-sudo install -o root -g root -m 0600 "$HOME/.cosmabot-sitting2/creation-receipt.json" /etc/cosmabot/creation-receipt.json
-```
-
-The root-owned placement path is **not proven in CI** (agents are not root on
-the runner). Unit tests cover non-root mode `0600` plus a mocked uid-0 chown/
-chmod path under a permissive umask; John still runs the printed `sudo install`
-on the VM.
-
-Use the printed `sha256=…` value with `--creation-receipt-sha256`. Local proof:
+Use the printed `sha256=` value (or the runbook export line) with
+`--creation-receipt-sha256`. Local proof:
 `python3 -m unittest discover -s infra/beta/vm/host/tests -p 'test_build_creation_receipt.py' -v`
 (and the CI re-export `tests/unit/test_build_creation_receipt.py`).
 
@@ -114,11 +112,16 @@ fstab entries and a nonempty destination. These checks run again immediately
 before formatting. No full-device data scan is performed: the reviewed creation
 receipt establishes that this is the newly created Empty disk.
 
-Command shape, with actual reviewed public inputs:
+Command shape, with actual reviewed public inputs. The format-disk gate is a
+separate hand-set approval: set `FORMAT_APPROVAL_DISK_ID` yourself to the exact
+data-disk ARM ID from the receipt tool's printed `disk_id=` line or the portal,
+confirm it equals the receipt `disk_id`, and pass that hand-set value to
+`--format-new-empty-disk` (do not feed the receipt field straight back into the
+approval flag):
 
 ```text
-python3 bootstrap_host.py --profile cosmabot-vm-staging-v1 --vm-id <actual-vm-id> --disk-id <actual-disk-id> --expected-device <observed-lun0-device> --creation-receipt <root-owned-receipt.json> --creation-receipt-sha256 <reviewed-sha256> --format-new-empty-disk <same-exact-disk-id>
-python3 bootstrap_host.py --profile cosmabot-vm-prod-v1 --vm-id <actual-vm-id> --disk-id <actual-disk-id> --expected-device <observed-lun0-device> --creation-receipt <root-owned-receipt.json> --creation-receipt-sha256 <reviewed-sha256> --format-new-empty-disk <same-exact-disk-id>
+python3 bootstrap_host.py --profile cosmabot-vm-staging-v1 --vm-id <actual-vm-id> --disk-id <actual-disk-id> --expected-device <observed-lun0-device> --creation-receipt <root-owned-receipt.json> --creation-receipt-sha256 <reviewed-sha256> --format-new-empty-disk <FORMAT_APPROVAL_DISK_ID>
+python3 bootstrap_host.py --profile cosmabot-vm-prod-v1 --vm-id <actual-vm-id> --disk-id <actual-disk-id> --expected-device <observed-lun0-device> --creation-receipt <root-owned-receipt.json> --creation-receipt-sha256 <reviewed-sha256> --format-new-empty-disk <FORMAT_APPROVAL_DISK_ID>
 ```
 
 The prod unit **file** is `infra/beta/vm/runtime/cosmabot-prod.service`. Place it
@@ -129,10 +132,14 @@ rename or reuse `cosmabot-staging.service`. Container UID drop stays in
 `render.py` compose (`user: 10001:10001` / `999:999`), not in the systemd unit
 (which must stay root for `start.sh`).
 
-Omitting the final flag or naming any other disk refuses formatting. Formatting
-uses ext4 without a force flag. The script mounts by its newly created UUID at
-`/var/lib/cosmabot`, with `nodev,nosuid,noexec`, records the prior fstab in
-`/etc/fstab.cosmabot-before`, and creates these empty directories with mode 0700:
+Omitting the final flag or naming any other disk refuses formatting. The Sitting
+2 runbook format-disk gate requires John to set `FORMAT_APPROVAL_DISK_ID` by
+hand (from the receipt tool print or portal), STOP unless it exactly equals the
+receipt `disk_id`, and pass that hand-set value to `--format-new-empty-disk`.
+Formatting uses ext4 without a force flag. The script mounts by its newly
+created UUID at `/var/lib/cosmabot`, with `nodev,nosuid,noexec`, records the
+prior fstab in `/etc/fstab.cosmabot-before`, and creates these empty directories
+with mode 0700:
 
 | Directory | UID/GID |
 |---|---:|
@@ -257,10 +264,13 @@ non-secret sidecar `WORKSPACE_LLM_API_KEY.source-account`.
 yes / checklist): workstation receipt-tool paste
 (`build_creation_receipt.py --profile cosmabot-vm-prod-v1 --out-dir
 "$HOME/.cosmabot-sitting2"`) → open temporary SSH `/32` with the existing open
-fence → root shell → copy `host/` + sibling `logging/` to `/opt/cosmabot/vm/`
-→ place the receipt root-owned on the VM with the printed `sudo install`
-commands → `#389` bootstrap so `/etc/cosmabot` exists (`apply_started_utc`
-under 24 hours, or STOP and tell the CTO) → close-and-verify that SSH rule →
+fence → copy `host/` + sibling `logging/` to `/opt/cosmabot/vm/` →
+receipt-place paste to `/root/cosmabot-creation-receipt.json` (sha256 verified;
+do not create `/etc/cosmabot` yet) → root shell with the printed export lines
+and hand-set `FORMAT_APPROVAL_DISK_ID` → `#389` bootstrap so `/etc/cosmabot`
+exists (`apply_started_utc` under 24 hours, or STOP and tell the CTO) →
+close-and-verify that SSH rule and require
+`/etc/cosmabot/host-bootstrap.json` before any second vault/secrets window →
 second vault window → `LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)`
 → `--stage-from-vault` without `--secret-name` (path shape + all expected names
 present and non-empty, or STOP before SSH) → `TEMP-JOHN-SSH-SECRETS-INSTALL` →
