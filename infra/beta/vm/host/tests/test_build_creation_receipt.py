@@ -402,20 +402,105 @@ class BuildCreationReceiptTests(unittest.TestCase):
             builder.default_az_runner(["azure", "vm", "show", "-g", "x", "-n", "y"])
         self.assertIn("refused non-az argv", str(ctx.exception).lower())
 
-    def test_az_runner_refuses_vm_delete_and_disk_update(self):
+    def test_az_allowlist_refuses_verbs_absent_from_denylist(self):
+        """Fail if the argv[2] allowlist layer is deleted.
+
+        These verbs are NOT in _AZ_WRITE_VERBS, so only Layer B (allowlist) stops them.
+        """
+        for argv in (
+            ["az", "disk", "grant-access", "-g", "x", "-n", "y", "--duration-in-seconds", "1"],
+            ["az", "vm", "open-port", "-g", "x", "-n", "y", "--port", "22"],
+            ["az", "vm", "generalize", "-g", "x", "-n", "y"],
+        ):
+            with self.subTest(argv=argv):
+                self.assertNotIn(argv[2].lower(), builder._AZ_WRITE_VERBS)
+                with self.assertRaises(builder.Stop) as ctx:
+                    builder.default_az_runner(argv)
+                # Allowlist message names group+verb (denylist message names the token only).
+                self.assertIn(f"Refused non-read az verb: az {argv[1]} {argv[2]}", str(ctx.exception))
+
+    def test_az_denylist_refuses_write_token_when_argv2_is_read_verb(self):
+        """Fail if the denylist layer is deleted.
+
+        argv[2] is an allowed read verb, so Layer B passes; a denylisted token
+        later in argv is what Layer A alone must refuse.
+        """
+        argv = ["az", "vm", "show", "-g", "x", "-n", "y", "delete"]
+        self.assertIn(argv[2].lower(), builder._AZ_READ_VERBS)
+        self.assertIn("delete", builder._AZ_WRITE_VERBS)
+        with self.assertRaises(builder.Stop) as ctx:
+            builder.default_az_runner(argv)
+        self.assertIn("Refused non-read az verb in argv: delete", str(ctx.exception))
+
+    def test_az_denylist_refuses_vm_delete_and_disk_update(self):
+        # Also covered when argv[2] itself is denylisted (both layers would refuse;
+        # denylist message fires first).
         for argv in (
             ["az", "vm", "delete", "-g", "x", "-n", "y", "--yes"],
             ["az", "disk", "update", "-g", "x", "-n", "y"],
+            ["az", "vm", "run-command", "invoke", "-g", "x", "-n", "y"],
         ):
             with self.subTest(argv=argv):
                 with self.assertRaises(builder.Stop) as ctx:
                     builder.default_az_runner(argv)
-                self.assertIn("Refused non-read az verb", str(ctx.exception))
+                self.assertIn("Refused non-read az verb in argv:", str(ctx.exception))
 
     def test_az_runner_refuses_write_verb(self):
         with self.assertRaises(builder.Stop) as ctx:
             builder.default_az_runner(["az", "vm", "create", "-g", "x", "-n", "y"])
         self.assertIn("Refused non-read az verb", str(ctx.exception))
+
+    def test_az_failure_output_capped_to_first_stderr_line_200_chars(self):
+        line1 = "E" * 250
+        line2 = "SECOND LINE MUST NEVER APPEAR"
+        completed = subprocess.CompletedProcess(
+            args=["az", "vm", "show"],
+            returncode=1,
+            stdout="",
+            stderr=line1 + "\n" + line2 + "\n",
+        )
+        with patch("subprocess.run", return_value=completed):
+            with self.assertRaises(builder.Stop) as ctx:
+                builder.default_az_runner(
+                    ["az", "vm", "show", "--resource-group", "rg", "--name", "vm", "-o", "json"]
+                )
+        message = str(ctx.exception)
+        self.assertNotIn(line2, message)
+        self.assertNotIn("E" * 201, message)
+        self.assertIn("E" * 200, message)
+        self.assertEqual(message.count("E"), 200)
+
+    def test_root_lstat_fail_closed_stops(self):
+        fake = FakeAz(_vm_payload(), _disk_payload())
+        receipt = builder.build_receipt(
+            profile=self.profile, runner=fake, now=self.now
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            receipt_path = out / "creation-receipt.json"
+            sha_path = out / "creation-receipt.sha256"
+            real_lstat = os.lstat
+
+            def lstat_wrong_owner(path):
+                st = real_lstat(path)
+                # uid 501 → fail-closed (must be root-owned).
+                return os.stat_result((
+                    st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                    501, 0, st.st_size, st.st_atime, st.st_mtime, st.st_ctime,
+                ))
+
+            with (
+                patch("os.chown"),
+                patch("os.lstat", side_effect=lstat_wrong_owner),
+                self.assertRaises(builder.Stop) as ctx,
+            ):
+                builder.write_receipt_files(
+                    receipt,
+                    receipt_path=receipt_path,
+                    sha256_path=sha_path,
+                    uid=0,
+                )
+            self.assertIn("Failed to write a private root-owned receipt file", str(ctx.exception))
 
     def test_az_runner_subprocess_shell_false_list_argv_and_secret_env_dropped(self):
         captured: dict = {}

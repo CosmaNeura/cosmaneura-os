@@ -35,9 +35,9 @@ inputs or evidence:
   "create_option": "Empty",
   "size_gib": 128,
   "lun": 0,
-  "apply_started_utc": "<recorded start of this reviewed apply, ISO8601 with timezone>",
+  "apply_started_utc": "<earliest ARM timeCreated of the VM and the disk (proxy lower bound), ISO8601 with timezone>",
   "disk_created_utc": "<actual disk timeCreated, ISO8601 with timezone>",
-  "apply_completed_utc": "<recorded successful end of this apply, ISO8601 with timezone>"
+  "apply_completed_utc": "<latest ARM timeCreated of the VM and the disk (proxy lower bound), ISO8601 with timezone>"
 }
 ```
 
@@ -63,13 +63,13 @@ Timestamp provenance (documented; never invented):
 | Receipt field | ARM source |
 | --- | --- |
 | `disk_created_utc` | `az disk show` → `timeCreated` |
-| `apply_started_utc` | earliest ARM `timeCreated` of the VM and the disk (**explicit proxy** for foundation-apply start; Azure has no separate apply-start field on these resources) |
-| `apply_completed_utc` | latest of VM `timeCreated` (when present) and disk `timeCreated` (**lower bound** on apply end) |
+| `apply_started_utc` | earliest ARM `timeCreated` of the VM and the disk (ARM timeCreated **proxy**, a **lower bound**) |
+| `apply_completed_utc` | latest ARM `timeCreated` of the VM and the disk (same proxy, a **lower bound**) |
 
-Azure does not store a separate foundation-apply start/end on the VM or disk.
-Bootstrap’s 24h window is therefore anchored to the `apply_started_utc` proxy
-above. If a required field cannot be read from `az`, the tool STOPs instead of
-faking it.
+One definition everywhere: these fields are an ARM `timeCreated` proxy (Azure has
+no separate foundation-apply start/end on the VM or disk). Bootstrap’s 24h
+window is anchored to `apply_started_utc`. If a required field cannot be read
+from `az`, the tool STOPs instead of faking it.
 
 Workstation paste (after `az login`, profile names fixed by `--profile`):
 

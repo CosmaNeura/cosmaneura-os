@@ -8,15 +8,12 @@ matching sha256 sidecar.
 
 No Azure writes. No secrets. Does not change or loosen `bootstrap_host.py`.
 
-Timestamp provenance (ARM-backed only; never invented):
-  * disk_created_utc   = `az disk show` → timeCreated
-  * apply_started_utc  = earliest ARM timeCreated of the VM and the disk
-    (explicit proxy: Azure does not store a separate foundation-apply start on
-    the VM or disk; bootstrap's 24h window is anchored to this proxy)
-  * apply_completed_utc = latest of VM timeCreated (when present) and disk
-    timeCreated. Same honesty rule: no tofu/apply end stamp exists on these
-    resources, so the latest ARM creation time is a lower bound on apply end
-    that still satisfies started <= created <= completed.
+Timestamp provenance (ARM-backed only; never invented) — one definition:
+  disk_created_utc / apply_* are an ARM timeCreated proxy. The earliest
+  timeCreated of the VM and the disk is apply_started_utc (a lower bound);
+  the latest is apply_completed_utc (a lower bound); disk_created_utc is the
+  disk's timeCreated. Azure stores no separate foundation-apply start/end on
+  these resources; bootstrap's 24h window is anchored to this proxy.
 
 If a required ARM field is missing, this tool STOPs with a clear message and
 exit status 1. It never fabricates IDs or timestamps.
@@ -62,8 +59,11 @@ RECEIPT_VERSION = 1
 SIZE_GIB = 128
 REQUIRED_LUN = 0
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+# Allowlist: argv[2] (az <group> <verb>) must be one of these read verbs.
 _AZ_READ_VERBS = frozenset({"show", "list", "get"})
-# Azure write verbs that must never appear in the argv we construct.
+# Denylist: every non-option token in argv[1:] is scanned. Not fully redundant
+# with the allowlist — the allowlist only checks argv[2], while this catches a
+# write-shaped token anywhere else (e.g. after a permitted show/list/get).
 _AZ_WRITE_VERBS = frozenset({
     "create", "update", "delete", "set", "remove", "start", "stop", "restart",
     "deallocate", "resize", "attach-data-disk", "detach-data-disk", "run-command",
@@ -135,15 +135,16 @@ def default_az_runner(argv: list[str]) -> dict[str, Any]:
     """Run a read-only az CLI command and parse JSON stdout."""
     if not argv or argv[0] != "az":
         stop("Internal az runner refused non-az argv")
-    # Refuse any write-shaped verb in the command (defense in depth).
+    # Layer A (denylist): refuse write-shaped tokens anywhere in argv[1:].
     for token in argv[1:]:
         if token.startswith("-"):
             continue
         if token.lower() in _AZ_WRITE_VERBS:
             stop(f"Refused non-read az verb in argv: {token}")
-        # First non-option after `az <group>` is enough; break after group+verb check below.
     if len(argv) < 3:
         stop("Internal az runner refused short argv")
+    # Layer B (allowlist): argv[2] must be show|list|get (catches verbs the
+    # denylist does not name, e.g. grant-access / open-port).
     group, verb = argv[1], argv[2]
     if verb.lower() not in _AZ_READ_VERBS:
         stop(f"Refused non-read az verb: az {group} {verb}")
@@ -357,9 +358,8 @@ def build_receipt(
         "apply_completed_utc": apply_completed,
         "notes": [
             "Built by build_creation_receipt.py from read-only az vm show + az disk show.",
-            "apply_started_utc is the earliest ARM timeCreated of the VM and the disk "
-            "(explicit proxy for foundation-apply start). apply_completed_utc is the "
-            "latest of those timeCreated values (a lower bound on apply end). "
+            "ARM timeCreated proxy: earliest VM/disk timeCreated is apply_started_utc "
+            "(a lower bound); latest is apply_completed_utc (a lower bound); "
             "disk_created_utc is disk.timeCreated.",
             "Never commit real subscription IDs or secret values.",
         ],
