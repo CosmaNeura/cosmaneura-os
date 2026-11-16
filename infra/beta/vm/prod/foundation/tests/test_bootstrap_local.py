@@ -5220,6 +5220,66 @@ class RecreateWorkloadMode(unittest.TestCase):
             )
         self.assertIn("--confirm-refresh", str(silent.exception))
 
+    def test_prevent_destroy_plan_fixture_false_blocks_true_lifts(self):
+        """Validated plan-JSON fixture: false refuses destroy/replace; true allows it.
+
+        Mirrors the real tofu probe shape without requiring OpenTofu on the CI
+        python-tests-migrate image (EncryptionProof stays out of the unit re-export
+        for the same reason). Mutation: drop the false refusal → this fails.
+        """
+        sub = self.inputs["subscription_id"]
+        destroy_plan = {
+            "resource_changes": [
+                {
+                    "address": bootstrap.RECREATE_VM_ADDRESS,
+                    "type": "azurerm_linux_virtual_machine",
+                    "change": {
+                        "actions": ["delete", "create"],
+                        "after": {"name": bootstrap.VM_AZURE_NAME},
+                    },
+                },
+                {
+                    "address": bootstrap.RECREATE_DISK_ADDRESS,
+                    "type": "azurerm_managed_disk",
+                    "change": {
+                        "actions": ["delete", "create"],
+                        "after": {
+                            "name": "data-vm-cosmabot-prod-eus2-01",
+                            "resource_group_name": bootstrap.RESOURCE_GROUP,
+                        },
+                    },
+                },
+                {
+                    "address": bootstrap.RECREATE_ATTACHMENT_ADDRESS,
+                    "type": "azurerm_virtual_machine_data_disk_attachment",
+                    "change": {"actions": ["delete", "create"], "after": {"lun": 0}},
+                },
+            ]
+        }
+        with self.assertRaises(bootstrap.Refused) as blocked:
+            bootstrap.assert_recreate_workload_changeset(
+                destroy_plan,
+                subscription_id=sub,
+                allow_workload_recreate=False,
+            )
+        self.assertIn("allow_workload_recreate=true", str(blocked.exception))
+        addressed = bootstrap.assert_recreate_workload_changeset(
+            destroy_plan,
+            subscription_id=sub,
+            allow_workload_recreate=True,
+        )
+        self.assertEqual(
+            addressed["replace_addresses"],
+            sorted(bootstrap.RECREATE_REQUIRED_REPLACE_ADDRESSES),
+        )
+        # Pin the HCL expression that the real tofu probe exercises locally.
+        compute = (MODULE / "compute.tf").read_text()
+        self.assertEqual(compute.count("prevent_destroy = !var.allow_workload_recreate"), 2)
+
+
+class PreventDestroyTofuProbe(unittest.TestCase):
+    """Real OpenTofu 1.12.5 probe. Not re-exported into tests/unit (needs tofu on PATH)."""
+
     def test_prevent_destroy_false_blocks_true_lifts_real_tofu_probe(self):
         tofu = shutil.which("tofu")
         self.assertIsNotNone(tofu, "Pinned OpenTofu 1.12.5 required for prevent_destroy probe")

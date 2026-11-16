@@ -15,7 +15,8 @@ assert spec.loader is not None
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
-# EncryptionProof needs a pinned tofu binary; keep it out of the unit suite.
+# EncryptionProof and PreventDestroyTofuProbe need a pinned tofu binary; keep
+# them out of the unit suite (python-tests-migrate has no OpenTofu on PATH).
 BootstrapSafety = module.BootstrapSafety
 RecoveryMode = module.RecoveryMode
 RecheckMode = module.RecheckMode
