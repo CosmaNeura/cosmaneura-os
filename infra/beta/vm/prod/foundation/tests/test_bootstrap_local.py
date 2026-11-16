@@ -4604,10 +4604,7 @@ class RecreateWorkloadMode(unittest.TestCase):
         empty = subprocess.CompletedProcess([], 0, b"[]", b"")
         with patch.object(bootstrap, "command", return_value=empty):
             bootstrap.assert_os_disk_preflight(env, self.inputs)
-        managed = (
-            f"/subscriptions/x/resourceGroups/{bootstrap.RESOURCE_GROUP}/providers/"
-            f"Microsoft.Compute/virtualMachines/{bootstrap.VM_AZURE_NAME}"
-        )
+        managed = bootstrap.expected_workload_vm_resource_id(self.inputs["subscription_id"])
         attached = subprocess.CompletedProcess(
             [],
             0,
@@ -4627,6 +4624,52 @@ class RecreateWorkloadMode(unittest.TestCase):
         ) as err:
             bootstrap.assert_os_disk_preflight(env, self.inputs)
         self.assertIn("unattached", str(err.exception).lower())
+
+    def test_managed_by_exact_case_insensitive_full_resource_id(self):
+        sub = self.inputs["subscription_id"]
+        exact = bootstrap.expected_workload_vm_resource_id(sub)
+        self.assertTrue(
+            bootstrap.managed_by_matches_workload_vm(exact, subscription_id=sub)
+        )
+        self.assertTrue(
+            bootstrap.managed_by_matches_workload_vm(exact.upper(), subscription_id=sub)
+        )
+        # Wrong VM name
+        wrong_vm = exact.replace(bootstrap.VM_AZURE_NAME, "vm-other-prod-eus2-01")
+        self.assertFalse(
+            bootstrap.managed_by_matches_workload_vm(wrong_vm, subscription_id=sub)
+        )
+        # Prefix / substring must not pass (old needle style)
+        prefix = exact + "/extensions/AzureMonitorLinuxAgent"
+        self.assertFalse(
+            bootstrap.managed_by_matches_workload_vm(prefix, subscription_id=sub)
+        )
+        self.assertFalse(
+            bootstrap.managed_by_matches_workload_vm(
+                f"/virtualMachines/{bootstrap.VM_AZURE_NAME}", subscription_id=sub
+            )
+        )
+        # Other resource group
+        other_rg = exact.replace(bootstrap.RESOURCE_GROUP, "rg-other-prod-eus2-01")
+        self.assertFalse(
+            bootstrap.managed_by_matches_workload_vm(other_rg, subscription_id=sub)
+        )
+        env = {}
+        for label, managed_by in (
+            ("wrong_vm", wrong_vm),
+            ("prefix", prefix),
+            ("other_rg", other_rg),
+        ):
+            payload = json.dumps(
+                [{"name": bootstrap.OS_DISK_NAME, "managedBy": managed_by}]
+            ).encode()
+            with self.subTest(label=label), patch.object(
+                bootstrap,
+                "command",
+                return_value=subprocess.CompletedProcess([], 0, payload, b""),
+            ), self.assertRaises(bootstrap.Refused) as err:
+                bootstrap.assert_no_orphaned_os_disk(env, self.inputs)
+            self.assertIn(bootstrap.OS_DISK_NAME, str(err.exception))
 
     def test_compute_tf_prevent_destroy_uses_allow_workload_recreate_var(self):
         text = (MODULE / "compute.tf").read_text()
@@ -5116,19 +5159,58 @@ class RecreateWorkloadMode(unittest.TestCase):
         self.assertIn("fail-closed", str(err.exception).lower())
         self.assertIn(bootstrap.OS_DISK_NAME, str(err.exception))
 
+    def _synthetic_origin_main_worktree(self) -> Path:
+        """Build a temp git worktree with a local bare origin/main. Does not touch the real repo."""
+        root = Path(tempfile.mkdtemp(prefix="cosmabot-refresh-git-")).resolve()
+        self.addCleanup(shutil.rmtree, root, True)
+        bare = root / "origin.git"
+        work = root / "work"
+        subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+        subprocess.run(["git", "clone", str(bare), str(work)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(work), "config", "user.email", "synth@example.invalid"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(work), "config", "user.name", "Synthetic Operator"],
+            check=True,
+            capture_output=True,
+        )
+        (work / "README").write_text("synthetic refresh guard fixture\n")
+        subprocess.run(["git", "-C", str(work), "add", "README"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(work), "commit", "-m", "initial"],
+            check=True,
+            capture_output=True,
+        )
+        # Ensure the branch is named main and pushed to origin/main.
+        branch = subprocess.run(
+            ["git", "-C", str(work), "rev-parse", "--abbrev-ref", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        if branch != "main":
+            subprocess.run(
+                ["git", "-C", str(work), "branch", "-M", "main"],
+                check=True,
+                capture_output=True,
+            )
+        subprocess.run(
+            ["git", "-C", str(work), "push", "-u", "origin", "main"],
+            check=True,
+            capture_output=True,
+        )
+        return work
+
     def test_refresh_module_snapshot_then_recheck_and_tamper_refuse(self):
         self._seed_private_dir()
-        # Stale private compute.tf (pre-recreate lifecycle) vs reviewed MODULE.
         stale = (MODULE / "compute.tf").read_text().replace(
             "prevent_destroy = !var.allow_workload_recreate",
             "prevent_destroy = true",
         )
-        # Also need matching variables.tf / versions.tf drift? Only change compute.tf.
-        bootstrap.replace_private(
-            self.folder / "module" / "compute.tf",
-            stale.encode(),
-        )
-        # Without refresh, prepare --recheck refuses.
+        bootstrap.replace_private(self.folder / "module" / "compute.tf", stale.encode())
         fp = bootstrap.fingerprint()
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap,
@@ -5145,12 +5227,14 @@ class RecreateWorkloadMode(unittest.TestCase):
                 recheck=True,
             )
         self.assertIn("Private module snapshot changed", str(before.exception))
-        # Sanctioned refresh on clean origin/main.
-        with patch.object(
-            bootstrap, "assert_clean_origin_main_checkout", return_value="a" * 40
-        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261116T140000Z"), patch.object(
-            bootstrap, "_operator_print"
-        ):
+        work = self._synthetic_origin_main_worktree()
+        # Run assert_clean for real against the synthetic repo (do not patch it out).
+        with patch.object(bootstrap, "REPO", work):
+            head = bootstrap.assert_clean_origin_main_checkout()
+        self.assertRegex(head, r"^[0-9a-f]{40}$")
+        with patch.object(bootstrap, "REPO", work), patch.object(
+            bootstrap, "utc_plan_stamp", return_value="20261116T140000Z"
+        ), patch.object(bootstrap, "_operator_print"):
             refreshed = bootstrap.refresh_module_snapshot(
                 self.folder,
                 fp["source_sha256"],
@@ -5159,9 +5243,11 @@ class RecreateWorkloadMode(unittest.TestCase):
             )
         self.assertTrue(refreshed["refreshed"])
         self.assertIn("compute.tf", refreshed["changed_files"])
+        self.assertTrue(Path(refreshed["source_backup"]).is_file())
+        backup = json.loads(Path(refreshed["source_backup"]).read_text())
+        self.assertIn("source_sha256", backup)
         manifest = json.loads((self.folder / "manifest.json").read_text())
         self.assertEqual(manifest["source"]["source_sha256"], fp["source_sha256"])
-        # After refresh, recheck prepare succeeds against unchanged live config.
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap,
             "command",
@@ -5177,7 +5263,6 @@ class RecreateWorkloadMode(unittest.TestCase):
                 recheck=True,
             )
         self.assertTrue(recheck["recheck"])
-        # Recover prepare also succeeds on the refreshed, unchanged private module.
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap,
             "command",
@@ -5193,11 +5278,7 @@ class RecreateWorkloadMode(unittest.TestCase):
                 recover=True,
             )
         self.assertTrue(recovered["recover"])
-        # Tamper after refresh still refuses.
-        bootstrap.replace_private(
-            self.folder / "module" / "compute.tf",
-            stale.encode(),
-        )
+        bootstrap.replace_private(self.folder / "module" / "compute.tf", stale.encode())
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             bootstrap,
             "command",
@@ -5213,12 +5294,176 @@ class RecreateWorkloadMode(unittest.TestCase):
                 recheck=True,
             )
         self.assertIn("Private module snapshot changed", str(after.exception))
-        # Refresh without --confirm-refresh refuses (no silent refresh).
         with self.assertRaises(bootstrap.Refused) as silent:
             bootstrap.refresh_module_snapshot(
                 self.folder, fp["source_sha256"], fp["lock_sha256"], confirm_refresh=False
             )
         self.assertIn("--confirm-refresh", str(silent.exception))
+
+    def test_refresh_guards_dirty_tree_off_main_hash_unsanctioned_and_match(self):
+        """Real assert_clean_origin_main_checkout against a synthetic bare origin."""
+        work = self._synthetic_origin_main_worktree()
+        self._seed_private_dir()
+        fp = bootstrap.fingerprint()
+
+        # Dirty working tree refuses.
+        (work / "dirt.txt").write_text("unsaved\n")
+        with patch.object(bootstrap, "REPO", work), self.assertRaises(bootstrap.Refused) as dirty:
+            bootstrap.assert_clean_origin_main_checkout()
+        self.assertIn("clean git working tree", str(dirty.exception).lower())
+        with patch.object(bootstrap, "REPO", work), self.assertRaises(bootstrap.Refused) as dirty_ref:
+            bootstrap.refresh_module_snapshot(
+                self.folder, fp["source_sha256"], fp["lock_sha256"], confirm_refresh=True
+            )
+        self.assertIn("clean git working tree", str(dirty_ref.exception).lower())
+        (work / "dirt.txt").unlink()
+
+        # HEAD not on origin/main refuses.
+        (work / "side.txt").write_text("side\n")
+        subprocess.run(["git", "-C", str(work), "checkout", "-b", "feature"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(work), "add", "side.txt"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(work), "commit", "-m", "side"],
+            check=True,
+            capture_output=True,
+        )
+        with patch.object(bootstrap, "REPO", work), self.assertRaises(bootstrap.Refused) as off_main:
+            bootstrap.assert_clean_origin_main_checkout()
+        self.assertIn("origin/main", str(off_main.exception).lower())
+        subprocess.run(["git", "-C", str(work), "checkout", "main"], check=True, capture_output=True)
+
+        # Hash mismatch refuses (clean origin/main).
+        with patch.object(bootstrap, "REPO", work), self.assertRaises(bootstrap.Refused) as bad_hash:
+            bootstrap.refresh_module_snapshot(
+                self.folder, "0" * 64, fp["lock_sha256"], confirm_refresh=True
+            )
+        self.assertIn("source/lock differs", str(bad_hash.exception).lower())
+        with patch.object(bootstrap, "REPO", work), self.assertRaises(bootstrap.Refused) as bad_lock:
+            bootstrap.refresh_module_snapshot(
+                self.folder, fp["source_sha256"], "0" * 64, confirm_refresh=True
+            )
+        self.assertIn("source/lock differs", str(bad_lock.exception).lower())
+
+        # Unsanctioned path in the private-module diff refuses.
+        bootstrap.write_private(
+            self.folder / "module" / "unsanctioned-extra.tf",
+            b'# synthetic unsanctioned drift\n',
+        )
+        with patch.object(bootstrap, "REPO", work), patch.object(
+            bootstrap, "_operator_print"
+        ), self.assertRaises(bootstrap.Refused) as unsanctioned:
+            bootstrap.refresh_module_snapshot(
+                self.folder, fp["source_sha256"], fp["lock_sha256"], confirm_refresh=True
+            )
+        self.assertIn("sanctioned", str(unsanctioned.exception).lower())
+        (self.folder / "module" / "unsanctioned-extra.tf").unlink()
+
+        # Snapshot already matches: refuse / do nothing.
+        with patch.object(bootstrap, "REPO", work), self.assertRaises(bootstrap.Refused) as matched:
+            bootstrap.refresh_module_snapshot(
+                self.folder, fp["source_sha256"], fp["lock_sha256"], confirm_refresh=True
+            )
+        self.assertIn("already matches", str(matched.exception).lower())
+        self.assertIn("nothing to refresh", str(matched.exception).lower())
+
+    def test_apply_completed_os_disk_failure_is_apply_attempted(self):
+        """Post-apply OS-disk refuse after tofu exit 0 must be ApplyAttempted (exit 2 path)."""
+        self._seed_private_dir()
+        self._recreate_prepare()
+        plan_sha, summary, plan_json, _plan_path = self._write_recreate_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        managed = bootstrap.expected_workload_vm_resource_id(self.inputs["subscription_id"])
+        preflight = json.dumps(
+            [{"name": bootstrap.OS_DISK_NAME, "managedBy": managed}]
+        ).encode()
+        az_phase = {"n": 0}
+
+        def run(argv, **kwargs):
+            if argv[0] == "az":
+                az_phase["n"] += 1
+                if az_phase["n"] == 1:
+                    return subprocess.CompletedProcess(argv, 0, preflight, b"")
+                return subprocess.CompletedProcess(
+                    argv,
+                    0,
+                    json.dumps(
+                        [{"name": bootstrap.OS_DISK_NAME, "managedBy": None}]
+                    ).encode(),
+                    b"",
+                )
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        class FakeProc:
+            def __init__(self, argv, **kwargs):
+                self.pid = 4242
+                self.returncode = 0
+
+            def wait(self, timeout=None):
+                return 0
+
+            def poll(self):
+                return 0
+
+            def send_signal(self, sig):
+                return None
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run
+        ), patch.object(
+            subprocess, "Popen", side_effect=lambda *a, **k: FakeProc(a[0], **k)
+        ), self.assertRaises(bootstrap.ApplyAttempted) as err:
+            bootstrap.apply(
+                self.folder, confirm_apply=True, approval_path=approval, recreate_workload=True
+            )
+        self.assertIn("apply-attempted", str(err.exception).lower())
+        self.assertIn(bootstrap.OS_DISK_NAME, str(err.exception))
+        # main() must print apply-attempted, not "No apply was attempted".
+        printed: list[str] = []
+        with patch.object(sys, "argv", ["bootstrap_local.py", "apply", "--confirm-apply",
+                                        "--approval", str(approval),
+                                        "--private-dir", str(self.folder),
+                                        "--recreate-workload"]), patch.object(
+            bootstrap, "apply", side_effect=bootstrap.ApplyAttempted(
+                "Apply completed but OS disk check refused (fail-closed / apply-attempted): orphan"
+            )
+        ), patch.object(bootstrap, "_operator_print", side_effect=lambda m: printed.append(m)), self.assertRaises(
+            SystemExit
+        ) as exit_err:
+            bootstrap.main()
+        self.assertEqual(exit_err.exception.code, 2)
+        self.assertTrue(any("apply was attempted" in m.lower() for m in printed))
+        self.assertFalse(any("no apply was attempted" in m.lower() for m in printed))
+
+    def test_apply_attempted_os_disk_timeout_oserror_calledprocesserror(self):
+        env = {}
+        inputs = self.inputs
+        for label, exc in (
+            ("timeout", subprocess.TimeoutExpired(cmd=["az"], timeout=1)),
+            ("oserror", OSError("az missing")),
+            ("called", subprocess.CalledProcessError(1, ["az"])),
+        ):
+            with self.subTest(label=label), patch.object(
+                bootstrap, "assert_no_orphaned_os_disk", side_effect=exc
+            ):
+                attempted = bootstrap._apply_attempted_with_os_disk_check(
+                    "Apply failed.",
+                    recreate_workload=True,
+                    env=env,
+                    inputs=inputs,
+                )
+            self.assertIsInstance(attempted, bootstrap.ApplyAttempted)
+            self.assertIn("apply-attempted", str(attempted).lower())
+            self.assertIn("fail-closed", str(attempted).lower())
+        # _list_named_os_disks itself fail-closes on timeout.
+        with patch.object(
+            bootstrap, "command", side_effect=subprocess.TimeoutExpired(cmd=["az"], timeout=1)
+        ), self.assertRaises(bootstrap.Refused) as list_err:
+            bootstrap._list_named_os_disks(env, inputs, require_present=True)
+        self.assertIn("fail-closed", str(list_err.exception).lower())
 
     def test_prevent_destroy_plan_fixture_false_blocks_true_lifts(self):
         """Validated plan-JSON fixture: false refuses destroy/replace; true allows it.

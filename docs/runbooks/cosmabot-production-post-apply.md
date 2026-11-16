@@ -2469,8 +2469,9 @@ paste with `return 1` without killing the operator SSH session. Do not add
 If the live private `module/` still pins the first-apply `*.tf` snapshot and
 `--recheck` / `--recover` / `--recreate-workload` refuse with
 `Private module snapshot changed`, run the sanctioned refresh first (clean
-checkout of a commit on `origin/main` only; prints `*.tf` diffs; binds the new
-digests John must approve):
+checkout of a commit on `origin/main` only; prints `*.tf` diffs; backs up
+prior `manifest.source` to `manifest.source.pre-refresh-<UTC>.json` before
+overwrite; binds the new digests John must approve):
 
 ```bash
 cosmabot_refresh_module_snapshot() {
@@ -2482,19 +2483,23 @@ cosmabot_refresh_module_snapshot() {
     --source-sha256 "$SOURCE_SHA256" \
     --lock-sha256 "$LOCK_SHA256" \
     --confirm-refresh || return 1
-  echo "PASS: module snapshot refresh bound new digests into manifest.source"
+  echo "PASS: module snapshot refresh bound new digests; prior manifest.source backed up under PRIVATE_DIR"
 }
 cosmabot_refresh_module_snapshot
 ```
 
 ### 1. Refresh the disk-empty evidence
 
-Confirm the attached data disk is still Empty / 128 GiB / LUN 0 (read-only):
+This fence checks Azure disk **metadata only** (`createOption`, size, attachment).
+It does not prove the volume has never been written. Write-bytes / ops evidence
+is Sitting 2 host bootstrap with the reviewed creation receipt
+(`infra/beta/vm/host/bootstrap_host.py --format-new-empty-disk`, after step 7).
 
 ```bash
 cosmabot_recreate_disk_evidence() {
   test -n "${RG:-}" || { echo "STOP: RG unset" >&2; return 1; }
   test -n "${SUBSCRIPTION_ID:-}" || { echo "STOP: SUBSCRIPTION_ID unset" >&2; return 1; }
+  echo "INFO: metadata-only check; write-bytes/ops evidence is Sitting 2 format with creation receipt"
   az disk show \
     --resource-group "$RG" \
     --subscription "$SUBSCRIPTION_ID" \
@@ -2586,15 +2591,39 @@ cosmabot_recreate_apply
 Pre-apply refuses an unattached / wrong-VM `osdisk-vm-cosmabot-prod-eus2-01`.
 Post-apply (and ApplyAttempted) refuse if that OS disk is missing or unattached.
 
+### Orphan OS disk resolution (human decision; never deletes)
+
+If preflight or post-apply refuses because `osdisk-vm-cosmabot-prod-eus2-01`
+exists unattached or attached to the wrong VM, paste this fence. It only lists
+facts and stops for John's decision. It never deletes, updates, or detaches.
+
+```bash
+cosmabot_recreate_os_disk_orphan_inspect() {
+  test -n "${RG:-}" || { echo "STOP: RG unset" >&2; return 1; }
+  test -n "${SUBSCRIPTION_ID:-}" || { echo "STOP: SUBSCRIPTION_ID unset" >&2; return 1; }
+  echo "INFO: inspect-only; this fence never deletes or detaches disks"
+  az disk show \
+    --resource-group "$RG" \
+    --subscription "$SUBSCRIPTION_ID" \
+    --name osdisk-vm-cosmabot-prod-eus2-01 \
+    --query "{name:name,managedBy:managedBy,diskState:diskState,timeCreated:timeCreated}" \
+    --output json || return 1
+  echo "STOP: human decision required before any recreate continue; do not delete from this paste"
+  return 1
+}
+cosmabot_recreate_os_disk_orphan_inspect
+```
+
 ### Mid-replace recovery
 
 If a prior recreate apply stopped after destroying the VM and/or data disk,
-re-run prepare → plan → apply with `--recreate-workload`. The planner lists
+re-run prepare then plan then apply with `--recreate-workload`. The planner lists
 state and passes `-replace` only for addresses still present; addresses absent
 from state are planned as create-only. The sanitiser still requires the exact
 three-address set (VM + data disk + attachment) and refuses any other touch.
 If Azure still holds an orphan `osdisk-vm-cosmabot-prod-eus2-01` not attached to
-`vm-cosmabot-prod-eus2-01`, preflight refuses until that disk is resolved.
+`vm-cosmabot-prod-eus2-01`, preflight refuses until that disk is resolved via the
+orphan-inspect fence above.
 
 ### 6. Recheck
 
@@ -2605,7 +2634,8 @@ Repeat step 2. Stop unless the post-recreate recheck exits 0.
 Build the host creation receipt with
 `infra/beta/vm/host/build_creation_receipt.py` (depends on PR #397 merging
 first; do not invent a substitute). Then run Sitting 2 (format empty disk +
-secrets install) within 24 hours of the recreate apply.
+secrets install) within 24 hours of the recreate apply. Sitting 2 format with
+the creation receipt is the write-bytes / ops evidence for the data disk.
 
 ```bash
 cosmabot_recreate_build_receipt() {

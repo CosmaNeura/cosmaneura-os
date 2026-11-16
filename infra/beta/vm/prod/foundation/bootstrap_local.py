@@ -475,6 +475,12 @@ def refresh_module_snapshot(
         raise Refused("Module snapshot refresh receipt path already exists; refuse overwrite")
     previous_source = prior.get("source") if isinstance(prior.get("source"), dict) else {}
     previous_source_sha256 = previous_source.get("source_sha256")
+    # Backup prior manifest.source before overwrite (operator recovery / audit).
+    source_backup_path = folder / f"manifest.source.pre-refresh-{stamp}.json"
+    if source_backup_path.exists():
+        raise Refused("Module snapshot refresh source backup path already exists; refuse overwrite")
+    write_private(source_backup_path, json_bytes(previous_source if previous_source else {}))
+    secure_file(source_backup_path)
     # Rewrite only sanctioned changed files from the reviewed MODULE tree.
     for rel in changed:
         target = folder / "module" / rel
@@ -499,6 +505,7 @@ def refresh_module_snapshot(
         "stamp": stamp,
         "changed_files": changed,
         "previous_source_sha256": previous_source_sha256,
+        "source_backup": str(source_backup_path),
         "source_sha256": actual["source_sha256"],
         "lock_sha256": actual["lock_sha256"],
     }
@@ -510,6 +517,7 @@ def refresh_module_snapshot(
         "changed_files": changed,
         "diffs": diffs,
         "previous_source_sha256": previous_source_sha256,
+        "source_backup": str(source_backup_path),
         "source_sha256": actual["source_sha256"],
         "lock_sha256": actual["lock_sha256"],
         "private_directory": str(folder),
@@ -528,6 +536,7 @@ def refresh_module_snapshot(
         "refreshed": True,
         "stamp": stamp,
         "receipt_path": str(receipt_path),
+        "source_backup": str(source_backup_path),
         "head_sha": head_sha,
         "changed_files": changed,
         "source_sha256": actual["source_sha256"],
@@ -1948,33 +1957,57 @@ def _replace_addresses_for_state(state_addresses: frozenset[str] | set[str]) -> 
     )
 
 
+def expected_workload_vm_resource_id(subscription_id: str) -> str:
+    """Canonical Azure resource ID for the production workload VM."""
+    if not isinstance(subscription_id, str) or not subscription_id.strip():
+        raise Refused("Workload VM resource id requires subscription_id")
+    return (
+        f"/subscriptions/{subscription_id.strip()}/resourceGroups/{RESOURCE_GROUP}"
+        f"/providers/Microsoft.Compute/virtualMachines/{VM_AZURE_NAME}"
+    )
+
+
+def managed_by_matches_workload_vm(managed_by: object, *, subscription_id: str) -> bool:
+    """Exact case-insensitive match on the full workload VM resource ID (no substring)."""
+    if not isinstance(managed_by, str) or not managed_by.strip():
+        return False
+    expected = expected_workload_vm_resource_id(subscription_id)
+    return managed_by.strip().casefold() == expected.casefold()
+
+
 def _list_named_os_disks(
     env: dict, inputs: dict, *, require_present: bool
 ) -> list[dict]:
     """List disks named OS_DISK_NAME.
 
-    CLI failure / non-array / invalid JSON always refuse (fail-closed).
-    When require_present is True, an empty filtered list also refuses (post-apply /
-    ApplyAttempted). When False (preflight), empty means no orphan candidate yet.
+    CLI failure / timeout / OSError / non-array / invalid JSON always refuse
+    (fail-closed). When require_present is True, an empty filtered list also
+    refuses (post-apply / ApplyAttempted). When False (preflight), empty means
+    no orphan candidate yet.
     """
-    result = command(
-        [
-            "az",
-            "disk",
-            "list",
-            "--resource-group",
-            RESOURCE_GROUP,
-            "--subscription",
-            inputs["subscription_id"],
-            "--query",
-            f"[?name=='{OS_DISK_NAME}'].{{name:name,managedBy:managedBy}}",
-            "--output",
-            "json",
-            "--only-show-errors",
-        ],
-        env=env,
-        timeout=120,
-    )
+    try:
+        result = command(
+            [
+                "az",
+                "disk",
+                "list",
+                "--resource-group",
+                RESOURCE_GROUP,
+                "--subscription",
+                inputs["subscription_id"],
+                "--query",
+                f"[?name=='{OS_DISK_NAME}'].{{name:name,managedBy:managedBy}}",
+                "--output",
+                "json",
+                "--only-show-errors",
+            ],
+            env=env,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+        raise Refused(
+            f"Could not list OS disks named {OS_DISK_NAME}; refuse (fail-closed): {exc}"
+        ) from exc
     if result.returncode:
         raise Refused(
             f"Could not list OS disks named {OS_DISK_NAME}; refuse (fail-closed)"
@@ -2014,10 +2047,11 @@ def assert_os_disk_preflight(env: dict, inputs: dict) -> None:
 
     Missing disk is allowed (mid-replace after delete_os_disk_on_deletion). An
     existing unattached / wrong-VM disk refuses before tofu apply starts.
-    Failed az disk list still refuses (fail-closed).
+    Failed az disk list still refuses (fail-closed). managedBy must be an exact
+    case-insensitive match on the full workload VM resource ID.
     """
     disks = _list_named_os_disks(env, inputs, require_present=False)
-    vm_needle = f"/virtualMachines/{VM_AZURE_NAME}"
+    subscription_id = str(inputs["subscription_id"])
     for disk in disks:
         managed_by = disk.get("managedBy")
         if not managed_by:
@@ -2025,24 +2059,23 @@ def assert_os_disk_preflight(env: dict, inputs: dict) -> None:
                 f"Pre-apply OS disk check: {OS_DISK_NAME} exists unattached "
                 f"(managedBy empty); refuse recreate until the orphan is resolved"
             )
-        if not isinstance(managed_by, str) or vm_needle not in managed_by:
+        if not managed_by_matches_workload_vm(managed_by, subscription_id=subscription_id):
             raise Refused(
-                f"Pre-apply OS disk check: {OS_DISK_NAME} is not attached to "
-                f"{VM_AZURE_NAME}; refuse recreate"
+                f"Pre-apply OS disk check: {OS_DISK_NAME} managedBy is not the exact "
+                f"workload VM id {expected_workload_vm_resource_id(subscription_id)}; "
+                "refuse recreate"
             )
 
 
 def assert_no_orphaned_os_disk(env: dict, inputs: dict) -> None:
     """Post-recreate / ApplyAttempted: require named OS disk attached to workload VM."""
     disks = _list_named_os_disks(env, inputs, require_present=True)
-    vm_needle = f"/virtualMachines/{VM_AZURE_NAME}"
+    subscription_id = str(inputs["subscription_id"])
     orphans = [
         disk
         for disk in disks
-        if not disk.get("managedBy")
-        or (
-            isinstance(disk.get("managedBy"), str)
-            and vm_needle not in str(disk.get("managedBy"))
+        if not managed_by_matches_workload_vm(
+            disk.get("managedBy"), subscription_id=subscription_id
         )
     ]
     if orphans:
@@ -2056,6 +2089,14 @@ def assert_no_orphaned_os_disk(env: dict, inputs: dict) -> None:
         )
 
 
+_OS_DISK_CHECK_FAILURES = (
+    Refused,
+    OSError,
+    subprocess.TimeoutExpired,
+    subprocess.CalledProcessError,
+)
+
+
 def _apply_attempted_with_os_disk_check(
     message: str,
     *,
@@ -2063,14 +2104,21 @@ def _apply_attempted_with_os_disk_check(
     env: dict,
     inputs: dict,
 ) -> ApplyAttempted:
-    """Build ApplyAttempted; on recreate, always attempt the orphan OS-disk check."""
+    """Build ApplyAttempted; on recreate, always attempt the orphan OS-disk check.
+
+    az timeout / OSError / CalledProcessError are treated as apply-attempted
+    (fail-closed), never as a clean pre-apply refusal.
+    """
     detail = message
     if recreate_workload:
         try:
             assert_no_orphaned_os_disk(env, inputs)
             detail = message + f" OS disk check passed for {OS_DISK_NAME}."
-        except Refused as orphan_exc:
-            detail = message + f" OS disk check refused (fail-closed): {orphan_exc}"
+        except _OS_DISK_CHECK_FAILURES as orphan_exc:
+            detail = (
+                message
+                + f" OS disk check refused (fail-closed / apply-attempted): {orphan_exc}"
+            )
     return ApplyAttempted(detail)
 
 
@@ -3090,7 +3138,14 @@ def apply(
         outcome["recover"] = True
     if recreate_workload:
         outcome["recreate_workload"] = True
-        assert_no_orphaned_os_disk(env, inputs)
+        try:
+            assert_no_orphaned_os_disk(env, inputs)
+        except _OS_DISK_CHECK_FAILURES as orphan_exc:
+            # tofu already exited 0; never tell the operator "No apply was attempted".
+            raise ApplyAttempted(
+                "Apply completed but OS disk check refused "
+                f"(fail-closed / apply-attempted): {orphan_exc}"
+            ) from orphan_exc
         outcome["orphaned_os_disk_check"] = "passed"
         outcome["os_disk_name"] = OS_DISK_NAME
     return outcome
