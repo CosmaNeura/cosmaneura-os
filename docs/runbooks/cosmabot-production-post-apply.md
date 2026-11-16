@@ -2462,19 +2462,47 @@ default (`allow_workload_recreate=false`). Do not touch
 `infra/beta/vm/host/bootstrap_host.py` or its 24h rule from this path. Coding
 agents must not run apply. Order is mandatory.
 
+Pasteable fences below are wrapped in functions so a failed check stops the
+paste with `return 1` without killing the operator SSH session. Do not add
+`set -e` or bare `exit` at the top level of these pastes.
+
+If the live private `module/` still pins the first-apply `*.tf` snapshot and
+`--recheck` / `--recover` / `--recreate-workload` refuse with
+`Private module snapshot changed`, run the sanctioned refresh first (clean
+checkout of a commit on `origin/main` only; prints `*.tf` diffs; binds the new
+digests John must approve):
+
+```bash
+cosmabot_refresh_module_snapshot() {
+  test -n "${PRIVATE_DIR:-}" || { echo "STOP: PRIVATE_DIR unset" >&2; return 1; }
+  test -n "${SOURCE_SHA256:-}" || { echo "STOP: SOURCE_SHA256 unset" >&2; return 1; }
+  test -n "${LOCK_SHA256:-}" || { echo "STOP: LOCK_SHA256 unset" >&2; return 1; }
+  python3 infra/beta/vm/prod/foundation/bootstrap_local.py refresh-module-snapshot \
+    --private-dir "$PRIVATE_DIR" \
+    --source-sha256 "$SOURCE_SHA256" \
+    --lock-sha256 "$LOCK_SHA256" \
+    --confirm-refresh || return 1
+  echo "PASS: module snapshot refresh bound new digests into manifest.source"
+}
+cosmabot_refresh_module_snapshot
+```
+
 ### 1. Refresh the disk-empty evidence
 
 Confirm the attached data disk is still Empty / 128 GiB / LUN 0 (read-only):
 
 ```bash
-test -n "${RG:-}" || { echo "STOP: RG unset" >&2; return 1; }
-test -n "${SUBSCRIPTION_ID:-}" || { echo "STOP: SUBSCRIPTION_ID unset" >&2; return 1; }
-az disk show \
-  --resource-group "$RG" \
-  --subscription "$SUBSCRIPTION_ID" \
-  --name data-vm-cosmabot-prod-eus2-01 \
-  --query "{name:name,createOption:creationData.createOption,sizeGb:diskSizeGb,managedBy:managedBy}" \
-  --output json
+cosmabot_recreate_disk_evidence() {
+  test -n "${RG:-}" || { echo "STOP: RG unset" >&2; return 1; }
+  test -n "${SUBSCRIPTION_ID:-}" || { echo "STOP: SUBSCRIPTION_ID unset" >&2; return 1; }
+  az disk show \
+    --resource-group "$RG" \
+    --subscription "$SUBSCRIPTION_ID" \
+    --name data-vm-cosmabot-prod-eus2-01 \
+    --query "{name:name,createOption:creationData.createOption,sizeGb:diskSizeGb,managedBy:managedBy}" \
+    --output json || return 1
+}
+cosmabot_recreate_disk_evidence
 ```
 
 Stop unless `createOption` is `Empty` and `sizeGb` is `128`.
@@ -2482,22 +2510,25 @@ Stop unless `createOption` is `Empty` and `sizeGb` is `128`.
 ### 2. Recheck is clean
 
 ```bash
-test -n "${SUBSCRIPTION_ID:-}" || { echo "STOP: SUBSCRIPTION_ID unset" >&2; return 1; }
-test -n "${SOURCE_SHA256:-}" || { echo "STOP: SOURCE_SHA256 unset" >&2; return 1; }
-test -n "${LOCK_SHA256:-}" || { echo "STOP: LOCK_SHA256 unset" >&2; return 1; }
-test -n "${TOFU_BIN:-}" || { echo "STOP: TOFU_BIN unset" >&2; return 1; }
-test -n "${PROVIDER_MIRROR:-}" || { echo "STOP: PROVIDER_MIRROR unset" >&2; return 1; }
-test -n "${PROD_INPUTS:-}" || { echo "STOP: PROD_INPUTS unset" >&2; return 1; }
-test -n "${PRIVATE_DIR:-}" || { echo "STOP: PRIVATE_DIR unset" >&2; return 1; }
-bash infra/beta/review-cosmabot-prod-foundation.sh \
-  --recheck \
-  --subscription-id "$SUBSCRIPTION_ID" \
-  --inputs "$PROD_INPUTS" \
-  --private-dir "$PRIVATE_DIR" \
-  --source-sha256 "$SOURCE_SHA256" \
-  --lock-sha256 "$LOCK_SHA256" \
-  --tofu "$TOFU_BIN" \
-  --provider-mirror "$PROVIDER_MIRROR"
+cosmabot_recreate_recheck() {
+  test -n "${SUBSCRIPTION_ID:-}" || { echo "STOP: SUBSCRIPTION_ID unset" >&2; return 1; }
+  test -n "${SOURCE_SHA256:-}" || { echo "STOP: SOURCE_SHA256 unset" >&2; return 1; }
+  test -n "${LOCK_SHA256:-}" || { echo "STOP: LOCK_SHA256 unset" >&2; return 1; }
+  test -n "${TOFU_BIN:-}" || { echo "STOP: TOFU_BIN unset" >&2; return 1; }
+  test -n "${PROVIDER_MIRROR:-}" || { echo "STOP: PROVIDER_MIRROR unset" >&2; return 1; }
+  test -n "${PROD_INPUTS:-}" || { echo "STOP: PROD_INPUTS unset" >&2; return 1; }
+  test -n "${PRIVATE_DIR:-}" || { echo "STOP: PRIVATE_DIR unset" >&2; return 1; }
+  bash infra/beta/review-cosmabot-prod-foundation.sh \
+    --recheck \
+    --subscription-id "$SUBSCRIPTION_ID" \
+    --inputs "$PROD_INPUTS" \
+    --private-dir "$PRIVATE_DIR" \
+    --source-sha256 "$SOURCE_SHA256" \
+    --lock-sha256 "$LOCK_SHA256" \
+    --tofu "$TOFU_BIN" \
+    --provider-mirror "$PROVIDER_MIRROR" || return 1
+}
+cosmabot_recreate_recheck
 ```
 
 Stop unless this exits 0 (0 add / 0 change / 0 destroy / 0 replace).
@@ -2505,26 +2536,31 @@ Stop unless this exits 0 (0 add / 0 change / 0 destroy / 0 replace).
 ### 3. Recreate plan
 
 ```bash
-test -n "${SUBSCRIPTION_ID:-}" || { echo "STOP: SUBSCRIPTION_ID unset" >&2; return 1; }
-test -n "${SOURCE_SHA256:-}" || { echo "STOP: SOURCE_SHA256 unset" >&2; return 1; }
-test -n "${LOCK_SHA256:-}" || { echo "STOP: LOCK_SHA256 unset" >&2; return 1; }
-test -n "${TOFU_BIN:-}" || { echo "STOP: TOFU_BIN unset" >&2; return 1; }
-test -n "${PROVIDER_MIRROR:-}" || { echo "STOP: PROVIDER_MIRROR unset" >&2; return 1; }
-test -n "${PROD_INPUTS:-}" || { echo "STOP: PROD_INPUTS unset" >&2; return 1; }
-test -n "${PRIVATE_DIR:-}" || { echo "STOP: PRIVATE_DIR unset" >&2; return 1; }
-bash infra/beta/review-cosmabot-prod-foundation.sh \
-  --recreate-workload \
-  --subscription-id "$SUBSCRIPTION_ID" \
-  --inputs "$PROD_INPUTS" \
-  --private-dir "$PRIVATE_DIR" \
-  --source-sha256 "$SOURCE_SHA256" \
-  --lock-sha256 "$LOCK_SHA256" \
-  --tofu "$TOFU_BIN" \
-  --provider-mirror "$PROVIDER_MIRROR"
+cosmabot_recreate_plan() {
+  test -n "${SUBSCRIPTION_ID:-}" || { echo "STOP: SUBSCRIPTION_ID unset" >&2; return 1; }
+  test -n "${SOURCE_SHA256:-}" || { echo "STOP: SOURCE_SHA256 unset" >&2; return 1; }
+  test -n "${LOCK_SHA256:-}" || { echo "STOP: LOCK_SHA256 unset" >&2; return 1; }
+  test -n "${TOFU_BIN:-}" || { echo "STOP: TOFU_BIN unset" >&2; return 1; }
+  test -n "${PROVIDER_MIRROR:-}" || { echo "STOP: PROVIDER_MIRROR unset" >&2; return 1; }
+  test -n "${PROD_INPUTS:-}" || { echo "STOP: PROD_INPUTS unset" >&2; return 1; }
+  test -n "${PRIVATE_DIR:-}" || { echo "STOP: PRIVATE_DIR unset" >&2; return 1; }
+  bash infra/beta/review-cosmabot-prod-foundation.sh \
+    --recreate-workload \
+    --subscription-id "$SUBSCRIPTION_ID" \
+    --inputs "$PROD_INPUTS" \
+    --private-dir "$PRIVATE_DIR" \
+    --source-sha256 "$SOURCE_SHA256" \
+    --lock-sha256 "$LOCK_SHA256" \
+    --tofu "$TOFU_BIN" \
+    --provider-mirror "$PROVIDER_MIRROR" || return 1
+}
+cosmabot_recreate_plan
 ```
 
 Record the printed `plan_sha256` and `summary_sha256`. Confirm the summary lists
-exact replace addresses for the workload VM, data disk, and data-disk attachment.
+exact create-or-replace addresses for the workload VM, data disk, and data-disk
+attachment (mid-replace recovery may be create-only for addresses absent from
+state).
 
 ### 4. John's typed yes on both hashes
 
@@ -2535,16 +2571,30 @@ binds a four-key approval file (mode 0600, outside the repo) with `reviewer`,
 ### 5. Apply
 
 ```bash
-test -n "${PRIVATE_DIR:-}" || { echo "STOP: PRIVATE_DIR unset" >&2; return 1; }
-test -n "${RECREATE_APPROVAL:-}" || { echo "STOP: RECREATE_APPROVAL unset" >&2; return 1; }
-bash infra/beta/apply-cosmabot-prod-foundation.sh \
-  --recreate-workload \
-  --confirm-apply \
-  --approval "$RECREATE_APPROVAL" \
-  --private-dir "$PRIVATE_DIR"
+cosmabot_recreate_apply() {
+  test -n "${PRIVATE_DIR:-}" || { echo "STOP: PRIVATE_DIR unset" >&2; return 1; }
+  test -n "${RECREATE_APPROVAL:-}" || { echo "STOP: RECREATE_APPROVAL unset" >&2; return 1; }
+  bash infra/beta/apply-cosmabot-prod-foundation.sh \
+    --recreate-workload \
+    --confirm-apply \
+    --approval "$RECREATE_APPROVAL" \
+    --private-dir "$PRIVATE_DIR" || return 1
+}
+cosmabot_recreate_apply
 ```
 
-Post-apply refuses if `osdisk-vm-cosmabot-prod-eus2-01` is left unattached.
+Pre-apply refuses an unattached / wrong-VM `osdisk-vm-cosmabot-prod-eus2-01`.
+Post-apply (and ApplyAttempted) refuse if that OS disk is missing or unattached.
+
+### Mid-replace recovery
+
+If a prior recreate apply stopped after destroying the VM and/or data disk,
+re-run prepare → plan → apply with `--recreate-workload`. The planner lists
+state and passes `-replace` only for addresses still present; addresses absent
+from state are planned as create-only. The sanitiser still requires the exact
+three-address set (VM + data disk + attachment) and refuses any other touch.
+If Azure still holds an orphan `osdisk-vm-cosmabot-prod-eus2-01` not attached to
+`vm-cosmabot-prod-eus2-01`, preflight refuses until that disk is resolved.
 
 ### 6. Recheck
 
@@ -2553,15 +2603,22 @@ Repeat step 2. Stop unless the post-recreate recheck exits 0.
 ### 7. Build the creation receipt and run Sitting 2 within 24h
 
 Build the host creation receipt with
-`infra/beta/vm/host/build_creation_receipt.py` (from PR #397; merge that PR first
-if it is not on `main` yet). Then run Sitting 2 (format empty disk + secrets
-install) within 24 hours of the recreate apply.
+`infra/beta/vm/host/build_creation_receipt.py` (depends on PR #397 merging
+first; do not invent a substitute). Then run Sitting 2 (format empty disk +
+secrets install) within 24 hours of the recreate apply.
 
 ```bash
-test -n "${RECEIPT_OUT_DIR:-}" || { echo "STOP: RECEIPT_OUT_DIR unset" >&2; return 1; }
-python3 infra/beta/vm/host/build_creation_receipt.py \
-  --profile cosmabot-vm-prod-v1 \
-  --out-dir "$RECEIPT_OUT_DIR"
+cosmabot_recreate_build_receipt() {
+  test -n "${RECEIPT_OUT_DIR:-}" || { echo "STOP: RECEIPT_OUT_DIR unset" >&2; return 1; }
+  test -f infra/beta/vm/host/build_creation_receipt.py || {
+    echo "STOP: build_creation_receipt.py missing - merge #397 first" >&2
+    return 1
+  }
+  python3 infra/beta/vm/host/build_creation_receipt.py \
+    --profile cosmabot-vm-prod-v1 \
+    --out-dir "$RECEIPT_OUT_DIR" || return 1
+}
+cosmabot_recreate_build_receipt
 ```
 
 ### 8. If 24h lapses
@@ -2569,8 +2626,6 @@ python3 infra/beta/vm/host/build_creation_receipt.py \
 Stop. Do not continue Sitting 2 on a stale receipt. Run a new recreate plan,
 get a new typed **yes** on both new hashes, apply again, recheck, rebuild the
 receipt, and only then restart Sitting 2.
-
----
 
 ## 10. Today's checklist (Fri 13 Nov)
 

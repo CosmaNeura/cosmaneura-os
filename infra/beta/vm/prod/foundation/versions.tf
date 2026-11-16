@@ -25,5 +25,10 @@ provider "azurerm" {
     resource_group {
       prevent_deletion_if_contains_resources = true
     }
+    # Explicit pin: destroying/replacing the workload VM must delete its OS disk
+    # (Azure portal Detach would otherwise leave osdisk-vm-cosmabot-prod-eus2-01).
+    virtual_machine {
+      delete_os_disk_on_deletion = true
+    }
   }
 }

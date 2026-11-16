@@ -4351,7 +4351,8 @@ class RecreateWorkloadMode(unittest.TestCase):
         ]
         with self.assertRaises(bootstrap.Refused) as missing_err:
             bootstrap._assert_recreate_commands_safe(missing_replace)
-        self.assertIn("-replace=azurerm_managed_disk.data", str(missing_err.exception))
+        self.assertIn("azurerm_managed_disk.data", str(missing_err.exception))
+        self.assertIn("must match state presence", str(missing_err.exception))
 
     def test_assert_recreate_accepts_exact_set_and_lists_addresses(self):
         plan = self._exact_recreate_plan(with_alerts=True)
@@ -4505,7 +4506,7 @@ class RecreateWorkloadMode(unittest.TestCase):
             (
                 "missing_vm_replace",
                 [c for c in exact if c["address"] != bootstrap.RECREATE_VM_ADDRESS],
-                "missing required replaces",
+                "missing required",
             ),
             (
                 "extra_replace",
@@ -4560,10 +4561,15 @@ class RecreateWorkloadMode(unittest.TestCase):
 
     def test_orphaned_os_disk_check_pass_and_refuse(self):
         env = {}
+        managed = (
+            f"/subscriptions/{self.inputs['subscription_id']}/resourceGroups/"
+            f"{bootstrap.RESOURCE_GROUP}/providers/Microsoft.Compute/virtualMachines/"
+            f"{bootstrap.VM_AZURE_NAME}"
+        )
         attached = subprocess.CompletedProcess(
             [],
             0,
-            json.dumps([{"name": bootstrap.OS_DISK_NAME, "managedBy": "/subscriptions/x/vm"}]).encode(),
+            json.dumps([{"name": bootstrap.OS_DISK_NAME, "managedBy": managed}]).encode(),
             b"",
         )
         with patch.object(bootstrap, "command", return_value=attached):
@@ -4580,6 +4586,47 @@ class RecreateWorkloadMode(unittest.TestCase):
             bootstrap.assert_no_orphaned_os_disk(env, self.inputs)
         self.assertIn(bootstrap.OS_DISK_NAME, str(err.exception))
         self.assertIn("orphan", str(err.exception).lower())
+        empty = subprocess.CompletedProcess([], 0, b"[]", b"")
+        with patch.object(bootstrap, "command", return_value=empty), self.assertRaises(
+            bootstrap.Refused
+        ) as empty_err:
+            bootstrap.assert_no_orphaned_os_disk(env, self.inputs)
+        self.assertIn("fail-closed", str(empty_err.exception).lower())
+        failed = subprocess.CompletedProcess([], 1, b"", b"az failed")
+        with patch.object(bootstrap, "command", return_value=failed), self.assertRaises(
+            bootstrap.Refused
+        ) as fail_err:
+            bootstrap.assert_no_orphaned_os_disk(env, self.inputs)
+        self.assertIn("fail-closed", str(fail_err.exception).lower())
+
+    def test_os_disk_preflight_allows_missing_refuses_orphan(self):
+        env = {}
+        empty = subprocess.CompletedProcess([], 0, b"[]", b"")
+        with patch.object(bootstrap, "command", return_value=empty):
+            bootstrap.assert_os_disk_preflight(env, self.inputs)
+        managed = (
+            f"/subscriptions/x/resourceGroups/{bootstrap.RESOURCE_GROUP}/providers/"
+            f"Microsoft.Compute/virtualMachines/{bootstrap.VM_AZURE_NAME}"
+        )
+        attached = subprocess.CompletedProcess(
+            [],
+            0,
+            json.dumps([{"name": bootstrap.OS_DISK_NAME, "managedBy": managed}]).encode(),
+            b"",
+        )
+        with patch.object(bootstrap, "command", return_value=attached):
+            bootstrap.assert_os_disk_preflight(env, self.inputs)
+        orphan = subprocess.CompletedProcess(
+            [],
+            0,
+            json.dumps([{"name": bootstrap.OS_DISK_NAME, "managedBy": None}]).encode(),
+            b"",
+        )
+        with patch.object(bootstrap, "command", return_value=orphan), self.assertRaises(
+            bootstrap.Refused
+        ) as err:
+            bootstrap.assert_os_disk_preflight(env, self.inputs)
+        self.assertIn("unattached", str(err.exception).lower())
 
     def test_compute_tf_prevent_destroy_uses_allow_workload_recreate_var(self):
         text = (MODULE / "compute.tf").read_text()
@@ -4595,6 +4642,667 @@ class RecreateWorkloadMode(unittest.TestCase):
             + 400
         ]
         self.assertIn("default     = false", block)
+
+    def test_os_disk_name_pinned_to_compute_tf(self):
+        compute = (MODULE / "compute.tf").read_text()
+        main = (MODULE / "main.tf").read_text()
+        self.assertIn(bootstrap.OS_DISK_COMPUTE_TF_NEEDLE, compute)
+        self.assertIn(f'vm_name             = "{bootstrap.VM_AZURE_NAME}"', main)
+        self.assertEqual(bootstrap.OS_DISK_NAME, f"osdisk-{bootstrap.VM_AZURE_NAME}")
+        versions = (MODULE / "versions.tf").read_text()
+        self.assertIn("delete_os_disk_on_deletion = true", versions)
+
+    def test_alert_allowlist_reaches_alert_branch(self):
+        sub = self.inputs["subscription_id"]
+        base = self._exact_recreate_plan(with_alerts=False)["resource_changes"]
+        # Unknown alert key reaches the update/alert allowlist branch and refuses.
+        unknown = base + [
+            {
+                "address": 'azurerm_monitor_metric_alert.vm["memory"]',
+                "type": "azurerm_monitor_metric_alert",
+                "change": {
+                    "actions": ["update"],
+                    "after": {"name": "alert-cbot-prod-memory-eus2-01"},
+                },
+            }
+        ]
+        with self.assertRaises(bootstrap.Refused) as err:
+            bootstrap.assert_recreate_workload_changeset(
+                {"resource_changes": unknown}, subscription_id=sub
+            )
+        self.assertIn("three", str(err.exception).lower())
+        # Partial allowlist (one of three) is accepted.
+        one = base + [
+            {
+                "address": 'azurerm_monitor_metric_alert.vm["cpu"]',
+                "type": "azurerm_monitor_metric_alert",
+                "change": {
+                    "actions": ["update"],
+                    "after": {
+                        "name": "alert-cbot-prod-cpu-eus2-01",
+                        "resource_group_name": bootstrap.RESOURCE_GROUP,
+                    },
+                },
+            }
+        ]
+        addressed = bootstrap.assert_recreate_workload_changeset(
+            {"resource_changes": one}, subscription_id=sub
+        )
+        self.assertEqual(
+            addressed["update_addresses"],
+            ['azurerm_monitor_metric_alert.vm["cpu"]'],
+        )
+        # Full allowlist accepted.
+        full = self._exact_recreate_plan(with_alerts=True)
+        addressed_full = bootstrap.assert_recreate_workload_changeset(
+            full, subscription_id=sub
+        )
+        self.assertEqual(
+            addressed_full["update_addresses"],
+            sorted(bootstrap.RECREATE_ALLOWED_ALERT_ADDRESSES),
+        )
+
+    def test_missing_allow_var_command_refused(self):
+        missing_var = [
+            ("init", ["init", "-input=false"]),
+            (
+                "plan",
+                [
+                    "plan",
+                    "-replace=azurerm_linux_virtual_machine.workload",
+                    "-replace=azurerm_managed_disk.data",
+                    "-out=/tmp/x.tfplan",
+                ],
+            ),
+        ]
+        with self.assertRaises(bootstrap.Refused) as err:
+            bootstrap._assert_recreate_commands_safe(missing_var)
+        self.assertIn("allow_workload_recreate=true", str(err.exception))
+
+    def test_mid_replace_create_only_changeset_and_selective_replace(self):
+        sub = self.inputs["subscription_id"]
+        create_only = {
+            "resource_changes": [
+                {
+                    "address": bootstrap.RECREATE_VM_ADDRESS,
+                    "type": "azurerm_linux_virtual_machine",
+                    "change": {
+                        "actions": ["create"],
+                        "after": {"name": bootstrap.VM_AZURE_NAME},
+                    },
+                },
+                {
+                    "address": bootstrap.RECREATE_DISK_ADDRESS,
+                    "type": "azurerm_managed_disk",
+                    "change": {
+                        "actions": ["create"],
+                        "after": {
+                            "name": "data-vm-cosmabot-prod-eus2-01",
+                            "resource_group_name": bootstrap.RESOURCE_GROUP,
+                        },
+                    },
+                },
+                {
+                    "address": bootstrap.RECREATE_ATTACHMENT_ADDRESS,
+                    "type": "azurerm_virtual_machine_data_disk_attachment",
+                    "change": {"actions": ["create"], "after": {"lun": 0}},
+                },
+                {
+                    "address": "azurerm_public_ip.workload",
+                    "type": "azurerm_public_ip",
+                    "change": {"actions": ["no-op"], "after": {}},
+                },
+            ]
+        }
+        addressed = bootstrap.assert_recreate_workload_changeset(
+            create_only, subscription_id=sub
+        )
+        self.assertEqual(addressed["create_addresses"], sorted(bootstrap.RECREATE_REQUIRED_REPLACE_ADDRESSES))
+        self.assertEqual(addressed["replace_addresses"], [])
+        summary = bootstrap.sanitize_recreate_workload_plan_summary(
+            create_only, inputs=self.inputs, plan_sha256="b" * 64
+        )
+        self.assertEqual(summary["create"].get("azurerm_linux_virtual_machine"), 1)
+        self.assertEqual(summary["replace"], {})
+        # Selective -replace: VM absent, disk present → only disk -replace.
+        cmds = bootstrap._recreate_workload_tofu_commands(
+            backend_hcl=Path("/tmp/backend.hcl"),
+            inputs=Path("/tmp/inputs.json"),
+            plan_out=Path("/tmp/plans/recreate-workload-20260101T000000Z.tfplan"),
+            replace_addresses={bootstrap.RECREATE_DISK_ADDRESS},
+        )
+        plan_args = cmds[1][1]
+        self.assertIn("-var=allow_workload_recreate=true", plan_args)
+        self.assertIn(f"-replace={bootstrap.RECREATE_DISK_ADDRESS}", plan_args)
+        self.assertNotIn(f"-replace={bootstrap.RECREATE_VM_ADDRESS}", plan_args)
+        # Both absent → no -replace flags (create-only recovery).
+        none = bootstrap._recreate_workload_tofu_commands(
+            backend_hcl=Path("/tmp/backend.hcl"),
+            inputs=Path("/tmp/inputs.json"),
+            plan_out=Path("/tmp/plans/recreate-workload-20260101T000001Z.tfplan"),
+            replace_addresses=frozenset(),
+        )
+        none_args = none[1][1]
+        self.assertTrue(all(not a.startswith("-replace=") for a in none_args))
+        self.assertEqual(
+            bootstrap._replace_addresses_for_state(
+                frozenset({"azurerm_public_ip.workload", "azurerm_resource_group.production"})
+            ),
+            frozenset(),
+        )
+        self.assertEqual(
+            bootstrap._replace_addresses_for_state(
+                frozenset(
+                    {
+                        bootstrap.RECREATE_VM_ADDRESS,
+                        bootstrap.RECREATE_DISK_ADDRESS,
+                        bootstrap.RECREATE_ATTACHMENT_ADDRESS,
+                    }
+                )
+            ),
+            frozenset({bootstrap.RECREATE_VM_ADDRESS, bootstrap.RECREATE_DISK_ADDRESS}),
+        )
+
+    def _write_recreate_artifacts(self, plan_json=None, *, stamp="20261116T120000Z"):
+        plan_json = plan_json or self._exact_recreate_plan(with_alerts=True)
+        plan_path = self.folder / "plans" / f"recreate-workload-{stamp}.tfplan"
+        summary_path = self.folder / f"recreate-workload-plan-summary-{stamp}.json"
+        result_path = self.folder / f"recreate-workload-plan-result-{stamp}.json"
+        for path in (plan_path, summary_path, result_path):
+            if path.exists():
+                path.unlink()
+        bootstrap.write_private(
+            plan_path,
+            bootstrap.json_bytes(
+                {"encryption_version": "v0", "encrypted_data": "recreate-plan", "meta": {}}
+            ),
+        )
+        plan_sha = bootstrap.digest(plan_path)
+        summary = bootstrap.sanitize_recreate_workload_plan_summary(
+            plan_json, inputs=self.inputs, plan_sha256=plan_sha
+        )
+        bootstrap.write_private(summary_path, bootstrap.json_bytes(summary))
+        result = {
+            "planned": True,
+            "recreate_workload": True,
+            "stamp": stamp,
+            "plan": str(plan_path),
+            "summary_path": str(summary_path),
+            "result_path": str(result_path),
+            "plan_sha256": plan_sha,
+            "summary_sha256": summary["summary_sha256"],
+            "enable_azure_openai": True,
+            "replace_addresses": summary["replace_addresses"],
+            "create_addresses": summary["create_addresses"],
+            "recreate_addresses": summary["recreate_addresses"],
+            "update_addresses": summary["update_addresses"],
+            "applied": False,
+            "first_apply_only": False,
+        }
+        bootstrap.write_private(result_path, bootstrap.json_bytes(result))
+        return plan_sha, summary, plan_json, plan_path
+
+    def _approval(self, plan_sha: str, summary_sha: str, *, mode=0o600):
+        path = self.root / f"approval-{secrets.token_hex(4)}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "reviewer": "john@example.invalid",
+                    "review_reference": "T-PROD-VM-RECREATE-MODE",
+                    "plan_sha256": plan_sha,
+                    "summary_sha256": summary_sha,
+                }
+            )
+        )
+        path.chmod(mode)
+        return path
+
+    def test_plan_recreate_workload_drives_selective_replace(self):
+        self._seed_private_dir()
+        self._recreate_prepare()
+        plan_json = self._exact_recreate_plan(with_alerts=True)
+        state_lines = "\n".join(
+            [
+                bootstrap.RECREATE_VM_ADDRESS,
+                bootstrap.RECREATE_DISK_ADDRESS,
+                bootstrap.RECREATE_ATTACHMENT_ADDRESS,
+                "azurerm_public_ip.workload",
+            ]
+        ).encode()
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            if argv[1] == "init":
+                data = self.folder / "tofu-data"
+                data.mkdir(mode=0o700, exist_ok=True)
+                bootstrap.write_private(
+                    data / "terraform.tfstate",
+                    bootstrap.json_bytes(
+                        {
+                            "backend": {
+                                "type": "local",
+                                "config": {
+                                    "path": str(self.folder / "state/foundation.tfstate"),
+                                    "workspace_dir": str(self.folder / "workspaces"),
+                                },
+                            }
+                        }
+                    ),
+                )
+            elif argv[1] == "state" and argv[2] == "list":
+                return subprocess.CompletedProcess(argv, 0, state_lines, b"")
+            elif argv[1] == "plan":
+                self.assertIn("-var=allow_workload_recreate=true", argv)
+                self.assertIn(f"-replace={bootstrap.RECREATE_VM_ADDRESS}", argv)
+                self.assertIn(f"-replace={bootstrap.RECREATE_DISK_ADDRESS}", argv)
+                out_arg = next(arg for arg in argv if arg.startswith("-out="))
+                out = Path(out_arg.split("=", 1)[1])
+                bootstrap.write_private(
+                    out,
+                    bootstrap.json_bytes(
+                        {
+                            "encryption_version": "v0",
+                            "encrypted_data": "invented-recreate-plan",
+                            "meta": {},
+                        }
+                    ),
+                )
+            elif argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"ok", b"")
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run
+        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261116T120000Z"):
+            result = bootstrap.plan(self.folder, recreate_workload=True)
+        self.assertTrue(result["recreate_workload"])
+        self.assertTrue(result["plan"].endswith("plans/recreate-workload-20261116T120000Z.tfplan"))
+        self.assertEqual(
+            result["replace_addresses"],
+            sorted(bootstrap.RECREATE_REQUIRED_REPLACE_ADDRESSES),
+        )
+        self.assertEqual(
+            [argv[1] for argv in calls],
+            ["init", "state", "plan", "show"],
+        )
+
+    def test_plan_recreate_mid_replace_create_only_when_vm_and_disk_absent(self):
+        self._seed_private_dir()
+        self._recreate_prepare()
+        create_plan = {
+            "resource_changes": [
+                {
+                    "address": bootstrap.RECREATE_VM_ADDRESS,
+                    "type": "azurerm_linux_virtual_machine",
+                    "change": {
+                        "actions": ["create"],
+                        "after": {"name": bootstrap.VM_AZURE_NAME},
+                    },
+                },
+                {
+                    "address": bootstrap.RECREATE_DISK_ADDRESS,
+                    "type": "azurerm_managed_disk",
+                    "change": {
+                        "actions": ["create"],
+                        "after": {
+                            "name": "data-vm-cosmabot-prod-eus2-01",
+                            "resource_group_name": bootstrap.RESOURCE_GROUP,
+                        },
+                    },
+                },
+                {
+                    "address": bootstrap.RECREATE_ATTACHMENT_ADDRESS,
+                    "type": "azurerm_virtual_machine_data_disk_attachment",
+                    "change": {"actions": ["create"], "after": {"lun": 0}},
+                },
+            ]
+        }
+        # State still has other foundation resources, but not VM/disk/attachment.
+        state_lines = b"azurerm_public_ip.workload\nazurerm_resource_group.production\n"
+
+        def run(argv, **kwargs):
+            if argv[1] == "init":
+                data = self.folder / "tofu-data"
+                data.mkdir(mode=0o700, exist_ok=True)
+                bootstrap.write_private(
+                    data / "terraform.tfstate",
+                    bootstrap.json_bytes(
+                        {
+                            "backend": {
+                                "type": "local",
+                                "config": {
+                                    "path": str(self.folder / "state/foundation.tfstate"),
+                                    "workspace_dir": str(self.folder / "workspaces"),
+                                },
+                            }
+                        }
+                    ),
+                )
+            elif argv[1] == "state" and argv[2] == "list":
+                return subprocess.CompletedProcess(argv, 0, state_lines, b"")
+            elif argv[1] == "plan":
+                self.assertTrue(all(not a.startswith("-replace=") for a in argv))
+                self.assertIn("-var=allow_workload_recreate=true", argv)
+                out_arg = next(arg for arg in argv if arg.startswith("-out="))
+                out = Path(out_arg.split("=", 1)[1])
+                bootstrap.write_private(
+                    out,
+                    bootstrap.json_bytes(
+                        {
+                            "encryption_version": "v0",
+                            "encrypted_data": "invented-recreate-create-only",
+                            "meta": {},
+                        }
+                    ),
+                )
+            elif argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(create_plan).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"ok", b"")
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run
+        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261116T130000Z"):
+            result = bootstrap.plan(self.folder, recreate_workload=True)
+        self.assertEqual(result["create_addresses"], sorted(bootstrap.RECREATE_REQUIRED_REPLACE_ADDRESSES))
+        self.assertEqual(result["replace_addresses"], [])
+        self.assertEqual(result["state_replace_addresses"], [])
+
+    def test_apply_recreate_drives_preflight_and_orphan_check(self):
+        self._seed_private_dir()
+        self._recreate_prepare()
+        plan_sha, summary, plan_json, _plan_path = self._write_recreate_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        managed = (
+            f"/subscriptions/{self.inputs['subscription_id']}/resourceGroups/"
+            f"{bootstrap.RESOURCE_GROUP}/providers/Microsoft.Compute/virtualMachines/"
+            f"{bootstrap.VM_AZURE_NAME}"
+        )
+        disk_payload = json.dumps(
+            [{"name": bootstrap.OS_DISK_NAME, "managedBy": managed}]
+        ).encode()
+        az_calls = []
+
+        def run(argv, **kwargs):
+            if argv[0] == "az":
+                az_calls.append(argv)
+                return subprocess.CompletedProcess(argv, 0, disk_payload, b"")
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        class FakeProc:
+            def __init__(self, argv, **kwargs):
+                self.pid = 4242
+                self.returncode = 0
+
+            def wait(self, timeout=None):
+                return 0
+
+            def poll(self):
+                return 0
+
+            def send_signal(self, sig):
+                return None
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run
+        ), patch.object(
+            subprocess, "Popen", side_effect=lambda *a, **k: FakeProc(a[0], **k)
+        ):
+            result = bootstrap.apply(
+                self.folder, confirm_apply=True, approval_path=approval, recreate_workload=True
+            )
+        self.assertTrue(result["applied"])
+        self.assertTrue(result["recreate_workload"])
+        self.assertEqual(result["orphaned_os_disk_check"], "passed")
+        self.assertEqual(result["os_disk_name"], bootstrap.OS_DISK_NAME)
+        # Preflight + post-apply orphan check both call az disk list.
+        self.assertGreaterEqual(len(az_calls), 2)
+        self.assertTrue(all(call[1] == "disk" and call[2] == "list" for call in az_calls))
+
+    def test_apply_recreate_attempted_runs_orphan_check_fail_closed(self):
+        self._seed_private_dir()
+        self._recreate_prepare()
+        plan_sha, summary, plan_json, _plan_path = self._write_recreate_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        managed = (
+            f"/subscriptions/{self.inputs['subscription_id']}/resourceGroups/"
+            f"{bootstrap.RESOURCE_GROUP}/providers/Microsoft.Compute/virtualMachines/"
+            f"{bootstrap.VM_AZURE_NAME}"
+        )
+        preflight = json.dumps(
+            [{"name": bootstrap.OS_DISK_NAME, "managedBy": managed}]
+        ).encode()
+        az_phase = {"n": 0}
+
+        def run(argv, **kwargs):
+            if argv[0] == "az":
+                az_phase["n"] += 1
+                if az_phase["n"] == 1:
+                    return subprocess.CompletedProcess(argv, 0, preflight, b"")
+                # Post-attempt orphan check: empty list must fail closed.
+                return subprocess.CompletedProcess(argv, 0, b"[]", b"")
+            if argv[1] == "version":
+                return subprocess.CompletedProcess(argv, 0, b'{"terraform_version":"1.12.5"}', b"")
+            if argv[1] == "show":
+                return subprocess.CompletedProcess(argv, 0, json.dumps(plan_json).encode(), b"")
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        class FakeProc:
+            def __init__(self, argv, **kwargs):
+                self.pid = 4242
+                self.returncode = 1
+
+            def wait(self, timeout=None):
+                return 1
+
+            def poll(self):
+                return 1
+
+            def send_signal(self, sig):
+                return None
+
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap, "command", side_effect=run
+        ), patch.object(
+            subprocess, "Popen", side_effect=lambda *a, **k: FakeProc(a[0], **k)
+        ), self.assertRaises(bootstrap.ApplyAttempted) as err:
+            bootstrap.apply(
+                self.folder, confirm_apply=True, approval_path=approval, recreate_workload=True
+            )
+        self.assertIn("fail-closed", str(err.exception).lower())
+        self.assertIn(bootstrap.OS_DISK_NAME, str(err.exception))
+
+    def test_refresh_module_snapshot_then_recheck_and_tamper_refuse(self):
+        self._seed_private_dir()
+        # Stale private compute.tf (pre-recreate lifecycle) vs reviewed MODULE.
+        stale = (MODULE / "compute.tf").read_text().replace(
+            "prevent_destroy = !var.allow_workload_recreate",
+            "prevent_destroy = true",
+        )
+        # Also need matching variables.tf / versions.tf drift? Only change compute.tf.
+        bootstrap.replace_private(
+            self.folder / "module" / "compute.tf",
+            stale.encode(),
+        )
+        # Without refresh, prepare --recheck refuses.
+        fp = bootstrap.fingerprint()
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap,
+            "command",
+            return_value=subprocess.CompletedProcess([], 0, b'{"terraform_version":"1.12.5"}', b""),
+        ), self.assertRaises(bootstrap.Refused) as before:
+            bootstrap.prepare(
+                self.folder,
+                self.input_file,
+                fp["source_sha256"],
+                fp["lock_sha256"],
+                self.tofu,
+                self.mirror,
+                recheck=True,
+            )
+        self.assertIn("Private module snapshot changed", str(before.exception))
+        # Sanctioned refresh on clean origin/main.
+        with patch.object(
+            bootstrap, "assert_clean_origin_main_checkout", return_value="a" * 40
+        ), patch.object(bootstrap, "utc_plan_stamp", return_value="20261116T140000Z"), patch.object(
+            bootstrap, "_operator_print"
+        ):
+            refreshed = bootstrap.refresh_module_snapshot(
+                self.folder,
+                fp["source_sha256"],
+                fp["lock_sha256"],
+                confirm_refresh=True,
+            )
+        self.assertTrue(refreshed["refreshed"])
+        self.assertIn("compute.tf", refreshed["changed_files"])
+        manifest = json.loads((self.folder / "manifest.json").read_text())
+        self.assertEqual(manifest["source"]["source_sha256"], fp["source_sha256"])
+        # After refresh, recheck prepare succeeds against unchanged live config.
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap,
+            "command",
+            return_value=subprocess.CompletedProcess([], 0, b'{"terraform_version":"1.12.5"}', b""),
+        ):
+            recheck = bootstrap.prepare(
+                self.folder,
+                self.input_file,
+                fp["source_sha256"],
+                fp["lock_sha256"],
+                self.tofu,
+                self.mirror,
+                recheck=True,
+            )
+        self.assertTrue(recheck["recheck"])
+        # Recover prepare also succeeds on the refreshed, unchanged private module.
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap,
+            "command",
+            return_value=subprocess.CompletedProcess([], 0, b'{"terraform_version":"1.12.5"}', b""),
+        ):
+            recovered = bootstrap.prepare(
+                self.folder,
+                self.input_file,
+                fp["source_sha256"],
+                fp["lock_sha256"],
+                self.tofu,
+                self.mirror,
+                recover=True,
+            )
+        self.assertTrue(recovered["recover"])
+        # Tamper after refresh still refuses.
+        bootstrap.replace_private(
+            self.folder / "module" / "compute.tf",
+            stale.encode(),
+        )
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            bootstrap,
+            "command",
+            return_value=subprocess.CompletedProcess([], 0, b'{"terraform_version":"1.12.5"}', b""),
+        ), self.assertRaises(bootstrap.Refused) as after:
+            bootstrap.prepare(
+                self.folder,
+                self.input_file,
+                fp["source_sha256"],
+                fp["lock_sha256"],
+                self.tofu,
+                self.mirror,
+                recheck=True,
+            )
+        self.assertIn("Private module snapshot changed", str(after.exception))
+        # Refresh without --confirm-refresh refuses (no silent refresh).
+        with self.assertRaises(bootstrap.Refused) as silent:
+            bootstrap.refresh_module_snapshot(
+                self.folder, fp["source_sha256"], fp["lock_sha256"], confirm_refresh=False
+            )
+        self.assertIn("--confirm-refresh", str(silent.exception))
+
+    def test_prevent_destroy_false_blocks_true_lifts_real_tofu_probe(self):
+        tofu = shutil.which("tofu")
+        self.assertIsNotNone(tofu, "Pinned OpenTofu 1.12.5 required for prevent_destroy probe")
+        with tempfile.TemporaryDirectory(prefix="cosmabot-prevent-destroy-") as directory:
+            root = Path(directory).resolve()
+            (root / "main.tf").write_text(
+                "terraform {\n"
+                '  required_version = "= 1.12.5"\n'
+                "}\n"
+                'variable "allow_workload_recreate" {\n'
+                "  type    = bool\n"
+                "  default = false\n"
+                "}\n"
+                'resource "terraform_data" "probe" {\n'
+                '  input = "synthetic"\n'
+                "  lifecycle {\n"
+                "    prevent_destroy = !var.allow_workload_recreate\n"
+                "  }\n"
+                "}\n"
+            )
+            init = subprocess.run(
+                [tofu, "init", "-input=false", "-backend=false"],
+                cwd=root,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(init.returncode, 0, init.stderr.decode())
+            apply = subprocess.run(
+                [tofu, "apply", "-input=false", "-auto-approve"],
+                cwd=root,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(apply.returncode, 0, apply.stderr.decode())
+            blocked = subprocess.run(
+                [
+                    tofu,
+                    "plan",
+                    "-input=false",
+                    "-var=allow_workload_recreate=false",
+                    "-replace=terraform_data.probe",
+                    "-out=blocked.tfplan",
+                ],
+                cwd=root,
+                capture_output=True,
+                check=False,
+            )
+            self.assertNotEqual(blocked.returncode, 0)
+            joined = (blocked.stdout + blocked.stderr).decode().lower()
+            self.assertTrue(
+                "prevent_destroy" in joined or "destroy" in joined,
+                joined,
+            )
+            lifted = subprocess.run(
+                [
+                    tofu,
+                    "plan",
+                    "-input=false",
+                    "-var=allow_workload_recreate=true",
+                    "-replace=terraform_data.probe",
+                    "-out=lifted.tfplan",
+                ],
+                cwd=root,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(lifted.returncode, 0, lifted.stderr.decode())
+            show = subprocess.run(
+                [tofu, "show", "-json", "lifted.tfplan"],
+                cwd=root,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(show.returncode, 0, show.stderr.decode())
+            plan = json.loads(show.stdout)
+            actions = [
+                change["change"]["actions"]
+                for change in plan.get("resource_changes") or []
+                if change.get("address") == "terraform_data.probe"
+            ]
+            self.assertTrue(actions)
+            self.assertIn("delete", actions[0])
+            self.assertIn("create", actions[0])
 
 
 class EncryptionProof(unittest.TestCase):
