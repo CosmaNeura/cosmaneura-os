@@ -5,12 +5,16 @@ import copy
 import datetime as dt
 import hashlib
 import importlib.util
+import io
 import json
 import os
+import stat
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 MODULE = Path(__file__).resolve().parents[1]
 
@@ -142,27 +146,101 @@ class BuildCreationReceiptTests(unittest.TestCase):
         # Only read-only az show calls.
         self.assertEqual([c[1:3] for c in fake.calls], [["vm", "show"], ["disk", "show"]])
 
+    def test_prewrite_validate_receipt_refusal_writes_nothing(self):
+        # Mutation: deleting the pre-write validate_receipt call must make this fail.
+        fake = FakeAz(_vm_payload(), _disk_payload())
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            with patch.object(
+                builder,
+                "validate_receipt",
+                side_effect=builder.Refused("synthetic refusal"),
+            ):
+                code = builder.main(
+                    ["--profile", self.profile, "--out-dir", str(out)],
+                    runner=fake,
+                    now=self.now,
+                    uid=501,
+                )
+            self.assertEqual(code, 1)
+            self.assertFalse((out / "creation-receipt.json").exists())
+            self.assertFalse((out / "creation-receipt.sha256").exists())
+
     def test_writes_sha256_and_prints_root_install_when_not_root(self):
         fake = FakeAz(_vm_payload(), _disk_payload())
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            code = builder.main(
-                ["--profile", self.profile, "--out-dir", str(out)],
-                runner=fake,
-                now=self.now,
-                uid=501,  # non-root (macOS-style)
-            )
+            stdout = io.StringIO()
+            with patch("sys.stdout", stdout):
+                code = builder.main(
+                    ["--profile", self.profile, "--out-dir", str(out)],
+                    runner=fake,
+                    now=self.now,
+                    uid=501,  # non-root (macOS-style)
+                )
             self.assertEqual(code, 0)
             receipt_path = out / "creation-receipt.json"
             sha_path = out / "creation-receipt.sha256"
             raw = receipt_path.read_bytes()
             digest = sha_path.read_text(encoding="utf-8").strip()
             self.assertEqual(hashlib.sha256(raw).hexdigest(), digest)
+            mode = stat.S_IMODE(receipt_path.stat().st_mode)
+            self.assertEqual(mode, 0o600)
+            printed = stdout.getvalue()
+            self.assertIn("NOTE: this workstation is not root", printed)
+            self.assertIn("sudo install -o root -g root -m 0600", printed)
+            self.assertIn(digest, printed)
             receipt = json.loads(raw)
             host.validate_receipt(
                 receipt, self.vm_id, self.disk_id, self.disk_id, self.now,
                 profile=self.profile,
             )
+
+    def test_root_uid_sets_owner_and_mode_0600_under_permissive_umask(self):
+        """Prove 0600 comes from explicit chmod, not umask; owner via chown."""
+        fake = FakeAz(_vm_payload(), _disk_payload())
+        receipt = builder.build_receipt(
+            profile=self.profile, runner=fake, now=self.now
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            receipt_path = out / "creation-receipt.json"
+            sha_path = out / "creation-receipt.sha256"
+            previous_umask = os.umask(0o000)
+
+            def permissive_umask(_mask: int) -> int:
+                # Ignore the code's restrictive umask so mode must come from chmod.
+                return 0o000
+
+            real_lstat = os.lstat
+
+            def lstat_as_root(path):
+                st = real_lstat(path)
+                return os.stat_result((
+                    st.st_mode, st.st_ino, st.st_dev, st.st_nlink,
+                    0, 0, st.st_size, st.st_atime, st.st_mtime, st.st_ctime,
+                ))
+
+            try:
+                with (
+                    patch("os.umask", side_effect=permissive_umask),
+                    patch("os.chown") as mock_chown,
+                    patch("os.lstat", side_effect=lstat_as_root),
+                ):
+                    digest = builder.write_receipt_files(
+                        receipt,
+                        receipt_path=receipt_path,
+                        sha256_path=sha_path,
+                        uid=0,
+                    )
+            finally:
+                os.umask(previous_umask)
+
+            self.assertEqual(len(digest), 64)
+            mode = stat.S_IMODE(receipt_path.stat().st_mode)
+            self.assertEqual(mode, 0o600)
+            mock_chown.assert_any_call(receipt_path, 0, 0)
+            mock_chown.assert_any_call(sha_path, 0, 0)
 
     def test_stop_multiple_data_disks(self):
         extra = [{
@@ -207,6 +285,97 @@ class BuildCreationReceiptTests(unittest.TestCase):
             builder.build_receipt(profile=self.profile, runner=fake, now=self.now)
         self.assertIn("vm.vmId", str(ctx.exception))
 
+    def test_stop_disk_id_mismatch(self):
+        wrong_disk = self.disk_id + "-other"
+        fake = FakeAz(
+            _vm_payload(disk_id=wrong_disk),
+            _disk_payload(disk_id=wrong_disk),
+        )
+        with self.assertRaises(builder.Stop) as ctx:
+            builder.build_receipt(profile=self.profile, runner=fake, now=self.now)
+        self.assertIn("does not match the selected profile data disk", str(ctx.exception))
+
+    def test_stop_cross_environment_staging_id_under_prod(self):
+        staging_vm, staging_disk, _, _ = _synthetic_ids(host.STAGING_PROFILE)
+        fake = FakeAz(
+            _vm_payload(vm_id=staging_vm, disk_id=staging_disk),
+            _disk_payload(disk_id=staging_disk, managed_by=staging_vm),
+        )
+        with self.assertRaises((builder.Stop, builder.Refused)) as ctx:
+            builder.build_receipt(profile=self.profile, runner=fake, now=self.now)
+        message = str(ctx.exception).lower()
+        self.assertIn("cross-environment", message)
+
+    def test_stop_vm_id_pattern_mismatch(self):
+        bad_vm = self.vm_id.replace("vm-cosmabot-prod-eus2-01", "vm-cosmabot-other-eus2-01")
+        fake = FakeAz(
+            _vm_payload(vm_id=bad_vm),
+            _disk_payload(managed_by=bad_vm),
+        )
+        with self.assertRaises(builder.Stop) as ctx:
+            builder.build_receipt(profile=self.profile, runner=fake, now=self.now)
+        self.assertIn("does not match the selected profile VM identity", str(ctx.exception))
+
+    def test_stop_managed_by_mismatch(self):
+        fake = FakeAz(
+            _vm_payload(),
+            _disk_payload(managed_by=self.vm_id + "-other"),
+        )
+        with self.assertRaises(builder.Stop) as ctx:
+            builder.build_receipt(profile=self.profile, runner=fake, now=self.now)
+        self.assertIn("disk.managedBy does not match vm.id", str(ctx.exception))
+
+    def test_stop_receipt_just_past_24h(self):
+        started = "2026-11-15T14:59:00Z"  # 24h + 1m before self.now (15:00)
+        fake = FakeAz(
+            _vm_payload(vm_time_created=started),
+            _disk_payload(time_created="2026-11-15T15:00:00Z"),
+        )
+        with self.assertRaises(builder.Stop) as ctx:
+            builder.build_receipt(profile=self.profile, runner=fake, now=self.now)
+        self.assertIn("older than 24 hours", str(ctx.exception))
+
+    def test_accepts_receipt_just_inside_24h(self):
+        started = "2026-11-15T15:01:00Z"  # 24h - 1m before self.now
+        fake = FakeAz(
+            _vm_payload(vm_time_created=started),
+            _disk_payload(time_created="2026-11-15T15:02:00Z"),
+        )
+        receipt = builder.build_receipt(
+            profile=self.profile, runner=fake, now=self.now
+        )
+        self.assertEqual(receipt["apply_started_utc"], started)
+        host.validate_receipt(
+            receipt, self.vm_id, self.disk_id, self.disk_id, self.now,
+            profile=self.profile,
+        )
+
+    def test_stop_future_apply_started(self):
+        future = "2026-11-16T16:00:00Z"  # after self.now
+        fake = FakeAz(
+            _vm_payload(vm_time_created=future),
+            _disk_payload(time_created=future),
+        )
+        with self.assertRaises(builder.Stop) as ctx:
+            builder.build_receipt(profile=self.profile, runner=fake, now=self.now)
+        self.assertIn("in the future", str(ctx.exception))
+
+    def test_vm_time_created_absent_uses_disk_only(self):
+        fake = FakeAz(
+            _vm_payload(vm_time_created=None),
+            _disk_payload(time_created="2026-11-16T14:05:00Z"),
+        )
+        receipt = builder.build_receipt(
+            profile=self.profile, runner=fake, now=self.now
+        )
+        self.assertEqual(receipt["apply_started_utc"], "2026-11-16T14:05:00Z")
+        self.assertEqual(receipt["disk_created_utc"], "2026-11-16T14:05:00Z")
+        self.assertEqual(receipt["apply_completed_utc"], "2026-11-16T14:05:00Z")
+        host.validate_receipt(
+            receipt, self.vm_id, self.disk_id, self.disk_id, self.now,
+            profile=self.profile,
+        )
+
     def test_stop_receipt_older_than_24h(self):
         old = "2026-11-14T14:00:00Z"
         fake = FakeAz(
@@ -228,10 +397,78 @@ class BuildCreationReceiptTests(unittest.TestCase):
             )
         self.assertEqual(code, 1)
 
+    def test_az_runner_requires_argv0_az(self):
+        with self.assertRaises(builder.Stop) as ctx:
+            builder.default_az_runner(["azure", "vm", "show", "-g", "x", "-n", "y"])
+        self.assertIn("refused non-az argv", str(ctx.exception).lower())
+
+    def test_az_runner_refuses_vm_delete_and_disk_update(self):
+        for argv in (
+            ["az", "vm", "delete", "-g", "x", "-n", "y", "--yes"],
+            ["az", "disk", "update", "-g", "x", "-n", "y"],
+        ):
+            with self.subTest(argv=argv):
+                with self.assertRaises(builder.Stop) as ctx:
+                    builder.default_az_runner(argv)
+                self.assertIn("Refused non-read az verb", str(ctx.exception))
+
     def test_az_runner_refuses_write_verb(self):
         with self.assertRaises(builder.Stop) as ctx:
             builder.default_az_runner(["az", "vm", "create", "-g", "x", "-n", "y"])
         self.assertIn("Refused non-read az verb", str(ctx.exception))
+
+    def test_az_runner_subprocess_shell_false_list_argv_and_secret_env_dropped(self):
+        captured: dict = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            return subprocess.CompletedProcess(
+                args=argv, returncode=0, stdout="{}", stderr=""
+            )
+
+        poisoned = {
+            "HOME": "/tmp/synthetic-home",
+            "PATH": "/usr/bin",
+            "AZURE_CLIENT_SECRET": "synthetic-secret-value",
+            "AZURE_CLIENT_ID": "synthetic-client-id",
+            "AZURE_TENANT_ID": "synthetic-tenant-id",
+            "AZURE_SUBSCRIPTION_ID": "00000000-0000-4000-8000-0000000000aa",
+        }
+        with (
+            patch.dict(os.environ, poisoned, clear=False),
+            patch("subprocess.run", side_effect=fake_run) as run_mock,
+        ):
+            payload = builder.default_az_runner(
+                ["az", "vm", "show", "--resource-group", "rg", "--name", "vm", "-o", "json"]
+            )
+        self.assertEqual(payload, {})
+        run_mock.assert_called_once()
+        argv = captured["argv"]
+        kwargs = captured["kwargs"]
+        self.assertIsInstance(argv, list)
+        self.assertEqual(argv[0], "az")
+        self.assertIs(kwargs.get("shell"), False)
+        env = kwargs["env"]
+        self.assertNotIn("AZURE_CLIENT_SECRET", env)
+        self.assertNotIn("AZURE_CLIENT_ID", env)
+        self.assertNotIn("AZURE_TENANT_ID", env)
+        self.assertEqual(env.get("AZURE_SUBSCRIPTION_ID"), poisoned["AZURE_SUBSCRIPTION_ID"])
+        self.assertEqual(env.get("HOME"), poisoned["HOME"])
+
+    def test_az_subprocess_env_helper_drops_secrets(self):
+        source = {
+            "HOME": "/tmp/x",
+            "PATH": "/bin",
+            "AZURE_CLIENT_SECRET": "nope",
+            "AZURE_CLIENT_ID": "nope",
+            "AZURE_TENANT_ID": "nope",
+        }
+        env = builder.az_subprocess_env(source)
+        self.assertEqual(env["HOME"], "/tmp/x")
+        self.assertNotIn("AZURE_CLIENT_SECRET", env)
+        self.assertNotIn("AZURE_CLIENT_ID", env)
+        self.assertNotIn("AZURE_TENANT_ID", env)
 
     def test_timestamp_provenance_uses_earliest_and_latest_time_created(self):
         # Disk created before VM: started=disk, completed=vm.
@@ -249,22 +486,6 @@ class BuildCreationReceiptTests(unittest.TestCase):
             receipt, self.vm_id, self.disk_id, self.disk_id, self.now,
             profile=self.profile,
         )
-
-    def test_root_uid_sets_mode_0600(self):
-        if os.geteuid() != 0:
-            self.skipTest("mode/owner check for uid 0 requires a root-capable harness")
-        fake = FakeAz(_vm_payload(), _disk_payload())
-        with tempfile.TemporaryDirectory() as tmp:
-            out = Path(tmp)
-            code = builder.main(
-                ["--profile", self.profile, "--out-dir", str(out)],
-                runner=fake,
-                now=self.now,
-                uid=0,
-            )
-            self.assertEqual(code, 0)
-            mode = out.joinpath("creation-receipt.json").stat().st_mode & 0o777
-            self.assertEqual(mode, 0o600)
 
 
 if __name__ == "__main__":

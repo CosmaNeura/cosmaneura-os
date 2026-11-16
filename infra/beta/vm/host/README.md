@@ -63,12 +63,13 @@ Timestamp provenance (documented; never invented):
 | Receipt field | ARM source |
 | --- | --- |
 | `disk_created_utc` | `az disk show` → `timeCreated` |
-| `apply_started_utc` | earliest of VM `timeCreated` (when present) and disk `timeCreated` |
-| `apply_completed_utc` | latest of VM `timeCreated` (when present) and disk `timeCreated` |
+| `apply_started_utc` | earliest ARM `timeCreated` of the VM and the disk (**explicit proxy** for foundation-apply start; Azure has no separate apply-start field on these resources) |
+| `apply_completed_utc` | latest of VM `timeCreated` (when present) and disk `timeCreated` (**lower bound** on apply end) |
 
 Azure does not store a separate foundation-apply start/end on the VM or disk.
-Bootstrap’s 24h window is therefore anchored to these ARM creation times. If a
-required field cannot be read from `az`, the tool STOPs instead of faking it.
+Bootstrap’s 24h window is therefore anchored to the `apply_started_utc` proxy
+above. If a required field cannot be read from `az`, the tool STOPs instead of
+faking it.
 
 Workstation paste (after `az login`, profile names fixed by `--profile`):
 
@@ -84,6 +85,11 @@ the VM to be a private **root-owned** regular file with mode `0600` or `0400`:
 sudo install -d -o root -g root -m 0700 /etc/cosmabot
 sudo install -o root -g root -m 0600 "$HOME/.cosmabot-sitting2/creation-receipt.json" /etc/cosmabot/creation-receipt.json
 ```
+
+The root-owned placement path is **not proven in CI** (agents are not root on
+the runner). Unit tests cover non-root mode `0600` plus a mocked uid-0 chown/
+chmod path under a permissive umask; John still runs the printed `sudo install`
+on the VM.
 
 Use the printed `sha256=…` value with `--creation-receipt-sha256`. Local proof:
 `python3 -m unittest discover -s infra/beta/vm/host/tests -p 'test_build_creation_receipt.py' -v`

@@ -10,13 +10,13 @@ No Azure writes. No secrets. Does not change or loosen `bootstrap_host.py`.
 
 Timestamp provenance (ARM-backed only; never invented):
   * disk_created_utc   = `az disk show` → timeCreated
-  * apply_started_utc  = earliest of VM timeCreated (when present) and disk
-    timeCreated. Azure does not store a separate foundation-apply start on the
-    VM or disk; bootstrap's 24h window is anchored to these ARM creation times.
+  * apply_started_utc  = earliest ARM timeCreated of the VM and the disk
+    (explicit proxy: Azure does not store a separate foundation-apply start on
+    the VM or disk; bootstrap's 24h window is anchored to this proxy)
   * apply_completed_utc = latest of VM timeCreated (when present) and disk
     timeCreated. Same honesty rule: no tofu/apply end stamp exists on these
-    resources, so the latest ARM creation time is the upper bound that still
-    satisfies started <= created <= completed.
+    resources, so the latest ARM creation time is a lower bound on apply end
+    that still satisfies started <= created <= completed.
 
 If a required ARM field is missing, this tool STOPs with a clear message and
 exit status 1. It never fabricates IDs or timestamps.
@@ -62,12 +62,21 @@ RECEIPT_VERSION = 1
 SIZE_GIB = 128
 REQUIRED_LUN = 0
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+_AZ_READ_VERBS = frozenset({"show", "list", "get"})
 # Azure write verbs that must never appear in the argv we construct.
 _AZ_WRITE_VERBS = frozenset({
     "create", "update", "delete", "set", "remove", "start", "stop", "restart",
     "deallocate", "resize", "attach-data-disk", "detach-data-disk", "run-command",
     "extension", "wait", "apply", "deploy",
 })
+# Env keys forwarded to az. Secrets / SP credentials are never passed through.
+_AZ_ENV_ALLOWLIST = (
+    "HOME", "PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "AZURE_CONFIG_DIR",
+    "AZURE_SUBSCRIPTION_ID", "ARM_SUBSCRIPTION_ID",
+)
+_AZ_ENV_SECRET_DENYLIST = (
+    "AZURE_CLIENT_SECRET", "AZURE_CLIENT_ID", "AZURE_TENANT_ID",
+)
 
 
 class Stop(RuntimeError):
@@ -113,6 +122,15 @@ def parse_utc(value: str) -> dt.datetime:
     return dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def az_subprocess_env(source: dict[str, str] | None = None) -> dict[str, str]:
+    """Build the env passed to az: allowlist only; never forward SP secrets."""
+    env_source = os.environ if source is None else source
+    env = {key: env_source[key] for key in _AZ_ENV_ALLOWLIST if key in env_source}
+    for denied in _AZ_ENV_SECRET_DENYLIST:
+        env.pop(denied, None)
+    return env
+
+
 def default_az_runner(argv: list[str]) -> dict[str, Any]:
     """Run a read-only az CLI command and parse JSON stdout."""
     if not argv or argv[0] != "az":
@@ -127,7 +145,7 @@ def default_az_runner(argv: list[str]) -> dict[str, Any]:
     if len(argv) < 3:
         stop("Internal az runner refused short argv")
     group, verb = argv[1], argv[2]
-    if verb.lower() not in {"show", "list", "get"}:
+    if verb.lower() not in _AZ_READ_VERBS:
         stop(f"Refused non-read az verb: az {group} {verb}")
     try:
         result = subprocess.run(
@@ -135,10 +153,8 @@ def default_az_runner(argv: list[str]) -> dict[str, Any]:
             check=False,
             capture_output=True,
             text=True,
-            env={key: os.environ[key] for key in (
-                "HOME", "PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "AZURE_CONFIG_DIR",
-                "AZURE_SUBSCRIPTION_ID", "ARM_SUBSCRIPTION_ID",
-            ) if key in os.environ},
+            shell=False,
+            env=az_subprocess_env(),
         )
     except FileNotFoundError:
         stop("az CLI not found on PATH; install Azure CLI before building the receipt")
@@ -341,8 +357,10 @@ def build_receipt(
         "apply_completed_utc": apply_completed,
         "notes": [
             "Built by build_creation_receipt.py from read-only az vm show + az disk show.",
-            "apply_started_utc / apply_completed_utc are ARM resource timeCreated bounds "
-            "(earliest/latest of VM and disk); disk_created_utc is disk.timeCreated.",
+            "apply_started_utc is the earliest ARM timeCreated of the VM and the disk "
+            "(explicit proxy for foundation-apply start). apply_completed_utc is the "
+            "latest of those timeCreated values (a lower bound on apply end). "
+            "disk_created_utc is disk.timeCreated.",
             "Never commit real subscription IDs or secret values.",
         ],
     }
@@ -375,21 +393,21 @@ def write_receipt_files(
     digest = hashlib.sha256(raw).hexdigest()
 
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    # umask 077 then write; mode tightened below.
+    # Restrictive umask during write, then explicit chmod 0600 (do not rely on umask alone).
     previous = os.umask(0o077)
     try:
         receipt_path.write_bytes(raw)
         sha256_path.write_text(digest + "\n", encoding="utf-8")
     finally:
         os.umask(previous)
+    os.chmod(receipt_path, 0o600)
+    os.chmod(sha256_path, 0o600)
 
     effective_uid = os.geteuid() if uid is None else uid
     if effective_uid == 0:
         os.chown(receipt_path, 0, 0)
-        os.chmod(receipt_path, 0o600)
         os.chown(sha256_path, 0, 0)
-        os.chmod(sha256_path, 0o600)
-        meta = receipt_path.lstat()
+        meta = os.lstat(receipt_path)
         if not (
             stat.S_ISREG(meta.st_mode)
             and meta.st_uid == 0
