@@ -172,27 +172,30 @@ installs mode-0400 host files under `/etc/cosmabot/runtime/<release_id>/<role>/`
 
 ### Operator shapes (names only in examples)
 
-Plan (names / mapping only):
+Plan (names / mapping only; omit `--secret-name` for the full catalog):
 
 ```text
 python3 secrets_transport.py \
   --profile cosmabot-vm-prod-v1 \
   --resource-group rg-cosmabot-prod-eus2-01 \
-  --vault-name kv-cbot-prd-<suffix> \
-  --plan-only \
-  --secret-name CLERK-SECRET-KEY
+  --vault-name "$PROD_KV_NAME" \
+  --plan-only
 ```
 
-Workstation stage-only (John `/32` vault window; never on the prod VM):
+Workstation stage-only (John `/32` vault window; never on the prod VM). Omit
+`--secret-name` so the full catalog is staged (required for
+`--check-staging-complete` / the §4.5 session gate). Use the same
+`$LOCAL_STAGING` folder the runbook creates with
+`mktemp -d /tmp/cosmabot-staging.XXXXXX`:
 
 ```text
+LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)
 python3 secrets_transport.py \
   --profile cosmabot-vm-prod-v1 \
   --resource-group rg-cosmabot-prod-eus2-01 \
-  --vault-name kv-cbot-prd-<suffix> \
+  --vault-name "$PROD_KV_NAME" \
   --stage-from-vault \
-  --staging-dir /tmp/cosmabot-staging.XXXXXX \
-  --secret-name CLERK-SECRET-KEY
+  --staging-dir "$LOCAL_STAGING"
 ```
 
 Then restore vault public access per **§4.3**. LLM installs also write a
@@ -201,9 +204,10 @@ non-secret sidecar `WORKSPACE_LLM_API_KEY.source-account`.
 **One order** (runbook Sitting 2 row 5 / after format-disk yes + continue-prep
 yes / checklist): `#389` bootstrap so `/etc/cosmabot` exists → second vault
 window → `LOCAL_STAGING=$(mktemp -d /tmp/cosmabot-staging.XXXXXX)` →
-`--stage-from-vault` (path shape + all expected names present and non-empty, or
-STOP before SSH) → `TEMP-JOHN-SSH-SECRETS-INSTALL` → ssh-stdin install →
-close-and-verify. John's hands-on: `/32`, vault window, SSH key.
+`--stage-from-vault` without `--secret-name` (path shape + all expected names
+present and non-empty, or STOP before SSH) → `TEMP-JOHN-SSH-SECRETS-INSTALL` →
+ssh-stdin install → close-and-verify. John's hands-on: `/32`, vault window,
+SSH key.
 
 SSH install window (John `/32` only; see runbook §4.5 and `fences/`):
 
