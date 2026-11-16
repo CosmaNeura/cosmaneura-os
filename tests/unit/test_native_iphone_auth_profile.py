@@ -23,7 +23,10 @@ APP_INFO = ROOT / "apps/capture/ios/App/App/Info.plist"
 SWIFT_CONFIG = (
     ROOT / "clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift"
 )
-EXPECTED_COMPOSITION_FILES = 515
+# The Apple credential logic, Capacitor bridge and Swift proving test add three
+# owned sources: NativeAppleSignIn.swift, CosmasAppleSignInPlugin.swift and
+# NativeAppleSignInTests.swift. Keep this pin strict across every profile.
+EXPECTED_COMPOSITION_FILES = 518
 
 
 def _load(path: Path, name: str):
