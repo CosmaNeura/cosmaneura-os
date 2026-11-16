@@ -35,9 +35,9 @@ inputs or evidence:
   "create_option": "Empty",
   "size_gib": 128,
   "lun": 0,
-  "apply_started_utc": "<recorded start of this reviewed apply, ISO8601 with timezone>",
+  "apply_started_utc": "<earliest ARM timeCreated of the VM and the disk (proxy lower bound), ISO8601 with timezone>",
   "disk_created_utc": "<actual disk timeCreated, ISO8601 with timezone>",
-  "apply_completed_utc": "<recorded successful end of this apply, ISO8601 with timezone>"
+  "apply_completed_utc": "<latest ARM timeCreated of the VM and the disk (proxy lower bound), ISO8601 with timezone>"
 }
 ```
 
@@ -49,6 +49,51 @@ IDs must identify only `rg-cosmabot-prod-eus2-01`, `vm-cosmabot-prod-eus2-01` an
 `data-vm-cosmabot-prod-eus2-01` (see `creation-receipt.prod.example.json`). The
 receipt is operator-supplied provenance; its hash binds the reviewed bytes. The
 script does not independently authenticate a fabricated receipt against ARM.
+
+### Building the receipt (`build_creation_receipt.py`)
+
+`build_creation_receipt.py` is the one-paste workstation helper that builds that
+JSON (and its sha256) from **read-only** `az vm show` and `az disk show` only.
+No Azure writes. No secrets. It refuses multiple data disks, a LUN other than 0,
+`createOption` other than `Empty`, a size other than 128 GiB, any missing ARM
+field, or an `apply_started_utc` older than 24 hours (clear `STOP:` + exit 1).
+
+Timestamp provenance (documented; never invented):
+
+| Receipt field | ARM source |
+| --- | --- |
+| `disk_created_utc` | `az disk show` → `timeCreated` |
+| `apply_started_utc` | earliest ARM `timeCreated` of the VM and the disk (ARM timeCreated **proxy**, a **lower bound**) |
+| `apply_completed_utc` | latest ARM `timeCreated` of the VM and the disk (same proxy, a **lower bound**) |
+
+One definition everywhere: these fields are an ARM `timeCreated` proxy (Azure has
+no separate foundation-apply start/end on the VM or disk). Bootstrap’s 24h
+window is anchored to `apply_started_utc`. If a required field cannot be read
+from `az`, the tool STOPs instead of faking it.
+
+Workstation paste (after `az login`, profile names fixed by `--profile`):
+
+```text
+python3 infra/beta/vm/host/build_creation_receipt.py --profile cosmabot-vm-prod-v1 --out-dir "$HOME/.cosmabot-sitting2"
+```
+
+On a non-root Mac it writes the local files for review and prints the exact
+root install commands for the VM. `bootstrap_host.py` requires the receipt on
+the VM to be a private **root-owned** regular file with mode `0600` or `0400`:
+
+```text
+sudo install -d -o root -g root -m 0700 /etc/cosmabot
+sudo install -o root -g root -m 0600 "$HOME/.cosmabot-sitting2/creation-receipt.json" /etc/cosmabot/creation-receipt.json
+```
+
+The root-owned placement path is **not proven in CI** (agents are not root on
+the runner). Unit tests cover non-root mode `0600` plus a mocked uid-0 chown/
+chmod path under a permissive umask; John still runs the printed `sudo install`
+on the VM.
+
+Use the printed `sha256=…` value with `--creation-receipt-sha256`. Local proof:
+`python3 -m unittest discover -s infra/beta/vm/host/tests -p 'test_build_creation_receipt.py' -v`
+(and the CI re-export `tests/unit/test_build_creation_receipt.py`).
 
 At execution it reads **compute metadata only**, without proxies or an identity
 token. Actual IMDS VM instance/resource IDs, region, size, managed disk ID, size,
