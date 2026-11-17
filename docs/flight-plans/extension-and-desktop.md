@@ -1,18 +1,24 @@
 # Extension and desktop: V0 flight plan
 
-Status: proposed; docs only; implementation requires John's approval of this PR.
+Status: proposed; docs only; draft PR #401; implementation requires John's approval of this plan and its prerequisites.
 Evidence baseline: `5d8e2f53` on `main`, inspected November 17, 2026.
 Decision evidence: `DL-20261117-01` and its confirmation resolution
 `DL-20261117-02` are recorded in [owner-decision PR #400](https://github.com/CosmaNeura/cosmaneura-os/pull/400),
 head `d965d3595a20bbbcc7fd2479ccc581324489253b`,
 [decision log at that head](https://github.com/CosmaNeura/cosmaneura-os/blob/d965d3595a20bbbcc7fd2479ccc581324489253b/docs/DECISION_LOG.md#L436).
-That PR is open and is not yet in the code baseline. The owner's instruction
+That PR is still an open draft and is not in this PR's baseline (`5d8e2f53`).
+**No V0 build PR until #400, containing `DL-20261117-01` and
+`DL-20261117-02`, is on main.** If its text changes before landing, re-check
+this plan against the landed text before any build PR. The owner's instruction
 here to follow DL-20261117-01 governs this plan; the recorded follow-up resolves
 its two historical confirmation markers. This PR does not copy or modify the
 three decision documents.
 Nothing here activates an external capability, installs software, changes
 credentials, or authorizes a merge. All development and qualification data is
-invented. Stop after opening the planning PR and wait for the owner.
+invented. Update only this plan in existing draft PR #401, then wait.
+Merge ≠ promote ≠ production publish ≠ store submission; the human still
+clicks deploy. Existing live users keep access and their current sign-in: no
+new agreement, practice, onboarding, billing, re-join or re-acceptance step.
 
 ## 1. Outcome and bounds
 
@@ -21,8 +27,8 @@ computer and receive a dated answer from its permitted EHR page observations.
 A packaged browser extension reads a small set of supported pages; the desktop
 app supplies device identity, credential custody, status and the cloud link.
 An extension-only installation can read supported pages without a desktop app,
-with narrower availability and security guarantees. Both use the existing Box,
-ports, work surface and F-8 queue. Neither is a general remote desktop.
+with narrower availability and security guarantees. Both retain the Box, ports and work-surface boundaries; F-8 availability is
+runtime-dependent and requires the section 9 prerequisites. Neither is a general remote desktop.
 
 Start with one synthetic system and one screen (appointment list), then a
 patient-context screen. Read only what is already loaded. V0 does not click,
@@ -32,7 +38,10 @@ Native EMR windows, canvas-only applications, inaccessible frames and remote
 desktop pixels are unsupported by a DOM reader. Report that limit rather than
 adding OCR or OS accessibility control implicitly.
 
-An independent recording-to-note capability is a separate, gated V0 slice.
+**OPEN-JOHN Thursday: recording inside OS versus the still-deferred
+“Rebuilding the existing Scribe inside OS.”** Is V0-8 a new OS recording path,
+or does it conflict with that deferral? No default or implementation resolution
+is assigned here. Independent recording-to-note is a separate gated proposal.
 DL-20261117-02 clarifies: “Yes, maybe for initial beta we rely on legacy but
 going forward we need independent recording and notes.” Record that beta
 exception honestly; do not label a Core-backed note independent. Scribe stays
@@ -41,6 +50,47 @@ identity. Plan the shared recorder interface here; no live identity change.
 Do not make page reading depend on transcription or silently send audio to
 Track A. Platform-specific device/credential/capture code stays behind interfaces
 from the first Mac slice, with Windows work starting in week three.
+
+### John's answers: November 17, 2:23pm ET via CoS
+
+(a) "A doctor should be able to see what is on his employees emr screen if it's a different login. We get user auth issues with larger groups in different departments but for small practices that isn't an issue, especially for V0, 1 and 2."
+
+For V0, V1 and V2 only, a practice owner or doctor may view an employee's
+loaded EMR screen under a different EMR login in a small practice. This does
+not transfer the employee's identity or private grants, grant agent impersonation,
+or permit EMR control. Larger multi-department groups are out of scope and later.
+No small-practice headcount cutoff was found in the repo; pricing seat thresholds
+are not observation limits. Named later owner decision: **small-practice size
+cutoff**, before expanding this scope.
+
+Require a visible **“being observed”** indicator on the observed computer,
+a staff notice the practice gives employees, explicit human session enablement,
+and a bounded session with visible expiry and stop control. **Proposed V0 default
+to qualify: 15 minutes**, then stop until a human explicitly renews; this is not
+a locked measurement. Stop on revocation, sign-out, lock, expiry or nobody-present
+state. Cannot establish human presence/lock state? Refuse new reads; the
+extension-only mode needs an explicit foreground/presence check before admission.
+
+**OPEN-JOHN Thursday: locked or unattended / nobody-present reads.** Answer (a)
+did not decide these. Default off until he answers; `background_page_reads_enabled`
+/ V0-7 remains off. Idle-logout measurement does not require enabling these reads.
+
+(b) "We could use the existing Athena sandbox to test, maybe? I'm sure there are others out there we'll find."
+
+Week 2 targets the athenahealth sandbox with invented patients only. Sandbox
+access and terms need confirmation before running that test. This answer is a
+suggested target, not proof of access or permission. Other vendor sandboxes come
+later. If unavailable, report those cells **unrun**; no fabricated results or real
+patient charts.
+
+(c) "One login per user should sync across the 3 major features of phone app, desktop app and browser plugin."
+
+Design one CosmaBot identity shared across phone, desktop and extension, with
+separate device sessions and Box/context authority. This does not prove token
+sharing, silent sign-in or a complete phone-to-desktop path. V0-5 and all shared
+identity changes are **BLOCKED on John's yes to the exact live Clerk settings**
+in section 4. All changes must be additive; existing users keep signing in the
+same way. No live Clerk change in this task.
 
 ## 2. Existing implementation to reuse
 
@@ -56,7 +106,7 @@ alone do not demonstrate a runtime dependency on the legacy service.
 | Native Mac audio | `clients/desktop/native-audio/Package.swift`, `clients/desktop/native-audio/Sources/ScribeDesktopAudio/MacMeetingAudio.swift`, `clients/desktop/native-audio/Sources/ScribeDesktopAudio/NativeCaptureProcessFence.swift`, `clients/desktop/native-audio/Sources/ScribeDesktopAudioHelper/Main.swift`; `clients/desktop/recorder/provider-recorder.ts`, `clients/desktop/recorder/provider-recorder-ipc.ts`, `clients/desktop/recorder/durable-record-store.ts` | Mac audio/process isolation, explicit human start/window selection, consent/lease and durable recording recovery. The Swift package targets macOS 14.2; this is not a Windows audio implementation or a background page reader. |
 | Phone/native encrypted recording | `clients/apple/native-auth/Bridge/NativeProviderRecordingService.swift`, `clients/apple/native-auth/Bridge/NativeProviderRecordingRuntime.swift`; `clients/capture/native-recording-pcm/Sources/CosmaneuraNativeRecordingPCM/NativeEncryptedPCMRecorder.swift`, `clients/capture/native-recording/Sources/CosmaneuraNativeRecording/NativeRecordingEncryption.swift`, `clients/capture/native-configured/secure-queue/ios/Sources/CosmaneuraSecureQueue/NativeRecordingQueueStore.swift` | Existing native PCM and encrypted local custody. Device capture transport buffers are not a new user-facing work queue. |
 | Local private recording | `web/src/private-recording-runtime.ts`, `web/src/private-recording-desktop.ts`, `web/src/private-recording-ledger.ts`; `src/cosmas_os/api/private_recording_routes.py`, `src/cosmas_os/application/private_recording.py`, `src/cosmas_os/private_recording_models.py` | Record locally, attach metadata, finish and bind a saved recording. Server metadata explicitly reports no upstream admission, audio upload or transcription. |
-| Sign-in | `clients/desktop/auth-session.mjs`, `clients/desktop/auth-helper-client.mjs`, `clients/desktop/spawn-auth-helper.mjs`, `clients/desktop/auth-ipc.mjs`; `clients/apple/native-auth/Desktop/main.swift`, `clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift`, `clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift`, `clients/apple/native-auth/Sources/CosmasNativeAuth/KeychainAccessBlock.swift`; `src/cosmas_os/api/auth.py` | Shared identity, separate product authority. Tokens stay out of desktop preload/renderer; session revisions fence requests. Keychain background access must fail without summoning authentication UI. Do not change shipped identity or Keychain names. |
+| Sign-in | `clients/desktop/auth-session.mjs`, `clients/desktop/auth-helper-client.mjs`, `clients/desktop/spawn-auth-helper.mjs`, `clients/desktop/auth-ipc.mjs`; `clients/apple/native-auth/Desktop/main.swift`, `clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift`, `clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKeychainCredentials.swift`, `clients/apple/native-auth/Sources/CosmasNativeAuth/KeychainAccessBlock.swift`; `src/cosmas_os/api/auth.py` | Shared identity, separate product authority. Desktop auth helper throws unless `darwin`; release packaging accepts only `OSX`. Windows sign-in and packaging are new work. Tokens stay out of desktop preload/renderer; session revisions fence requests. Keychain background access must fail without summoning authentication UI. Do not change shipped identity or Keychain names. |
 | Queue and operation ledger | `src/cosmas_os/models.py` (`Ticket`, `ActionRevision`, `Decision`, `Operation`); `src/cosmas_os/application/services.py` (`decide`, `edit_revision`, `execute_operation`, `reconcile_unknown`, `list_queue`); `src/cosmas_os/worker/tasks.py` | F-8 immutable revisions, exact approval and unique operation per revision; Postgres intent and retry/reconciliation. Existing chase creation is domain-specific: add the appropriate read-review work producer, not a call that pretends a page read is an insurance chase. |
 | EHR observations and custody | `src/cosmas_os/ports/ehr_reads.py`, `src/cosmas_os/ports/tebra_fhir_ehr.py`, `src/cosmas_os/ports/athena_allergy_ehr.py`, `src/cosmas_os/ports/athena_medication_ehr.py`, `src/cosmas_os/ports/elation_lab_ehr.py`; `src/cosmas_os/application/ehr_reads.py`, `src/cosmas_os/ehr_read_models.py`, `src/cosmas_os/ehr_read_audit.py`, `src/cosmas_os/api/ehr_read_routes.py` | Bounded observations, private/public projections, hashes, current authorization and explicit reviewed-source selection. Existing closed shapes identify particular providers/protocols and synthetic modes; a browser observation needs an additive, accurately named shape. |
 | EHR adapters | `src/cosmas_os/adapters/ehr_read_runtime.py`, `src/cosmas_os/adapters/elation_read_runtime.py`, `src/cosmas_os/adapters/tebra_fhir_read_runtime.py`; `src/cosmas_os/plugins/ehr_fhir/client.py`; `src/cosmas_os/ports/athena_fhir_ehr.py`, `src/cosmas_os/ports/elation_fhir_ehr.py` | Explicit runtime dispatch and read-only FHIR client. Preview adapter exports are not proof that a supported browser adapter or production route is already wired. Prefer authorized APIs for data absent from an open page. |
@@ -121,8 +171,11 @@ a failed independent path cannot fall back to them.
 ### Preferred: extension paired to the desktop app
 
 Use packaged Chromium/Edge extension code and an OS native-messaging host
-installed with the desktop app. Allow only the exact signed/released extension
-IDs. Keep the host a bounded relay to the owned main process, with strict
+shipped with the desktop app but **registered only when
+`desktop_extension_pairing_enabled` is on**, never at every desktop install.
+Disabling pairing removes/refuses host registration without changing app sign-in. Allow only the exact signed/released extension
+IDs once qualified; store approval and signed extension IDs are unverified,
+not identifiers already obtained. Keep the host a bounded relay to the owned main process, with strict
 message schemas and no shell, filesystem, arbitrary URL or generic IPC access.
 Native-messaging availability across browsers is a qualification item.
 
@@ -139,7 +192,7 @@ read capability, never the human's Clerk bearer, refresh token, EMR cookie or
 cloud model key. Revalidate Box grants, installation and pairing generation on
 every accepted observation and requested read. Sign out, membership removal,
 connection disable, unpair, profile change and replacement revoke the binding.
-Already observed history follows existing retention and access policy; it does
+Already observed history follows the proposed section 6 retention rule and current access checks; it does
 not disappear merely because the endpoint is removed.
 
 Security trade-off: native custody and device status reduce browser-held cloud
@@ -175,13 +228,42 @@ and storage; clear session credentials on sign-out. A compromised browser can
 forge page observations in either mode. Neither mode uploads cookies or
 credential-store contents. No automatic mode change transfers permissions.
 
+### Additive shared-identity / Clerk approval checklist (BLOCKED)
+
+Read evidence: `docs/NATIVE_SIGNIN_ACCOUNT_CONTRACT.md`,
+`clients/desktop/auth-session.mjs`, `clients/desktop/auth-helper-client.mjs`,
+`clients/desktop/spawn-auth-helper.mjs`, `clients/apple/native-auth/Desktop/main.swift`,
+`clients/apple/native-auth/Sources/CosmasNativeAuth/NativeClerkConfiguration.swift`,
+`clients/apple/native-auth/Sources/CosmasNativeAuth/ClerkKitWorkspaceDriver.swift`,
+and `src/cosmas_os/api/auth.py`. Phone and Mac use Clerk SDK hosted auth with
+an ephemeral browser, `sharedSessionSync == nil`, native credential custody and
+fresh session tokens. One login means one user identity, not copying native
+bearers into an extension.
+
+| Setting / contract | Exact existing requirement and proposed approval scope |
+| --- | --- |
+| Clerk realm / application | Keep each environment's issuer and publishable-key realm. Production-review is `operational-production-v1` / `https://clerk.beta.cosmas.ai`; live per-practice enrollment is `operational-beta-v1` / `https://clerk.cosmas.ai`; staging keeps its pinned development realm. John must approve which existing realm gets the additive extension client, or any new application credentials. No second IdP or user migration. |
+| Hosted-auth redirect URIs | Native callback is `bundleIdentifier + "://callback"`; existing operational callbacks are `com.cosmasos.beta.ios://callback` and `com.cosmasos.beta.desktop.auth://callback`. Preserve them and synthetic bundle-specific callbacks. Add only the exact extension login callback for each qualified browser/released extension ID. IDs and resulting redirect strings are not yet known: approval must name the actual strings before change, never a wildcard or fabricated ID. |
+| Allowed origins / authorized parties | Existing native request origins are `capacitor://localhost` and `app://cosmas`; preserve existing web origins. Backend `allowed_origins` and `authorized_parties` are process settings, not automatically Clerk dashboard fields. Browser JWTs require `azp` in exact approved parties; native `azp` may be absent, but when present equals its native origin. Approval must list exact extension origin (Chromium `chrome-extension://<released-id>` if supported), callback origin and resulting browser `azp`, corresponding Clerk origin configuration and backend entries. Clerk acceptance is unqualified; do not bypass it with native-origin rules. |
+| PKCE / flow | Native code uses `startHostedAuth`, not an implemented extension OAuth/PKCE flow. Propose authorization-code PKCE/state binding only if Clerk supports the selected extension flow; qualify client/redirect registration and PKCE enforcement and show John the exact settings. No invented Clerk PKCE toggle or client secret in a public extension. |
+| JWT audiences / templates | Preserve configured exact scalar production `aud` for enrollment/workspace. Development `shared_staging` with empty configured audience requires absent `aud`. The contract supplies no literal production audience. Any extension session template/audience change must name actual configured audience and claims for John's yes; no widening/removal of issuer/session/Org checks. |
+
+V0-5 and any shared-identity slice remain BLOCKED until unresolved literal
+extension IDs, redirects, origins, parties, realm and audience/flow settings above
+are a concrete list John says yes to. Answer (c) does not approve these settings.
+Qualify on synthetic accounts; keep native callbacks, Keychain service names,
+membership/access paths and shipped sessions intact. No new sign-in/enrollment wall.
+
 ### Optional on-device model boundary
 
 DL-20261117-01 item 4 permits a small desktop model for perception (screen,
 patient and change recognition), protection (PHI minimization, mismatch warnings
 and later pre-fill checks), and short on-screen staff help (missing/changed
 fields, call notes, answers about visible content). V0 works with deterministic
-selectors first; a model is optional and separately default off under proposed
+selectors first; **OPEN-JOHN Thursday: speech-to-text and drafting providers,
+and optional on-device model choice/explicit yes, with no default selection.**
+STT and drafting stay fake-only until John names providers; application LLM
+remains dark. Do not change the model. A model is optional and separately default off under proposed
 `desktop_local_perception_enabled`. Consequential output must be verified by
 code against typed fields/context or escalated; low confidence never binds a
 patient or creates authority. Test incorrect/missing/contradictory outputs,
@@ -231,10 +313,12 @@ unsupported/partial result and diagnostic codes, not guessed field values.
 
 ## 6. Page read to observation to existing F-8 work
 
-1. An already granted endpoint reads a supported loaded page in the signed-in
-   user's own browser session. A human explicitly enables the read-only
-   observation session; passive page-change observation can continue while that
-   grant/session is valid. Phone requests stage a fresh-read request against this
+1. An already granted endpoint reads a supported loaded page in the observed
+   human's EMR browser session, including an employee's different login for a
+   granted small-practice owner/doctor in V0–V2 under answer (a). A human explicitly
+   enables the bounded read-only session with staff notice and visible indicator;
+   passive page changes are admitted only while unlocked, human-present and
+   within that session, current grants and expiry. Phone requests stage a fresh-read request against this
    existing read scope, never create a new EMR login or unattended task runner.
    No autonomous browsing, navigation or simulated user activity is allowed.
 2. The paired relay or fallback HTTPS ingress validates the endpoint capability,
@@ -246,7 +330,14 @@ unsupported/partial result and diagnostic codes, not guessed field values.
    time and server receipt time, pack/version/hash, screen kind, patient/visit
    binding if verified, coverage, freshness, source/payload hashes and provenance
    `browser_page`. Unknown or contradictory identity refuses clinical attachment.
-4. Extend the closed observation contracts and dispatch additively. Do not
+4. Gate new observation kinds by negotiated protocol/contract revision before
+   sending or accepting them (`docs/workspace-compatibility.md`). Existing
+   `src/cosmas_os/ports/ehr_reads.py` uses `extra="forbid"`; do not add fields to
+   older closed shapes or send unknown kinds to older installed clients. Introduce
+   a separately versioned browser shape, update validators/dispatch and compatibility
+   advertisement together, and refuse unsupported versions before body dispatch.
+   Qualify old/new client-server matrices and rollback; preserve existing-user
+   access on the compatible old path. Extend contracts additively. Do not
    disguise browser evidence as `protocol: fhir`, a vendor API receipt,
    `transport: mock`, or `mode: synthetic` in a real runtime. Reuse the existing
    private snapshot/public projection and current-authority checks in
@@ -274,6 +365,46 @@ timeouts are unconfirmed, not successful completion. Bound retries and retain
 the same request identity through disconnect/restart. Never replay mutations
 because the remote outcome is unknown.
 
+### Proposed observation retention and safety prerequisites (before V0-4)
+
+Store per page-change observation only: opaque Box/endpoint/connection references,
+observed human/caller principal references and session generation; screen kind,
+pack/protocol version/hash; source and receipt times; verified patient/visit binding
+when needed; bounded allowlisted typed fields, coverage, source/payload hashes and
+receipt/deduplication key. Device status contains only availability, confidence and
+timestamps. No full DOM, HTML, screenshots, audio, cookies, credentials, unrelated
+charts or staff activity timeline. Retain latest minimized device status only;
+replace on update and expire after 24 hours without a heartbeat.
+
+**Proposed retention rule for approval, not implemented:** page-change payloads
+and patient/context bindings expire 24 hours after receipt, including superseded
+snapshots and retry buffers. A purge job deletes them and their hashes/clinical
+projections from hot storage/cache; clients expire local buffers on the same bound
+and clear them on sign-out. Keep only opaque receipt ID, rule, deletion time and
+outcome after purge, without patient labels, bytes or deleted-content hashes.
+F-8 revisions bind immutable evidence hashes while retained; after evidence expires,
+refuse execution dependent on it and require a fresh observation/new revision.
+No silent copying of page payload into indefinite ticket history. A separately
+reviewed human-saved artifact needs its own approved retention rule, not an implicit
+exception. Apply the same 24-hour maximum to observation backup copies; before V0-4 build backup deletion/restore expiry enforcement; test
+clock-driven expiry, crash/retry, failed purge reconciliation, cross-Box isolation
+and restoration that cannot resurrect expired data. Purge failure blocks new
+admission for the affected Box until reconciled; report a safe failure code.
+
+`docs/RETENTION.md` currently covers insurance artifacts only. Do not edit it in
+this PR; a later approved update is needed for this rule before implementation.
+BAA version 2.3 coverage for EMR page observations and device status is **unverified**;
+no coverage claim or BAA change here, and no new acceptance wall for live users.
+
+Every proposed switch in section 9 must use existing `src/cosmas_os/config.py`
+refusals: `cosmas_ehr_real_data_enabled` defaults off, must not be set in
+hosted/production, and also requires a recorded practice-BAA flag on the connection.
+Respect `workspace_hosted_enabled` and existing EHR availability's hosted refusal;
+`real_patient_recording_enabled` must stay false in process configuration.
+No new observation/read switch or Box allowlist overrides these gates. This plan
+admits synthetic data only. Test forbidden real-data/hosted/BAA/recording combinations
+fail closed on admission, dispatch and response, not just in UI.
+
 ## 7. Phone to cloud to desktop and back
 
 The practice owner designates one registered endpoint as the **anchor computer**:
@@ -283,6 +414,7 @@ explicit, audited owner change. Do not switch anchors automatically to whichever
 employee is active. A remote Mac mini can be the first test anchor, but is not
 evidence that every Mac stays awake or signed into an EMR.
 
+**Proposed, not a proven complete path; requires section 9 runtime services.**
 Phone request -> existing signed cloud session -> current Box/role/device grants
 -> existing F-8 staged read work and correlation -> desktop's outbound
 authenticated poll/stream -> paired extension read within the enabled human
@@ -313,7 +445,7 @@ posture scans, keylogging or staff-surveillance history.
 | Caller | Which computer and information may be requested |
 | --- | --- |
 | Owner or explicitly granted practice administrator | Register/revoke endpoints and select the anchor; see permitted practice device health. Device administration alone does not grant access to every clinician's private content. |
-| Provider/staff with explicit device-read and clinical-context grants | Ask about the anchor or a named granted endpoint within their Box and allowed patient/work context. A shared computer's active user's session does not transfer that user's private grants to the caller. |
+| Provider/staff with explicit device-read and clinical-context grants | Ask about the anchor or a named granted endpoint within their Box and allowed patient/work context. For V0–V2 small practices, a granted owner/doctor may observe an employee's different EMR login under answer (a), notice, indicator and bounded session. No impersonation or unrelated private-source access. |
 | Agent principal | Read only for an authorized task under its installed capability and human/context scope; no impersonation, grant expansion or self-approval. |
 | Other Box, removed member, ungranted member or support/coding agent | Deny endpoint discovery, status and clinical answers; owning a phone or knowing a device ID supplies no authority. |
 
@@ -321,54 +453,102 @@ The phone receives a minimized authorized answer, source time/coverage,
 safe endpoint label, availability and an existing work/review card if needed.
 Patient-specific details reach it only after current patient/workspace grants
 are checked again at response time. Do not send raw DOM, desktop screenshots,
-other users' charts, local paths, cookies, tokens, audio or an unrestricted
+ungranted charts outside the bounded employee-screen scope, local paths, cookies, tokens, audio or an unrestricted
 device history. No PHI in notification previews; V0 can use the existing open
 app response flow because push notifications remain deferred. Revocation
 during a read suppresses the reply and leaves a safe unavailable result.
 
 ## 8. Behavior by computer state
 
-OS lock, sleep, EMR timeout and app/browser availability are separate facts.
-Missing heartbeats cannot distinguish sleep from a broken network or app exit.
-No current repository evidence qualifies background page reads on locked Mac
-or Windows; the table states proposed behavior to test, not shipped behavior.
+Lock, nobody-present state, sleep, EMR timeout and app/browser availability are
+separate facts. Missing heartbeats cannot distinguish them. Locked-screen
+continuity is unmeasured; John has not authorized locked or nobody-present reads.
+V0 defaults both off, including V0-7 / `background_page_reads_enabled`.
 
 | State | Paired desktop path | Extension-only path | Phone result and limits |
 | --- | --- | --- | --- |
-| In use; browser and EMR session active | Read loaded supported pages without stealing focus; send new observation. Existing native recording may run only after consent/explicit start and its own lease checks. | Read permitted loaded tabs while browser execution is available. | Fresh answer for permitted context. A chart change mid-read invalidates identity binding; no automatic navigation to another chart. |
-| Screen locked; computer awake | App cloud transport and noninteractive DOM reads may continue if browser, grants, EMR session and credential access remain valid. Screen-pixel capture is not required. Keychain interaction-required stops authenticated work; do not unlock or prompt behind the lock. | Loaded-page reads may continue while browser runs, but tab throttling/discard and token expiry can stop them. OS lock state is unknown. | New source timestamps prove continuity only if a new read succeeds. Otherwise dated last-seen data and “fresh read unavailable.” Do not claim cached data is a fresh read. New recording cannot start remotely; existing audio lock behavior is separately qualified. |
-| EMR idle logout or timeout (locked or unlocked) | Detect supported timeout/login marker and stop clinical reads. App's own cloud link may remain live. | Same detection if browser executes; otherwise last-known status only. | “Sign in on Front desk Mac to refresh,” with prior source time. Old DOM may remain visible after logout: never treat it as current session data. No credential injection or keepalive activity. Authorized backend EHR API reads have separate connection status and may work independently. |
-| Asleep/hibernating, app exited or network unavailable | No new local page reads or promised recording continuation. On wake/relaunch, revalidate session, pairing, pack, request expiry and chart identity. | No reads if browser/OS cannot execute; browser exit is sufficient even without sleep. | Cloud work/history and explicitly dated last-seen answer remain accessible under current grants. Pending read expires visibly. V0 does not wake/unlock the computer or revive an EMR session. |
+| In use, unlocked, human present; EMR session active | Read supported loaded pages only within the bounded human-enabled session, indicator and current grants. Recording has separate consent/lease gates. | Requires affirmative foreground/presence qualification; otherwise refuse. | Fresh permitted answer; chart change invalidates binding; no navigation. |
+| Locked, awake | No new page reads. Safe transport/status only if credentials allow noninteractive access; no hidden prompt/unlock. | Cannot assert OS lock state; unknown lock/presence refuses new reads rather than assuming unlocked. | Dated last-known evidence, “fresh read unavailable.” Heartbeat/cache does not prove a fresh read. |
+| Unattended / nobody present (even unlocked) | No new reads; end session until explicit human restart with presence confirmed. | Same default-off rule; service-worker availability does not establish human presence. | Dated history only under current grants. OPEN-JOHN Thursday; no authorization inferred from (a). |
+| EMR idle logout / timeout | Stop clinical reads; detect marker only in permitted foreground session, or after human unlock/return. Cloud link may remain. | Same; stale DOM is not current session evidence. | Human sign-in on observed computer is recovery. No credentials/keepalives. Separately authorized APIs have separate status/gates. |
+| Sleep, hibernation, app/browser exit or network loss | No new reads or promised recording continuity. Revalidate session, pairing, pack, expiry and chart after return. | No read if execution unavailable. | Pending request expires visibly; dated history only. No wake/unlock/relogin tool. |
 
-If locking causes browser suspension on a qualified configuration, narrow its
-advertised support to “awake and unlocked” and prefer an authorized backend
-read API for locked availability. Do not weaken the lock to make the test pass.
+Locked or nobody-present activation requires John's Thursday answer followed by
+separately approved qualification. Even then, cached evidence cannot prove
+continuity: require post-lock changing-fixture source revision/hash and source
+and receipt times before any future claim. OS/browser/native-messaging/store
+behavior remains unmeasured. Do not weaken lock or timeout to qualify it.
 
 ## 9. Small, separately releasable V0 pull requests
 
 Each implementation PR is a later approval-dependent change. Proposed switches
 below do not exist yet; all default false on server and relevant client, with
-an explicit Box allowlist. Unknown/omitted switch values refuse activation.
+an explicit Box allowlist. Today switches are process settings in
+`src/cosmas_os/config.py`; there is **no existing Box-level allowlist mechanism**.
+Propose a Postgres Box-capability record keyed by permanent Box ID, capability,
+revision, owner authorization and expiry, checked on admission/dispatch/reply;
+revocation invalidates grants and caches. This must be built and tested first,
+not assumed present. Unknown/omitted switch values refuse activation.
 Disabling a switch stops new admission/dispatch, retains history and lets an
 already accepted receipt reconcile without starting new work. No switch grants
 EMR writes, real-data processing or production activation by itself.
 The slices are dependency order, not a promise to finish them in two weeks:
-Windows interface/host work starts in week three even if later Mac slices or
+Windows sign-in, credential custody and release packaging work starts in week three even if later Mac slices or
 independent recording are still in progress.
 
-| Slice / independent release | Deliverable | Tests required in that PR | Default-off switch / rollback |
-| --- | --- | --- | --- |
-| V0-1: data contracts and fake observation | Screen-pack schema, bounded packaged-interpreter contract and synthetic page fixtures behind EHR read ports; no browser installation | Unsupported version/opcode, oversized pack, hash/origin mismatch, ambiguous layout, partial lists, malicious page instructions and patient mismatch all refuse correctly. Golden allowed fixtures and negative mutations. | `screen_pack_reads_enabled`; disable pack selection, retain pinned evidence. |
-| V0-2: endpoint registration/status | Additive Box-scoped endpoint records, device key binding, last-seen timestamps and anchor selection in existing settings | Allowed/denied Box/member/device matrix; stale/skewed times, duplicate enrollment, revoked key, anchor replacement and concurrent owner edits; restart retains same endpoint. | `desktop_endpoint_presence_enabled`; stop presence writes and new enrollment without deleting history. |
-| V0-3: paired relay | Native-messaging host, strict packaged-extension allowlist, explicit pairing and revocation, one synthetic read round trip | Rogue page/extension/profile, challenge replay/expiry, malformed/oversized messages, sign-out in flight, relay crash/restart and lost receipt retry; existing desktop sandbox/auth tests. Mac install/signing verification outside Linux CI. | `desktop_extension_pairing_enabled`; unpair/refuse new relay traffic, preserve app sign-in and recording. |
-| V0-4: observation custody and F-8 | Backend ingress/browser adapter, accurate additive provenance, minimized projections and deduplicated read-review Ticket/ActionRevision | Cross-Box/patient refusals, revocation before/after I/O, altered hash/key conflict, duplicate ingress after response loss, worker crash, no duplicate ticket/operation, edited revision invalidates approval, source text cannot invoke tools. | `browser_page_observations_enabled`; block ingress/new producer work; existing queue and historical receipts remain. |
-| V0-5: extension-only fallback | Separate browser endpoint enrollment and direct HTTPS observation flow; one supported screen | PKCE/state/session binding, token expiry/sign-out, malicious content-script messages, forbidden origin, worker suspension/tab discard/browser exit and idempotent reconnect. Verify no desktop/cloud human token reaches page code. | `extension_only_reads_enabled`; refuse new fallback sessions; never downgrade paired sessions automatically. |
-| V0-6: phone round trip | Named/anchor target in existing Messages/Workspace action flow, status and dated answers; no new navigation surface | Full caller matrix, active-user versus caller grants, stale snapshot, anchor changed mid-request, lost desktop connection, expiry on wake, membership revoked before reply and private-source non-disclosure; phone/desktop UX parity. | `phone_computer_reads_enabled`; remove new read action and stop its dispatch; normal conversations remain. |
-| V0-7: locked-session qualification | Noninteractive passive observation and accurate timeout/state results after Mac experiments | Fresh read after OS lock, denied credential interaction without UI, browser throttle/discard, timeout leaves stale DOM, sleep/wake request expiry and no focus/login/keepalive actions; record measured EMR idle logout. | `background_page_reads_enabled`; revert to explicit foreground reads, preserve cached time labels. |
-| V0-8a: independent audio transcription | OS-owned port and immutable transcript custody using local fake, existing encrypted recordings and same operation identity; no legacy calls | Corrupt/truncated audio, consent/lease expiry, duplicate upload/receipt loss, processor crash/recovery, revocation, model outage, no hidden Core/legacy egress; fake output visibly synthetic. | `independent_recording_transcription_enabled`; refuse new transfer, retain recoverable encrypted audio. External processor stays separately dark. |
-| V0-8b: independent note draft | Exact transcript-to-draft linkage and human review in existing work/notes flow; fake first | Changed transcript invalidates draft approval; partial/gapped transcript, wrong patient, duplicated retry, unauthorized reviewer, no auto-sign/submit and no legacy fallback. | `independent_recording_note_draft_enabled`; retain transcript/draft history, stop new drafting. |
-| V0-optional: local perception/help | Small approved-lineage on-device model behind the permitted desktop interface; no clinical drafting | Wrong patient/change detection, unverified consequential output, unsupported weight lineage, absent model and memory/CPU exhaustion; deterministic verification or escalation, never clinical judgment | `desktop_local_perception_enabled`; use deterministic selectors and cloud reasoning, retain existing observations. |
-| V0-9: Windows qualification | Minimal Windows native host/credential adapter and installers; no reuse claim for Mac-only Swift audio | Chrome/Edge native host identity/registry/install validation, Windows credential failure, lock/logoff/RDP disconnect/tab discard/sleep, remote VM reconnect and same request recovery. Existing browser contracts must remain identical. | `windows_extension_desktop_enabled`; Windows capability remains unsupported until the platform matrix passes. Windows native audio is a later separate slice. |
+### Runtime prerequisite R0 (before service-bearing slices)
+
+Evidence: `docs/flight-plans/2026-10-27-standalone-practice.md`,
+`src/cosmas_os/config.py`, `src/cosmas_os/api/app.py:lifespan` and its queue
+refusal. `standalone_synthetic` and `standalone_clerk_synthetic` do not start
+queue, handoff/routine or new observation connector lifespans/background workers;
+queue dispatch fail-closes. AI Send and member management remain unavailable.
+Unlisted true `*_enabled` settings refuse standalone startup. Current app source
+has explicitly configured Google/Microsoft personal-service lifespan hooks; this
+is a narrow existing exception, not availability of F-8 or browser connectors.
+Use neither those hooks nor the standalone Core-capture exception as a hidden
+implementation path. New flags cannot simply be flipped in either profile.
+
+Target **S** is a future reviewed `standalone_clerk_synthetic` backend with
+`standalone-practice-v1` web/Mac/iPhone clients, synthetic data and fake processing
+only. S is **not currently ready**. Before V0-2 service work and V0-4/V0-6/V0-8
+queue work: build additive endpoint/grant/Box-allowlist and retention schemas;
+explicit synthetic ingress/dispatch routes and configuration admission; F-8
+read-work producer and immutable revisions/Operation ledger; bounded authenticated
+endpoint poll/receipt transport; worker lifecycle and retry/reconciliation/purge
+service with sandboxed egress; Messages/action/response authorization and protocol
+compatibility. Test startup refusals, expiry, revocation and restart recovery.
+Any standalone admission/worker changes require a separately reviewed prerequisite
+PR after #400 lands; no weakening of existing guards. Until R0 is built, those
+slices **cannot run in standalone**; local port tests are not an end-to-end runtime.
+No hosted/production promotion, provider activation, live users or Core fallback.
+
+Target **L** is isolated local fake ports/fixtures (no backend service startup),
+with `standalone_synthetic` / `standalone-practice-v1` used only for already
+admitted setup/notebook UI. New service flags remain false there. **M** is the
+Mac Electron packaged synthetic client / Swift native helper (macOS 14.2 audio
+minimum); **W** is a future Windows Electron synthetic profile, not an existing
+OSX release profile. Proposed Windows client profile: `windows-standalone-synthetic-v0`
+(to build/qualify, not shipped); it must preserve `standalone-practice-v1` contracts.
+M uses `standalone-practice-v1` with existing synthetic identity configuration;
+S sign-in qualification uses `operational-staging-v1`, never a live-user realm. **E** is a development Chromium/Edge synthetic extension;
+store approval, signed IDs and cross-browser native messaging remain unqualified.
+A full S/M/E or S/W/E path needs R0 plus explicit platform and identity approvals.
+
+| Slice / independent release | Deliverable | Tests required in that PR | Default-off switch / rollback | Runtime / environment / profile |
+| --- | --- | --- | --- | --- |
+| V0-1: data contracts and fake observation | Screen-pack schema, bounded packaged-interpreter contract and synthetic page fixtures behind EHR read ports; no browser installation | Unsupported version/opcode, oversized pack, hash/origin mismatch, ambiguous layout, partial lists, malicious page instructions and patient mismatch all refuse correctly. Golden allowed fixtures and negative mutations. | `screen_pack_reads_enabled`; disable pack selection, retain pinned evidence. | L; isolated fake interpreter, no service activation |
+| V0-2: endpoint registration/status | Additive Box-scoped endpoint records, device key binding, last-seen timestamps and anchor selection in existing settings | Allowed/denied Box/member/device matrix; stale/skewed times, duplicate enrollment, revoked key, anchor replacement and concurrent owner edits; restart retains same endpoint. | `desktop_endpoint_presence_enabled`; stop presence writes and new enrollment without deleting history. | S + M; BLOCKED on R0 endpoint/allowlist/config admission |
+| V0-3: paired relay | Native-messaging host, strict packaged-extension allowlist, explicit pairing and revocation, one synthetic read round trip | Rogue page/extension/profile, challenge replay/expiry, malformed/oversized messages, sign-out in flight, relay crash/restart and lost receipt retry; existing desktop sandbox/auth tests. Mac install/signing verification outside Linux CI. | `desktop_extension_pairing_enabled`; unpair/refuse new relay traffic, preserve app sign-in and recording. | L + M + E for fake relay; S pairing service BLOCKED on R0 and credential/ID approval |
+| V0-4: observation custody and F-8 | Backend ingress/browser adapter, accurate additive provenance, minimized projections and deduplicated read-review Ticket/ActionRevision | Cross-Box/patient refusals, revocation before/after I/O, altered hash/key conflict, duplicate ingress after response loss, worker crash, no duplicate ticket/operation, edited revision invalidates approval, source text cannot invoke tools. | `browser_page_observations_enabled`; block ingress/new producer work; existing queue and historical receipts remain. | S + M + E; cannot run until R0 F-8/workers/retention/protocol built |
+| V0-5: extension-only fallback | **BLOCKED on John's yes to section 4 exact live Clerk settings**, additive shared identity; separate browser endpoint enrollment and direct HTTPS observation flow; one supported screen | PKCE/state/session binding, token expiry/sign-out, malicious content-script messages, forbidden origin, worker suspension/tab discard/browser exit and idempotent reconnect. Verify no desktop/cloud human token reaches page code. | `extension_only_reads_enabled`; refuse new fallback sessions; never downgrade paired sessions automatically. | S + E; R0 plus exact Clerk yes; no live setting change here |
+| V0-6: phone round trip | Named/anchor target in existing Messages/Workspace action flow, status and dated answers; no new navigation surface | Full caller matrix, active-user versus caller grants, stale snapshot, anchor changed mid-request, lost desktop connection, expiry on wake, membership revoked before reply and private-source non-disclosure; phone/desktop UX parity. | `phone_computer_reads_enabled`; remove new read action and stop its dispatch; normal conversations remain. | S + M + E + synthetic iPhone standalone-practice-v1; R0 F-8/Messages/dispatch required |
+| V0-7: lock/unattended refusal and later qualification | Default-off reads under lock/nobody present; **OPEN-JOHN Thursday** for any activation | Prove new reads refused on lock/unknown presence, no hidden credential UI, expiry on wake and stale DOM not fresh. Post-lock fresh changing-fixture reads only after John's answer and separate approval; idle-logout test needs none. | `background_page_reads_enabled`; stays false, preserve dated evidence. | L/M/E refusal fixtures; S after R0; locked/unattended reads OFF pending John |
+| V0-8a: independent audio transcription | **OPEN-JOHN Thursday recording/Scribe boundary; fake-only until STT provider named.** OS-owned port and immutable transcript custody using local fake, existing encrypted recordings and same operation identity; no legacy calls | Corrupt/truncated audio, consent/lease expiry, duplicate upload/receipt loss, processor crash/recovery, revocation, model outage, no hidden Core/legacy egress; fake output visibly synthetic. | `independent_recording_transcription_enabled`; refuse new transfer, retain recoverable encrypted audio. External processor stays separately dark. | L + M / synthetic iPhone capture fakes; S persistence/workers require R0 and recording decision |
+| V0-8b: independent note draft | **Same recording boundary; drafting fake-only until provider named; application LLM dark.** Exact transcript-to-draft linkage and human review in existing work/notes flow; fake first | Changed transcript invalidates draft approval; partial/gapped transcript, wrong patient, duplicated retry, unauthorized reviewer, no auto-sign/submit and no legacy fallback. | `independent_recording_note_draft_enabled`; retain transcript/draft history, stop new drafting. | L fake draft port; S Messages/review/F-8 requires R0 and recording decision |
+| V0-W: Windows desktop sign-in and packaging (before V0-9) | New native auth-helper/credential custody and process fence, Windows release profile/installer and code signing; currently helper is `darwin`-only, packager `OSX`-only, Swift audio macOS 14.2 | Sign-in/out, token refresh, denied credential interaction, profile/session revision fence, upgrade/uninstall/rollback, signing verification and preservation of Mac/phone sign-in; no audio equivalence claim | `windows_extension_desktop_enabled`; refuse Windows enrollment/reads, preserve existing clients. | L + W future synthetic profile; S integration requires R0, Windows scope and exact identity yes |
+| V0-9: Windows qualification | **OPEN-JOHN Thursday Windows scope.** Depends on V0-W sign-in and packaging; substantial native host/credential/install qualification, not a minimal adapter; no Mac Swift audio reuse | Chrome/Edge native host identity/registry/install validation, Windows credential failure, lock/logoff/RDP disconnect/tab discard/sleep, remote VM reconnect and same request recovery. Existing browser contracts must remain identical. | `windows_extension_desktop_enabled`; Windows capability remains unsupported until the platform matrix passes. Windows native audio extent has no default; John's Thursday scope decides. | S + W + E, physical PC then synthetic Azure VM; all prerequisites and founder approvals |
+| V0-optional: local perception/help | Off critical path, only after explicit John yes; small approved-lineage on-device model behind the permitted desktop interface; no clinical drafting | Wrong patient/change detection, unverified consequential output, unsupported weight lineage, absent model and memory/CPU exhaustion; deterministic verification or escalation, never clinical judgment | `desktop_local_perception_enabled`; use deterministic selectors and fake-only response processing; application LLM stays dark, retain existing observations. | L/M separately approved synthetic model harness; no application LLM activation |
 
 For every new fence test both sides and remove/invert the guard to demonstrate
 that its proving test fails. Name actual collected CI jobs in each later PR;
@@ -377,114 +557,160 @@ Mac/Windows device tests need attached synthetic run logs; Linux CI alone is
 not proof. Follow `docs/review-policy.md` for implementation plan review and
 required final-head review. Do not route messages to another Codex task.
 
+### New credential and endpoint approvals (no creation in this task)
+
+Each item needs **John's yes** before creation/acquisition. Proposed custody is
+not an assertion that a secret/account already exists. Codex creates none,
+commits none and puts no values in the plan, logs or PR. Publisher/code-signing
+approvals do not authorize publication or store submission.
+
+| Secret / account | Proposed custody | Who creates / acquires it after John's yes |
+| --- | --- | --- |
+| Extension signing key; browser store publisher account | Founder-controlled signing vault/hardware-backed custody; founder store account, no private key in extension | Founder/operator obtains account and signing material; exact released IDs qualified later |
+| Windows code-signing certificate/private key | Founder-controlled signing service/HSM; CI access only through separately approved signing identity | Founder/operator acquires certificate and restricted signing access |
+| Azure VM admin and RDP credentials | Founder-managed secret vault; restricted human RDP access, never sent to phone or clients | Founder creates synthetic VM account/credentials during approved apply |
+| Speech-to-text provider key | Approved backend secret manager only; no browser/desktop key | Founder creates only after naming provider and approving external processing; fake-only meanwhile |
+| Backend endpoint-capability token-signing key | Backend secret manager / managed signing service; public verification material only to clients | Founder/operator creates under separately approved signing/rotation/revocation plan |
+| Any new Clerk application/client credentials | Founder Clerk console and backend secret manager if confidential material is actually needed; public extension has no client secret | Founder approves exact section 4 settings and creates only required application credentials |
+| Endpoint device private key (additional prerequisite) | OS native credential custody; extension-only uses separately qualified bounded browser custody | Approved product enrollment on synthetic device after John's yes; not Codex in this task |
+
+Azure Windows VM is a synthetic test endpoint only, not a second cloud. Week 3
+requires **John's yes, founder-only Terraform/apply click, and approved cost**.
+No Terraform, plan/apply/prepare/promote, workflow dispatch or infrastructure change
+in this task. No repo cost quote found: budgetary estimate for a small Windows
+2-vCPU/8-GiB test VM is tens of dollars for intermittent testing, potentially
+low hundreds of USD/month if left running, plus disk/network/IP charges. This is
+an estimated cost class, not an obtained quote. Founder must confirm region/SKU,
+hours and actual pricing before apply; deallocate after tests and remove resources
+when complete (disk charges can remain). No admin/RDP values in evidence.
+
 ## 10. Three-week qualification plan
 
-Weeks count from approval, with later capability activation still explicit.
-Use synthetic EHR pages/accounts and invented appointments throughout. Human
-operators may qualify an authorized EMR's idle behavior without putting real
-patient content into coding-agent evidence. If credentials or physical hardware
-are unavailable, report the unrun cells; do not fabricate qualification.
+Weeks count from plan approval, #400 on main and applicable prerequisites, not
+a three-week delivery promise. Use only invented people, appointments and screens.
+Report unrun cells when access, terms, credential approval or physical hardware is
+missing. No test results have been collected by this PR.
 
 ### Week 1: local Mac and remote Mac mini
 
-Inventory macOS/browser/extension/app versions, power policy, browser background
-policy, permissions and whether the remote session is console, screen sharing
-or another session. Record no real device/tenant identifiers in the report.
-Use the Mac mini as the synthetic practice anchor, and a local Mac as a second
-endpoint. Compare paired mode and extension-only mode. Prove explicit pairing,
-wrong-profile denial, current grants, one appointment observation, phone reply,
-partial coverage and pack rollback. Confirm reads do not move focus or modify
-the EMR. Capture baseline request latency and observation age.
+L/M/E fixture tests first; S integration only after R0. Inventory synthetic
+OS/browser/app versions and session/power policy without real device/tenant IDs.
+Qualify explicit pairing, notice/indicator, proposed 15-minute expiry/stop/renewal,
+wrong-profile denial, small-practice owner/doctor reading an employee's different
+EMR login, caller/context grants, pack rollback and stale/partial labels. Qualify
+extension-only only after exact Clerk approval and lock/presence admission proof.
+A phone round trip is a proposed later integration target, not already complete.
 
-Mandatory locked-screen test: start with an authenticated loaded synthetic
-appointment page and valid grants; read once; lock the OS through the normal
-lock action while keeping it awake; disconnect the remote viewer for the mini.
-From the phone request a read at 1, 5 and 15 minutes. An approved synthetic
-fixture updates its own visible timestamp/row revision after lock without
-extension-driven navigation. Require a new post-lock source hash/revision and
-`observed_at`, matching the fixture, plus cloud receipt time. A heartbeat or
-cached snapshot alone fails. Verify the OS remains locked, no authentication UI
-appears and no key/cookie/screenshots leak. Repeat with tab backgrounded,
-minimized window and browser discard. Log successes and unsupported states for
-each mode; lock never authorizes a new chart or privileges.
+Lock normally, disconnect the remote viewer, and request at 1, 5 and 15 minutes:
+with `background_page_reads_enabled=false` prove **no new page read** and a dated
+unavailable result, no hidden auth UI, no focus/login/keepalive/mutation. Repeat
+for nobody present, unknown presence, minimized/background tabs, discard and sleep.
+A future continuity experiment requires John's Thursday answer and separate
+approval, then a changing synthetic fixture's new source revision/hash and source
+and receipt times; heartbeats or cached snapshots never prove continuity.
 
-### Week 2: Mac failure/recovery and EMR idle logout
+### Week 2: Mac failure/recovery and athenahealth idle logout
 
-Repeat lock tests on both Macs with token refresh due, noninteractive Keychain
-access refused, network loss, desktop/extension restart, EMR timeout and actual
-sleep/wake. Remote-viewer disconnect is not sleep or lock; test each independently.
-Prove duplicate replies/reconnects yield one observation receipt and F-8 item;
-expired requests never run against a different chart after unlock. Exercise
-synthetic audio consent/stop/recovery separately from page reading; native audio
-continuity under lock is a measured capability, never assumed from DOM success.
+Target **athenahealth sandbox, invented patients only**, subject to confirmed
+sandbox access and terms before running. John's (b) suggests it; it does not prove
+access. Other vendor sandboxes later. Access unavailable? Mark cells **unrun**;
+never substitute real charts or fabricate a timeout value.
 
-Measure EMR idle logout with at least three trials per tested configuration:
-unlocked idle, locked-awake idle, locked-awake with bounded read-only DOM
-observations, and remote-session-disconnected. Set `t0` at the last human EMR
-interaction. Record time until login/timeout marker and time until the next
-attempted read is refused, sampling at a known interval (e.g. 30 seconds) and
-reporting uncertainty. Include browser/EMR version and policy, trial range and
-median. Record whether passive reads changed logout timing compared with the
-idle control. Do not send keepalives or weaken EMR timeout. If a page does not
-expose logout reliably, classify freshness as unverified until an authorized
-API or human reauthentication confirms it. The output is a support matrix and
-measured logout interval, not a promise of indefinite unattended access.
+Test network/relay restart, response loss, duplicate receipts and same F-8 intent
+(after R0), token refresh refusal, membership revocation, EMR logout/stale DOM,
+sleep/wake expiry and no auto-replay against a changed chart. Synthetic audio
+consent/stop/recovery is separate and contingent on recording-boundary approval;
+lock continuity for audio is unmeasured, not implied by DOM tests.
 
-### Week 3 onward: Windows PCs and Azure Windows VM
+Measure idle logout with at least three trials per supported configuration:
+unlocked human-present idle control; locked-awake idle; nobody-present idle; and
+remote-session disconnect, distinguishing lock from sleep. Set `t0` at last
+human EMR interaction. Keep new locked/unattended reads OFF; human return/unlock
+checks or permitted sandbox session evidence bound the logout interval. Record
+interval uncertainty, browser/EMR policy/version, trial range/median and refusal
+at the next permitted read. A proposed 30-second sample interval applies only
+where permitted; otherwise report coarser bounds. Measuring idle logout needs no
+background page reads. Bounded foreground observations may be compared with the
+idle control only while present/unlocked. No keepalives or timeout-policy change.
+If markers are unreliable, mark freshness unverified until permitted human
+reauthentication or a separately authorized API confirms it.
 
-Repeat the same synthetic contract and failure matrix on physical Windows PCs
-with Chrome and Edge, then on an Azure Windows VM with an interactive browser
-session. Azure supplies test compute, not a second Box/cloud architecture.
-Separate workstation lock, user logoff, RDP disconnect, RDP session timeout,
-VM stop/deallocation and power sleep. A disconnected RDP session can retain
-processes; a logged-off session cannot. Measure rather than equate these states.
-Run the post-lock changing-fixture read and EMR idle-logout experiment again.
-Test Windows credential custody, native-messaging registration/replacement,
-browser profile boundaries, reconnection, session expiry and permissions denied.
-Do not relax OS/EMR security settings to obtain continuity. No RDP credentials
-or connection details reach the phone.
+### Week 3 onward: Windows sign-in, packaging, then PCs / Azure VM
 
-Before enabling any cell, require zero unauthorized disclosures/EMR mutations,
-correct source age and partial-coverage labels, deterministic failure/recovery,
-one F-8 item for replayed work, and logged post-lock fresh reads where claimed.
-Collect success rate and p50/p95 request latency over at least 30 synthetic
-requests per supported cell; report results rather than invent a production SLO.
-An unqualified platform/mode stays off. Retest affected cells after browser,
-OS, pack/interpreter or credential-custody changes.
+**OPEN-JOHN Thursday: how far V0 Windows goes; no default.** Start V0-W before
+V0-9: native sign-in/helper, Windows credentials, process fences, release profile,
+installer, signing and upgrade/rollback. Current `spawn-auth-helper.mjs` throws
+unless `darwin`; `package-desktop-release.mjs` accepts only `OSX`;
+`native-audio/Package.swift` targets macOS 14.2. This is substantial new platform
+work, not a minimal adapter; week three is a start, not a completed Windows claim.
+Windows audio scope also depends on John's choice, not Mac code reuse.
+
+Then qualify physical Windows Chrome/Edge and, only after founder approvals/click,
+the synthetic Azure Windows VM. Distinguish lock, logoff, RDP disconnect/timeout,
+VM stop/deallocation and sleep. Disconnected RDP may retain processes; logoff
+cannot. None establishes authorized human presence or read permission. Prove
+lock/nobody-present default refusal and permitted foreground recovery. Repeat
+sandbox idle-logout only with confirmed access/terms. Native messaging across
+browsers, registry/install replacement, credential custody and signed IDs remain
+qualification items. Do not relax OS/EMR security settings.
+
+For each supported cell require no unauthorized disclosures or EMR mutations,
+correct age/coverage, deterministic refusal/recovery and one F-8 item on replay
+where that service exists. Proposed collection: at least 30 synthetic requests,
+success rate and p50/p95 latency. The 30s heartbeat / 90s unknown / 60s freshness
+numbers in section 7 are proposed and unmeasured, not a production SLO. Unqualified
+platform/mode stays off. Retest affected cells after OS/browser/pack/custody changes.
+No SOC 2 claim, EHR write-back, Zoom-just-works or stranger-checkout claim. V0 has
+no EMR write, click, type, navigate, login, submit or sign tool.
 
 ## 11. Locked-decision conflicts and smallest compatible alternatives
 
-This table checks both the desired behavior and tempting implementations.
-It does not silently override a locked decision. No fatal counterexample to
-the existing authority/queue/data rules has been established.
+Every original row is retained below (1–18), with M1–M6 added. **CONFIRMED**
+means the invariant still applies, not that a proposed runtime passed tests.
+**RESOLVED** means this plan supplies the compatible scope/dependency, not build
+completion. **OPEN-JOHN** means owner decision still required; no inferred answer.
+No fatal counterexample to the authority/queue/data invariants was established.
 
-| Decision / rule | Conflict or unresolved tension | Smallest compatible alternative |
+| Row / decision or rule | Status / conflict or tension | Smallest compatible alternative / resolution |
 | --- | --- | --- |
-| `DL-20261117-01` / `DL-20261117-02` | Decision documents are in open PR #400 rather than baseline main; historical confirmation markers must not be treated as unresolved owner intent. | Apply the exact recorded rulings and follow-up, cited above, under this task's direct instruction. Keep this PR to one planning file and let the decision-document PR merge separately. |
-| D-001/D-002/D-012; repository boundary | Reusing legacy service capture as an “independent” recording-to-note path or importing Track A source/data would violate independence and Track A ownership. | Reuse this repository's owned capture boundaries; build an OS-owned fake-first transcription/draft slice. Any future Core integration is separately named and versioned, never a hidden fallback. Shared Clerk identity is the accepted exception, not shared app authority. |
-| Canonical “Browser automation” deferral and `AGENTS.md` browser-automation prohibition | DL-20261117-01 item 1 supersedes the blanket browser prohibition for a read-only extension in the signed-in user's own session. Unattended automation and agent-held EMR logins remain deferred; a locked-screen claim cannot imply either. | Use explicitly enabled passive loaded-page observation only, default off. No automatic navigation, new login or privilege expansion. If the human session expires or the page is inaccessible, return dated evidence or use a separately authorized EHR read API. |
-| Canonical “Rebuilding the existing Scribe inside OS” deferral | A complete new transcription/drafting feature exceeds simple extension reuse and the original ArtifactChase slice. | DL-20261117-01 item 6 and DL-20261117-02 authorize the independent direction and allow possible initial-beta legacy reliance. Keep page V0 separately releasable and recorder shared with separate Scribe; implement independent cloud note processing behind explicit gates, without migrating or replacing Track A. |
-| D-003 and D-011; “Second EHR” deferral | General screen packs could silently activate multiple EHRs or expand v1 beyond insurance ArtifactChase. | One synthetic system/screen first; each vendor, real-data port rung and clinical capability separately activated. Preserve existing vendor paths without declaring blanket production browser support. No pricing/payment-recovery changes. |
-| D-004 | Calling every physical PC a practice “computer” might create one Box per device. | One logical Box; endpoint IDs and one selected anchor beneath it. Explicit Box scope at cloud/shared boundaries. |
-| D-005/D-007 and shared identity `DL-20260927-01` | Remote callers could inherit the active employee's EMR authority, or agents could authenticate/approve as humans. | Separate endpoint, human and agent identities; intersect caller/work/patient/device grants and deny wins. Shared Clerk identity preserves separate OS product permissions. No agent login, signing or self-approval. |
-| D-008/D-009 | Extension tasks, phone commands or relay retries could become a second queue or repeat work after lost replies. | Existing F-8 Ticket/revision/Operation and Postgres intent; transport correlation only. Exact hashes, stable retries and explicit unconfirmed outcomes. Reads remain auditable without inventing approval for every observation. |
-| D-010/D-011, PHI/credential boundary | A default-on reader/audio processor or broad raw-screen upload would activate external data handling without its gates. | Default-off client/server/Box activation, minimized typed observations, explicit capability prerequisites and no coding-agent access to live content. Credentials stay native/browser-private; all test/report content synthetic. |
-| D-013 and `DL-20261023-01` | Device dashboards, extension inboxes or phone remote-control UI could sprawl into a second presentation/action layer. | Existing settings for connection/anchor setup and existing Messages/Workspace work cards with plain availability labels. Preserve shared session/action state and per-device presentation preference. No new push/camera/live-dictation feature. |
-| Desktop sandbox and credential controls (implementation evidence) | Reusing capture permission to grant page control, exposing main IPC to page JavaScript, or allowing hidden Keychain prompts would weaken proven boundaries. | Separate bounded native-messaging capability; exact extension allowlist; no generic IPC or prompt behind lock. Failure is unavailable plus recovery after explicit human interaction. |
-| DL-20261117-01 item 2 | A “helpful” form-fill extension could expand V0 to editing visible EMR fields. | Form fill is V1 only, provider-triggered by explicit click, visible fields only; never click Save, Submit, Send or Sign. V0 packs/interpreter contain no fill operation. |
-| DL-20261117-01 item 3 | Phone-originated prescription/message actions could bypass the desktop and human prescriber. | Stage desktop work only; never send from phone automation. CosmaBot never signs or transmits prescriptions. V0 has no prescription action. |
-| DL-20261117-01 item 4; runtime model invariant | A local model might draft clinical notes, select codes, make clinical judgments or use prohibited weights. | Restrict local optional model to the three permitted functions, code-verify or escalate consequential outputs, reject Chinese-origin weights/derivatives and retain cloud reasoning. No Cursor endpoint runtime dependency. |
-| DL-20261117-01 items 5, 7 and 8 | Mac-first work could become Mac-only, fold separate Scribe into CosmaBot, change sign-up identity live, or add device posture monitoring. | Mac weeks 1–2, Windows from week 3 with platform interfaces; separate Scribe shares recorder and planned CosmaBot sign-up identity. No live identity changes in this task. Compliance checks remain V2 and are named accordingly. |
-| D-009 and architecture style | Persistent unattended access could motivate Kafka, Kubernetes, event sourcing, consumer messengers or another cloud/IdP. | Existing modular monolith/Postgres plus outbound HTTPS relay and current identity. Azure Windows VM is a synthetic test endpoint only. |
-| Locked/sleep/timeout expectations | “Read anytime” has fatal technical counterexamples: asleep OS cannot execute, EMR logout removes session authority, inaccessible DOM cannot supply missing pages. These are availability limits, not reasons to override security decisions. | Dated last-seen snapshot, explicit fresh-read refusal and authorized backend API where available. Human unlock/relogin is recovery; V0 does not disable locks/timeouts. |
-| `DL-20261030-01` autonomy versus this task and review policy | DL-20261117-01 item 10 supersedes October 30 production/store/live identity autonomy for this workstream. This task also stops at the docs-only PR. | Add this one document, commit/push/open its PR, stop and wait for John. No production deploys, store submissions or live identity changes without explicit task instruction. Later high-risk slices follow plan review and exact-head checks; CI/rulesets remain intact. |
+| 1. `DL-20261117-01` / `DL-20261117-02` | **RESOLVED** — #400 is an open draft, not baseline main; historical confirmation markers are resolved by its follow-up. | Cite exact recorded rulings, do not copy decision documents; no V0 build PR until #400 lands. Re-check if text changes from `d965d3595a20bbbcc7fd2479ccc581324489253b`. |
+| 2. D-001/D-002/D-012; repository boundary | **CONFIRMED** — legacy capture is not an independent path; no Track A import/shared DB. | Owned local custody and fake-first OS port proposal; future Core integration explicitly named/versioned, never hidden fallback. Shared identity does not grant shared product authority. |
+| 3. Canonical browser-automation deferral / AGENTS prohibition (gap 3) | **RESOLVED** — item 1 permits read-only scope; John's (a) extends observed login scope for V0–V2 small practices only. | Owner/doctor may observe employee's loaded screen with grants, notice, indicator and bounded session. No headcount cutoff found; named later size decision. Locked/nobody-present reads stay off pending Thursday. No browsing/navigation/login/privilege expansion; dated evidence or separately authorized API on expiry. |
+| 4. Canonical “Rebuilding the existing Scribe inside OS” deferral | **OPEN-JOHN** — independent direction / possible beta legacy exception does not decide whether V0-8 conflicts with deferred rebuilding. | Thursday decide new OS recording path versus deferral; no default. Keep page reading separate, shared recorder/separate Scribe and independent fake-first proposal; no migration/replacement or covert Core fallback. Independent complete recording-to-note: none found, not every path disproven. |
+| 5. D-003/D-011; second-EHR deferral | **CONFIRMED** — generic packs cannot activate vendors or change ArtifactChase/pricing scope. | One synthetic fixture system/screen first, athenahealth sandbox timeout target with confirmed terms/access; each vendor/real-data rung separately approved. No payment recovery or blanket browser support. |
+| 6. D-004 | **CONFIRMED** — devices cannot become separate Boxes. | One permanent logical Box, registered endpoints and explicit anchor beneath it. |
+| 7. D-005/D-007; shared identity `DL-20260927-01` (gap 7) | **RESOLVED** — employee login observation is permitted by (a), not identity inheritance or agent impersonation. | Small-practice owner/doctor V0–V2 observation within caller/device/patient/work grants; deny wins. Notice/indicator/session bound; no unrelated private-source access, self-approval/signing or agent login. (c) is one identity with separate product/session authority. |
+| 8. D-008/D-009 | **RESOLVED** — extension work/retries cannot create another queue; F-8 is not available in every runtime. | R0 before standalone service work: F-8 producer/revisions/Operation, workers/dispatch/receipts and recovery. Postgres intent, exact hashes/stable retries, unconfirmed outcomes. No invented approval for each passive observation. |
+| 9. D-010/D-011; PHI/credential boundary (incomplete row 9) | **RESOLVED** — raw uploads/default-on processing lack retention and existing gates. | Section 6 minimized 24-hour proposed retention/purge before V0-4; later approved RETENTION update. Every switch respects real-data, hosted, recorded practice-BAA and process-recording refusals. BAA 2.3 coverage unverified; synthetic only, no BAA change. Section 9 credentials need John's yes. |
+| 10. D-013 / `DL-20261023-01` | **CONFIRMED** — no second UI/queue, remote control or automatic private-source sharing. | Existing settings and Messages/Workspace work cards only after runtime support; shared state/per-device presentation. No new push/camera/live dictation. Complete phone path remains proposed. |
+| 11. Desktop sandbox / credential controls | **RESOLVED** — capture permission must not grant page control or generic IPC/hidden prompts. | Separate bounded relay and exact qualified IDs; register native host only with pairing switch on. Deny unknown shapes/versions; no prompt behind lock. Human interaction recovers; cross-browser native messaging unmeasured. |
+| 12. `DL-20261117-01` item 2 | **CONFIRMED** — helpful fill is outside V0. | V1 only, provider-triggered explicit click and visible fields; never Save/Submit/Send/Sign. V0 has no write/click/type/navigate/login/submit/sign tool. |
+| 13. Item 3 | **CONFIRMED** — phone cannot bypass desktop/prescriber. | Stage desktop work only; CosmaBot never signs/transmits prescriptions. V0 has no prescription action. |
+| 14. Item 4 / runtime model invariant | **OPEN-JOHN** — permission for optional functions does not choose a model or provider. | Thursday explicit model yes and provider choices; fake-only STT/drafts and dark application LLM until named. If later approved, only permitted local functions, code verification/escalation, no clinical judgment/drafting/coding decisions, no Chinese-origin weights/derivatives or Cursor runtime endpoint. |
+| 15. Items 5, 7, 8 (incomplete row 15) | **OPEN-JOHN** — Windows extent is undecided; Mac auth/packaging/audio cannot supply it. | Thursday Windows scope with no default; V0-W sign-in/helper/credentials/release packaging before V0-9, substantial work starting week 3. Separate Scribe/shared recorder; additive identity blocked on exact Clerk yes; compliance checks remain V2. |
+| 16. D-009 / architecture style | **CONFIRMED** — persistence does not justify new infrastructure architecture. | Modular monolith/Postgres/outbound HTTPS; no Kafka/Kubernetes/event sourcing/consumer messengers/second IdP. Azure VM synthetic endpoint only, founder click, cost and John's yes first. |
+| 17. Lock/sleep/timeout expectations | **OPEN-JOHN** — locked/nobody-present permission unanswered; continuity unmeasured; sleep/logout/inaccessible DOM are fatal availability counterexamples. | Thursday decision; reads default off until answer and later qualification. Dated snapshots/refusal, human unlock/relogin or separately authorized API. Idle logout measurement does not require background reads. No security weakening. |
+| 18. `DL-20261030-01` autonomy versus task/review | **RESOLVED** — item 10 and current task impose narrower live lock. | One docs-only commit on existing branch updating draft #401; no new PR/merge/ready/deploy/store/live settings or secrets. Human clicks deploy. Later slices need scoped approvals and CI/review gates; no weakened Trivy/rulesets. |
+| M1. Runtime model/provider decision | **OPEN-JOHN** — no STT/drafting provider selected by these answers. | Thursday names providers; fake-only until then; optional on-device model explicit yes. Application LLM dark; no model change in this task. |
+| M2. Standalone runtime restrictions | **RESOLVED** — standalone has no F-8/worker execution for new slices; unlisted enabled flags refuse startup, AI Send/member management unavailable. | Section 9 assigns L/S/M/W/E profiles per slice and R0 built first. Narrow existing personal-service hooks are not new connector lifespans. Cannot run service-bearing slices in standalone until explicit admitted schemas/routes/queue/workers/Messages/retention/compatibility exist. |
+| M3. Live Clerk settings | **RESOLVED** — answer (c) establishes shared identity, not console change approval. | V0-5/all shared-identity work BLOCKED on John's yes to section 4 exact realm, redirect strings, origins/parties, supported PKCE flow and audience/template settings. Unknown extension IDs/values remain unqualified; additive only, existing sign-in unchanged. |
+| M4. Credentials / Azure VM | **RESOLVED** — no implicit authority to create credentials or infrastructure here. | Section 9 lists custody/creator for each secret/account; John's yes for each, Codex creates/commits/exposes none. Founder-only Terraform/apply click plus John's yes and confirmed cost; estimate is not a quote. Synthetic endpoint, not second cloud. |
+| M5. Whose EMR session | **RESOLVED** — “own session” did not include (a). | V0–V2 small-practice owner/doctor may view employee screen under different login; larger multi-department groups later. Notice, indicator, proposed 15-minute bound; size cutoff named later decision; lock/nobody-present reads Thursday, default off. |
+| M6. Stale lower docs | **RESOLVED** — lower docs still ban browser automation and #400 does not reconcile them. | `docs/BUILD_AND_DEPLOYMENT_ROADMAP.md` and `docs/handoff/CODEX_D3_TO_COMPLETE_BUILD_HANDOFF.md` remain stale on that prohibition, lower authority than `DL-20261117-01` item 1. Note only here; edit no other docs or decision files. |
+
+### John's Thursday decisions still open
+
+- Recording inside OS versus deferred Scribe rebuilding: is V0-8 a new path or a conflict? No default; independent recording-to-note remains “none found.”
+- Windows scope: how far V0 Windows goes, including audio. No default.
+- Model choice: speech-to-text/drafting providers and explicit optional on-device model yes. No default selection; fake-only processing and dark application LLM until named.
+- Locked/unattended/nobody-present reads: no chosen permission; operational default off until John answers, including V0-7.
 
 ## 12. Evidence and approval boundary
 
-This PR adds only this file. It reports repository inspection and proposes
+This revision edits only this existing file. It reports repository inspection and proposes
 tests; it does not claim device experiments or runtime tests passed. Validate
 Markdown whitespace and every cited file path before pushing, and verify the
-PR diff contains exactly this new document. No dependencies, code, CI changes,
+PR diff changes only this existing document. No dependencies, code, CI changes,
 live credentials, physical test runs, source imports or deployments belong here.
 
 Owner approval is the next boundary after the planning PR. A reviewed plan does
