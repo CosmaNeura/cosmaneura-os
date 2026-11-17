@@ -113,7 +113,7 @@ The normal backend test command discovers `tests/integration/test_extension_loca
 and `tests/unit/test_extension_client.py`. The client installer installs the pinned
 extension SDK and bundler; the unit test runs the worker tests and builds an
 unconfigured artifact. The normal `cd web && corepack pnpm test` command discovers
-`web/src/extension-signin.test.ts` and exercises actual DOM selectors and panel
+`web/flow-checks/extension-signin.test.ts` and exercises actual DOM selectors and panel
 states. CI remains required and unchanged.
 
 The automated checks cover accepted/rejected request Origins and signed `azp`,
