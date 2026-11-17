@@ -1,0 +1,86 @@
+.copy-to-ehr-phone-remote{
+  min-height:100dvh;
+  box-sizing:border-box;
+  padding:1.25rem 1rem 2rem;
+  display:flex;
+  flex-direction:column;
+  gap:1rem;
+  background:
+    radial-gradient(120% 80% at 10% -10%,rgba(34,92,74,.18),transparent 55%),
+    linear-gradient(180deg,#f3efe6 0%,#e7e1d4 48%,#d9e2dc 100%);
+  color:#1c241f;
+  font-family:"Source Serif 4","Iowan Old Style","Palatino Linotype",Palatino,serif;
+}
+
+.copy-to-ehr-phone-remote h1{
+  margin:0;
+  font-size:clamp(1.6rem,5vw,2rem);
+  font-weight:600;
+  letter-spacing:-0.02em;
+}
+
+.copy-to-ehr-phone-remote p{
+  margin:0;
+  font-family:"IBM Plex Sans","Avenir Next",Avenir,sans-serif;
+  font-size:.95rem;
+  line-height:1.45;
+  max-width:36rem;
+}
+
+.copy-to-ehr-phone-remote[data-connection='failed']{
+  background:
+    radial-gradient(120% 80% at 90% -10%,rgba(140,42,34,.16),transparent 50%),
+    linear-gradient(180deg,#f6ebe4 0%,#eadfd6 100%);
+}
+
+.copy-to-ehr-phone-remote__status[role='alert']{
+  font-family:"IBM Plex Sans","Avenir Next",Avenir,sans-serif;
+  font-weight:600;
+}
+
+.copy-to-ehr-phone-remote__actions{
+  display:flex;
+  flex-direction:column;
+  gap:.75rem;
+  margin-top:.5rem;
+}
+
+.copy-to-ehr-phone-remote__actions button,
+.copy-to-ehr-phone-remote__local button{
+  min-height:44px;
+  border:0;
+  border-radius:.2rem;
+  padding:.85rem 1rem;
+  font:600 1rem/1.2 "IBM Plex Sans","Avenir Next",Avenir,sans-serif;
+  text-align:left;
+  background:#1f4d3d;
+  color:#f7f3ea;
+}
+
+.copy-to-ehr-phone-remote__actions button:disabled,
+.copy-to-ehr-phone-remote__local button:disabled{
+  opacity:.55;
+}
+
+.copy-to-ehr-phone-remote__actions button[data-kind='end'],
+.copy-to-ehr-phone-remote__local button{
+  background:#243028;
+}
+
+.copy-to-ehr-phone-remote__local{
+  display:flex;
+  flex-direction:column;
+  gap:.75rem;
+  margin-top:auto;
+  padding-top:1rem;
+}
+
+@media (min-width:720px){
+  .copy-to-ehr-phone-remote{
+    padding:2rem clamp(1.5rem,6vw,4rem);
+  }
+  .copy-to-ehr-phone-remote__actions{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,18rem));
+  }
+}

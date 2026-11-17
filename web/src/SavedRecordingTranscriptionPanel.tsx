@@ -117,10 +117,12 @@ export function requireLegacySavedRecordingTarget(transfer:Transfer,workspace:Wo
 }
 
 export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,isCurrent,taskBot,locked,notesEnabled,
-  onDraftLock,onReviewDraft,onCurrentDraft,scratchpad,notebookDirty,onNotebook,onRecordings,onNavigationLock}:{entry:SavedRecordingEntry;identity:AuthenticatedWorkspaceIdentity;
+  onDraftLock,onReviewDraft,onCurrentDraft,scratchpad,notebookDirty,onNotebook,onRecordings,onNavigationLock,
+  copyToEhrEnabled=false,copyToEhrFallbackOffer=false,copyToEhrRemoteEnabled=false}:{entry:SavedRecordingEntry;identity:AuthenticatedWorkspaceIdentity;
   workspace:Workspace;team:ProviderTeam;isCurrent:()=>boolean;taskBot?:CaptureTaskBot;locked:boolean;notesEnabled:boolean;
   onDraftLock:(v:boolean)=>void;onReviewDraft:(v:CaptureDraft)=>void;onCurrentDraft:(v:CaptureDraft)=>void;
-  scratchpad?:SavedScratchpad;notebookDirty:boolean;onNotebook:()=>void;onRecordings?:()=>void;onNavigationLock?:(busy:boolean)=>void}){
+  scratchpad?:SavedScratchpad;notebookDirty:boolean;onNotebook:()=>void;onRecordings?:()=>void;onNavigationLock?:(busy:boolean)=>void;
+  copyToEhrEnabled?:boolean;copyToEhrFallbackOffer?:boolean;copyToEhrRemoteEnabled?:boolean}){
   const origin=entry.originWorkspace??workspace;
   const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[consented,setConsented]=useState(false),[error,setError]=useState('');
   const [renewConsent,setRenewConsent]=useState(false),[claimedContinuation,setClaimedContinuation]=useState(false);
@@ -351,6 +353,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
         finally{if(privateTransitionOwner.current===selected){privateTransitionOwner.current=null;if(current(selected))setPrivateTransition(false);}}}}/></section>}
     {showDraft&&review?.working?.note_ready&&notesEnabled&&transfer?.admitted&&<div ref={noteSection}><CaptureDraftPanel workspaceId={workspace.id} sessionId={transfer.admitted.session_id}
       sourceId={review.working.working_transcript_id} identity={identity} onDraftLock={reportDraftLock} onReviewDraft={onReviewDraft} onCurrentDraft={onCurrentDraft}
-      reviewLocked={locked||privateBusy||privateDirty} sourceLocked={reviewLock||busy||privateBusy||privateDirty} taskBot={taskBot} scratchpad={scratchpad} notebookDirty={notebookDirty} onNotebook={onNotebook} simpleFlow/></div>}
+      reviewLocked={locked||privateBusy||privateDirty} sourceLocked={reviewLock||busy||privateBusy||privateDirty} taskBot={taskBot} scratchpad={scratchpad} notebookDirty={notebookDirty} onNotebook={onNotebook}
+      copyToEhrEnabled={copyToEhrEnabled} copyToEhrFallbackOffer={copyToEhrFallbackOffer} copyToEhrRemoteEnabled={copyToEhrRemoteEnabled} simpleFlow/></div>}
   </section>;
 }

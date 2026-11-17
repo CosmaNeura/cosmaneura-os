@@ -22,6 +22,7 @@ from cosmas_os.adapters.athena_fhir_schedule_read import (
 )
 from cosmas_os.adapters.core_encounters import CoreDiscoveryDenied
 from cosmas_os.adapters.ehr_auth import ClientCredentialsTokenClient
+from cosmas_os.application.ehr_export.fallback import note_adapter_failure
 from cosmas_os.ports.athena_schedule import AthenaScheduleRequest, AthenaScheduleResponse
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
 from cosmas_os.ports.core_encounters import ConnectionRequest
@@ -116,6 +117,10 @@ class AthenaFhirScheduleReads:
                 now=now or datetime.now(UTC),
             )
         except AthenaFhirScheduleError as exc:
+            if exc.code in {"connection_changed", "account_changed"}:
+                note_adapter_failure(None, "athena", kind="disconnect", error_code=exc.code)
+            else:
+                note_adapter_failure(None, "athena", kind="error", error_code=exc.code)
             if exc.code in {"sandbox_flag_required", "real_data_required", "not_configured",
                             "synthetic_transport_required", "auth_unavailable"}:
                 raise ConnectorUnavailable("core_connection_unavailable") from None

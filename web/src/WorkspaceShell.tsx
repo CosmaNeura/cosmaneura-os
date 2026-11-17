@@ -56,6 +56,8 @@ import { TeamWorkPanel } from "./TeamWorkPanel";
 import { HandoffReviewPanel } from "./HandoffReviewPanel";
 import {modelActive, type ModelOperation} from "./model-work-request";
 import { NoteReview } from "./NoteReview";
+import {copyToEhrFlagProps} from './copy-to-ehr-flags';
+import {useCopyToEhrFlags} from './useCopyToEhrFlags';
 import {canReviewChiefNote,supportsChiefNoteSource,type ChiefNoteOffer} from './chief-note-source';
 import { FollowUpWork } from "./FollowUpWork";
 import { VendorWorkspaceMount } from "./VendorWorkMount";
@@ -170,6 +172,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const {setActivityProof,setActivityBusy,setActivityContextBusy,setActivityContextError,setActivityAttempt,setSelectedSource,setFaxSourceBusy,setProviderFaxSourceBusy,setPhoneNoteTask,setReviewHandoffId,setHandoffReviewPending,setSelectedResult,setSavedResearchChat,setSettingsOpen,setPracticePage,setPracticeOpen,setPracticeOpened,setSelected,setPanel,setMobilePanel,setStage,setEntryIntent,setResearchEntry,setSettingsEntry,setInboxSelection,setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setConnectionError,setConflict,setMessage,setError,generation,
     setWorkspace,setTeamDraft,setNote,setThought,setEvidence,setSource,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryState}=session;
   const messagesMode=session.presentation.current()==='messages';
+  const copyToEhr=copyToEhrFlagProps(useCopyToEhrFlags(authenticated));
   const [openingVisit,setOpeningVisit]=useState(false);
   const [newMessage,setNewMessage]=useState(false),[conversationDetails,setConversationDetails]=useState<false|'details'|'sources'>(false);
   const [sourceChoicesReview,setSourceChoicesReview]=useState<{address:string;token:object;generation:number;workspaceId:string}|null>(null);
@@ -1835,7 +1838,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} scratchpad={workspace.entries.filter(e=>e.kind==='scratchpad').at(-1)}
             notebookDirty={note!==latestNote} onNotebook={()=>{setSavedRecordingNotebook(savedRecordingEntry);setPanel('Notebook');setMobilePanel('Notebook');}}
             onRecordings={goHome} onNavigationLock={setCaptureNavigationLocked}
-            taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}/>}
+            taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}
+            {...copyToEhr}/>}
         </div>
         <div hidden={messagesMode&&(!!reviewHandoffId||mobilePanel!=='Notebook')&&!privateLinkPending}>{authenticated&&workspace.private_draft&&!savedRecordingEntry&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null} forTranscription={!!savedRecordingEntry} compact={nativePrivateNote}
           recoveryLocked={busy||!!pending||recoveryBlocked||captureNavigationLocked||captureDraftLocked}
@@ -1855,7 +1859,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               name: scribe.name, enabled: scribe.enabled && team.revision > 0, includeNotebook: scribe.include_notebook} : undefined}
             openRequest={locked || settingsOpen || practiceOpen || practicePage!=="notebook" ? 0 : captureRequest} preferencesScope={team.recovery_scope}
             onNotebook={() => { setPanel("Notebook"); setMobilePanel("Notebook"); }}
-            onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} reviewLocked={locked} /></div>}
+            onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} reviewLocked={locked} {...copyToEhr} /></div>}
         {CAPTURE_WORKSPACE_BUILD && authenticated && visitLinked && team?.capture?.enabled && !settingsOpen && !practiceOpen &&
           <div hidden={(messagesMode?(!!reviewHandoffId||mobilePanel!=='Notebook'):phoneChiefConversation)&&!scribeSourceBusy}><ExistingScribeSourcePanel key={`scribe-source:${workspace.id}`} workspace={workspace} identity={authenticated}
             openRequest={settingsOpen||practiceOpen?0:recordingSourceRequest}
@@ -2059,7 +2063,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               <NoteReview key={workspace.id} active={panel === "Review"} compact={messagesMode} notebookDirty={note!==latestNote} workspace={reviewWorkspace!} locked={locked || captureDraftLocked} onStateChange={setReviewState}
                 chiefNoteOffer={chiefNoteSelection&&chiefNoteSelection.owner===authenticated&&chiefNoteSelection.identity===identity&&chiefNoteSelection.workspaceId===workspace.id&&chiefNoteSelection.address===selected&&chiefNoteSelection.generation===generation.current?chiefNoteSelection:undefined}
               onTeamDrafts={authenticated&&team?.configuration.bots.some(item=>item.role==='chief'&&item.enabled&&!item.retired)?openClinicalTeamDrafts:undefined}
-              onSave={operation => void save(operation)} onSources={() => { setPanel("Sources"); setMobilePanel("Sources"); }} /></div>
+              onSave={operation => void save(operation)} onSources={() => { setPanel("Sources"); setMobilePanel("Sources"); }}
+              copyToEhrIdentity={authenticated} {...copyToEhr} /></div>
             {visitLinked&&<div hidden={panel !== "Work"}><FollowUpWork key={workspace.id} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}
               onSave={operation => void save(operation)} onReview={() => {setPanel("Review");setMobilePanel("Review");}} /></div>}
             {panel === "Notebook" && <>

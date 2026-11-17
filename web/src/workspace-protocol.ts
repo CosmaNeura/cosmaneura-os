@@ -2,6 +2,7 @@ import {WorkspaceApiError,type WorkspaceIdentity} from './workspace-api';
 import {assertRegisteredWorkspaceRequest} from './workspace-base';
 import {hostedWorkspaceRequested} from './hosted-workspace';
 import {observeWorkspaceEnrollment,workspaceEnrollmentRevision,workspaceEnrollmentHold} from './workspace-enrollment-state';
+import {observeCopyToEhrFlags} from './copy-to-ehr-flag-store';
 
 export const WORKSPACE_PROTOCOL_HEADER='X-Cosmas-Workspace-Protocol';
 export const REQUIRED_WORKSPACE_CONTRACTS:Readonly<Record<string,number>>=Object.freeze({
@@ -86,6 +87,7 @@ export async function workspaceFetch(identity:WorkspaceIdentity|undefined,url:st
   // Ordinary native responses retain their caller-owned session/deadline fences.
   if(!hostedWorkspaceRequested()){
     const response=await fetchWorkspace(url,init);
+    observeCopyToEhrFlags(identity,response);
     try{nativeCurrent();}catch(error){cancel(response);throw error;}
     return enrollment(response);
   }
@@ -96,6 +98,7 @@ export async function workspaceFetch(identity:WorkspaceIdentity|undefined,url:st
   if(new Headers(init.headers).get(WORKSPACE_PROTOCOL_HEADER)!=='1'){block(identity);throw mismatch();}
   init.signal?.throwIfAborted();
   const response=await fetchWorkspace(url,init);
+  observeCopyToEhrFlags(identity,response);
   try{nativeCurrent();}catch(error){cancel(response);throw error;}
   if(init.signal?.aborted || !currentIdentity(identity)){cancel(response);throw new WorkspaceApiError(401);}
   enrollment(response);
