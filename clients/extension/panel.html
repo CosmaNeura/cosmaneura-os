@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CosmaBot local proof</title><link rel="stylesheet" href="panel.css"></head>
+<body><main><h1>CosmaBot</h1><p>Local synthetic sign-in proof</p>
+<form id="signin"><label>CosmaBot development account<input id="identifier" autocomplete="username" required maxlength="255"></label><label>Password<input id="password" type="password" autocomplete="current-password" required maxlength="1024"></label><button>Sign in</button></form>
+<p id="status" role="status" aria-live="polite">Opening the local proof…</p>
+<button id="connect">Check local Box</button><button id="read">Read invented schedule</button><button id="signout">Sign out</button>
+<pre id="prep"></pre><button id="copy" disabled>Copy prep</button>
+</main><script type="module" src="panel.js"></script></body></html>
