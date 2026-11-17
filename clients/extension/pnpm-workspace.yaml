@@ -1,0 +1,2 @@
+# Preserve the release-age fence locally and in CI.
+minimumReleaseAge: 1440

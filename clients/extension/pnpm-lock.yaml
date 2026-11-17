@@ -1,3 +1,170 @@
+---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    configDependencies: {}
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.21.0
+        version: 12.21.0
+
+packages:
+
+  '@pnpm/exe.android-arm64@12.21.0':
+    resolution: {integrity: sha512-iaWidxR5B9NUBpwMznCQu1yUpKB6BjTY5BYX2lORj76VsfINdj8Z8XWSzSNrGI8qlxa28Jzdp5fiaspzOaJZlA==}
+    cpu: [arm64]
+    os: [android]
+
+  '@pnpm/exe.android-x64@12.21.0':
+    resolution: {integrity: sha512-35e5v3wlwjIYxDywq+R6/z8CE4gLOEgRxt18yqz1tMRLmx2mnW+CFJI2Q8+srTNjn7gykXUC0x1k195JNikC5A==}
+    cpu: [x64]
+    os: [android]
+
+  '@pnpm/exe.darwin-arm64@12.21.0':
+    resolution: {integrity: sha512-F5OyMX/6zLSowpTZEQRojbCmPS1Pq+fyRaIinslsIe6Glh3qbyQ52u+Fe0eEzSaRuIbWZkXmAAXSWh6Q5Wrlgg==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@pnpm/exe.darwin-x64@12.21.0':
+    resolution: {integrity: sha512-EzpvcsaE6hrrgYeEiAFYd2rSgFybYyxXhkAY7K3y6Hg3loVfcyJ81hHczpFzi8lW5RXtUlFECRPZ8ZAMRFQYYg==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@pnpm/exe.freebsd-x64@12.21.0':
+    resolution: {integrity: sha512-wNjuEnmdLks4aayPu/QZWQ5tQM9Jn+odUp/vwQM8BXRYoulkTZhtZTHoD60N6mUdLWef1hgUeUh8llNGEUsimw==}
+    cpu: [x64]
+    os: [freebsd]
+
+  '@pnpm/exe.linux-arm64-musl@12.21.0':
+    resolution: {integrity: sha512-Ceit9zn4g5ZqCJtx1fV8eJE7p8aeXMrGZ+Dc01vRqZLIUNgNeI+Ur0ruyqxtsnJx6rGADyXzohumxPLHjaJ5AQ==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@pnpm/exe.linux-arm64@12.21.0':
+    resolution: {integrity: sha512-4Oj/iF2TDCe2lcH0n4TupPR5sSdrNLclJB6xBElLMPCUOAvBhdf2rRlSaO5M4erJ6g4Fyy7YTXTpcmfFsKyxEA==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.linux-ppc64@12.21.0':
+    resolution: {integrity: sha512-s2o7rdSDeUTBFsNqxptpZXlTgT6cojmMVUOvTQvFNSv6Easian02ha4tR32fwwD97Au4YzIIjMCwywCF4D82Sw==}
+    cpu: [ppc64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.linux-riscv64@12.21.0':
+    resolution: {integrity: sha512-EYv3GzxeBTITCuM3yGHHbpRFpUvyulkXpQ6LsjKAQNL3iaba1E6h9iDmlouLb3Io4AMMsfdk0/uG6poQ41uewA==}
+    cpu: [riscv64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.linux-s390x@12.21.0':
+    resolution: {integrity: sha512-8VXGNGVNEfs7pL9GTZOzFxjFEnMt4WL3rLOADR5/kPQ7ROTV9GfpVI2DPO/zArXFSkvfc9Zad/WypHLbvzoaTQ==}
+    cpu: [s390x]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.linux-x64-musl@12.21.0':
+    resolution: {integrity: sha512-MnC5vpIXYubhDZCgCwlfJMg7Cg6HupN2IuouT9gD/tUmOfVdQYqeyYccWbthyo/Jeto8de1oQlxeRN1+1Hl2DQ==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@pnpm/exe.linux-x64@12.21.0':
+    resolution: {integrity: sha512-8eufCjHXspKbNS/kh8q4Q0gqJoOuvC4Q5pgos6XS8By/nAMtP+jf8F1Cw9er840kfAX+PJ/ts+A9qnLE91rvXQ==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@pnpm/exe.netbsd-x64@12.21.0':
+    resolution: {integrity: sha512-eyh1M8hQZCkLWxuva7S/fc1SbFbgqg0/5di0dgWmyiuc2Io3dbWVihDun8X+XM8zsR5uhIDvvZpbS9aZQbCovg==}
+    cpu: [x64]
+    os: [netbsd]
+
+  '@pnpm/exe.win32-arm64@12.21.0':
+    resolution: {integrity: sha512-7xTxxUXo/grRLivSeIl6B21gnsz7ooe5EMPcJmQqwxc8WLJVReN8MzrlHru8bqXfVr4X3+6ZGZscntKenlCBqQ==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@pnpm/exe.win32-x64@12.21.0':
+    resolution: {integrity: sha512-9TpkJemVApxJ1Z1w0ZFGN+AuSx4nJOqXSJUqMqDvaXTYwGOzvBiiWdFP9GN0ketiWCQS1Q0/pza2E7I3pP0OBQ==}
+    cpu: [x64]
+    os: [win32]
+
+  pnpm@12.21.0:
+    resolution: {integrity: sha512-Zv2CeO4ok1zpUXktNDZ/869cQyonVkRYIwKVM4NbjaUpu+C+UTCv1W7QcT+4eJ5Hutgtk71a4v5UsVVi1idu8A==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+snapshots:
+
+  '@pnpm/exe.android-arm64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.android-x64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.darwin-arm64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.darwin-x64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.freebsd-x64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.linux-arm64-musl@12.21.0':
+    optional: true
+
+  '@pnpm/exe.linux-arm64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.linux-ppc64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.linux-riscv64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.linux-s390x@12.21.0':
+    optional: true
+
+  '@pnpm/exe.linux-x64-musl@12.21.0':
+    optional: true
+
+  '@pnpm/exe.linux-x64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.netbsd-x64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.win32-arm64@12.21.0':
+    optional: true
+
+  '@pnpm/exe.win32-x64@12.21.0':
+    optional: true
+
+  pnpm@12.21.0:
+    optionalDependencies:
+      '@pnpm/exe.android-arm64': 12.21.0
+      '@pnpm/exe.android-x64': 12.21.0
+      '@pnpm/exe.darwin-arm64': 12.21.0
+      '@pnpm/exe.darwin-x64': 12.21.0
+      '@pnpm/exe.freebsd-x64': 12.21.0
+      '@pnpm/exe.linux-arm64': 12.21.0
+      '@pnpm/exe.linux-arm64-musl': 12.21.0
+      '@pnpm/exe.linux-ppc64': 12.21.0
+      '@pnpm/exe.linux-riscv64': 12.21.0
+      '@pnpm/exe.linux-s390x': 12.21.0
+      '@pnpm/exe.linux-x64': 12.21.0
+      '@pnpm/exe.linux-x64-musl': 12.21.0
+      '@pnpm/exe.netbsd-x64': 12.21.0
+      '@pnpm/exe.win32-arm64': 12.21.0
+      '@pnpm/exe.win32-x64': 12.21.0
+
+---
 lockfileVersion: '9.0'
 
 settings:
@@ -9,8 +176,8 @@ importers:
   .:
     dependencies:
       '@clerk/chrome-extension':
-        specifier: 3.1.108
-        version: 3.1.108(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: 3.1.107
+        version: 3.1.107(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     devDependencies:
       esbuild:
         specifier: 0.28.2
@@ -69,30 +236,30 @@ packages:
   '@base-org/account@2.0.1':
     resolution: {integrity: sha512-tySVNx+vd6XEynZL0uvB10uKiwnAfThr8AbKTwILVG86mPbLAhEOInQIk+uDnvpTvfdUhC1Bi5T/46JvFoLZQQ==}
 
-  '@clerk/chrome-extension@3.1.108':
-    resolution: {integrity: sha512-hsv6r1zBafRRz3+2q5sjm7cbZxyJygXd1tCmJ+3LyfVp6OqD+ftwuigYEd3yVNX98mVgjXZ2JMcYr7QVxUQ7fA==}
+  '@clerk/chrome-extension@3.1.107':
+    resolution: {integrity: sha512-tZZm9I08gaJhRf49/aOeIQ+AX4eMm0Xnc/RjSA2Q+1WjetIgrCaPcNLeQodbZXxMggsCs8EFgMIgaiZm0Dr43g==}
     engines: {node: '>=20.9.0'}
     peerDependencies:
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
       react-dom: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
 
-  '@clerk/clerk-js@6.44.0':
-    resolution: {integrity: sha512-mxaIzoZAWcSoTZ4yGXyDAvQKrLk8FP8jAjMDbaLhPNVa92nQrUcmTxe5H9EGpICXZ/YH2ot7m4z/B8wNzN4D5A==}
+  '@clerk/clerk-js@6.43.1':
+    resolution: {integrity: sha512-w/T5c4bbHuppHtOC9ws4NncTU0VIURiXhb1dHOE4StUzmsoOfELoLj31ET0cfjMRr8vb4cnj0qN+0HeLV58Ixg==}
     engines: {node: '>=20.9.0'}
 
-  '@clerk/localizations@4.25.0':
-    resolution: {integrity: sha512-jTjLpJyByWBdWHdybxGSQcEooPYGTvAhvmWdLHIVwj3AAsMcq4NRNZ9BUEc6ZXXGrdnxFMaXlgix5GMsSb+Zug==}
+  '@clerk/localizations@4.24.8':
+    resolution: {integrity: sha512-JKtLkGL/YJ2kqyID/0icY4Nv8Lh4j6AuNoRi2uvj96t8J8/SeWjYE23SBM+PqaFJaerf/letX/jFZjNd5LhYqQ==}
     engines: {node: '>=20.9.0'}
 
-  '@clerk/react@6.18.9':
-    resolution: {integrity: sha512-39e3XtC5z8/l59c6hMmmO5Hxfjpgq31oNp3qvLo6zTLm6tTOK73TKeE1Ge7mwjl2Lhk60eysTq3r9mubZUTjsQ==}
+  '@clerk/react@6.18.8':
+    resolution: {integrity: sha512-4f/9t9x28JbMueJMPNLUsG/f3Kilzubdz1hnjOj4j6HFLmO48R907+ozWdte1t+Vsj1SJooJBqZj/nIU78JvNw==}
     engines: {node: '>=20.9.0'}
     peerDependencies:
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
       react-dom: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
 
-  '@clerk/shared@4.46.0':
-    resolution: {integrity: sha512-eb60E6xjOzcBu1B1C3Y1XucVwbo5PtkQI/gbSHEwqDwjsC9G++ePzuyzyINGkGt65ia3w6qMN1iRcdd1w/jzlQ==}
+  '@clerk/shared@4.45.1':
+    resolution: {integrity: sha512-rAGh+U8dSE6Ov1I3mXysIHaGhxx63ET+24kW4gnmApJvrfU8nq9JT9pQOoyzG3X4PQa93aaAsxkck46CynDeHA==}
     engines: {node: '>=20.9.0'}
     peerDependencies:
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
@@ -103,8 +270,8 @@ packages:
       react-dom:
         optional: true
 
-  '@clerk/ui@1.43.0':
-    resolution: {integrity: sha512-nu1oa/iUFr5+n+W5tfBBdH6RXAV8fVK8qAmUfoPBPfB2ihxgok40us9f1LQdIrun7fg2ufV06jxOrFmusGBSvw==}
+  '@clerk/ui@1.42.6':
+    resolution: {integrity: sha512-pZOc3Tw+1zs1a7ttafvCFZlOxlQzzfC8BNw7iDfITjCkqiIP1VAAGhJaBVhby6ZHAUHWTmahjk+SK6d5eLfAFA==}
     engines: {node: '>=20.9.0'}
     peerDependencies:
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
@@ -386,8 +553,8 @@ packages:
   '@swc/helpers@0.5.21':
     resolution: {integrity: sha512-jI/VAmtdjB/RnI8GTnokyX7Ug8c+g+ffD6QRLa6XQewtnGyukKkKSk3wLTM3b5cjt1jNh9x0jfVlagdN2gDKQg==}
 
-  '@tanstack/query-core@5.107.2':
-    resolution: {integrity: sha512-npIQ9T9CpaEHgwCeqmazMtiBePlaSxfzt5qee2C8KLJnA9Kmiri0Rxls9bCdd0GXu9xCvdWA16t4GWP/bcOXbw==}
+  '@tanstack/query-core@5.107.1':
+    resolution: {integrity: sha512-PSyAik11oQBEVOiVy5hjZWHmoUqOXqK1WYy4v55mcxozEfKaQgpUMsgnXhWjuESzSht8JfzqMS1m6M/9CpNgvg==}
 
   '@types/parse-json@4.0.2':
     resolution: {integrity: sha512-dISoDXWWQwUquiKsyZ4Ng+HX2KsPL7LyHKHQwgGFEA3IaKac4Obd+h2a/a6waisAoepJlBcx9paWqjA8/HVjCw==}
@@ -688,8 +855,8 @@ packages:
   tslib@2.9.1:
     resolution: {integrity: sha512-a4Ux9VKuIMHsOS7ENbEq6hK2ZGYIT27Rtl0E4eD9KqwxhKiQeMZE/9xb3IdYwWaSOyIBQLExhQgXDTYoiCxnWA==}
 
-  viem@2.58.0:
-    resolution: {integrity: sha512-oBGZGy6VptLmAATtEua71a7FzCXT5y74dQoeDP8EDHmBsWhQ34rXeHKz6tHeciKWnJ3zBT1u8sby8tAtg0gouA==}
+  viem@2.57.20:
+    resolution: {integrity: sha512-LSvREzKT7xFXpmxW2YFJ/OtcZRkSGLp5zywSgadBf0qQCeqh2+FxHHWyrS2zEG7ZfBWQQvk8HI1i4HPzSMD14g==}
     peerDependencies:
       mppx: '>=0.17.0'
       typescript: '>=5.0.4'
@@ -804,7 +971,7 @@ snapshots:
       idb-keyval: 6.2.1
       ox: 0.6.9
       preact: 10.24.2
-      viem: 2.58.0
+      viem: 2.57.20
       zustand: 5.0.3(react@19.3.1)
     transitivePeerDependencies:
       - '@types/react'
@@ -817,12 +984,12 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@clerk/chrome-extension@3.1.108(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@clerk/chrome-extension@3.1.107(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
-      '@clerk/clerk-js': 6.44.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@clerk/react': 6.18.9(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@clerk/shared': 4.46.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@clerk/ui': 1.43.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/clerk-js': 6.43.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/react': 6.18.8(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/shared': 4.45.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/ui': 1.42.6(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
       webextension-polyfill: 0.12.0
@@ -838,14 +1005,14 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@clerk/clerk-js@6.44.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@clerk/clerk-js@6.43.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@base-org/account': 2.0.1(react@19.3.1)
-      '@clerk/shared': 4.46.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/shared': 4.45.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@coinbase/wallet-sdk': 4.3.7
       '@stripe/stripe-js': 5.6.0
       '@swc/helpers': 0.5.21
-      '@tanstack/query-core': 5.107.2
+      '@tanstack/query-core': 5.107.1
       '@wallet-standard/core': 1.1.1
       '@zxcvbn-ts/core': 3.0.4
       '@zxcvbn-ts/language-common': 3.0.4
@@ -867,22 +1034,22 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@clerk/localizations@4.25.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@clerk/localizations@4.24.8(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
-      '@clerk/shared': 4.46.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/shared': 4.45.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     transitivePeerDependencies:
       - react
       - react-dom
 
-  '@clerk/react@6.18.9(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@clerk/react@6.18.8(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
-      '@clerk/shared': 4.46.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/shared': 4.45.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
 
-  '@clerk/shared@4.46.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@clerk/shared@4.45.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
-      '@tanstack/query-core': 5.107.2
+      '@tanstack/query-core': 5.107.1
       dequal: 2.0.3
       glob-to-regexp: 0.4.1
       js-cookie: 3.0.8
@@ -890,10 +1057,10 @@ snapshots:
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
 
-  '@clerk/ui@1.43.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@clerk/ui@1.42.6(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
-      '@clerk/localizations': 4.25.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@clerk/shared': 4.46.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/localizations': 4.24.8(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@clerk/shared': 4.45.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@emotion/cache': 11.11.0
       '@emotion/react': 11.11.1(react@19.3.1)
       '@floating-ui/react': 0.27.20(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -918,7 +1085,7 @@ snapshots:
       clsx: 1.2.1
       eventemitter3: 5.0.4
       preact: 10.29.8
-      viem: 2.58.0
+      viem: 2.57.20
     transitivePeerDependencies:
       - bufferutil
       - mppx
@@ -1143,7 +1310,7 @@ snapshots:
     dependencies:
       tslib: 2.9.1
 
-  '@tanstack/query-core@5.107.2': {}
+  '@tanstack/query-core@5.107.1': {}
 
   '@types/parse-json@4.0.2': {}
 
@@ -1405,7 +1572,7 @@ snapshots:
 
   tslib@2.9.1: {}
 
-  viem@2.58.0:
+  viem@2.57.20:
     dependencies:
       '@noble/curves': 1.9.1
       '@noble/hashes': 1.8.0
