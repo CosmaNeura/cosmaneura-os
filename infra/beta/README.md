@@ -1192,3 +1192,127 @@ on this estimate without the existing exact deployment review.
 
 Record only sanitized evidence in git. D3 is not complete until every item is
 demonstrated by the authorized human path.
+
+## Copy to EHR staging deploy
+
+`copy-to-ehr-staging-deploy.sh` is the repeatable staging path for the Copy to
+EHR beta. It follows the October 31 pointer switch on
+`vm-cosmabot-staging-eus2-lab01`. It does not use the Container Apps /
+`render.py` path.
+
+The script requires bash 4 or newer. The macOS system bash is 3.2 and is
+refused with `BASH_TOO_OLD`. Install Homebrew bash and run that.
+
+The script is a dry-run until `--execute`. Without `--cutover` it leaves
+`release-r10` on ports 54110 and 54112 and trials the new build on 54120 and
+54122, with a throwaway database on 54130. That database is
+`cosmabot_standalone_copy_ehr_trial`. The trial creates `cbpg_e0a414184674`
+and `cosmabot_runtime_e0a414184674` with different passwords before migrate.
+The live database is not migrated until cutover. Cutover also requires `--expect-prior-sha`. Cutover stops the
+live listeners, so staging is down until `release-r10` is serving again or the
+new release passes its checks. The image build, web transfer, and side-port
+trial load the staging VM. On `--execute`, the local web build runs
+`scripts/install-client-deps.sh` before `pnpm run build` in `web/`. That is
+the same install CI uses. `tsc -b` also typechecks `clients/capture`, so a
+web-only install is not enough.
+
+`az vm run-command invoke` can return exit code 0 when the remote script
+failed. This script does not treat that exit code as success. Each remote
+step has to print its own sentinel (`API_IMAGE_OK`, `CHUNK_OK <n>`,
+`SIDE_PORT_OK`, `CUTOVER_OK`, `TEARDOWN_OK`, or `ARCHIVE_SHA256` plus the
+archive hash). If that line is missing, the local script exits non-zero and
+does not continue. A failed build, chunk, or side-port does not start cutover.
+
+The web env file has to be a regular mode 600 file with exactly 11 lines of
+`VITE_<NAME>=<value>`. The name is `VITE_` plus uppercase letters, digits, and
+underscores. The value cannot contain a space, `$`, or a backslash. Quotes,
+spaces around `=`, inline comments, an `export` prefix, a duplicate key, a
+missing profile, and an unknown profile are refused. The refusal prints
+`WEB_ENV_REFUSED` and does not echo the line. The build uses a private mode
+600 copy. For `independent-beta-v1` and `standalone-practice-v1` that copy
+omits `VITE_COSMANEURA_WEB_ORIGIN` and `VITE_CAPTURE_UPLOAD_ORIGINS`. The
+build also checks `.env`, `.env.local`, `.env.production`, and
+`.env.production.local` in that web directory, line by line, and ignores
+comments. If one of those files defines either dropped key, the build is
+refused. Other files, including `.env.example`, are not part of that check.
+The build unsets every inherited `VITE_*` variable except `VITE_BUILD_SHA`.
+The copy is deleted when the build finishes. The cleanup trap is armed only
+after that copy is created, and it also runs on EXIT, INT, TERM, and HUP. A
+file that was already there is not deleted.
+
+The candidate SHA lives in one constant, `DEFAULT_SOURCE_SHA`, currently
+`e29bf5a2de0eddec1663b1185076472ef172b590`. Pass `--sha` when PR 341 moves.
+That tree keeps schema head `a46f2c09d853` and the public keys
+`COPY_TO_EHR_ENABLED`, `COPY_TO_EHR_REMOTE_ENABLED`, and
+`COPY_TO_EHR_FALLBACK_ENABLED`.
+
+Cutover requires `--expect-prior-sha 9dfd4cfd`. That is the commit live staging
+serves in `version.json`. Before the dump, the script curls the live listener
+on port 54112. The read has to succeed, and the commit has to prefix-match
+that value. The value has to be at least 8 hex characters. The same value
+must also prefix-match `release-r10/source-sha` or the running image tag.
+Both checks have to pass. `6e65ffc6` is the image tag
+`cosmabot-nov1-api:6e65ffc6d892282e9f13cbd16c8a17e7592fa88c`, not the served
+commit. After a migration the database has to be at `a46f2c09d853`. A failed
+rollback prints `CUTOVER_ROLLBACK_FAILED` and exits non-zero.
+
+The pre-cutover `pg_dump` stays on the staging VM under
+`/var/lib/cosmabot/standalone/e0a41418-4674-456e-8512-7d5de7a78670`, inside
+`rg-cosmas-os-vm-staging-eus2-lab01`. The script does not download that dump
+and does not upload it. `--dump-target` has to be a path on that VM. A
+storage account id (`/subscriptions/...`) is refused. A dump failure aborts
+before the live listeners stop.
+
+While `release-r10` is still serving, the script takes a dump and proves it
+restores into a scratch database. That check is only a gate, so a bad dump
+never stops the listeners. After the listeners stop, the script takes a
+second dump and checks that one. Rollback restores the second dump, and the
+row counts are the counts from that quiesced database.
+
+Rollback does not drop the live database before a restore into a new database
+has succeeded. The new database is created with the live database's owner,
+encoding, `datcollate`, and `datctype`. `pg_restore` keeps object owners and
+ACLs (`--single-transaction --exit-on-error`, no `--clean`, no `--no-owner`).
+Before the rename, the script copies the live connection limit, the database
+ACL (`datacl`), and `pg_db_role_setting` rows onto the new database. It does
+not copy the tablespace, the database OID, or frozen transaction ids. A
+`datacl` or role setting the script cannot parse makes the pre-stop gate
+print `DATABASE_SHAPE_REFUSED` and leave the listeners up. The same
+`pg_restore` flags are used for the scratch gate. After the alembic version
+and the row counts match on the new database, the script terminates other
+sessions and renames the new database into place. If the migration never
+started, including when the quiesced dump file is already gone, or it started
+and the alembic version and row counts are unchanged, rollback restarts
+`release-r10` without restoring. A failed drop of the renamed-aside database
+prints `OLD_DATABASE_DROP_FAILED` and still restarts `release-r10`. A failed
+rename back to the live name prints `RENAME_BACK_FAILED`. A restore failure
+prints `CUTOVER_ROLLBACK_FAILED` and exits non-zero.
+
+`CUTOVER_IN_PROGRESS` means the marker file
+`/var/lib/cosmabot/standalone/e0a41418-4674-456e-8512-7d5de7a78670/copy-to-ehr-cutover.in-progress`
+is present. A cutover wrote it and did not finish cleanly. The next run,
+including the image build, sees the marker, prints `CUTOVER_IN_PROGRESS`, and
+does not delete it. On the VM, confirm that `release-r10` is serving:
+`/etc/cosmabot/active-release` points at `release-r10`, both r10 containers
+are running, and port 54112 serves the prior commit. If that is true, remove
+the marker by hand:
+
+```sh
+sudo rm /var/lib/cosmabot/standalone/e0a41418-4674-456e-8512-7d5de7a78670/copy-to-ehr-cutover.in-progress
+```
+
+If `release-r10` is not serving, leave the marker in place and finish the
+database rollback first. The script itself clears the marker when rollback
+verification shows `release-r10` serving, and when a listener stop fails but
+`release-r10` is confirmed serving again.
+
+After a successful cutover the trial Postgres, API, and edge containers and
+the trial nft rule are removed. `--teardown-trial` removes a trial that was
+left running. It does not stop `release-r10`. Dry-run is still the default;
+add `--execute` to run the removal.
+
+`beta-infra-static` in `.github/workflows/synth-ci.yml` runs the shell tests:
+
+```sh
+bash infra/beta/tests/copy-to-ehr-staging-deploy.sh
+```
