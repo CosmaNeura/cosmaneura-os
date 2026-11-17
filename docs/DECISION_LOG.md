@@ -480,3 +480,22 @@ IMPLEMENTATION IMPACT:
 - **Affected contract version:** 1.9-draft
 - **Implementation impact:** Docs-only transcription and reconciliation of
   `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`.
+
+### DL-20261117-02
+
+- **Status:** ACCEPTED
+- **Date:** 2026-11-17
+- **Owner acceptance evidence:** Direct follow-up from John Clemente, CEO,
+  November 17, 2026, answering the two confirmation questions about
+  independent recording and notes, and new Scribe sign-ups using CosmaBot
+  identity.
+- **Ruling (verbatim owner follow-up):**
+
+1. Yes, maybe for initial beta we rely on legacy but going forward we need independent recording and notes.
+2. yes, confirmed.
+
+- **Supersedes:** The confirmation markers in items 6 and 7 of
+  `DL-20261117-01`; item 6 is clarified by the owner's initial-beta wording.
+- **Affected contract version:** 1.9-draft
+- **Implementation impact:** Reconcile items 6 and 7 in
+  `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`. Docs only.

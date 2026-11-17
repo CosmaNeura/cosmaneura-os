@@ -66,6 +66,8 @@ John Clemente, CEO, November 17, 2026. Recorded as `DL-20261117-01` in
 `docs/DECISION_LOG.md`. Decision 10 supersedes the October 30 production,
 store and live identity authority for this workstream.
 
+Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
+
 1. A read-only browser extension that reads pages in the signed-in user's
    own browser session is in scope. Unattended automation and agent-held
    EMR logins remain deferred.
@@ -87,10 +89,10 @@ store and live identity authority for this workstream.
 5. Desktop targets are Windows and Mac. Development starts on Mac for two
    weeks and moves to Windows from week three. Platform-specific code sits
    behind interfaces.
-6. [CONFIRM] CosmaBot must record a visit and produce a note without
-   depending on the legacy platform.
+6. Yes, maybe for initial beta we rely on legacy but going forward we need
+   independent recording and notes.
 7. Scribe remains a separate product that shares the recorder.
-   [CONFIRM: new Scribe sign-ups use CosmaBot identity.]
+   new Scribe sign-ups use CosmaBot identity.
 8. Device compliance checks are deferred to V2 and are described as
    compliance checks, not security monitoring.
 9. CosmaBot never asks a practice to disable screen locks or EMR session
