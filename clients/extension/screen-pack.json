@@ -1,0 +1,5 @@
+{
+  "screen": "#invented-schedule",
+  "rows": "tbody tr",
+  "fields": {"appointment": ".appointment", "person": ".person", "time": ".time"}
+}

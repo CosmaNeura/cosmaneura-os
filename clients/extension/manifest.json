@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "CosmaBot · local sign-in proof",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsUf/iL4Wp8w6Vo1ZV60PTm5HHSkKvh+NC1n0gdl0XvtdX4KHahyGok3oWq6DirlYN15CY9+yeWS6FtG+e/xX4R044QiJJcAjabXTqq/0q4aJ3Py+lEqS1zuT08NmRYugI2ru0LColV+C93EqMWJiSIJ07UYemcO5dyT2Slgy22M6sG9Hcaj7J47OgXJuoItEHIJZZ2cGTkRzKKim2t/WfQ+H5TxO0XmdIwR6D7nV56Tf9Zw4EU7tycoFF3FzqiLq11kwdNAyGWCO1pMnGtbyU5j3HSp3I+GBKvhvyQvW7uVeYHV8DRi/vRZDK63xWqofa2eCNrwbOUFeUGAJ5RG4gwIDAQAB",
+  "permissions": ["sidePanel", "storage", "clipboardWrite"],
+  "host_permissions": ["http://127.0.0.1:8765/*", "http://127.0.0.1:8766/*"],
+  "background": {"service_worker": "worker.js", "type": "module"},
+  "action": {"default_title": "Open CosmaBot local proof"},
+  "side_panel": {"default_path": "panel.html"},
+  "content_scripts": [{"matches": ["http://127.0.0.1:8765/schedule.html"], "js": ["content.js"], "run_at": "document_idle"}],
+  "content_security_policy": {"extension_pages": "default-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'; form-action 'none'; connect-src http://127.0.0.1:8766; base-uri 'none'"}
+}
