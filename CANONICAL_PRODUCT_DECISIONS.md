@@ -1,7 +1,7 @@
 # Canonical product decisions
 
 Status: reconciled owner rulings for Cursor revalidation  
-Date: 2026-09-02  
+Date: 2026-11-17
 Working version: 1.9-draft
 
 These decisions supersede contradictory statements in the uploaded roadmap,
@@ -181,6 +181,43 @@ vocabulary do not appear in normal practice workflow. The primary interface is
 the clinic's work queue. Safety and retry machinery should be invisible until
 human attention is genuinely required.
 
+### DL-20261117-01 - Owner decisions, November 17, 2026
+
+John Clemente, CEO, November 17, 2026. Recorded in `docs/DECISION_LOG.md`
+as `DL-20261117-01`.
+
+1. A read-only browser extension that reads pages in the signed-in user's
+   own browser session is in scope. Unattended automation and agent-held
+   EMR logins remain deferred.
+2. Provider-triggered form fill is approved for V1, not V0. It fills visible
+   fields only after an explicit user click and never clicks Save, Submit,
+   Send or Sign.
+3. Actions started from the phone stage work at the desktop. They never
+   send. CosmaBot never signs or transmits a prescription; it may prepare
+   one for the prescriber to sign in the EMR.
+4. A small on-device model is permitted in the desktop app for three kinds
+   of work: perception (recognising screens, patients and changes),
+   protection (PHI minimisation, pre-fill checks, mismatch warnings), and
+   short on-screen help for staff (what is missing, what changed, call
+   notes, answers about what is on screen). It does not draft clinical
+   notes, choose codes or make clinical judgments. No model weights of
+   Chinese origin, including derivatives. The cloud remains the reasoning
+   layer. Every consequential on-device output is verified by code or
+   escalated.
+5. Desktop targets are Windows and Mac. Development starts on Mac for two
+   weeks and moves to Windows from week three. Platform-specific code sits
+   behind interfaces.
+6. [CONFIRM] CosmaBot must record a visit and produce a note without
+   depending on the legacy platform.
+7. Scribe remains a separate product that shares the recorder.
+   [CONFIRM: new Scribe sign-ups use CosmaBot identity.]
+8. Device compliance checks are deferred to V2 and are described as
+   compliance checks, not security monitoring.
+9. CosmaBot never asks a practice to disable screen locks or EMR session
+   timeouts.
+10. For this workstream: no production deploys, no store submissions and no
+    live identity changes without my explicit instruction in the task.
+
 ## Validation-required technology hypothesis
 
 The intended direction is a modular monolith using FastAPI, Postgres,
@@ -205,7 +242,7 @@ Cursor must validate rather than assume:
 - Patient email versus A2P sequencing.
 - Actual Athena/Acuity access and practice identifiers.
 - Physical packing of Boxes after the first isolated beta.
-- Product runtime model/provider, if and when an LLM capability is enabled.
+- Product runtime model/provider.
 - Quantitative product graduation and kill thresholds.
 
 Conservative defaults apply until adjudicated: local fake adapters, individual
@@ -218,12 +255,15 @@ cross-Box networking, and no automatic patient sends.
 - Kafka or a generalized event-sourcing platform
 - Shared multi-Org runtime
 - Second EHR
-- Browser automation
+- Unattended automation and agent-held EMR logins
+- Provider-triggered form fill is approved for V1, not V0.
 - Evidence/open-web retrieval zone
 - Teams
 - Native mobile/Capacitor
 - Payment-card chase or PAN handling
-- Claims and prescription workflows
+- Claims
 - RRM workbook demo
 - Full self-service onboarding
 - Rebuilding the existing Scribe inside OS
+- Device compliance checks are deferred to V2 and are described as
+  compliance checks, not security monitoring.

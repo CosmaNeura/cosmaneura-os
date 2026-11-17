@@ -432,3 +432,51 @@ IMPLEMENTATION IMPACT:
   Checkout quantity equal to human seats; public config exposes `seat_cents`
   instead of `first_human_cents` / `additional_human_cents`. Stripe remains
   TEST-only until an explicit founder live switch.
+
+### DL-20261117-01
+
+- **Status:** ACCEPTED
+- **Date:** 2026-11-17
+- **Owner acceptance evidence:** Direct owner message from John Clemente, CEO,
+  November 17, 2026.
+- **Ruling:**
+
+1. A read-only browser extension that reads pages in the signed-in user's
+   own browser session is in scope. Unattended automation and agent-held
+   EMR logins remain deferred.
+2. Provider-triggered form fill is approved for V1, not V0. It fills visible
+   fields only after an explicit user click and never clicks Save, Submit,
+   Send or Sign.
+3. Actions started from the phone stage work at the desktop. They never
+   send. CosmaBot never signs or transmits a prescription; it may prepare
+   one for the prescriber to sign in the EMR.
+4. A small on-device model is permitted in the desktop app for three kinds
+   of work: perception (recognising screens, patients and changes),
+   protection (PHI minimisation, pre-fill checks, mismatch warnings), and
+   short on-screen help for staff (what is missing, what changed, call
+   notes, answers about what is on screen). It does not draft clinical
+   notes, choose codes or make clinical judgments. No model weights of
+   Chinese origin, including derivatives. The cloud remains the reasoning
+   layer. Every consequential on-device output is verified by code or
+   escalated.
+5. Desktop targets are Windows and Mac. Development starts on Mac for two
+   weeks and moves to Windows from week three. Platform-specific code sits
+   behind interfaces.
+6. [CONFIRM] CosmaBot must record a visit and produce a note without
+   depending on the legacy platform.
+7. Scribe remains a separate product that shares the recorder.
+   [CONFIRM: new Scribe sign-ups use CosmaBot identity.]
+8. Device compliance checks are deferred to V2 and are described as
+   compliance checks, not security monitoring.
+9. CosmaBot never asks a practice to disable screen locks or EMR session
+   timeouts.
+10. For this workstream: no production deploys, no store submissions and no
+    live identity changes without my explicit instruction in the task.
+
+- **Supersedes:** Conflicting browser, prescription, model and workstream
+  authority statements in `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`;
+  `DL-20261030-01` production, store and live identity authority for this
+  workstream.
+- **Affected contract version:** 1.9-draft
+- **Implementation impact:** Docs-only transcription and reconciliation of
+  `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`.
