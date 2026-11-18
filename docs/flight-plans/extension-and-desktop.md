@@ -116,7 +116,12 @@ and creates no secrets.
 (2) "Every practice member probably has their own EMR login. We don't obviously control that but that user access control is outside the realm of HIPAA for our purposes. So a medical coder who has an EMR login can start or renew a viewing session."
 
 Any practice member with their own EMR login, including a medical coder, may
-start or renew a viewing session. Starting/renewing remains explicit human
+start or renew a viewing session at that computer under their own EMR login;
+the observed person is that CosmaBot user who starts the session. Until the
+OPEN-JOHN viewing question below is answered, anyone other than a granted owner
+or doctor may start, renew and read only that session. The earlier V0–V2
+small-practice rule still permits a granted practice owner or doctor to view an
+employee's screen under a different EMR login. Starting/renewing remains explicit human
 action, with current practice authority, the visible “being observed” indicator
 on the observed computer, the practice's staff notice, stop control and bounded
 expiry. The 15-minute bound above remains a **proposed V0 default to qualify**.
