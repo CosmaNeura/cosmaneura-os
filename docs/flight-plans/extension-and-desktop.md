@@ -627,7 +627,7 @@ posture scans, keylogging or staff-surveillance history.
 | Caller | Which computer and information may be requested |
 | --- | --- |
 | Owner or explicitly granted practice administrator | Register/revoke endpoints and select the anchor; see permitted practice device health. Device administration alone does not grant access to every clinician's private content. |
-| Provider/staff with explicit device-read and clinical-context grants | Ask about the anchor or a named granted endpoint within their Box and allowed patient/work context. Any practice member with their own EMR login, including a coder, may start/renew under (2), notice, indicator and bounded session. For V0–V2 small practices, a granted owner/doctor may observe an employee's different EMR login under (a). Non-doctor viewing of another person's different-login screen remains OPEN-JOHN; do not infer that grant. No impersonation or unrelated private-source access. |
+| Provider/staff with explicit device-read and clinical-context grants | Ask about the anchor or a named granted endpoint within their Box and allowed patient/work context. Under (2), the observed person is the CosmaBot user who starts the session at that computer under their own EMR login, including a coder, with notice, indicator and bounded session. Until John answers whether a non-doctor member may view another person's different-login screen or only their own (OPEN-JOHN), anyone other than a granted owner or doctor may start, renew and read only that session. For V0–V2 small practices, a granted owner/doctor may observe an employee's different EMR login under (a). No impersonation or unrelated private-source access. |
 | Agent principal | Read only for an authorized task under its installed capability and existing human-enabled/context scope; never start, renew or widen a viewing session, impersonate, expand grants or self-approve. |
 | Other Box, removed member, ungranted member or support/coding agent | Deny endpoint discovery, status and clinical answers; owning a phone or knowing a device ID supplies no authority. |
 
@@ -781,7 +781,11 @@ missing. No test results have been collected by this PR.
 L/M/E fixture tests first; S integration only after R0. Inventory synthetic
 OS/browser/app versions and session/power policy without real device/tenant IDs.
 Qualify explicit pairing, notice/indicator, proposed 15-minute expiry/stop/renewal,
-any practice member/coder starting and renewing their own session under (2),
+the observed CosmaBot user starting at that computer under their own EMR login
+under (2), including a coder; until the OPEN-JOHN question (may a non-doctor member
+view another person's different-login screen, or only their own?) is answered,
+anyone other than a granted owner or doctor starting, renewing and reading only
+that session; retain the V0–V2 small-practice owner/doctor exception below,
 proposed OS-idle/foreground presence signal and unknown-state refusal,
 wrong-profile denial, small-practice owner/doctor reading an employee's different
 EMR login, caller/context grants, pack rollback and stale/partial labels. Qualify
