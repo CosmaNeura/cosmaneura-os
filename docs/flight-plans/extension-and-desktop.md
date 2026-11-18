@@ -323,9 +323,21 @@ rule, signature checks or current Box/human authority. Enrollment verifies activ
 Clerk session and verified email; workspace admission checks current local identity
 and human/Box grants. Existing beta entry without enrollment remains intact.
 
+**Discovery step before the exact-list yes (H2), not performed today.** Use
+read-only Clerk research plus a staging-realm-only trial on synthetic accounts;
+the only output is the exact supported Clerk settings list for sign-in-once.
+Any staging Clerk setting changes for that trial need their own John's yes
+before the trial. Codex changes no live or staging Clerk setting and creates no
+secrets. Do not invent settings. Then present that exact list for John's yes:
+sign-in-once, V0-5 and every shared-identity slice remain BLOCKED on that yes,
+additive and not implemented today. Existing users keep signing in the same way
+until that yes; staging qualification is not approval for live changes.
+
 **Required SSO additions, unverified until built.** Keep per-device sessions and
 native custody beneath one CosmaBot identity, but establish them without a second
-credential sign-in after the user's first sign-in. A Clerk-supported, authenticated
+credential sign-in on already registered devices after the user's first sign-in.
+Adding a new device to the sign-in-once binding requires a full credential
+sign-in; a stolen signed-in phone cannot unlock a new device. A Clerk-supported, authenticated
 device/session handoff must be qualified for phone, Mac and extension, bound to
 the user, realm, device/browser profile, single-use challenge, expiry and callback
 state. No such cross-device exchange is defined by this contract/source; neither
@@ -351,7 +363,9 @@ with durable failure/retry fences. This registry/fan-out is missing today;
 current SDK `signOut()` is not evidence of all-app propagation. Offline devices
 cannot receive an immediate event: short-lived authority must expire, local
 access must lock when current authority cannot be established, and reconnect
-must reconcile revocation before unlock. Propagation latency is unmeasured.
+must reconcile revocation before unlock. This new offline lock applies only to
+sessions created through sign-in-once, not existing non-SSO sessions.
+Propagation latency is unmeasured.
 
 Membership removal denies the affected practice on **all three apps** and ends
 viewing there without dropping unrelated valid memberships. Session revocation,
@@ -374,7 +388,7 @@ unsupported flows stay unqualified; no complete approved live change list exists
 
 | Setting / contract | Exact existing requirement and proposed approval scope |
 | --- | --- |
-| Clerk realm / application | Keep each environment's issuer and publishable-key realm. Production-review is `operational-production-v1` / `https://clerk.beta.cosmas.ai`; live per-practice enrollment is `operational-beta-v1` / `https://clerk.cosmas.ai`; staging keeps its pinned development realm. John must approve which existing realm gets the additive extension client, or any new application credentials. No second IdP or user migration. |
+| Clerk realm / application | Keep each environment's issuer and publishable-key realm. Production-review is `operational-production-v1` / `https://clerk.beta.cosmas.ai`; `clerk.cosmas.ai` / `operational-beta-v1` remains the live profile and is reserved for the later per-practice enrollment design; staging keeps its pinned development realm. John must approve which existing realm gets the additive extension client, or any new application credentials. No second IdP or user migration. |
 | Hosted-auth redirect URIs | Native callback is `bundleIdentifier + "://callback"`; existing operational callbacks are `com.cosmasos.beta.ios://callback` and `com.cosmasos.beta.desktop.auth://callback`. Preserve them and synthetic bundle-specific callbacks. Add only the exact extension login callback for each qualified browser/released extension ID. IDs and resulting redirect strings are not yet known: approval must name the actual strings before change, never a wildcard or fabricated ID. |
 | Allowed origins / authorized parties | Existing native request origins are `capacitor://localhost` and `app://cosmas`; preserve existing web origins. Backend `allowed_origins` and `authorized_parties` are process settings, not automatically Clerk dashboard fields. Browser JWTs require `azp` in exact approved parties; native `azp` may be absent, but when present equals its native origin. Approval must list exact extension origin (Chromium `chrome-extension://<released-id>` if supported), callback origin and resulting browser `azp`, corresponding Clerk origin configuration and backend entries. Clerk acceptance is unqualified; do not bypass it with native-origin rules. |
 | PKCE / flow | Native code uses `startHostedAuth`, not an implemented extension OAuth/PKCE flow. Propose authorization-code PKCE/state binding only if Clerk supports the selected extension flow; qualify client/redirect registration and PKCE enforcement and show John the exact settings. No invented Clerk PKCE toggle or client secret in a public extension. |
@@ -383,7 +397,9 @@ unsupported flows stay unqualified; no complete approved live change list exists
 
 V0-5 and any shared-identity slice remain BLOCKED until unresolved literal
 extension IDs, redirects, origins, parties, realm, audience/flow and SSO/revocation
-settings above are a concrete list John says yes to. Answer (1) replaces the r2
+settings above are the exact list produced by the discovery step and John says
+yes to that list. The slice stays additive and not implemented today; Codex
+changes no live or staging Clerk setting and creates no secrets. Answer (1) replaces the r2
 sign-in reading but does not approve those exact live settings.
 Qualify on synthetic accounts; keep native callbacks, Keychain service names,
 membership/access paths and shipped sessions intact. No new sign-in/enrollment wall.
