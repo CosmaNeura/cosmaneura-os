@@ -451,9 +451,13 @@ unsupported/partial result and diagnostic codes, not guessed field values.
    human's EMR browser session, including an employee's different login for a
    granted small-practice owner/doctor in V0–V2 under answer (a). A human explicitly
    starts or renews the bounded read-only session under answer (2): any practice
-   member with their own EMR login, including a medical coder, may do so, with
-   staff notice and visible indicator. This does not grant a non-doctor another
-   person's different-login view; that question remains OPEN-JOHN. Agents never
+   member with their own EMR login, including a medical coder, may do so at that
+   computer under their own EMR login. The observed person is the CosmaBot user
+   who starts that session, with staff notice and visible indicator. Until John
+   answers whether a non-doctor member may view another person's different-login
+   screen or only their own (OPEN-JOHN), anyone other than a granted owner or
+   doctor may start, renew and read only that session. The V0–V2 small-practice
+   owner/doctor different-login employee-screen rule above remains. Agents never
    start, renew or widen it themselves;
    passive page changes are admitted only while unlocked, human-present and
    within that session, current grants and expiry. Phone requests stage a fresh-read request against this
@@ -524,10 +528,12 @@ rule, deletion time and outcome, without patient labels or bytes.
 **Lasting content-free access record (N3):** after chart-content purge, keep who
 viewed whose screen (opaque viewer and observed-human principal references plus
 Box/endpoint/session references), and the start, each renew and end times, under
-existing audit retention, not the proposed 24-hour observation expiry. Include
+an audit-retention duration that remains OPEN-JOHN with no default, not the
+proposed 24-hour observation expiry. Include
 the actor for each start/renew/end where different from viewer. No chart content,
 patient labels/bindings or observation payloads; no general staff activity history.
-Audit retention duration is not newly chosen here.
+**OPEN-JOHN: what is the content-free access-record audit-retention duration?**
+No default; `docs/RETENTION.md` documents no duration for this record.
 
 Keep F-8's immutable hash binding intact: an expired revision retains its exact
 content-free action payload/hash, selected evidence hashes/opaque references,
@@ -540,7 +546,9 @@ refuse execution dependent on expired evidence and require a fresh observation
 and new revision/approval. Existing approval does not authorize fresh evidence.
 No silent copying of page payload into indefinite ticket history. A separately
 reviewed human-saved artifact needs its own approved retention rule, not an implicit
-exception. Apply the same 24-hour maximum to observation backup copies; before V0-4 build backup deletion/restore expiry enforcement; test
+exception. A 24-hour maximum for observation backup copies is **unproven**;
+before V0-4, prove backup deletion/restore expiry enforcement meets that maximum
+or fall back to purge-on-restore before restored observations become accessible. Test
 clock-driven expiry, crash/retry, failed purge reconciliation, cross-Box isolation
 and restoration that cannot resurrect expired data, preservation of bound hashes
 and post-purge access-record retrieval without chart content. Purge failure blocks
