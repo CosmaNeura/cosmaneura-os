@@ -493,9 +493,11 @@ jobs:
           cd web
           corepack pnpm exec vitest run src/EnrollmentServerJourney.test.tsx --maxWorkers=1
 
-  # Platform-neutral desktop recorder suite only. Mac-only files
-  # (workspace-capture-host.test.ts, recording-operational.test.ts) stay
-  # local until the MacStadium Cursor worker mac-studio runs them.
+  # Platform-neutral desktop recorder + ubuntu-passing desktop *.test.mjs.
+  # Mac-only vitest files (workspace-capture-host.test.ts,
+  # recording-operational.test.ts) stay local until MacStadium Cursor worker
+  # mac-studio runs them. Four *.test.mjs files that fail on Linux today are
+  # listed in the PR body and omitted from the explicit node --test list.
   desktop-recorder:
     name: desktop-recorder-neutral
     runs-on: ubuntu-24.04
@@ -503,7 +505,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: ${ env.NODE_VERSION }
       - name: Enable pnpm
         run: corepack enable
       - name: Install
@@ -517,6 +519,68 @@ jobs:
             recorder/native-continuation.test.ts \
             recorder/continuous-capture.test.ts \
             recorder/durable-queue-store.test.ts
+      - name: Ubuntu-passing desktop node --test suites
+        run: |
+          set -euo pipefail
+          # Explicit file list: only *.test.mjs that pass on ubuntu today.
+          node --test \
+            clients/desktop/api-proxy.test.mjs \
+            clients/desktop/auth-helper-client.test.mjs \
+            clients/desktop/auth-ipc.test.mjs \
+            clients/desktop/auth-session.test.mjs \
+            clients/desktop/capture-content-security.test.mjs \
+            clients/desktop/close-protection.electron.test.mjs \
+            clients/desktop/close-protection.test.mjs \
+            clients/desktop/connector-api-routes.agent-research.test.mjs \
+            clients/desktop/connector-api-routes.conversations.test.mjs \
+            clients/desktop/connector-api-routes.ehr-read.test.mjs \
+            clients/desktop/connector-api-routes.google-message.test.mjs \
+            clients/desktop/connector-api-routes.microsoft-calendar.test.mjs \
+            clients/desktop/connector-api-routes.microsoft-message.test.mjs \
+            clients/desktop/connector-api-routes.scheduling-patient.test.mjs \
+            clients/desktop/connector-auth-http.test.mjs \
+            clients/desktop/connector-auth-proxy.test.mjs \
+            clients/desktop/connector-catalog-v2.test.mjs \
+            clients/desktop/core-connection-auth-proxy.test.mjs \
+            clients/desktop/core-record-auth-proxy.test.mjs \
+            clients/desktop/cosmaneura-navigation-dom.test.mjs \
+            clients/desktop/cosmaneura-navigation.test.mjs \
+            clients/desktop/desktop-update-guidance.test.mjs \
+            clients/desktop/finance-setup-auth-http.test.mjs \
+            clients/desktop/finance-setup-auth-proxy.test.mjs \
+            clients/desktop/google-navigation.test.mjs \
+            clients/desktop/handoff-review-auth-proxy.test.mjs \
+            clients/desktop/hosted-auth-http.test.mjs \
+            clients/desktop/inbox-auth-proxy.test.mjs \
+            clients/desktop/installation-state.test.mjs \
+            clients/desktop/local-auth-http.test.mjs \
+            clients/desktop/membership-auth-http.test.mjs \
+            clients/desktop/membership-auth-proxy.test.mjs \
+            clients/desktop/membership-retirement-auth-http.test.mjs \
+            clients/desktop/membership-retirement-auth-proxy.test.mjs \
+            clients/desktop/membership-saved-evidence-auth-http.test.mjs \
+            clients/desktop/membership-saved-evidence-auth-proxy.test.mjs \
+            clients/desktop/microphone-permissions.test.mjs \
+            clients/desktop/microsoft-navigation.test.mjs \
+            clients/desktop/model-activity-auth-proxy.test.mjs \
+            clients/desktop/native-identity-config.test.mjs \
+            clients/desktop/practice-access-proxy.test.mjs \
+            clients/desktop/practice-https-wire.test.mjs \
+            clients/desktop/practice-infos-config.test.mjs \
+            clients/desktop/practice-ipc.test.mjs \
+            clients/desktop/practice-session.test.mjs \
+            clients/desktop/research-routes.test.mjs \
+            clients/desktop/routine-run-auth-proxy.test.mjs \
+            clients/desktop/scheduling-navigation.test.mjs \
+            clients/desktop/scribe-source-requests.test.mjs \
+            clients/desktop/sign-in-presentation.test.mjs \
+            clients/desktop/startup-recovery.test.mjs \
+            clients/desktop/team-contract-v5.test.mjs \
+            clients/desktop/vendor-setup-auth-http.test.mjs \
+            clients/desktop/vendor-setup-auth-proxy.test.mjs \
+            clients/desktop/workspace-auth-proxy.test.mjs \
+            clients/desktop/workspace-lifecycle.test.mjs \
+            clients/desktop/workspace-protocol.test.mjs
 
   synth-gate:
     name: synth-ci-gate
