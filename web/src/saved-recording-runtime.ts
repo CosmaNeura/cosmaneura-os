@@ -7,17 +7,18 @@ import {HttpCiphertextUploadTarget} from '../../clients/capture/src/bff/upload-t
 import {QueueInvariantError} from '../../clients/capture/src/queue/errors';
 import {workspaceCaptureBff,type PreparedCapture} from './capture-api';
 import {creatorReviewApi} from './creator-review-api';
-import {openCaptureQueueStorage} from './capture-storage';
+import {captureQueueDatabaseName,openCaptureQueueStorage} from './capture-storage';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {SavedRecordingSource} from './saved-recording-source';
 import type {AudioRetentionClock,AudioRetentionPolicy,PrivateRecordingRuntime,PrivateRecordingStore} from './private-recording-runtime';
 import {isAudioRetentionProtected,markTransferRetentionReleased} from './private-recording-runtime';
 import {audioRetentionEffective,refuseExpiredAudio} from './private-recording-retention';
-/** Session-scoped import queue DB name; PCM copy is bounded to this sessionId namespace. */
-export function savedRecordingImportQueueDatabaseName(sessionId:string){return `cosmas-capture-queue:${sessionId}`;}
 import {acquireCaptureFlowLock} from '../../clients/capture/src/flow/capture-lock';
 import {workspaceAuthHeaders} from './workspace-auth-headers';
 import {workspaceApiBase} from './workspace-base';
+
+/** Session-scoped import queue DB name (same helper the browser queue open uses). */
+export function savedRecordingImportQueueDatabaseName(sessionId:string){return captureQueueDatabaseName(sessionId);}
 
 export async function importSavedChunks(controller:Pick<CaptureFlowController,'snapshot'|'startRecording'|'pauseRecording'|'prepareContinuation'|'stopRecording'|'resumePendingWork'>,
   source:SavedRecordingSource,total:number,current:()=>boolean):Promise<void>{
@@ -130,6 +131,7 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
     if(!current())throw new QueueInvariantError('capture_access_unavailable');
     if(activeFlow&&activeFlow.sessionId!==sessionId)throw new QueueInvariantError('capture_saved_session_changed');
     let reviewOnly=false;
+    let provenComplete=false;
     if(activeFlow?.reviewAfterUpload===true&&activeFlow.phase==='processing'){
       // This encrypted terminal record proves upload, not transcript readiness.
       // The mounted review panel reauthorizes every actual transcript read.
@@ -138,19 +140,23 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
       if(!await controller.restore()||controller.snapshot.state!=='processing'||
         controller.snapshot.sessionId!==sessionId||controller.snapshot.recordedChunks!==options.chunks)
         throw new QueueInvariantError('capture_saved_session_changed');
+      provenComplete=true;
     }else{
       const view=await creatorReviewApi(workspaceId,sessionId,identity,abort.signal).read();
       if(!current())throw new QueueInvariantError('capture_access_unavailable');
       if(!await controller.restore()){
-        if(!['created','capturing'].includes(view.status))reviewOnly=true;
+        if(!['created','capturing'].includes(view.status)){reviewOnly=true;provenComplete=true;}
         else if(view.status==='capturing')throw new QueueInvariantError('capture_saved_session_changed');
         else await controller.prepareConfigured(sessionId);
       }
     }
     if(!current())throw new QueueInvariantError('capture_access_unavailable');
+    // Release only on proven completion (reviewOnly or restored processing) — never on mere admitted.
+    if(provenComplete)await releaseTransferProtection();
     const selected=controller;
-    /** Drop the session-scoped import-queue IndexedDB after the handle is closed (bounds PCM copy). */
+    /** Drop session-scoped import-queue IndexedDB only when retention is effective (identical to main when off). */
     const dropImportQueueCopy=()=>{
+      if(!audioRetentionEffective(options.audioRetention))return;
       if(options.platform!=='desktop'||typeof indexedDB==='undefined')return;
       try{indexedDB.deleteDatabase(savedRecordingImportQueueDatabaseName(sessionId));}catch{/* best-effort bound */}
     };
@@ -174,7 +180,8 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
       queue?.close();queue=undefined;dropImportQueueCopy();
     },
     uploadProgress:async()=>{
-      const rows=await queue!.storage.listMetadata();
+      if(!queue)return {confirmed:0,total:options.chunks,reference:reference??null};
+      const rows=await queue.storage.listMetadata();
       if(!current())throw new QueueInvariantError('capture_access_unavailable');
       const terminal=rows.flatMap(row=>[row.retry.upload.terminalCode,row.retry.registration.terminalCode])
         .find(code=>code==='upload_rejected'||code==='upload_target_rejected'||code==='chunk_receipt_reservation_mismatch'||code==='registration_receipt_mismatch');

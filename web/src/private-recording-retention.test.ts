@@ -470,6 +470,40 @@ it('policy-off clears armed stamp; re-enable gets a fresh grace window (H2)',asy
   store.close();
 });
 
+it('unknown/null/missing-enabledAt leaves armed stamp alone (no clear, no stamp)',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const first=Date.parse('2026-10-01T00:00:00.000Z');
+  const stamped=new Date(first).toISOString();
+  await readOrStampDeviceArmedAt(store,first);
+  expect(await readDeviceArmedAt(store)).toBe(stamped);
+  expect(await resolveArmedAudioRetentionPolicy(store,null,first+60_000)).toBeNull();
+  expect(await readDeviceArmedAt(store)).toBe(stamped);
+  expect(await resolveArmedAudioRetentionPolicy(store,undefined,first+60_000)).toBeUndefined();
+  expect(await readDeviceArmedAt(store)).toBe(stamped);
+  // enabled without enabledAt: reuse existing stamp, do not clear or invent a new one.
+  const missingAt=await resolveArmedAudioRetentionPolicy(store,{enabled:true},first+60_000);
+  expect(missingAt).toEqual({enabled:true,deviceArmedAt:stamped});
+  expect(await readDeviceArmedAt(store)).toBe(stamped);
+  // Failed-clock / no allowDelete also leaves stamp, does not invent a new one.
+  const skewed=policyOn({
+    enabledAt:'2026-09-01T00:00:00.000Z',
+    fetchedAtDeviceMs:first,
+    serverNow:new Date(first+AUDIO_RETENTION_CLOCK_SKEW_MS+1).toISOString(),
+  });
+  expect(resolveAudioRetentionClock(skewed,first).allowDelete).toBe(false);
+  await resolveArmedAudioRetentionPolicy(store,skewed,first);
+  expect(await readDeviceArmedAt(store)).toBe(stamped);
+  store.close();
+});
+
+it('sweep returns early without opening a store when policy is absent/unknown',async()=>{
+  const openStore=vi.fn(async()=>{throw new Error('store must not open for unknown policy');});
+  expect(await sweepExpiredPrivateRecordingAudio(scope,'desktop',{audioRetention:null,openStore})).toEqual({deleted:[],inspected:0});
+  expect(await sweepExpiredPrivateRecordingAudio(scope,'desktop',{audioRetention:undefined,openStore})).toEqual({deleted:[],inspected:0});
+  expect(await sweepExpiredPrivateRecordingAudio(scope,'desktop',{audioRetention:{enabled:'maybe' as never},openStore})).toEqual({deleted:[],inspected:0});
+  expect(openStore).not.toHaveBeenCalled();
+});
+
 it('stamps armedAt only when allowDelete, using effectiveNowMs not raw device clock (H2)',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   const deviceNow=Date.parse('2026-11-15T12:00:00.000Z');
@@ -658,7 +692,7 @@ it('refuseExpiredAudio skip option and transfer protection gate delete',async()=
   const row=manifest(id(26),ended);
   refuseExpiredAudio(row,start+AUDIO_RETENTION_MS,policy,{skip:true}); // must not throw
   try{refuseExpiredAudio(row,start+AUDIO_RETENTION_MS,policy);expect.unreachable();}
-  catch(error){expect(error).toMatchObject({code:EXPIRED_AUDIO_REFUSED});}
+  catch(error){expect(error).toMatchObject({code:EXPIRED_AUDIO_REFUSED,message:AUDIO_DELETED_USER_MESSAGE});}
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   await seed(store,row);
   await armAt(store,Date.parse(policy.enabledAt!));
@@ -703,6 +737,35 @@ it('opens audio-deleted stub without manifest and surfaces exact user message',a
   await runtime.close();
   const rows=await listPrivateRecordings(scope,'desktop',()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto}));
   expect(rows[0]).toMatchObject({recordingId:id(28),phase:'audio_deleted',retentionLabel:AUDIO_DELETED_USER_MESSAGE});
+});
+
+it('admitted transfer with partial upload past deadline remounts protected and openable',async()=>{
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,manifest(id(50),ended),{
+    ['transfer:'+id(50)]:{contract:'cosmas.saved-transfer.v1',recording_id:id(50),admitted:true},
+  });
+  await armAt(store,Date.parse(policy.enabledAt!));
+  const past=()=>start+AUDIO_RETENTION_MS;
+  // Without transfer protection this would refuse; with unreleased transfer: open succeeds.
+  const first=await PrivateRecordingRuntime.open({
+    scope,platform:'desktop',isCurrent:()=>true,
+    openStore:async()=>store,getAudioRetention:()=>policy,now:past,
+  },{recordingId:id(50),title:'Synthetic mid-upload'});
+  expect(first.snapshot.phase).toBe('sealed');
+  expect(await isTransferRetentionReleased(store,id(50))).toBe(false);
+  expect(await isAudioRetentionProtected(store,id(50))).toBe(true);
+  await first.close();
+  // Remount after close: still protected, still openable, still no release marker.
+  const remountStore=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const remount=await PrivateRecordingRuntime.open({
+    scope,platform:'desktop',isCurrent:()=>true,
+    openStore:async()=>remountStore,getAudioRetention:()=>policy,now:past,
+  },{recordingId:id(50),title:'Synthetic mid-upload'});
+  expect(remount.snapshot.phase).toBe('sealed');
+  expect(await isTransferRetentionReleased(remountStore,id(50))).toBe(false);
+  expect(await isAudioRetentionProtected(remountStore,id(50))).toBe(true);
+  await remount.close();
 });
 
 it('live getAudioRetention getter is consulted each time (not a stale open capture)',async()=>{

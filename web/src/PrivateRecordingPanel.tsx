@@ -140,7 +140,8 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       }
       setPrepared(true);
     })().catch(cause=>{if(selected.alive&&owner.current===selected){
-      const deleted=cause&&typeof cause==='object'&&'message'in cause&&cause.message===AUDIO_DELETED_USER_MESSAGE;
+      const code=cause&&typeof cause==='object'&&'code'in cause?cause.code:'';
+      const deleted=code==='private_recording_audio_expired'||(cause&&typeof cause==='object'&&'message'in cause&&cause.message===AUDIO_DELETED_USER_MESSAGE);
       setPreparationError(deleted?AUDIO_DELETED_USER_MESSAGE:recordingId?'Saved recording recovery could not be confirmed. Its encrypted audio is retained. Check microphone status before starting another recording.':'Recording is not ready: current access or encrypted storage could not be prepared. Check your connection and try again.');
       if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))live.current.onAccessLost?.(cause);
     }});
@@ -200,7 +201,8 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       setPrepared(true);
       if(platform==='ios'&&!nativeReady)setNativeEpoch(value=>value+1);
     }catch(cause){if(owner.current===selected&&current()){
-      const deleted=cause&&typeof cause==='object'&&'message'in cause&&cause.message===AUDIO_DELETED_USER_MESSAGE;
+      const code=cause&&typeof cause==='object'&&'code'in cause?cause.code:'';
+      const deleted=code==='private_recording_audio_expired'||(cause&&typeof cause==='object'&&'message'in cause&&cause.message===AUDIO_DELETED_USER_MESSAGE);
       setPreparationError(deleted?AUDIO_DELETED_USER_MESSAGE:'Recording is not ready: current access or encrypted storage could not be prepared. Check your connection and try again.');
       if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))live.current.onAccessLost?.(cause);
     }}

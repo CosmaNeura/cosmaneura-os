@@ -200,21 +200,26 @@ export async function readOrStampDeviceArmedAt(
 
 /**
  * Resolve armed policy once per store so label, refuse, and sweep agree.
- * Policy off → clear stamp (rollback-safe). Stamp only when allowDelete, using
- * effectiveNowMs. Without allowDelete, reuse an existing stamp but never write.
+ * Clear the stamp only on an explicit server `enabled:false` (kill switch).
+ * Unknown (null/undefined/missing enabledAt/no allowDelete yet) → no clear, no stamp;
+ * reuse an existing stamp when present. Stamp only when allowDelete, using effectiveNowMs.
  */
 export async function resolveArmedAudioRetentionPolicy(
   store: AudioRetentionStore,
   policy: AudioRetentionPolicy | null | undefined,
   nowMs: number,
 ): Promise<AudioRetentionPolicy | null | undefined> {
-  if (!audioRetentionEffective(policy) || !policy) {
+  // Explicit off from server — clear so a later re-enable gets a fresh grace window.
+  if (policy != null && policy.enabled === false) {
     await clearDeviceArmedAt(store);
     return policy;
   }
-  if (audioRetentionEnabledAtMs(policy) === null) {
-    await clearDeviceArmedAt(store);
-    return policy;
+  // Unknown / absent / not fully usable — leave stamp alone; do not invent one.
+  if (!audioRetentionEffective(policy) || !policy || audioRetentionEnabledAtMs(policy) === null) {
+    const existing = await readDeviceArmedAt(store);
+    return existing && policy && audioRetentionEffective(policy)
+      ? {...policy, deviceArmedAt: existing}
+      : policy;
   }
   const clock = resolveAudioRetentionClock(policy, nowMs);
   if (!clock.allowDelete) {
@@ -414,6 +419,6 @@ export function refuseExpiredAudio(
   if (!clock.allowDelete) return;
   const anchor = audioRetentionAnchor(manifest, clock.effectiveNowMs, policy);
   if (anchor?.expired) {
-    throw Object.assign(new Error('Private recording audio expired'), {code: EXPIRED_AUDIO_REFUSED});
+    throw Object.assign(new Error(AUDIO_DELETED_USER_MESSAGE), {code: EXPIRED_AUDIO_REFUSED});
   }
 }
