@@ -5,8 +5,9 @@ from sqlalchemy import func, or_, select
 
 from cosmas_os.application import provider_team
 from cosmas_os.application import workspace as ws
+from cosmas_os.config import settings as runtime_settings
 from cosmas_os.domain.hashing import payload_hash
-from cosmas_os.models import AuditEvent, ExternalIdentity, WorkspaceAppointmentLink
+from cosmas_os.models import AuditEvent, BoxContext, ExternalIdentity, WorkspaceAppointmentLink
 from cosmas_os.ports.private_recording import (
     AttachRecording,
     BindRecordingVisit,
@@ -204,6 +205,19 @@ def link(s, box, owner, wid, rid, command, *, external, fence):
 def read(s, box, owner, wid, rid, *, external):
     _, row = checked(s, box, owner, wid, external, rid)
     return view(s, row)
+
+
+def audio_retention(s, box, owner, wid, *, external):
+    """Read-only effective policy: process switch AND Box opt-in. Default off."""
+    scope(s, box, owner, wid, external)
+    row = s.get(BoxContext, box)
+    if row is None:
+        raise ws.WorkspaceError("private_recording_unavailable", 503)
+    enabled = bool(
+        runtime_settings.recording_audio_48h_retention_enabled
+        and row.recording_audio_48h_retention_enabled
+    )
+    return {"enabled": enabled, "hours": 48, "warn_hours": 36}
 
 
 def source_digest(recording, finish_row, appointment_link):

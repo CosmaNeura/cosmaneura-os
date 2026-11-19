@@ -340,3 +340,48 @@ def test_new_migration_installs_all_immutable_receipts_and_refuses_erasure(recor
         for table in ("private_recordings", "private_recording_finishes", "private_recording_links"):
             if table + "_immutable" in installed:
                 connection.execute(text("DROP TRIGGER " + table + "_immutable ON " + table))
+
+
+def test_audio_retention_policy_defaults_off(recording, session):
+    from cosmas_os.config import settings
+    from cosmas_os.models import BoxContext
+
+    f, draft, _ = recording
+    response = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"enabled": False, "hours": 48, "warn_hours": 36}
+    assert response.headers.get("cache-control") == "no-store"
+    box = session.get(BoxContext, f.box)
+    assert box is not None
+    assert box.recording_audio_48h_retention_enabled is False
+    assert settings.recording_audio_48h_retention_enabled is False
+
+
+def test_audio_retention_enabled_only_when_process_and_box_opt_in(recording, session, monkeypatch):
+    from cosmas_os.application import private_recording as service
+    from cosmas_os.models import BoxContext
+
+    f, draft, _ = recording
+    box = session.get(BoxContext, f.box)
+    assert box is not None
+    box.recording_audio_48h_retention_enabled = True
+    session.commit()
+
+    monkeypatch.setattr(service.runtime_settings, "recording_audio_48h_retention_enabled", False)
+    off = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert off.status_code == 200 and off.json()["enabled"] is False
+
+    monkeypatch.setattr(service.runtime_settings, "recording_audio_48h_retention_enabled", True)
+    on = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert on.status_code == 200 and on.json() == {"enabled": True, "hours": 48, "warn_hours": 36}
+
+    box.recording_audio_48h_retention_enabled = False
+    session.commit()
+    again = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert again.status_code == 200 and again.json()["enabled"] is False
+
+
+def test_audio_retention_requires_private_recording_contract(recording):
+    f, draft, _ = recording
+    bare = f.client.get(base(draft) + "/audio-retention", headers={"Authorization": "Bearer " + f.token()})
+    assert bare.status_code == 426
