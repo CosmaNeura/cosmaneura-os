@@ -19,10 +19,12 @@ export function normalizeDesktopAudioRetentionPolicy(raw: unknown): DesktopAudio
   const o = raw as Record<string, unknown>;
   if (o.enabled !== true) return { enabled: false };
   const enabledAt = o.enabledAt ?? o.enabled_at;
-  const policy: DesktopAudioRetentionPolicy = { enabled: true };
-  if (enabledAt === null) policy.enabledAt = null;
-  else if (typeof enabledAt === "string") policy.enabledAt = enabledAt;
-  return policy;
+  // Build in one expression — readonly props cannot be assigned after create (TS2540).
+  return enabledAt === null
+    ? { enabled: true, enabledAt: null }
+    : typeof enabledAt === "string"
+      ? { enabled: true, enabledAt }
+      : { enabled: true };
 }
 
 export function desktopAudioRetentionEnabled(policy: DesktopAudioRetentionPolicy | null | undefined): boolean {

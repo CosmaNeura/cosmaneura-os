@@ -54,11 +54,12 @@ export class DesktopProviderRecorderIpc {
           case "resume": await this.recorder.resumePendingWork(); break;
           case "release": await this.recorder.releaseUploadedCapture(); break;
           case "deactivate":
-            await this.recorder.sweepExpiredAudio(); // failure → ok=false, not swallowed
+            // Deactivate first/unconditionally; sweep must never flip ok or block teardown.
             await this.recorder.deactivate();
+            try { await this.recorder.sweepExpiredAudio(); } catch { /* never affect ok */ }
             break;
           case "read":
-            await this.recorder.sweepExpiredAudio();
+            try { await this.recorder.sweepExpiredAudio(); } catch { /* never affect ok */ }
             break;
         }
       } catch { ok = false; }

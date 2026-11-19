@@ -203,8 +203,8 @@ export class DesktopProviderRecorder implements ProviderRecorderController {
     }
   }
 
+  /** Safe after deactivate: must not call requireOpen (Fable: requireOpen throws once deactivated). */
   async sweepExpiredAudio(): Promise<{ deleted: string[]; inspected: number }> {
-    this.requireOpen();
     this.audioRetention = await this.refreshAudioRetentionPolicy();
     if (!desktopAudioRetentionEnabled(this.audioRetention) || !this.options.audioRetentionRecords) {
       return { deleted: [], inspected: 0 };

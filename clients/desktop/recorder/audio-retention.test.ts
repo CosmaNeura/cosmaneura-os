@@ -165,7 +165,38 @@ it("ledger-like non-audio keys are not deleted", async () => {
   store.close();
 });
 
-it("poison/grandpa/wipe + IPC fetch authority (ok=false on sweep throw)", async () => {
+function ipcHarness(recorder: DesktopProviderRecorder) {
+  let handler: (e: unknown, v: unknown) => Promise<unknown> = async () => { throw new Error("unset"); };
+  const frame = { url: "app://cosmas/index.html" };
+  const bridge = new DesktopProviderRecorderIpc(
+    { handle(_c: string, h: typeof handler) { handler = h; }, removeHandler() {} } as never,
+    { id: 1, mainFrame: frame, isDestroyed: () => false, send() {}, on() {}, removeListener() {} } as never,
+    recorder,
+  );
+  bridge.install();
+  const event = { sender: { id: 1, mainFrame: frame }, senderFrame: frame };
+  const request = (value: unknown) => handler(event, value);
+  const read = (extra: Record<string, unknown> = {}) =>
+    request({ kind: "read", requestId: id(91), recorderId: null, ...extra });
+  return {
+    bridge,
+    read,
+    request,
+    async deactivateRequest() {
+      const state = (await read()) as { state: { recorderId: string } };
+      return request({ kind: "deactivate", requestId: id(92), recorderId: state.state.recorderId });
+    },
+  };
+}
+
+const idleSnapshot = {
+  state: "ready", statusCode: "ready", sessionId: id(90), recordedChunks: 0, queuedChunks: 0,
+  elapsedSeconds: 0, remainingBudgetSeconds: null, remainingAuthoritySeconds: null,
+  transcriptionStatus: null, transcript: null,
+  desktop: { phase: "ready", coverage: "not_started", trimmedStartMs: 0, trimmedEndMs: null },
+};
+
+it("poison/grandpa/wipe + IPC fetch authority (ok=true when sweep throws)", async () => {
   const { store, records } = await openStore();
   const ended = "2026-11-01T00:00:00.000Z", start = Date.parse(ended), flip = "2026-11-01T00:00:00.000Z";
   await put(records, `manifest:${id(19)}`, { recordingId: id(19), updatedAt: "bad", phase: "sealed", chunks: [] });
@@ -202,38 +233,88 @@ it("poison/grandpa/wipe + IPC fetch authority (ok=false on sweep throw)", async 
   };
   expect((await fetchSweep(async () => null)).deleted).toEqual([]);
   let fetchPolicy: () => Promise<unknown> = async () => ({ enabled: false }), sweepThrows = false;
-  const snapshot = {
-    state: "ready", statusCode: "ready", sessionId: id(90), recordedChunks: 0, queuedChunks: 0,
-    elapsedSeconds: 0, remainingBudgetSeconds: null, remainingAuthoritySeconds: null,
-    transcriptionStatus: null, transcript: null,
-    desktop: { phase: "ready", coverage: "not_started", trimmedStartMs: 0, trimmedEndMs: null },
-  };
   const recorder = {
-    availableForView: true, get snapshot() { return snapshot; },
-    subscribe(l: (v: unknown) => void) { l(snapshot); return () => undefined; },
+    availableForView: true, get snapshot() { return idleSnapshot; },
+    subscribe(l: (v: unknown) => void) { l(idleSnapshot); return () => undefined; },
     async sweepExpiredAudio() {
       if (sweepThrows) throw new Error("sweep failed");
       return fetchSweep(fetchPolicy);
     },
     async deactivate() {},
   } as unknown as DesktopProviderRecorder;
-  let handler: (e: unknown, v: unknown) => Promise<unknown> = async () => { throw new Error("unset"); };
-  const frame = { url: "app://cosmas/index.html" };
-  const bridge = new DesktopProviderRecorderIpc(
-    { handle(_c: string, h: typeof handler) { handler = h; }, removeHandler() {} } as never,
-    { id: 1, mainFrame: frame, isDestroyed: () => false, send() {}, on() {}, removeListener() {} } as never,
-    recorder,
-  );
-  bridge.install();
-  const event = { sender: { id: 1, mainFrame: frame }, senderFrame: frame };
-  const read = (extra: Record<string, unknown> = {}) =>
-    handler(event, { kind: "read", requestId: id(91), recorderId: null, ...extra });
+  const { bridge, read } = ipcHarness(recorder);
   expect(((await read({ audioRetention: { enabled: true, hours: 1, enabledAt } })) as { ok: boolean }).ok).toBe(true);
   expect(await records.get(`manifest:${id(8)}`)).not.toBeNull();
   fetchPolicy = async () => on;
   expect(((await read()) as { ok: boolean }).ok).toBe(true);
   expect(await records.get(`manifest:${id(8)}`)).toBeNull();
   await seed(records, id(10), ended); sweepThrows = true;
-  expect(((await read()) as { ok: boolean }).ok).toBe(false);
+  // Sweep failure must never set ok=false on read.
+  expect(((await read()) as { ok: boolean }).ok).toBe(true);
   await bridge.dispose(); store.close();
+});
+
+it("deactivate calls deactivate before sweep", async () => {
+  const order: string[] = [];
+  const recorder = {
+    availableForView: true, get snapshot() { return idleSnapshot; },
+    subscribe(l: (v: unknown) => void) { l(idleSnapshot); return () => undefined; },
+    async sweepExpiredAudio() { order.push("sweep"); return { deleted: [], inspected: 0 }; },
+    async deactivate() { order.push("deactivate"); },
+  } as unknown as DesktopProviderRecorder;
+  const { bridge, read, request } = ipcHarness(recorder);
+  const state = (await read()) as { state: { recorderId: string } };
+  order.length = 0; // ignore preliminary read sweep
+  expect(((await request({
+    kind: "deactivate", requestId: id(93), recorderId: state.state.recorderId,
+  })) as { ok: boolean }).ok).toBe(true);
+  expect(order).toEqual(["deactivate", "sweep"]);
+  await bridge.dispose();
+});
+
+it("deactivate succeeds (ok true) even when sweep throws", async () => {
+  let deactivated = false;
+  const recorder = {
+    availableForView: true, get snapshot() { return idleSnapshot; },
+    subscribe(l: (v: unknown) => void) { l(idleSnapshot); return () => undefined; },
+    async sweepExpiredAudio() { throw new Error("sweep failed"); },
+    async deactivate() { deactivated = true; },
+  } as unknown as DesktopProviderRecorder;
+  const { bridge, deactivateRequest } = ipcHarness(recorder);
+  const result = await deactivateRequest() as { ok: boolean };
+  expect(deactivated).toBe(true);
+  expect(result.ok).toBe(true);
+  await bridge.dispose();
+});
+
+it("read ok true when sweep throws", async () => {
+  const recorder = {
+    availableForView: true, get snapshot() { return idleSnapshot; },
+    subscribe(l: (v: unknown) => void) { l(idleSnapshot); return () => undefined; },
+    async sweepExpiredAudio() { throw new Error("sweep failed"); },
+    async deactivate() {},
+  } as unknown as DesktopProviderRecorder;
+  const { bridge, read } = ipcHarness(recorder);
+  expect(((await read()) as { ok: boolean }).ok).toBe(true);
+  await bridge.dispose();
+});
+
+it("with policy off, deactivate behaves (ok true, deactivate called)", async () => {
+  let deactivated = false;
+  let swept = false;
+  const recorder = {
+    availableForView: true, get snapshot() { return idleSnapshot; },
+    subscribe(l: (v: unknown) => void) { l(idleSnapshot); return () => undefined; },
+    async sweepExpiredAudio() {
+      swept = true;
+      return { deleted: [], inspected: 0 };
+    },
+    async deactivate() { deactivated = true; },
+  } as unknown as DesktopProviderRecorder;
+  const { bridge, deactivateRequest } = ipcHarness(recorder);
+  const result = await deactivateRequest() as { ok: boolean };
+  expect(deactivated).toBe(true);
+  expect(swept).toBe(true);
+  expect(result.ok).toBe(true);
+  await bridge.dispose();
 });
