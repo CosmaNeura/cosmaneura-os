@@ -432,3 +432,110 @@ IMPLEMENTATION IMPACT:
   Checkout quantity equal to human seats; public config exposes `seat_cents`
   instead of `first_human_cents` / `additional_human_cents`. Stripe remains
   TEST-only until an explicit founder live switch.
+
+### DL-20261117-01
+
+- **Status:** ACCEPTED (items 6 and 7 resolved by DL-20261117-02;
+  DL-20261119-01; workstream scope confirmed 19 Nov 2026 4:08pm ET)
+- **Date:** 2026-11-17
+- **Owner acceptance evidence:** Direct owner message from John Clemente, CEO,
+  November 17, 2026.
+- **Ruling:**
+
+1. A read-only browser extension that reads pages in the signed-in user's
+   own browser session is in scope. Unattended automation and agent-held
+   EMR logins remain deferred.
+2. Provider-triggered form fill is approved for V1, not V0. It fills visible
+   fields only after an explicit user click and never clicks Save, Submit,
+   Send or Sign.
+3. Actions started from the phone stage work at the desktop. They never
+   send. CosmaBot never signs or transmits a prescription; it may prepare
+   one for the prescriber to sign in the EMR.
+4. A small on-device model is permitted in the desktop app for three kinds
+   of work: perception (recognising screens, patients and changes),
+   protection (PHI minimisation, pre-fill checks, mismatch warnings), and
+   short on-screen help for staff (what is missing, what changed, call
+   notes, answers about what is on screen). It does not draft clinical
+   notes, choose codes or make clinical judgments. No model weights of
+   Chinese origin, including derivatives. The cloud remains the reasoning
+   layer. Every consequential on-device output is verified by code or
+   escalated.
+5. Desktop targets are Windows and Mac. Development starts on Mac for two
+   weeks and moves to Windows from week three. Platform-specific code sits
+   behind interfaces.
+6. [CONFIRM] CosmaBot must record a visit and produce a note without
+   depending on the legacy platform.
+7. Scribe remains a separate product that shares the recorder.
+   [CONFIRM: new Scribe sign-ups use CosmaBot identity.]
+8. Device compliance checks are deferred to V2 and are described as
+   compliance checks, not security monitoring.
+9. CosmaBot never asks a practice to disable screen locks or EMR session
+   timeouts.
+10. For this workstream: no production deploys, no store submissions and no
+    live identity changes without my explicit instruction in the task.
+
+- **Note (PR #400):** ("my" = John Clemente.) The `[CONFIRM]` markers above
+  are John's, from his November 17, 2026 owner-message drafting (not
+  agent-invented); items 6 and 7 were answered the same day by
+  `DL-20261117-02`. Legacy-for-beta substance resolved by `DL-20261119-01`.
+  Narrowed by `DL-20261117-01` decision 10. Read both before acting. Scope
+  confirmed by John Clemente on 19 Nov 2026 4:08pm ET: "This workstream
+  makes no production deploys, no App Store submissions and no changes to
+  live sign-ins." If it is unclear whether a task belongs to this
+  workstream, treat it as belonging to it. Decision 4 gloss (reviewer
+  reading, PENDING / OPEN-JOHN): "call notes" here means short on-screen
+  staff help, not drafting clinical notes. "Consequential" means any
+  on-device output that could affect a clinical or system-of-record action.
+  If it is unclear whether an output is consequential, treat it as
+  consequential. "Chinese origin, including derivatives" covers developer,
+  fine-tune, distillation and quantisation provenance; the specific
+  on-device model is still pending John's pick. Decision 5 (PR #400: start
+  date for the two-week Mac window is pending; Windows signing and
+  distribution are not authorised by the October 30 text; pending John).
+- **Supersedes:** Conflicting browser, prescription, model and workstream
+  authority statements in `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`;
+  `DL-20261030-01` production, store and live identity authority for this
+  workstream.
+- **Affected contract version:** 1.10-draft
+- **Implementation impact:** Docs-only transcription and reconciliation of
+  `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`.
+
+### DL-20261117-02
+
+- **Status:** ACCEPTED
+- **Date:** 2026-11-17
+- **Owner acceptance evidence:** Direct follow-up from John Clemente, CEO,
+  November 17, 2026, answering the two confirmation questions about
+  independent recording and notes, and new Scribe sign-ups using CosmaBot
+  identity. (PR #400: confirmed same calendar day as `DL-20261117-01`.)
+- **Ruling (verbatim owner follow-up):**
+
+1. Yes, maybe for initial beta we rely on legacy but going forward we need independent recording and notes.
+2. yes, confirmed.
+
+- **Supersedes:** The confirmation markers in items 6 and 7 of
+  `DL-20261117-01`; item 6 is clarified by the owner's initial-beta wording
+  and later settled for beta by `DL-20261119-01`.
+- **Affected contract version:** 1.10-draft
+- **Implementation impact:** Reconcile items 6 and 7 in
+  `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`. Docs only.
+
+### DL-20261119-01
+
+- **Status:** ACCEPTED
+- **Date:** 2026-11-19
+- **Owner acceptance evidence:** Direct answer from John Clemente, CEO,
+  19 Nov 2026 9:28am ET, settling PR #400 legacy-for-beta (H1) on
+  `DL-20261117-01` item 6.
+- **Ruling (verbatim owner answer):**
+
+1. Beta does not rely on the legacy platform
+
+- **Supersedes:** The unresolved "maybe for initial beta we rely on legacy"
+  reading of `DL-20261117-02` item 1 for beta scope. Independent recording
+  and notes without legacy dependency remain required.
+- **Affected contract version:** 1.10-draft
+- **Implementation impact:** Reconcile item 6 in
+  `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`. Docs only. Do not add
+  any dependency on the legacy platform for beta. Do not remove or change
+  an existing legacy dependency without John's instruction.

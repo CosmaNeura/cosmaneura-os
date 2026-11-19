@@ -34,9 +34,15 @@ BUILD_GATE: LOCAL_SYNTH_BUILD_APPROVED
 
 Do not edit another repository. Authority for infrastructure, live Clerk
 settings, signed Mac and iPhone builds, and production deploy is the October
-30, 2026 decision in the next section.
+30, 2026 decision, subject to `DL-20261117-01` for this workstream.
 
 ## Owner decision, October 30, 2026
+
+Narrowed by `DL-20261117-01` decision 10 below. Read both before acting. Scope
+confirmed by John Clemente on 19 Nov 2026: "This workstream makes no
+production deploys, no App Store submissions and no changes to live
+sign-ins." If it is unclear whether a task belongs to this workstream,
+treat it as belonging to it.
 
 On Friday, October 30, 2026, at 9:04am ET, John Clemente, CEO, decided that
 Cursor agents working in this repository may do the following without asking
@@ -59,6 +65,78 @@ not force-push `main`. When an unexpected owner change is already in the tree,
 agents leave that change in place and continue the rest of the work.
 
 This decision is also recorded as `DL-20261030-01`.
+
+## Owner decisions, November 17, 2026
+
+John Clemente, CEO, November 17, 2026. Recorded as `DL-20261117-01` in
+`docs/DECISION_LOG.md`. Decision 10 supersedes the October 30 production,
+store and live identity authority for this workstream.
+
+Narrowed by `DL-20261117-01` decision 10 below. Read both before acting. Scope
+confirmed by John Clemente on 19 Nov 2026: "This workstream makes no
+production deploys, no App Store submissions and no changes to live
+sign-ins." If it is unclear whether a task belongs to this workstream,
+treat it as belonging to it.
+
+Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
+Item 6 also incorporates John's 19 Nov 2026 9:28am ET answer recorded as
+`DL-20261119-01`.
+
+These decisions set product scope. They do not change the build gate or
+the synthetic-data rule. Build and test against invented pages and
+invented patients only.
+
+1. A read-only browser extension that reads pages in the signed-in user's
+   own browser session is in scope. Unattended automation and agent-held
+   EMR logins remain deferred.
+2. Provider-triggered form fill is approved for V1, not V0. It fills visible
+   fields only after an explicit user click and never clicks Save, Submit,
+   Send or Sign.
+3. Actions started from the phone stage work at the desktop. They never
+   send. CosmaBot never signs or transmits a prescription; it may prepare
+   one for the prescriber to sign in the EMR. (PR #400: "the phone stage" is
+   not a lift of the deferred Native mobile/Capacitor item; that remains
+   deferred.)
+4. A small on-device model is permitted in the desktop app for three kinds
+   of work: perception (recognising screens, patients and changes),
+   protection (PHI minimisation, pre-fill checks, mismatch warnings), and
+   short on-screen help for staff (what is missing, what changed, call
+   notes, answers about what is on screen). It does not draft clinical
+   notes, choose codes or make clinical judgments. No model weights of
+   Chinese origin, including derivatives. The cloud remains the reasoning
+   layer. Every consequential on-device output is verified by code or
+   escalated.
+   Gloss (reviewer reading, PENDING / OPEN-JOHN): "call notes" here means
+   short on-screen staff help, not drafting clinical notes.
+   "Consequential" means any on-device output that could affect a clinical
+   or system-of-record action. If it is unclear whether an output is
+   consequential, treat it as consequential. "Chinese origin, including
+   derivatives" covers developer, fine-tune, distillation and quantisation
+   provenance; the specific on-device model is still pending John's pick.
+5. Desktop targets are Windows and Mac. Development starts on Mac for two
+   weeks and moves to Windows from week three. Platform-specific code sits
+   behind interfaces. (PR #400: start date for the two-week Mac window is
+   pending; Windows signing and distribution are not authorised by the
+   October 30 text; pending John)
+6. CosmaBot must record a visit and produce a note without depending on
+   the legacy platform. Owner follow-up (`DL-20261117-02`): "Yes, maybe
+   for initial beta we rely on legacy but going forward we need
+   independent recording and notes." John's answer of 19 Nov 2026
+   9:28am ET: "Beta does not rely on the legacy platform". Do not add
+   any dependency on the legacy platform for beta. Do not remove or change
+   an existing legacy dependency without John's instruction.
+7. Scribe remains a separate product that shares the recorder. New Scribe
+   sign-ups use CosmaBot identity (confirmed, `DL-20261117-02`). This sets
+   direction only. Existing Scribe users, their logins and their access
+   are not changed, migrated or walled. Turning this on for live sign-ups
+   is a live identity change under decision 10.
+8. Device compliance checks are deferred to V2 and are described as
+   compliance checks, not security monitoring.
+9. CosmaBot never asks a practice to disable screen locks or EMR session
+   timeouts.
+10. For this workstream: no production deploys, no store submissions and no
+    live identity changes without my explicit instruction in the task.
+    ("my" = John Clemente.)
 
 ## Repository boundary
 
@@ -89,10 +167,11 @@ Product runtime and coding agents are different.
 Do not commit credentials, `.env` values, database dumps, vendor tokens, or
 real production identifiers.
 
-Cursor agents may apply infrastructure changes, change live Clerk settings,
-publish signed Mac and iPhone builds, and deploy to production without asking
-John or Shawn first, as recorded on October 30, 2026. That authority still
-forbids copying real patient data into code, tests, fixtures, commits, pull
+For this workstream: no production deploys, no store submissions and no
+live identity changes without John Clemente's explicit instruction in the
+task.
+
+Do not copy real patient data into code, tests, fixtures, commits, pull
 request text, logs, or chat.
 
 Use invented people, appointments, identifiers, images, and money in synth
@@ -126,8 +205,9 @@ work.
 - Keep Redis/Celery as transport, never the authoritative business record.
 - Keep normal UX centered on work and outcomes, not infrastructure or
   compliance vocabulary.
-- Do not add Kubernetes, Kafka, a second cloud/IdP, browser automation,
-  consumer messengers, payment/PAN, or generalized event sourcing.
+- Do not add Kubernetes, Kafka, a second cloud/IdP, unattended browser
+  automation, agent-held EMR logins, form fill before V1, consumer
+  messengers, payment/PAN, or generalized event sourcing.
 
 ## Engineering behavior
 
@@ -143,8 +223,9 @@ work.
   or physical device is not available.
 - Do not force-push `main`.
 - Do not weaken CI, Trivy scanning, or the main branch ruleset.
-- Apply infrastructure, change live Clerk settings, publish signed Mac and
-  iPhone builds, and deploy to production when the task calls for them.
+- For this workstream: no production deploys, no store submissions and no
+  live identity changes without John Clemente's explicit instruction in the
+  task.
 - Draft-light CI: run the relevant tests inside the cloud agent before
   pushing; push once per round. A red `synth-ci-gate` on an unlabelled draft
   means light mode, not a CI failure. Add the `ci:full` label before asking
@@ -158,7 +239,8 @@ work.
 Treat identity/authority, PHI paths, patient messaging, retention, schema,
 external side effects, deployment, and cross-repository contracts as high-risk.
 They require explicit tests and recovery behavior. Agents carry that work
-through under the October 30, 2026 decision.
+through under the October 30, 2026 decision, subject to `DL-20261117-01`
+for this workstream.
 
 ## Install, lint, and tests
 
@@ -240,5 +322,9 @@ These come from Fable's most common review holes. Breaking one is a HOLE in revi
 
 ### 8. Before you push
 - Run the relevant tests in your agent first, and push once per round.
-- Synthetic data only, never PHI. No new secrets, no model changes, no CI or ruleset weakening.
+- Synthetic data only, never PHI. No new secrets, no CI or ruleset weakening.
+- No change to the product runtime model, and no selection or change of
+  on-device model, weights or vendor, without John's explicit yes.
+  On-device model scope is the November 17, 2026 owner decision 4 above;
+  the specific model is pending.
 - On high-risk tickets (docs/review-policy.md section 2a), wait for Fable's plan PASS before the first push.
