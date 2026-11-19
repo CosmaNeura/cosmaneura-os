@@ -24,12 +24,18 @@ def _unique(pairs):
     return value
 
 
+def _headers_acceptable(request) -> bool:
+    return not (
+        request.query_params or len(request.headers.getlist('content-type')) != 1
+        or request.headers['content-type'].split(';', 1)[0].strip().lower() != 'application/json'
+        or len(request.headers.getlist('authorization')) > 1
+        or request.headers.getlist('content-encoding')
+    )
+
+
 async def read_team_request(request, schema):
     try:
-        if (request.query_params or len(request.headers.getlist('content-type')) != 1
-            or request.headers['content-type'].split(';', 1)[0].strip().lower() != 'application/json'
-            or len(request.headers.getlist('authorization')) > 1
-            or request.headers.getlist('content-encoding')):
+        if not _headers_acceptable(request):
             raise ValueError()
         body = bytearray()
         async for chunk in request.stream():
