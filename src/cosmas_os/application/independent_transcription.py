@@ -85,11 +85,12 @@ def _processor() -> TranscriptionProcessor:
         return _PROCESSOR
     if settings.independent_recording_transcription_azure_enabled:
         endpoint = settings.azure_fast_transcription_endpoint
-        if not endpoint:
+        auth = settings.azure_fast_transcription_auth
+        if not endpoint or auth not in {"entra", "key"}:
             raise ws.WorkspaceError("independent_recording_transcription_unavailable", 503)
         return AzureFastTranscriptionProcessor.from_settings(
             endpoint=endpoint,
-            auth=settings.azure_fast_transcription_auth,
+            auth=auth,
         )
     return FakeTranscriptionProcessor()
 

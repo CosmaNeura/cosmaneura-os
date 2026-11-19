@@ -142,8 +142,8 @@ class Settings(BaseSettings):
     independent_recording_transcription_azure_enabled: bool = False
     # HTTPS Cognitive Services URL (US region host, fixed path). Never a secret value.
     azure_fast_transcription_endpoint: str | None = None
-    # Explicit auth: entra (default, reused DefaultAzureCredential) or key (FIXED_KEY_ENV_NAME).
-    azure_fast_transcription_auth: Literal["entra", "key"] = "entra"
+    # Explicit auth when Azure is on: entra|key. Default None so standalone azure_* stays empty.
+    azure_fast_transcription_auth: Literal["entra", "key"] | None = None
 
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)
@@ -740,6 +740,11 @@ class Settings(BaseSettings):
                 errors.append(
                     "INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED requires a "
                     "valid https AZURE_FAST_TRANSCRIPTION_ENDPOINT without query or credentials"
+                )
+            if self.azure_fast_transcription_auth not in {"entra", "key"}:
+                errors.append(
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED requires "
+                    "AZURE_FAST_TRANSCRIPTION_AUTH=entra|key"
                 )
         if self.cosmas_env in STANDALONE_ENVS:
             return errors + self._standalone_configuration_errors()
