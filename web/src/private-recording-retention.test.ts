@@ -48,12 +48,12 @@ it('keeps audio at 47:59:59 and deletes at 48:00:00 with an injected clock',asyn
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
   await seed(store,manifest(id(1),ended));
   const keep=await sweepPrivateRecordingAudio({store,scope,policy,now:()=>start+AUDIO_RETENTION_MS-1,
-    parseManifest:(value,recordingId)=>value as PrivateRecordingManifest});
+    parseManifest:(value)=>value as PrivateRecordingManifest});
   expect(keep.deleted).toEqual([]);
   expect(await store.read('manifest:'+id(1))).not.toBeNull();
   expect(await store.read('chunk:'+id(1)+':0')).not.toBeNull();
   const gone=await sweepPrivateRecordingAudio({store,scope,policy,now:()=>start+AUDIO_RETENTION_MS,
-    parseManifest:(value,recordingId)=>value as PrivateRecordingManifest});
+    parseManifest:(value)=>value as PrivateRecordingManifest});
   expect(gone.deleted).toEqual([id(1)]);
   expect(await store.read('manifest:'+id(1))).toBeNull();
   expect(await store.read('chunk:'+id(1)+':0')).toBeNull();
@@ -65,8 +65,9 @@ it('SecureQueue fake deletes at 48:00:00 and keeps at 47:59:59',async()=>{
   const native:SecureQueuePlugin={
     async list(){return {keys:[...records.keys()]};},
     async get({key}){const row=records.get(key);if(!row)throw Object.assign(new Error('missing'),{code:'SECURE_QUEUE_NOT_FOUND'});return row;},
-    async create({key,data}){if(records.has(key))throw Error('exists');const row={key,revision:'1',data};records.set(key,row);return row;},
-    async compareAndSwap({key,data,expectedRevision}){const prior=records.get(key);if(!prior||prior.revision!==expectedRevision)throw Error('cas');const row={key,revision:String(Number(expectedRevision)+1),data};records.set(key,row);return row;},
+    async put({key,data}){const row={key,revision:'1',data};records.set(key,row);return {revision:row.revision};},
+    async create({key,data}){if(records.has(key))throw Error('exists');const row={key,revision:'1',data};records.set(key,row);return {revision:row.revision};},
+    async compareAndSwap({key,data,expectedRevision}){const prior=records.get(key);if(!prior||prior.revision!==expectedRevision)throw Error('cas');const row={key,revision:String(Number(expectedRevision)+1),data};records.set(key,row);return {revision:row.revision};},
     async delete({key}){const deleted=records.delete(key);return {deleted};},
     async clear(){const cleared=records.size;records.clear();return {cleared};},
   };

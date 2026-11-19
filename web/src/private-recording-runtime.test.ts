@@ -156,7 +156,7 @@ it('reports only current startup progress, isolates observers and never persists
 
 it('stops physical input before a held encrypted status write while retaining exclusion',async()=>{
   const encrypted=await store(),gate=deferred();let writing=false;
-  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),close:()=>encrypted.close(),write:async(key,expected,value)=>{
+  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),delete:key=>encrypted.delete(key),close:()=>encrypted.close(),write:async(key,expected,value)=>{
     if((value as PrivateRecordingManifest).phase==='stopping'){writing=true;await gate.promise;}await encrypted.write(key,expected,value);
   }};
   const source=new ControlledSource(),release=vi.fn(async()=>{}),runtime=await open(source,{openStore:async()=>guarded,acquireLock:async()=>release});
@@ -168,7 +168,7 @@ it('stops physical input before a held encrypted status write while retaining ex
 
 it('observes immediate stop rejection while a status write is held and retains its exact owner',async()=>{
   const encrypted=await store(),gate=deferred();let writing=false;
-  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),close:()=>encrypted.close(),write:async(key,expected,value)=>{
+  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),delete:key=>encrypted.delete(key),close:()=>encrypted.close(),write:async(key,expected,value)=>{
     if((value as PrivateRecordingManifest).phase==='stopping'&&!writing){writing=true;await gate.promise;}await encrypted.write(key,expected,value);
   }};
   const source=new ControlledSource(),release=vi.fn(async()=>{}),runtime=await open(source,{openStore:async()=>guarded,acquireLock:async()=>release});
@@ -206,7 +206,7 @@ it('withholds corrupted saved audio and prevents a different account from adopti
 });
 
 it('preserves an orphan chunk after manifest CAS failure and never silently overwrites it or restarts',async()=>{
-  const inner=await store();let fail=false;const wrapped:PrivateRecordingStore={read:k=>inner.read(k),keys:()=>inner.keys(),close:()=>inner.close(),write:async(k,e,v)=>{if(fail&&k.startsWith('manifest:')&&(v as PrivateRecordingManifest).chunks.length>0)throw Error('Simulated lost manifest commit');await inner.write(k,e,v);}};
+  const inner=await store();let fail=false;const wrapped:PrivateRecordingStore={read:k=>inner.read(k),keys:()=>inner.keys(),delete:k=>inner.delete(k),close:()=>inner.close(),write:async(k,e,v)=>{if(fail&&k.startsWith('manifest:')&&(v as PrivateRecordingManifest).chunks.length>0)throw Error('Simulated lost manifest commit');await inner.write(k,e,v);}};
   const source=new ControlledSource(),runtime=await open(source,{openStore:async()=>wrapped});await runtime.start(consent());fail=true;const chunk=wav();await expect(source.emit(chunk)).rejects.toThrow();expect(chunk.wavBytes.every(v=>v===0)).toBe(true);expect(runtime.snapshot.recordedChunks).toBe(0);expect(await inner.keys()).toContain('chunk:'+runtime.snapshot.recordingId+':0');await runtime.stop();expect(runtime.snapshot.phase).toBe('interrupted');await expect(runtime.start(consent())).rejects.toThrow();expect(source.starts).toBe(1);
 });
 

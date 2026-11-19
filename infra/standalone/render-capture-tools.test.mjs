@@ -99,9 +99,9 @@ function assertNoRealPatientOn(files){
 
 // Off-path must stay byte-identical to origin/main after #361 (eight Settings
 // bools rendered explicitly false). Values match render-goldens.test.mjs.
-// Regenerated after schema_revision bump to b57c3d0e9142 (account_delete_intents).
-const MAIN_DEDICATED_FINGERPRINT='d905f23a38bc908aca675744a2de9b6a67a2731d97dd9a064f80b5bc3f82b8a2';
-const MAIN_OWNED_STAGING_FINGERPRINT='9841c565c3bcd0ad985cb5581b48366707a6fe9e6f8fd70e424c6835505dde0f';
+// Regenerated after schema_revision bump to c68d4e1f0253 (recording_audio_48h_retention).
+const MAIN_DEDICATED_FINGERPRINT='25cc3c3bfca95ad81bec2117d64de7c73fa50d2c8ee37b2f1ceb00dbd2fac6b8';
+const MAIN_OWNED_STAGING_FINGERPRINT='417e972fd3d0a2e2ed7b82fd3caf9b4642cea0c73f911f0064216312cf720e04';
 
 test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const baseline=render(structuredClone(sample));

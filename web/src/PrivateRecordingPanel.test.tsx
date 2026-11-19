@@ -218,7 +218,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     metadata.attach.mockImplementationOnce(async(...args)=>{await original(...args);rejected=true;throw new WorkspaceApiError(503);});
     const resolve=vi.spyOn(privateRecordingApi,'resolve').mockImplementation(async()=>({outcome:'saved',recording:metadata.receipt()}));
     props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe,prepareStore:async()=>{
-      const store=await prepareStore();return {keys:()=>store.keys(),close:()=>store.close(),write:(key,prior,value)=>store.write(key,prior,value),read:async key=>{
+      const store=await prepareStore();return {keys:()=>store.keys(),close:()=>store.close(),delete:(key)=>store.delete(key),write:(key,prior,value)=>store.write(key,prior,value),read:async key=>{
         const retained=await store.read(key);
         if(rejected&&key==='ledger:'+runtimes[0].snapshot.recordingId&&++pendingReads===2){rereading=true;await held;}
         return retained;
@@ -317,7 +317,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
       const store=await prepareStore();
       if(!recovering)return store;
       const key='manifest:'+runtimes[0].snapshot.recordingId;
-      return {keys:()=>store.keys(),close:()=>store.close(),write:async(k,prior,value)=>{recoveryWrites(k,value);await store.write(k,prior,value);},read:async k=>{
+      return {keys:()=>store.keys(),close:()=>store.close(),delete:(k)=>store.delete(k),write:async(k,prior,value)=>{recoveryWrites(k,value);await store.write(k,prior,value);},read:async k=>{
         const retained=await store.read(k);
         if(k===key&&++manifestReads===2){
           const changed={...(retained as Record<string,unknown>),phase:'recording'};
