@@ -1,6 +1,7 @@
 import { DESKTOP_RECORDER_CHANNELS, parseDesktopRecorderRequest, parseDesktopRecorderState,
   type DesktopRecorderPort, type DesktopRecorderState } from "../../capture/src/configured/provider/desktop-recorder-view";
 import type { DesktopProviderRecorder } from "./provider-recorder.js";
+import type { DesktopAudioRetentionPolicy } from "./durable-provider-records.js";
 
 interface Frame { readonly url: string }
 interface InvokeEvent { readonly sender: { readonly id: number; readonly mainFrame: Frame }; readonly senderFrame: Frame | null }
@@ -39,7 +40,10 @@ export class DesktopProviderRecorderIpc {
     this.ipc.handle(DESKTOP_RECORDER_CHANNELS.request, async (event, value) => {
       if (this.revoked || event.sender.id !== this.renderer.id || !event.senderFrame
         || event.senderFrame !== event.sender.mainFrame || !origin(event.senderFrame.url) || !this.validRenderer()) throw failure();
-      const request = parseDesktopRecorderRequest(value);
+      // T1: optional renderer policy. Absent/unknown means OFF (no deletion).
+      const policy = readAudioRetentionPolicy(value);
+      if (policy !== undefined) this.recorder.setAudioRetentionPolicy(policy);
+      const request = parseDesktopRecorderRequest(stripAudioRetentionPolicy(value));
       if (request.recorderId !== this.recorderId && !(request.kind === "read" && request.recorderId === null)) throw failure();
       if (!this.recorder.availableForView && request.kind !== "deactivate") throw failure();
       let ok = true;
@@ -52,8 +56,13 @@ export class DesktopProviderRecorderIpc {
           case "permissions": await this.recorder.refreshPermissions(); break;
           case "resume": await this.recorder.resumePendingWork(); break;
           case "release": await this.recorder.releaseUploadedCapture(); break;
-          case "deactivate": await this.recorder.deactivate(); break;
-          case "read": break;
+          case "deactivate":
+            await this.recorder.sweepExpiredAudio().catch(() => undefined);
+            await this.recorder.deactivate();
+            break;
+          case "read":
+            await this.recorder.sweepExpiredAudio().catch(() => undefined);
+            break;
         }
       } catch { ok = false; }
       if (request.kind !== "deactivate" && !this.recorder.availableForView) throw failure();
@@ -98,3 +107,19 @@ function origin(value: string): boolean {
   catch { return false; }
 }
 function failure(): Error { return new Error("Desktop recording command is unavailable."); }
+
+/** Pull optional T1 policy without failing closed parsers that expect exact keys. */
+function readAudioRetentionPolicy(value: unknown): DesktopAudioRetentionPolicy | null | undefined {
+  if (!value || typeof value !== "object" || !("audioRetention" in value)) return undefined;
+  const policy = (value as { audioRetention: unknown }).audioRetention;
+  if (policy === null) return null;
+  if (!policy || typeof policy !== "object" || Array.isArray(policy)) return null;
+  return policy as DesktopAudioRetentionPolicy;
+}
+
+function stripAudioRetentionPolicy(value: unknown): unknown {
+  if (!value || typeof value !== "object" || !("audioRetention" in value)) return value;
+  const copy = { ...(value as Record<string, unknown>) };
+  delete copy.audioRetention;
+  return copy;
+}

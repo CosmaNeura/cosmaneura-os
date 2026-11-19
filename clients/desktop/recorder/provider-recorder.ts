@@ -14,6 +14,12 @@ import { parseBackendCaptureGrant, type OneTimeCaptureCapability } from "./proto
 import { DesktopPcmCaptureSource } from "./pcm-capture-source.js";
 import type { DesktopPCMCoverage } from "./native-pcm-driver.js";
 import { NativeProcessPCMDriver, type AuthorizedDesktopSelection, type NativeProcessDriverOptions } from "./native-process-driver.js";
+import {
+  desktopAudioRetentionEnabled,
+  sweepDurablePrivateRecordingAudio,
+  type DesktopAudioRetentionPolicy,
+} from "./durable-provider-records.js";
+import type { DesktopRecordNamespace } from "./durable-record-store.js";
 
 /** Saved server receipts, supplied to the backend for verification, not authority. */
 export interface PreparedDesktopCapture {
@@ -58,6 +64,13 @@ export interface DesktopProviderRecorderOptions {
   readonly retireSource: () => Promise<void>;
   /** Close creator-scoped stores and release exclusive host ownership after stop. */
   readonly release: () => Promise<void>;
+  /**
+   * T1: 48-hour audio retention. Absent/unknown means OFF (no deletion).
+   * Effective only when enabled===true. Optional durable namespace for private audio.
+   */
+  readonly audioRetention?: DesktopAudioRetentionPolicy | null;
+  readonly audioRetentionRecords?: DesktopRecordNamespace;
+  readonly now?: () => number;
 }
 
 /** Trusted main composition. No identity, grant, storage key, helper path or
@@ -94,8 +107,10 @@ export class DesktopProviderRecorder implements ProviderRecorderController {
   private deactivated = false;
   private closed = false;
   private captureMayBeActive = false;
+  private audioRetention: DesktopAudioRetentionPolicy | null | undefined;
 
   private constructor(private readonly options: DesktopProviderRecorderOptions) {
+    this.audioRetention = options.audioRetention;
     if (typeof process === "undefined" || !process.versions.node || typeof window !== "undefined"
       || "type" in process && process.type === "renderer" || options.enabled !== true
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(options.sessionId) || options.signal.aborted) throw unavailable();
@@ -171,10 +186,29 @@ export class DesktopProviderRecorder implements ProviderRecorderController {
     options.signal.addEventListener("abort", this.onRevocation, { once: true });
   }
 
+  /** Renderer-supplied policy. Absent or unknown keeps deletion off. */
+  setAudioRetentionPolicy(policy: DesktopAudioRetentionPolicy | null | undefined): void {
+    this.requireOpen();
+    this.audioRetention = policy && typeof policy === "object" ? policy : null;
+  }
+
+  async sweepExpiredAudio(): Promise<{ deleted: string[]; inspected: number }> {
+    this.requireOpen();
+    if (!desktopAudioRetentionEnabled(this.audioRetention) || !this.options.audioRetentionRecords) {
+      return { deleted: [], inspected: 0 };
+    }
+    return sweepDurablePrivateRecordingAudio({
+      records: this.options.audioRetentionRecords,
+      policy: this.audioRetention,
+      now: this.options.now ?? (() => Date.now()),
+    });
+  }
+
   static async open(options: DesktopProviderRecorderOptions): Promise<DesktopProviderRecorder> {
     options = Object.freeze({ ...options, native: Object.freeze({ ...options.native }) });
     const recorder = new DesktopProviderRecorder(options);
     try {
+      await recorder.sweepExpiredAudio().catch(() => undefined);
       await recorder.run("prepare", async () => {
         const current = Object.freeze({ ...await options.authorizePreparation(recorder.signal) }); recorder.requireOpen();
         if (current.sessionId !== options.sessionId || ![
