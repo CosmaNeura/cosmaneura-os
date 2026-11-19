@@ -103,8 +103,8 @@ test('owned staging fingerprint and vault mapping',()=>{
   // Match render-goldens owned staging: keep sample identity; only scope/origins/features.
   const value=owned('staging.cosmas.ai');
   const files=render(value);
-  // Regenerated after merge of #404 and rechain to c68f2a91b053.
-  assert.equal(fp(files),'92e0e66cf0d23e21a51289475f27d8878f3133eb284b5aec6800a138b3de97e9');
+  // Regenerated after #405/#404 merge + AZURE_ENABLED explicit false.
+  assert.equal(fp(files),'d16c716ba578ef8f24ed178bbb213c0733b14134ca8a197485ab0b0a570d993b');
   const pe=files['host-preparation.json'].private_environment;
   assert.deepEqual(pe.key_vault_secret_names,{
     [ACCOUNT_DELETE_ENV_NAME]:STAGING_ACCOUNT_DELETE_VAULT_SECRET,

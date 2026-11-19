@@ -11,6 +11,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
+from cosmas_os.adapters.azure_fast_transcription import AzureFastTranscriptionProcessor
 from cosmas_os.application import private_recording as private
 from cosmas_os.application import real_patient_recording as real_patient
 from cosmas_os.application import services as svc
@@ -93,7 +94,18 @@ def enabled_status(session: Session, box_id: str, owner_id: str, wid: str, *, ex
 
 
 def _processor() -> TranscriptionProcessor:
-    return _PROCESSOR if _PROCESSOR is not None else FakeTranscriptionProcessor()
+    if _PROCESSOR is not None:
+        return _PROCESSOR
+    if settings.independent_recording_transcription_azure_enabled:
+        endpoint = settings.azure_fast_transcription_endpoint
+        auth = settings.azure_fast_transcription_auth
+        if not endpoint or auth not in {"entra", "key"}:
+            raise ws.WorkspaceError("independent_recording_transcription_unavailable", 503)
+        return AzureFastTranscriptionProcessor.from_settings(
+            endpoint=endpoint,
+            auth=auth,
+        )
+    return FakeTranscriptionProcessor()
 
 
 def _scoped(model, session: Session, box_id: str, wid: str, rid: str, oid: str, *, lock=False, state=None):
