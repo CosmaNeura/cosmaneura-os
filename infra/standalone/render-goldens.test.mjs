@@ -21,15 +21,17 @@ const fingerprint=files=>createHash('sha256').update(JSON.stringify(files)).dige
 //   "
 // Regenerated after schema_revision bump to c68d4e1f0253 (recording_audio_48h_retention).
 // Regenerated after RECORDING_AUDIO_48H_RETENTION_ENABLED explicit false.
-const DEDICATED_AUDIENCE_FINGERPRINT='cf23b5aa6bd220dbf8cb5b5286c65e07ce1386abb4a3e3a8a6b26298eacfc5b5';
-const DEDICATED_SHARED_STAGING_FINGERPRINT='6241c39b2f166cb3e75fd28f0aaacc6add0a1e5d0e0531460a145736f8422e99';
-const OWNED_STAGING_FINGERPRINT='da154a6d6eb20ef339d85139b72ed773a1fed9403b986c7db0d44279c017dfa4';
+// Regenerated after merge of #404 and rechain to c68f2a91b053.
+const DEDICATED_AUDIENCE_FINGERPRINT='e46859a75beb56bab2babd8595b657cb51bd25c29fea472f94e5223c845bb6c7';
+const DEDICATED_SHARED_STAGING_FINGERPRINT='e3759161087a426ac23c234b697ae7a6fe9ef1cc4e9a52bde136f39a9b1b383a';
+const OWNED_STAGING_FINGERPRINT='92e0e66cf0d23e21a51289475f27d8878f3133eb284b5aec6800a138b3de97e9';
 
 const EXPLICIT_FALSE=[
   'WORKSPACE_CAPTURE_PROXY_ENABLED','GOOGLE_CONNECTION_BROKER_ENABLED',
   'WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED','WORKSPACE_ENROLLMENT_MANAGED',
   'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
   'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED',
+  'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
   'RECORDING_AUDIO_48H_RETENTION_ENABLED',
 ];
 
@@ -50,7 +52,7 @@ test('shared_staging dedicated package fingerprint and explicit-false backend sw
   for(const flag of EXPLICIT_FALSE)assert.equal(files['api-public.json'][flag],'false',flag);
 });
 
-test('owned staging package fingerprint keeps the eight switches false',()=>{
+test('owned staging package fingerprint keeps the nine switches false',()=>{
   const value=structuredClone(sample);
   value.resource_scope='owned-cosmabot-vm-instance';
   value.web_origin='https://staging.cosmas.ai';value.api_origin='https://api.staging.cosmas.ai';
