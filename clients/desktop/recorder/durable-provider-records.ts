@@ -4,6 +4,131 @@ import type { DesktopPCMCoverage, DesktopPCMStart } from "./native-pcm-driver.js
 import { parseDesktopPCMStart, parseDesktopPCMCompletion } from "./pcm-capture-source.js";
 import { type DesktopRecordNamespace, failure, uuid } from "./durable-record-store.js";
 
+export const DESKTOP_AUDIO_RETENTION_HOURS = 48;
+
+/** T1: absent/unknown → OFF. enabled===true required. */
+export type DesktopAudioRetentionPolicy = {
+  readonly enabled: boolean;
+  readonly enabledAt?: string | null;
+  readonly hours?: number;
+  readonly warnHours?: number;
+};
+
+export function normalizeDesktopAudioRetentionPolicy(raw: unknown): DesktopAudioRetentionPolicy | null {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (o.enabled !== true) return { enabled: false };
+  const enabledAt = o.enabledAt ?? o.enabled_at;
+  // Build in one expression — readonly props cannot be assigned after create (TS2540).
+  return enabledAt === null
+    ? { enabled: true, enabledAt: null }
+    : typeof enabledAt === "string"
+      ? { enabled: true, enabledAt }
+      : { enabled: true };
+}
+
+export function desktopAudioRetentionEnabled(policy: DesktopAudioRetentionPolicy | null | undefined): boolean {
+  return policy?.enabled === true;
+}
+
+export function desktopAudioRetentionEnabledAtMs(policy: DesktopAudioRetentionPolicy | null | undefined): number | null {
+  if (!desktopAudioRetentionEnabled(policy) || typeof policy?.enabledAt !== "string" || !policy.enabledAt) return null;
+  const ms = Date.parse(policy.enabledAt);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+type DurableAudioManifest = {
+  readonly recordingId: string;
+  readonly phase: string;
+  readonly endedAt?: string;
+  readonly updatedAt: string;
+  readonly chunks: readonly { readonly sequence: number }[];
+};
+
+const ACTIVE = new Set(["starting", "recording", "pausing", "stopping"]);
+
+function retentionDeadlineMs(manifest: DurableAudioManifest, enabledAtMs: number): number {
+  const raw = typeof manifest.endedAt === "string" && manifest.endedAt.length > 0
+    ? manifest.endedAt : manifest.updatedAt;
+  const anchor = Date.parse(raw);
+  if (!Number.isFinite(anchor)) throw failure();
+  return Math.max(anchor, enabledAtMs) + DESKTOP_AUDIO_RETENTION_HOURS * 60 * 60 * 1000;
+}
+
+async function readJson(records: DesktopRecordNamespace, key: string): Promise<{ value: unknown; revision: number } | null> {
+  const row = await records.get(key);
+  if (!row) return null;
+  try {
+    return { value: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(row.data)), revision: row.revision };
+  } finally { row.data.fill(0); }
+}
+
+async function deleteKey(records: DesktopRecordNamespace, key: string): Promise<void> {
+  const row = await records.get(key);
+  if (!row) return;
+  try { records.delete(key, row.revision); }
+  finally { row.data.fill(0); }
+}
+
+/** Delete expired private-recording AUDIO only. Per-recording try/catch. */
+export async function sweepDurablePrivateRecordingAudio(options: {
+  readonly records: DesktopRecordNamespace;
+  readonly policy: DesktopAudioRetentionPolicy | null | undefined;
+  readonly now: () => number;
+  readonly sealInProgress?: (recordingId: string) => Promise<DurableAudioManifest | null>;
+  readonly recordFailure?: (recordingId: string, error: unknown) => void;
+}): Promise<{ readonly deleted: string[]; readonly inspected: number }> {
+  if (!desktopAudioRetentionEnabled(options.policy)) return { deleted: [], inspected: 0 };
+  const enabledAtMs = desktopAudioRetentionEnabledAtMs(options.policy);
+  if (enabledAtMs === null) return { deleted: [], inspected: 0 };
+  const nowMs = options.now();
+  const listed = await options.records.list();
+  const manifests = listed.filter((row) => row.key.startsWith("manifest:"));
+  for (const row of listed) row.data.fill(0);
+  const deleted: string[] = [];
+  for (const entry of manifests) {
+    const recordingId = entry.key.slice("manifest:".length);
+    try {
+      const loaded = await readJson(options.records, entry.key);
+      if (!loaded || !loaded.value || typeof loaded.value !== "object") continue;
+      let manifest = loaded.value as DurableAudioManifest;
+      if (manifest.recordingId !== recordingId || typeof manifest.updatedAt !== "string") continue;
+      let deadline = retentionDeadlineMs(manifest, enabledAtMs);
+      if (deadline > nowMs) continue;
+      if (ACTIVE.has(manifest.phase)) {
+        const sealed = options.sealInProgress ? await options.sealInProgress(recordingId) : null;
+        if (!sealed) continue;
+        manifest = sealed;
+        deadline = retentionDeadlineMs(manifest, enabledAtMs);
+        if (deadline > nowMs) continue;
+      }
+      const hint = Array.isArray(manifest.chunks) ? manifest.chunks.length : 0;
+      for (let sequence = 0; sequence < hint; sequence++) {
+        await deleteKey(options.records, `chunk:${recordingId}:${sequence}`);
+      }
+      const remaining = (await options.records.list()).filter((row) => row.key.startsWith(`chunk:${recordingId}:`));
+      for (const row of remaining) {
+        const key = row.key;
+        row.data.fill(0);
+        await deleteKey(options.records, key);
+      }
+      await deleteKey(options.records, `manifest:${recordingId}`);
+      deleted.push(recordingId);
+    } catch (error) {
+      options.recordFailure?.(recordingId, error);
+    }
+  }
+  return { deleted, inspected: manifests.length };
+}
+
+export async function clearPrivateRecordingScopeKeys(records: DesktopRecordNamespace): Promise<void> {
+  for (const row of await records.list()) {
+    const { key, revision } = row;
+    row.data.fill(0);
+    records.delete(key, revision);
+  }
+}
+
 /** Reuses the existing provider and review journals in trusted main code. This
  * adapter is not registered as a Capacitor plugin or exposed to renderer IPC. */
 export function desktopJournalRecords(records: DesktopRecordNamespace): Pick<SecureQueuePlugin, "get" | "create" | "compareAndSwap"> {

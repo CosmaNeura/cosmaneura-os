@@ -214,7 +214,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     await selected.store.write('transfer:'+entry.recordingId,saved.current,next);need(current(selected));saved.current=next;setTransfer(next);}
   async function openRuntime(admitted:PreparedCapture,selected=owner.current){need(current(selected)&&selected);
     const opened=await openSavedRecordingRuntime({workspaceId:workspace.id,admitted,identity,scope:entry.scope,recording:selected.recording,
-      chunks:saved.current!.admission!.source.chunks,platform:entry.platform,isCurrent:()=>current(selected)});
+      chunks:saved.current!.admission!.source.chunks,platform:entry.platform,isCurrent:()=>current(selected),store:selected.store});
     if(!current(selected)){await opened.close();return;}selected.runtime=opened;selected.unsubscribe=opened.controller.subscribe(value=>{if(current(selected))setSnapshot(value);});
     if(opened.reviewOnly)setSnapshot({...opened.controller.snapshot,state:'processing',sessionId:admitted.session_id});
   }

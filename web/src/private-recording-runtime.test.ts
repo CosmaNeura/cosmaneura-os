@@ -7,7 +7,7 @@ import {IosNativeMicrophoneCaptureSource} from '../../clients/capture/src/native
 import {BrowserMicrophoneCaptureSource} from '../../clients/capture/src/audio/browser-microphone-source';
 import {acquireCaptureFlowLock,type CaptureFlowLockManager} from '../../clients/capture/src/flow/capture-lock';
 import type {SecureQueuePlugin,VersionedSecureQueueRecord} from '../../clients/capture/plugins/secure-queue/definitions';
-import {PrivateRecordingRuntime,listPrivateRecordings,openPrivateRecordingStore,validatePrivateRecordingConsent,type PrivateRecordingOptions,type PrivateRecordingManifest,type PrivateRecordingStore} from './private-recording-runtime';
+import {PrivateRecordingRuntime,activePrivateRecordingId,listPrivateRecordings,openPrivateRecordingStore,validatePrivateRecordingConsent,type PrivateRecordingOptions,type PrivateRecordingManifest,type PrivateRecordingStore} from './private-recording-runtime';
 vi.mock('../../clients/capture/src/audio/pcm-capture-worklet.ts?worker&url',()=>({default:'/simulated-os-worklet.js'}));
 
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
@@ -156,7 +156,7 @@ it('reports only current startup progress, isolates observers and never persists
 
 it('stops physical input before a held encrypted status write while retaining exclusion',async()=>{
   const encrypted=await store(),gate=deferred();let writing=false;
-  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),close:()=>encrypted.close(),write:async(key,expected,value)=>{
+  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),delete:key=>encrypted.delete(key),close:()=>encrypted.close(),write:async(key,expected,value)=>{
     if((value as PrivateRecordingManifest).phase==='stopping'){writing=true;await gate.promise;}await encrypted.write(key,expected,value);
   }};
   const source=new ControlledSource(),release=vi.fn(async()=>{}),runtime=await open(source,{openStore:async()=>guarded,acquireLock:async()=>release});
@@ -168,7 +168,7 @@ it('stops physical input before a held encrypted status write while retaining ex
 
 it('observes immediate stop rejection while a status write is held and retains its exact owner',async()=>{
   const encrypted=await store(),gate=deferred();let writing=false;
-  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),close:()=>encrypted.close(),write:async(key,expected,value)=>{
+  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),delete:key=>encrypted.delete(key),close:()=>encrypted.close(),write:async(key,expected,value)=>{
     if((value as PrivateRecordingManifest).phase==='stopping'&&!writing){writing=true;await gate.promise;}await encrypted.write(key,expected,value);
   }};
   const source=new ControlledSource(),release=vi.fn(async()=>{}),runtime=await open(source,{openStore:async()=>guarded,acquireLock:async()=>release});
@@ -206,7 +206,7 @@ it('withholds corrupted saved audio and prevents a different account from adopti
 });
 
 it('preserves an orphan chunk after manifest CAS failure and never silently overwrites it or restarts',async()=>{
-  const inner=await store();let fail=false;const wrapped:PrivateRecordingStore={read:k=>inner.read(k),keys:()=>inner.keys(),close:()=>inner.close(),write:async(k,e,v)=>{if(fail&&k.startsWith('manifest:')&&(v as PrivateRecordingManifest).chunks.length>0)throw Error('Simulated lost manifest commit');await inner.write(k,e,v);}};
+  const inner=await store();let fail=false;const wrapped:PrivateRecordingStore={read:k=>inner.read(k),keys:()=>inner.keys(),delete:k=>inner.delete(k),close:()=>inner.close(),write:async(k,e,v)=>{if(fail&&k.startsWith('manifest:')&&(v as PrivateRecordingManifest).chunks.length>0)throw Error('Simulated lost manifest commit');await inner.write(k,e,v);}};
   const source=new ControlledSource(),runtime=await open(source,{openStore:async()=>wrapped});await runtime.start(consent());fail=true;const chunk=wav();await expect(source.emit(chunk)).rejects.toThrow();expect(chunk.wavBytes.every(v=>v===0)).toBe(true);expect(runtime.snapshot.recordedChunks).toBe(0);expect(await inner.keys()).toContain('chunk:'+runtime.snapshot.recordingId+':0');await runtime.stop();expect(runtime.snapshot.phase).toBe('interrupted');await expect(runtime.start(consent())).rejects.toThrow();expect(source.starts).toBe(1);
 });
 
@@ -230,4 +230,23 @@ it('can close a stopped recording again after access changes without reopening a
   await runtime.start(consent());await source.emit();await runtime.close();current=false;
   await runtime.close();expect(source.stops).toBe(1);expect(runtime.snapshot.recordedChunks).toBe(1);
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it('ledger manifestSHA256 ignores endedAt and retention-off writes omit endedAt',async()=>{
+  const nowMs=Date.parse('2026-11-01T00:00:00.000Z'),policy={enabled:true as const,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:new Date(nowMs).toISOString(),fetchedAtDeviceMs:nowMs};
+  const on=new ControlledSource(),runtime=await open(on,{audioRetention:policy,now:()=>nowMs});
+  expect(activePrivateRecordingId()).toBeNull();
+  await runtime.start(consent());expect(activePrivateRecordingId()).toBe(runtime.snapshot.recordingId);
+  await on.emit();await runtime.stop();expect(activePrivateRecordingId()).toBeNull();
+  expect(runtime.snapshot.endedAt).toBeTruthy();
+  const withEnded=await runtime.snapshotForLedger();
+  const encrypted=await store(),saved=await encrypted.read('manifest:'+runtime.snapshot.recordingId) as PrivateRecordingManifest;
+  const stripped={...saved};delete (stripped as {endedAt?:string}).endedAt;
+  await encrypted.write('manifest:'+runtime.snapshot.recordingId,saved,stripped);encrypted.close();
+  const id=runtime.snapshot.recordingId;await runtime.close();
+  const reopened=await open(new ControlledSource(),{audioRetention:policy,now:()=>nowMs},{recordingId:id});
+  expect((await reopened.snapshotForLedger()).manifestSHA256).toBe(withEnded.manifestSHA256);
+  const source=new ControlledSource(),plain=await open(source);await plain.start(consent());await source.emit();await plain.stop();
+  const s=await store(),row=await s.read('manifest:'+plain.snapshot.recordingId) as PrivateRecordingManifest;s.close();
+  expect(row).not.toHaveProperty('endedAt');
 });
