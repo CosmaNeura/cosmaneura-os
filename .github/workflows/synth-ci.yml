@@ -517,6 +517,7 @@ jobs:
             clients/desktop/recorder/native-continuation.test.ts
             clients/desktop/recorder/continuous-capture.test.ts
             clients/desktop/recorder/durable-queue-store.test.ts
+            clients/desktop/recorder/audio-retention.test.ts
           )
           EXCLUDED_VITEST=(
             clients/desktop/recorder/workspace-capture-host.test.ts # Mac-only; see #409
