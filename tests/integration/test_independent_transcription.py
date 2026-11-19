@@ -764,6 +764,106 @@ def test_upload_put_fails_once_then_retry_leaves_readable_blob(enabled_case):
     assert started["status"] == "ready"
 
 
+def test_duplicate_after_recording_class_change_refuses_without_put(enabled_case):
+    c = enabled_case
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-dup-class")
+    uploaded = tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    upload = c["session"].get(IndependentRecordingAudioUpload, uploaded["upload_id"])
+    assert upload is not None and upload.blob_key is not None
+    upload.recording_class = "real"
+    c["session"].commit()
+
+    puts: list[str] = []
+    original_put = c["blob"].put_bytes
+
+    def counting_put(key: str, data: bytes, content_type: str) -> str:
+        puts.append(key)
+        return original_put(key, data, content_type)
+
+    c["blob"].put_bytes = counting_put  # type: ignore[method-assign]
+    with pytest.raises(ws.WorkspaceError) as err:
+        tx.upload_audio(
+            c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+            payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+        )
+    assert err.value.code == "independent_transcription_recording_class_mismatch"
+    assert puts == []
+
+
+def test_duplicate_fence_raise_refuses_without_put(enabled_case):
+    c = enabled_case
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-dup-fence")
+    tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    puts: list[str] = []
+    original_put = c["blob"].put_bytes
+
+    def counting_put(key: str, data: bytes, content_type: str) -> str:
+        puts.append(key)
+        return original_put(key, data, content_type)
+
+    c["blob"].put_bytes = counting_put  # type: ignore[method-assign]
+
+    def boom_fence() -> None:
+        raise ws.WorkspaceError("independent_transcription_fence", 503)
+
+    with pytest.raises(ws.WorkspaceError) as err:
+        tx.upload_audio(
+            c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+            payload, external=c["external"], blob=c["blob"], clock=c["clock"], fence=boom_fence,
+        )
+    assert err.value.code == "independent_transcription_fence"
+    assert puts == []
+
+
+def test_healthy_duplicate_skips_put_and_audit(enabled_case):
+    from cosmas_os.models import AuditEvent
+
+    c = enabled_case
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-dup-healthy")
+    first = tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    audits_before = c["session"].scalars(
+        select(AuditEvent).where(
+            AuditEvent.aggregate_id == first["upload_id"],
+            AuditEvent.event_type == "recording_audio.uploaded",
+        )
+    ).all()
+    assert len(audits_before) == 1
+
+    puts: list[str] = []
+    original_put = c["blob"].put_bytes
+
+    def counting_put(key: str, data: bytes, content_type: str) -> str:
+        puts.append(key)
+        return original_put(key, data, content_type)
+
+    c["blob"].put_bytes = counting_put  # type: ignore[method-assign]
+    second = tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    assert second["duplicate"] is True
+    assert puts == []
+    audits_after = c["session"].scalars(
+        select(AuditEvent).where(
+            AuditEvent.aggregate_id == first["upload_id"],
+            AuditEvent.event_type == "recording_audio.uploaded",
+        )
+    ).all()
+    assert len(audits_after) == 1
+
+
 def test_unavailable_processor_failure_is_retryable(enabled_case):
     c = enabled_case
     now = c["clock"].now()
@@ -798,8 +898,15 @@ def test_unavailable_processor_failure_is_retryable(enabled_case):
     assert recovered["status"] == "ready"
 
 
-def test_finish_lock_timeout_returns_503(enabled_case, monkeypatch):
-    from sqlalchemy.exc import OperationalError
+def test_finish_lock_timeout_returns_503(enabled_case, engine):
+    """Hold the upload row from a second PG backend; finish must map the real lock timeout to 503."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    from cosmas_os.ports.recording_transcription import TranscriptionRequest
 
     c = enabled_case
     now = c["clock"].now()
@@ -813,43 +920,116 @@ def test_finish_lock_timeout_returns_503(enabled_case, monkeypatch):
     job = tx._claim_job(c["session"], upload=upload, now=now)
     claim_attempt = job.attempts
     c["session"].commit()
+    # Nested-savepoint commits are invisible to other backends; persist so the
+    # holder connection can take the real row lock. owned_database_isolation
+    # truncates committed rows before the next test on the workspace profile.
+    outer = c["session"].connection()
+    outer.commit()
+    outer.begin()
 
-    class LockTimeout(Exception):
-        pgcode = "55P03"
-        sqlstate = "55P03"
+    upload_id = upload.id
+    box_id, owner_id = c["f"].box, c["f"].actor
+    wid, rid, oid = c["draft"]["id"], c["row"]["recording_id"], payload["operation_id"]
+    held, release = Event(), Event()
+    holder_pid: list[int] = []
 
-    def boom_get(*args, **kwargs):
-        raise OperationalError("SELECT", {}, LockTimeout("canceling statement due to lock timeout"))
+    def hold_upload_row() -> None:
+        with Session(engine) as holder:
+            holder.execute(text("SET LOCAL lock_timeout = '30s'"))
+            holder_pid.append(holder.scalar(text("SELECT pg_backend_pid()")))
+            locked = holder.get(IndependentRecordingAudioUpload, upload_id, with_for_update=True)
+            assert locked is not None
+            held.set()
+            assert release.wait(30), "finish never finished waiting on the held upload lock"
+            holder.rollback()
 
-    from cosmas_os.ports.recording_transcription import TranscriptionRequest
-
-    monkeypatch.setattr(c["session"], "get", boom_get)
     outcome = FakeTranscriptionProcessor().transcribe(
         TranscriptionRequest(
             audio=b"tone-lock-to",
             sha256=payload["sha256"],
             duration_ms=1000,
             language="en-US",
-            operation_id=payload["operation_id"],
+            operation_id=oid,
             synthetic=True,
         )
     )
-    with pytest.raises(ws.WorkspaceError) as err:
-        tx._finish_transcription(
-            c["session"],
-            c=svc.Container(c["session"], clock=c["clock"], blob=c["blob"]),
-            upload_id=upload.id,
-            box_id=c["f"].box,
-            owner_id=c["f"].actor,
-            wid=c["draft"]["id"],
-            rid=c["row"]["recording_id"],
-            operation_id=payload["operation_id"],
-            outcome=outcome,
-            now=now,
-            claim_attempt=claim_attempt,
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(hold_upload_row)
+        assert held.wait(5), "second connection never locked the upload row"
+        with Session(engine) as finish_session:
+            finish_pid = finish_session.scalar(text("SELECT pg_backend_pid()"))
+            assert finish_pid != holder_pid[0]
+            with pytest.raises(ws.WorkspaceError) as err:
+                tx._finish_transcription(
+                    finish_session,
+                    c=svc.Container(finish_session, clock=c["clock"], blob=c["blob"]),
+                    upload_id=upload_id,
+                    box_id=box_id,
+                    owner_id=owner_id,
+                    wid=wid,
+                    rid=rid,
+                    operation_id=oid,
+                    outcome=outcome,
+                    now=now,
+                    claim_attempt=claim_attempt,
+                )
+            assert err.value.code == "independent_transcription_unavailable"
+            assert err.value.status == 503
+            assert err.value.__cause__ is not None
+            assert tx._is_lock_timeout(err.value.__cause__)
+        release.set()
+        pending.result(timeout=35)
+
+
+def test_start_and_finish_lock_upload_before_job(enabled_case):
+    from sqlalchemy import event
+
+    c = enabled_case
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-lock-order")
+    tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    statements: list[str] = []
+    bind = c["session"].connection()
+
+    def before(_connection, _cursor, statement, _parameters, _context, _executemany) -> None:
+        statements.append(statement)
+
+    def lock_targets(rows: list[str]) -> list[str]:
+        ordered: list[str] = []
+        for statement in rows:
+            upper = statement.upper()
+            if "FOR UPDATE" not in upper:
+                continue
+            if "INDEPENDENT_RECORDING_AUDIO_UPLOADS" in upper:
+                ordered.append("upload")
+            elif "INDEPENDENT_RECORDING_TRANSCRIPTION_JOBS" in upper:
+                ordered.append("job")
+        return ordered
+
+    start_locks: list[str] = []
+
+    class CaptureProcessor(FakeTranscriptionProcessor):
+        def transcribe(self, request):  # type: ignore[override]
+            start_locks[:] = lock_targets(statements)
+            return super().transcribe(request)
+
+    event.listen(bind, "before_cursor_execute", before)
+    try:
+        started = tx.start_transcription(
+            c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+            {"operation_id": payload["operation_id"]},
+            external=c["external"], blob=c["blob"], clock=c["clock"],
+            processor=CaptureProcessor(),
         )
-    assert err.value.code == "independent_transcription_unavailable"
-    assert err.value.status == 503
+    finally:
+        event.remove(bind, "before_cursor_execute", before)
+    assert started["status"] == "ready"
+    assert start_locks[:2] == ["upload", "job"]
+    finish_locks = lock_targets(statements)[len(start_locks):]
+    assert finish_locks[:2] == ["upload", "job"]
 
 
 def test_delete_own_account_blob_failure_rolls_back(enabled_case, monkeypatch):

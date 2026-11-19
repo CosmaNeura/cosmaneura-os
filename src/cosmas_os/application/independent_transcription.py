@@ -197,6 +197,16 @@ def _dup_view(row: IndependentRecordingAudioUpload) -> dict[str, Any]:
     }
 
 
+def _blob_present(c: svc.Container, key: str) -> bool:
+    try:
+        c.blob.get_bytes(key)
+        return True
+    except Exception as exc:  # noqa: BLE001 — typed absence only; other failures surface
+        if isinstance(exc, (KeyError, FileNotFoundError)) or type(exc).__name__ in _NOT_FOUND_TYPES:
+            return False
+        raise
+
+
 def _reput_matching_upload(
     session: Session,
     c: svc.Container,
@@ -206,9 +216,9 @@ def _reput_matching_upload(
     sha256: str,
     owner_id: str,
     now: datetime,
-    synthetic: bool,
+    fence=None,
 ) -> dict[str, Any]:
-    """Idempotent retry: same sha, not revoked/purged → re-put bytes and audit after put."""
+    """Idempotent retry: same sha, not revoked/purged → re-put only when the blob is missing."""
     _idem_conflict(existing, sha256=sha256, owner_id=owner_id)
     if existing.revoked_at is not None:
         raise ws.WorkspaceError("independent_transcription_revoked", 409)
@@ -216,6 +226,15 @@ def _reput_matching_upload(
         raise ws.WorkspaceError("independent_transcription_audio_expired", 410)
     if existing.blob_key is None:
         raise ws.WorkspaceError("independent_transcription_audio_expired", 410)
+    # Re-check class and fence before any storage write — same gates as first put.
+    _recording_class, synthetic = _require_recording_class(
+        session, existing.box_id, existing.recording_id, claimed=existing.recording_class,
+    )
+    if fence:
+        fence()
+    if _blob_present(c, existing.blob_key):
+        session.commit()
+        return _dup_view(existing)
     try:
         c.blob.put_bytes(existing.blob_key, audio_bytes, "application/octet-stream")
     except Exception as exc:  # noqa: BLE001 — storage failure is retryable for the client
@@ -248,6 +267,7 @@ def upload_audio(
     if existing is not None:
         return _recover_duplicate_upload(
             session, c, existing, audio_bytes=audio_bytes, sha256=sha256, owner_id=owner_id, now=now,
+            fence=fence,
         )
     duration_ms = int(payload["duration_ms"])
     language = str(payload.get("language") or "en-US")
@@ -281,6 +301,7 @@ def upload_audio(
             raise ws.WorkspaceError("idempotency_conflict", 409) from None
         return _recover_duplicate_upload(
             session, c, raced, audio_bytes=audio_bytes, sha256=sha256, owner_id=owner_id, now=now,
+            fence=fence,
         )
     # Persist the deterministic key before the blob write so a crash mid-put leaves
     # a row the duplicate path can re-put into. Audit "saved" only after put succeeds.
@@ -310,11 +331,11 @@ def _recover_duplicate_upload(
     sha256: str,
     owner_id: str,
     now: datetime,
+    fence=None,
 ) -> dict[str, Any]:
-    synthetic = existing.recording_class in {"synthetic", "demo"}
     return _reput_matching_upload(
         session, c, existing,
-        audio_bytes=audio_bytes, sha256=sha256, owner_id=owner_id, now=now, synthetic=synthetic,
+        audio_bytes=audio_bytes, sha256=sha256, owner_id=owner_id, now=now, fence=fence,
     )
 
 
