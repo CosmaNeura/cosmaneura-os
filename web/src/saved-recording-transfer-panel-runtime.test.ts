@@ -2,7 +2,6 @@
  * Panel persist/relaunch contract against the real saved-recording runtime.
  * Hole 1: import must never delete transfer:<recordingId> (breaks CAS persist).
  */
-import {createHash} from 'node:crypto';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import {EncryptedIndexedDbFlowStore} from '../../clients/capture/src/configured/flow/encrypted-store';
@@ -132,7 +131,8 @@ async function seedConfirmedImportRow(){
       schema_version:'1.0',content_encryption:'A256GCM',
       nonce:base64UrlEncode(new Uint8Array(12).fill(1)),media_type:'audio/wav',
     },new Uint8Array(16).fill(2));
-    const sha256=createHash('sha256').update(envelope).digest('hex');
+    const sha256=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',envelope as BufferSource)),
+      b=>b.toString(16).padStart(2,'0')).join('');
     const encrypted=attachEncryptedEnvelope(reserved,envelope,sha256);
     expect(await storage.compareAndSwap(objectId,1,encrypted)).toBe(true);
     const uploading=markUploading(encrypted);
