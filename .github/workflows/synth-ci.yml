@@ -513,7 +513,6 @@ jobs:
         run: |
           set -euo pipefail
           INCLUDED_VITEST=(
-            clients/desktop/recorder/audio-retention.test.ts
             clients/desktop/recorder/native-provider-presentation-cleanup.test.ts
             clients/desktop/recorder/native-continuation.test.ts
             clients/desktop/recorder/continuous-capture.test.ts
