@@ -5,7 +5,10 @@ import {openPrivateRecordingStore,sweepExpiredPrivateRecordingAudio,type Private
 import {privateRecordingLedgerKey} from './private-recording-ledger';
 import {
   AUDIO_DELETED_STUB_CONTRACT,
+  AUDIO_RETENTION_ARMED_CONTRACT,
+  AUDIO_RETENTION_ARMED_KEY,
   AUDIO_RETENTION_CLOCK_SKEW_MS,
+  AUDIO_RETENTION_HOURS,
   AUDIO_RETENTION_MS,
   AUDIO_TOMBSTONE_CONTRACT,
   audioRetentionAnchor,
@@ -16,16 +19,36 @@ import {
   deletePrivateRecordingAudio,
   EXPIRED_AUDIO_REFUSED,
   normalizeAudioRetentionPolicy,
+  readOrStampDeviceArmedAt,
   refuseExpiredAudio,
+  resolveAudioRetentionClock,
   sweepPrivateRecordingAudio,
+  type AudioRetentionPolicy,
 } from './private-recording-retention';
 
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const scope='d'.repeat(64),otherScope='e'.repeat(64);
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const consent=()=>({modality:'in_person' as const,participant_regions:['US-NY'],method:'verbal_attestation' as const,all_parties_consented:true as const,granted_at:'2026-11-01T12:00:00.000Z',language:'en-US' as const});
+
+/** Enabled policy with aligned server/device clocks (offset 0 → effectiveNow tracks injected now). */
+function policyOn(opts:{enabledAt:string;now?:number;deviceArmedAt?:string;serverNow?:string;fetchedAtDeviceMs?:number}):AudioRetentionPolicy{
+  const now=opts.now??Date.parse(opts.enabledAt);
+  const fetchedAtDeviceMs=opts.fetchedAtDeviceMs??now;
+  const serverNow=opts.serverNow??new Date(fetchedAtDeviceMs).toISOString();
+  return {
+    enabled:true,
+    hours:48,
+    warnHours:36,
+    enabledAt:opts.enabledAt,
+    serverNow,
+    fetchedAtDeviceMs,
+    ...(opts.deviceArmedAt?{deviceArmedAt:opts.deviceArmedAt}:{}),
+  };
+}
+
 /** enabledAt at/before ended so deadline stays endedAt+48h for classic clock tests. */
-const policy={enabled:true as const,hours:48,warnHours:36,enabledAt:'2026-10-01T00:00:00.000Z'};
+const policy=policyOn({enabledAt:'2026-10-01T00:00:00.000Z',now:Date.parse('2026-11-01T00:00:00.000Z')});
 let idb:IDBFactory;
 beforeEach(()=>{
   vi.stubGlobal('crypto',webcrypto);
@@ -50,6 +73,11 @@ async function seed(store:PrivateRecordingStore,row:PrivateRecordingManifest,ext
   for(const [key,value] of Object.entries(extra))await store.write(key,null,value);
 }
 
+/** Pre-stamp device armedAt so runtime sweep does not push the deadline to "now". */
+async function armAt(store:PrivateRecordingStore,atMs:number){
+  await readOrStampDeviceArmedAt(store,atMs);
+}
+
 it('keeps audio at 47:59:59 and deletes at 48:00:00 with an injected clock',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
@@ -64,6 +92,7 @@ it('keeps audio at 47:59:59 and deletes at 48:00:00 with an injected clock',asyn
   expect(gone.deleted).toEqual([id(1)]);
   expect(await store.read('manifest:'+id(1))).toBeNull();
   expect(await store.read('chunk:'+id(1)+':0')).toBeNull();
+  expect(await store.read('audio-deleted:'+id(1))).toMatchObject({contract:AUDIO_DELETED_STUB_CONTRACT,phase:'audio_deleted'});
   store.close();
 });
 
@@ -81,6 +110,7 @@ it('SecureQueue fake deletes at 48:00:00 and keeps at 47:59:59',async()=>{
   const store=await openPrivateRecordingStore(scope,'ios',{crypto:webcrypto,native});
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
   await seed(store,manifest(id(2),ended));
+  await armAt(store,Date.parse(policy.enabledAt!));
   expect((await sweepExpiredPrivateRecordingAudio(scope,'ios',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS-1})).deleted).toEqual([]);
   expect((await sweepExpiredPrivateRecordingAudio(scope,'ios',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([id(2)]);
   expect(await store.read('manifest:'+id(2))).toBeNull();
@@ -95,10 +125,11 @@ it('finishes a crash mid-delete on retry without resurrecting chunks',async()=>{
   expect(await store.read('chunk:'+id(3)+':0')).toBeNull();
   expect(await store.read('chunk:'+id(3)+':1')).not.toBeNull();
   expect(await store.read('manifest:'+id(3))).not.toBeNull();
-  await deletePrivateRecordingAudio(store,id(3),2);
+  await deletePrivateRecordingAudio(store,id(3),2,{scope});
   expect(await store.read('manifest:'+id(3))).toBeNull();
   expect(await store.read('chunk:'+id(3)+':1')).toBeNull();
-  await deletePrivateRecordingAudio(store,id(3),2); // idempotent retry
+  expect(await store.read('audio-deleted:'+id(3))).toMatchObject({contract:AUDIO_DELETED_STUB_CONTRACT});
+  await deletePrivateRecordingAudio(store,id(3),2,{scope}); // idempotent retry
   store.close();
 });
 
@@ -140,6 +171,7 @@ it('offline then sweep on launch deletes expired audio',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
   await seed(store,manifest(id(5),ended));
+  await armAt(store,Date.parse(policy.enabledAt!));
   store.close();
   // Device offline: no sweep. Reopen = launch.
   const relaunch=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
@@ -152,6 +184,7 @@ it('sign-out sweep removes expired audio only',async()=>{
   const base=Date.parse('2026-11-01T00:00:00.000Z');
   await seed(store,manifest(id(6),new Date(base).toISOString()));
   await seed(store,manifest(id(7),new Date(base+AUDIO_RETENTION_MS/2).toISOString()));
+  await armAt(store,Date.parse(policy.enabledAt!));
   const now=()=>base+AUDIO_RETENTION_MS;
   expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now})).deleted).toEqual([id(6)]);
   expect(await store.read('manifest:'+id(7))).not.toBeNull();
@@ -163,6 +196,7 @@ it('replayed or restored expired recordingId is deleted again on sight',async()=
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended),now=()=>start+AUDIO_RETENTION_MS;
   await seed(store,manifest(id(8),ended));
+  await armAt(store,Date.parse(policy.enabledAt!));
   await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now});
   await seed(store,manifest(id(8),ended)); // restored/replayed
   expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now})).deleted).toEqual([id(8)]);
@@ -176,6 +210,7 @@ it('cross-scope isolation: sweep only touches its own scope',async()=>{
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
   const rowA=manifest(id(9),ended);const rowB={...manifest(id(10),ended),scope:otherScope};
   await seed(a,rowA);await seed(b,rowB);
+  await armAt(a,Date.parse(policy.enabledAt!));
   expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store:a,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([id(9)]);
   expect(await b.read('manifest:'+id(10))).not.toBeNull();
   expect(await b.read('chunk:'+id(10)+':0')).not.toBeNull();
@@ -190,6 +225,7 @@ it('transcripts and ledgers survive audio deletion',async()=>{
   const ledger={contract:'cosmas.private-recording.ledger.v1',recording_id:id(11),kept:true};
   const transcript={contract:'cosmabot.private-transcript.v1',text:'Synthetic visit A notes'};
   await seed(store,manifest(id(11),ended),{[ledgerKey]:ledger,[transcriptKey]:transcript,['visit-binding:'+id(11)]:{kept:true}});
+  await armAt(store,Date.parse(policy.enabledAt!));
   await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS});
   expect(await store.read('manifest:'+id(11))).toBeNull();
   expect(await store.read('chunk:'+id(11)+':0')).toBeNull();
@@ -223,8 +259,9 @@ it('either switch off means no deletion and no label',async()=>{
 it('absent enabledAt means no deletion and no label (fail closed)',async()=>{
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
   const row=manifest(id(120),ended);
-  const noAt={enabled:true as const,hours:48,warnHours:36};
-  const badAt={enabled:true as const,hours:48,warnHours:36,enabledAt:'not-a-date'};
+  const noAt=policyOn({enabledAt:'2026-10-01T00:00:00.000Z'});
+  delete (noAt as {enabledAt?:string}).enabledAt;
+  const badAt=policyOn({enabledAt:'not-a-date',now:start});
   expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS,noAt)).toBeNull();
   expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS,badAt)).toBeNull();
   expect(audioRetentionLabel(row,start+AUDIO_RETENTION_MS/2,noAt)).toBeNull();
@@ -268,7 +305,7 @@ it('legacy manifest without endedAt falls back to updatedAt',()=>{
 it('grandfathering: 30-day-old recording waits until flip+48h',async()=>{
   const flip='2026-11-15T12:00:00.000Z',flipMs=Date.parse(flip);
   const oldEnded='2026-10-16T12:00:00.000Z'; // 30 days before flip
-  const grandpa={enabled:true as const,hours:48,warnHours:36,enabledAt:flip};
+  const grandpa=policyOn({enabledAt:flip,now:flipMs});
   const row=manifest(id(16),oldEnded);
   expect(audioRetentionAnchor(row,flipMs+AUDIO_RETENTION_MS-1,grandpa)?.expired).toBe(false);
   expect(audioRetentionLabel(row,flipMs+AUDIO_RETENTION_MS-1,grandpa)?.text)
@@ -285,28 +322,119 @@ it('grandfathering: 30-day-old recording waits until flip+48h',async()=>{
   store.close();
 });
 
-it('clock skew over bound → no delete and no expired refuse',async()=>{
+it('missing serverNow refuses delete (H7 fail closed)',async()=>{
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
-  const deviceNow=start+AUDIO_RETENTION_MS;
-  const skewed={...policy,serverNow:new Date(deviceNow+AUDIO_RETENTION_CLOCK_SKEW_MS+1).toISOString()};
+  const noServer={enabled:true as const,hours:48,warnHours:36,enabledAt:'2026-10-01T00:00:00.000Z',fetchedAtDeviceMs:start};
+  expect(resolveAudioRetentionClock(noServer,start+AUDIO_RETENTION_MS).allowDelete).toBe(false);
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
-  await seed(store,manifest(id(17),ended));
-  expect((await sweepPrivateRecordingAudio({store,scope,policy:skewed,now:()=>deviceNow,
+  await seed(store,manifest(id(170),ended));
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:noServer,now:()=>start+AUDIO_RETENTION_MS,
     parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
-  expect(await store.read('manifest:'+id(17))).not.toBeNull();
-  refuseExpiredAudio(manifest(id(17),ended),deviceNow,skewed); // must not throw
+  refuseExpiredAudio(manifest(id(170),ended),start+AUDIO_RETENTION_MS,noServer);
   store.close();
 });
 
-it('serverNow within skew bound drives effective clock for delete',async()=>{
+it('clock skew over 5 min at fetch → no delete and no expired refuse',async()=>{
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
-  const serverAtDeadline=start+AUDIO_RETENTION_MS;
-  const deviceBehind=serverAtDeadline-60_000; // 1 min behind, within 5 min
-  const aligned={...policy,serverNow:new Date(serverAtDeadline).toISOString()};
+  const deviceAtFetch=start;
+  const skewed=policyOn({
+    enabledAt:'2026-10-01T00:00:00.000Z',
+    fetchedAtDeviceMs:deviceAtFetch,
+    serverNow:new Date(deviceAtFetch+AUDIO_RETENTION_CLOCK_SKEW_MS+1).toISOString(),
+  });
+  expect(resolveAudioRetentionClock(skewed,start+AUDIO_RETENTION_MS).allowDelete).toBe(false);
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,manifest(id(17),ended));
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:skewed,now:()=>start+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(17))).not.toBeNull();
+  refuseExpiredAudio(manifest(id(17),ended),start+AUDIO_RETENTION_MS,skewed); // must not throw
+  store.close();
+});
+
+it('aligned fetch then device advances 10 min still deletes at effective deadline (H7 offset)',async()=>{
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  const fetchDevice=start; // serverNow ≈ device at fetch
+  const aligned=policyOn({
+    enabledAt:'2026-10-01T00:00:00.000Z',
+    fetchedAtDeviceMs:fetchDevice,
+    serverNow:new Date(fetchDevice).toISOString(),
+  });
+  const tenMin=10*60*1000;
+  // Device advanced 10 min after fetch; deadline is start+48h → need device at deadline+10min? No:
+  // offset=0 so effectiveNow=deviceNow. Advance device 10 min from an earlier point and still hit deadline.
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   await seed(store,manifest(id(18),ended));
-  expect((await sweepPrivateRecordingAudio({store,scope,policy:aligned,now:()=>deviceBehind,
+  // At fetch+10min, still before deadline → keep
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:aligned,now:()=>fetchDevice+tenMin,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
+  // Advance device to deadline (10 min after a "would-be" early check); offset keeps tracking
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:aligned,now:()=>start+AUDIO_RETENTION_MS,
     parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([id(18)]);
+  store.close();
+});
+
+it('server ahead within skew at fetch: offset tracks so device-behind still deletes',async()=>{
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  const serverAtDeadline=start+AUDIO_RETENTION_MS;
+  const deviceAtFetch=serverAtDeadline-60_000; // 1 min behind at fetch
+  const aligned=policyOn({
+    enabledAt:'2026-10-01T00:00:00.000Z',
+    fetchedAtDeviceMs:deviceAtFetch,
+    serverNow:new Date(serverAtDeadline).toISOString(),
+  });
+  // offset = +60s; at same device time as fetch, effective = serverAtDeadline → delete
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,manifest(id(181),ended));
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:aligned,now:()=>deviceAtFetch,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([id(181)]);
+  store.close();
+});
+
+it('Box-first then process: deviceArmedAt gates until flip+48h (H1)',async()=>{
+  const flip='2026-11-15T12:00:00.000Z',flipMs=Date.parse(flip);
+  const enabledLongAgo='2026-10-16T12:00:00.000Z'; // Box on 30 days ago
+  const oldEnded='2026-09-01T12:00:00.000Z';
+  const armed=policyOn({enabledAt:enabledLongAgo,deviceArmedAt:flip,now:flipMs});
+  const row=manifest(id(26),oldEnded);
+  expect(audioRetentionAnchor(row,flipMs+AUDIO_RETENTION_MS-1,armed)?.expired).toBe(false);
+  expect(audioRetentionLabel(row,flipMs+AUDIO_RETENTION_MS-1,armed)?.text)
+    .toBe('Audio is removed from this device about 1 h from now; transcript and notes are kept.');
+  expect(audioRetentionAnchor(row,flipMs+AUDIO_RETENTION_MS,armed)?.expired).toBe(true);
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,row);
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:armed,now:()=>flipMs+AUDIO_RETENTION_MS-1,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(26))).not.toBeNull();
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:armed,now:()=>flipMs+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([id(26)]);
+  expect(await store.read('manifest:'+id(26))).toBeNull();
+  store.close();
+});
+
+it('readOrStampDeviceArmedAt stamps once and never moves armedAt later',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const first=Date.parse('2026-11-15T12:00:00.000Z');
+  const armedAt=await readOrStampDeviceArmedAt(store,first);
+  expect(armedAt).toBe(new Date(first).toISOString());
+  expect(await store.read(AUDIO_RETENTION_ARMED_KEY)).toEqual({
+    contract:AUDIO_RETENTION_ARMED_CONTRACT,
+    armedAt,
+  });
+  expect(await store.read(AUDIO_RETENTION_ARMED_KEY)).not.toHaveProperty('title');
+  const later=await readOrStampDeviceArmedAt(store,first+AUDIO_RETENTION_MS);
+  expect(later).toBe(armedAt);
+  expect(await store.read(AUDIO_RETENTION_ARMED_KEY)).toEqual({contract:AUDIO_RETENTION_ARMED_CONTRACT,armedAt});
+  // Runtime sweep merges stamped armedAt into policy before delete decisions.
+  const ended='2026-10-01T00:00:00.000Z';
+  await seed(store,manifest(id(27),ended));
+  const pol=policyOn({enabledAt:'2026-09-01T00:00:00.000Z',now:first});
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{
+    store,audioRetention:pol,now:()=>first+AUDIO_RETENTION_MS-1,
+  })).deleted).toEqual([]); // max(anchor, enabledAt, armedAt=first)+48h
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{
+    store,audioRetention:pol,now:()=>first+AUDIO_RETENTION_MS,
+  })).deleted).toEqual([id(27)]);
   store.close();
 });
 
@@ -371,23 +499,25 @@ it('shouldSkipRecording skips and onDeleted fires after successful delete',async
   store.close();
 });
 
-it('normalizeAudioRetentionPolicy maps snake_case and rejects invalid raw',()=>{
+it('normalizeAudioRetentionPolicy maps snake_case, pins hours to 48, stamps fetchedAtDeviceMs',()=>{
+  const fetchMs=1_700_000_000_000;
   expect(normalizeAudioRetentionPolicy(null)).toBeNull();
   expect(normalizeAudioRetentionPolicy(undefined)).toBeNull();
   expect(normalizeAudioRetentionPolicy('nope')).toBeNull();
   expect(normalizeAudioRetentionPolicy({enabled:false})).toEqual({enabled:false});
   expect(normalizeAudioRetentionPolicy({
     enabled:true,
-    hours:48,
+    hours:72,
     warn_hours:36,
     enabled_at:'2026-11-15T00:00:00.000Z',
     server_now:'2026-11-16T00:00:00.000Z',
-  })).toEqual({
+  },fetchMs)).toEqual({
     enabled:true,
-    hours:48,
+    hours:AUDIO_RETENTION_HOURS,
     warnHours:36,
     enabledAt:'2026-11-15T00:00:00.000Z',
     serverNow:'2026-11-16T00:00:00.000Z',
+    fetchedAtDeviceMs:fetchMs,
   });
 });
 

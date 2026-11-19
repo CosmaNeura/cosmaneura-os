@@ -233,7 +233,7 @@ it('can close a stopped recording again after access changes without reopening a
 });
 
 it('ledger manifestSHA256 ignores endedAt and retention-off writes omit endedAt',async()=>{
-  const nowMs=Date.parse('2026-11-01T00:00:00.000Z'),policy={enabled:true as const,enabledAt:'2026-10-01T00:00:00.000Z'};
+  const nowMs=Date.parse('2026-11-01T00:00:00.000Z'),policy={enabled:true as const,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:new Date(nowMs).toISOString(),fetchedAtDeviceMs:nowMs};
   const on=new ControlledSource(),runtime=await open(on,{audioRetention:policy,now:()=>nowMs});
   expect(activePrivateRecordingId()).toBeNull();
   await runtime.start(consent());expect(activePrivateRecordingId()).toBe(runtime.snapshot.recordingId);

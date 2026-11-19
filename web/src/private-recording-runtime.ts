@@ -10,9 +10,9 @@ import {
   audioRetentionEffective,
   audioRetentionEnabledAtMs,
   audioRetentionLabel,
-  buildAudioDeletedStub,
   buildAudioTombstone,
   deletePrivateRecordingAudio,
+  readOrStampDeviceArmedAt,
   refuseExpiredAudio,
   sweepPrivateRecordingAudio,
   type AudioRetentionClock,
@@ -312,7 +312,7 @@ export async function openPrivateRecordingStore(scope:string,platform:'ios'|'des
   need(HASH.test(scope));
   const crypt=deps.crypto??globalThis.crypto;need(crypt?.subtle);
   const name='cosmas-private-recording:v1:'+scope;
-  const validKey=(key:string)=>/^(?:(?:manifest|ledger|transfer|visit-binding|display-title|private-transcript|audio-tombstone|audio-deleted):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
+  const validKey=(key:string)=>key==='audio-retention-armed'||/^(?:(?:manifest|ledger|transfer|visit-binding|display-title|private-transcript|audio-tombstone|audio-deleted):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
   const serialize=(value:unknown)=>{const bytes=encode(value);need(bytes.length<=450000);return bytes;};
   if(platform==='ios'){
     const plugin=deps.native??(await import('../../clients/capture/plugins/secure-queue')).SecureQueue;
@@ -373,19 +373,27 @@ async function writeAudioTombstone(store:PrivateRecordingStore,id:string,outcome
   await store.write(key,prior,buildAudioTombstone(id,iso,outcome));
 }
 
-/** Shared sweep hooks: skip in-flight work; tombstone + audio-deleted stub on success. */
-function audioSweepHooks(store:PrivateRecordingStore,scope:string,now:AudioRetentionClock,skip:Set<string>){
+/** Shared sweep hooks: skip in-flight work; tombstone on success (stub written before manifest delete). */
+function audioSweepHooks(store:PrivateRecordingStore,_scope:string,now:AudioRetentionClock,skip:Set<string>){
   return {
     shouldSkipRecording:(recordingId:string)=>skip.has(recordingId),
     onDeleted:async(recordingId:string)=>{
-      const iso=new Date(now()).toISOString();
       // Overwrites any prior failed tombstone at the same key.
-      await writeAudioTombstone(store,recordingId,'deleted',iso);
-      const stubKey='audio-deleted:'+recordingId,prior=await store.read(stubKey);
-      await store.write(stubKey,prior,buildAudioDeletedStub(recordingId,scope,iso));
+      await writeAudioTombstone(store,recordingId,'deleted',new Date(now()).toISOString());
     },
     recordFailure:(recordingId:string)=>{void writeAudioTombstone(store,recordingId,'failed',new Date(now()).toISOString()).catch(()=>{});},
   };
+}
+
+/** Stamp device armedAt once, then merge into policy for deadline max(anchor, enabledAt, armedAt). */
+async function policyWithDeviceArmed(
+  store:PrivateRecordingStore,
+  policy:AudioRetentionPolicy|null|undefined,
+  nowMs:number,
+):Promise<AudioRetentionPolicy|null|undefined>{
+  if(!retentionOn(policy)||!policy)return policy;
+  const deviceArmedAt=await readOrStampDeviceArmedAt(store,nowMs);
+  return {...policy,deviceArmedAt};
 }
 
 /** Sweep expired audio for one scope. No-op when policy is off. Sign-out uses the same path. */
@@ -404,8 +412,9 @@ export async function sweepExpiredPrivateRecordingAudio(
   const clock=options.now??(()=>Date.now());
   try{
     const skip=await audioSweepSkipIds(store);
+    const policy=await policyWithDeviceArmed(store,options.audioRetention,clock());
     return await sweepPrivateRecordingAudio({
-      store,scope,policy:options.audioRetention,now:clock,sealInProgress:options.sealInProgress,
+      store,scope,policy,now:clock,sealInProgress:options.sealInProgress,
       parseManifest:(value,recordingId)=>manifest(value,scope,recordingId),...audioSweepHooks(store,scope,clock,skip),
     });
   }finally{if(owned)store.close();}
@@ -424,16 +433,18 @@ export async function listPrivateRecordings(scope:string,platform:'ios'|'desktop
   const store=await(options.openStore?.()??openPrivateRecordingStore(scope,platform));
   const clock=options.now??(()=>Date.now());const nowMs=clock();const on=retentionOn(options.audioRetention);
   try{
+    const policy=on?await policyWithDeviceArmed(store,options.audioRetention,nowMs):options.audioRetention;
     if(on){const skip=await audioSweepSkipIds(store);await sweepPrivateRecordingAudio({
-      store,scope,policy:options.audioRetention,now:clock,parseManifest:(value,recordingId)=>manifest(value,scope,recordingId),
+      store,scope,policy,now:clock,parseManifest:(value,recordingId)=>manifest(value,scope,recordingId),
       ...audioSweepHooks(store,scope,clock,skip),
     });}
     const all=await store.keys();need(all.filter(k=>k.startsWith('manifest:')||k.startsWith('audio-deleted:')).length<=1000);
     const rows:(PrivateRecordingSnapshot&{createdAt:string})[]=[];
+    const manifestIds=new Set(all.filter(k=>k.startsWith('manifest:')).map(k=>k.slice(9)));
     for(const key of all){
       if(key.startsWith('manifest:')){
         const row=manifest(await store.read(key),scope,key.slice(9));
-        const label=on?audioRetentionLabel(row,nowMs,options.audioRetention):null;
+        const label=on?audioRetentionLabel(row,nowMs,policy):null;
         rows.push({recordingId:row.recordingId,title:displayTitle(await store.read('display-title:'+row.recordingId),scope,row.recordingId)??row.title,createdAt:row.createdAt,endedAt:row.endedAt,phase:row.phase,elapsedSeconds:row.chunks.reduce((n,c)=>n+c.durationMs,0)/1000,recordedChunks:row.chunks.length,recordedBytes:row.chunks.reduce((n,c)=>n+c.bytes,0),workspaceId:row.workspaceId,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null,
           ...(on?{retentionLabel:label?.text??null,retentionWarn:label?.warn??false}:{})});
         continue;
@@ -442,7 +453,9 @@ export async function listPrivateRecordings(scope:string,platform:'ios'|'desktop
       const raw=await store.read(key);if(!raw||typeof raw!=='object')continue;
       const stub=raw as {contract?:unknown;recordingId?:unknown;scope?:unknown;phase?:unknown;updatedAt?:unknown};
       if(stub.contract!==AUDIO_DELETED_STUB_CONTRACT||stub.scope!==scope||stub.phase!=='audio_deleted'||typeof stub.recordingId!=='string'||!UUID.test(stub.recordingId)||typeof stub.updatedAt!=='string')continue;
-      const id=stub.recordingId,title=displayTitle(await store.read('display-title:'+id),scope,id)??'Private recording';
+      const id=stub.recordingId;
+      if(manifestIds.has(id))continue; // stub written before manifest delete — avoid duplicate rows mid-crash
+      const title=displayTitle(await store.read('display-title:'+id),scope,id)??'Private recording';
       rows.push({recordingId:id,title,createdAt:stub.updatedAt,phase:'audio_deleted',elapsedSeconds:0,recordedChunks:0,recordedBytes:0,workspaceId:null,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null,
         ...(on?{retentionLabel:null,retentionWarn:false}:{})});
     }

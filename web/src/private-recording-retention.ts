@@ -8,6 +8,8 @@ export const AUDIO_RETENTION_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 export const AUDIO_TOMBSTONE_CONTRACT = 'cosmabot.private-recording-audio-tombstone.v1';
 export const AUDIO_DELETED_STUB_CONTRACT = 'cosmabot.private-recording-audio-deleted.v1';
+export const AUDIO_RETENTION_ARMED_CONTRACT = 'cosmabot.private-recording-audio-retention-armed.v1';
+export const AUDIO_RETENTION_ARMED_KEY = 'audio-retention-armed';
 
 export type AudioRetentionClock = () => number;
 export type AudioRetentionPolicy = {
@@ -16,6 +18,10 @@ export type AudioRetentionPolicy = {
   warnHours?: number;
   enabledAt?: string | null;
   serverNow?: string | null;
+  /** Device Date.now() when serverNow was fetched; used for stable clock offset. */
+  fetchedAtDeviceMs?: number | null;
+  /** First time this device armed retention (local stamp). */
+  deviceArmedAt?: string | null;
 };
 
 export type AudioRetentionManifestLike = {
@@ -56,6 +62,11 @@ export type AudioDeletedStub = {
   updatedAt: string;
 };
 
+export type AudioRetentionArmed = {
+  contract: typeof AUDIO_RETENTION_ARMED_CONTRACT;
+  armedAt: string;
+};
+
 const ACTIVE = new Set(['starting', 'recording', 'pausing', 'stopping']);
 
 function parseIsoMs(value: unknown): number | null {
@@ -79,20 +90,28 @@ function optionalIso(value: unknown): string | null | undefined {
 /**
  * Map camelCase or snake_case policy payloads. Absent/invalid raw → null.
  * Non-true `enabled` → `{enabled: false}` (off).
+ * When enabled from server, hours are pinned to 48 and `fetchedAtDeviceMs` is stamped.
  */
-export function normalizeAudioRetentionPolicy(raw: unknown): AudioRetentionPolicy | null {
+export function normalizeAudioRetentionPolicy(
+  raw: unknown,
+  nowMs: number = Date.now(),
+): AudioRetentionPolicy | null {
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
   if (o.enabled !== true) return {enabled: false};
-  const hours = optionalFiniteHours(o.hours);
   const warnHours = optionalFiniteHours(o.warnHours ?? o.warn_hours);
   const enabledAt = optionalIso(o.enabledAt ?? o.enabled_at);
   const serverNow = optionalIso(o.serverNow ?? o.server_now);
-  const policy: AudioRetentionPolicy = {enabled: true};
-  if (hours !== undefined) policy.hours = hours;
+  const deviceArmedAt = optionalIso(o.deviceArmedAt ?? o.device_armed_at);
+  const policy: AudioRetentionPolicy = {
+    enabled: true,
+    hours: AUDIO_RETENTION_HOURS,
+    fetchedAtDeviceMs: nowMs,
+  };
   if (warnHours !== undefined) policy.warnHours = warnHours;
   if (enabledAt !== undefined) policy.enabledAt = enabledAt;
   if (serverNow !== undefined) policy.serverNow = serverNow;
+  if (deviceArmedAt !== undefined) policy.deviceArmedAt = deviceArmedAt;
   return policy;
 }
 
@@ -113,20 +132,50 @@ type RetentionClockResolution = {
 };
 
 /**
- * serverNow present + skew within bound → use server time and allow delete.
- * no serverNow → device now, allow delete.
- * skew over bound → no delete / no expired refuse; labels use device now.
+ * Missing serverNow or fetchedAtDeviceMs → no delete / no expired refuse; labels use device now.
+ * Skew at fetch (|serverNow − fetchedAtDeviceMs| > 5 min) → same refuse.
+ * Otherwise effectiveNow = nowMs + (serverNowMs − fetchedAtDeviceMs) so the clock tracks after fetch.
  */
 export function resolveAudioRetentionClock(
   policy: AudioRetentionPolicy | null | undefined,
   nowMs: number,
 ): RetentionClockResolution {
   const serverNowMs = parseIsoMs(policy?.serverNow);
-  if (serverNowMs === null) return {effectiveNowMs: nowMs, allowDelete: true};
-  if (Math.abs(nowMs - serverNowMs) > AUDIO_RETENTION_CLOCK_SKEW_MS) {
+  if (serverNowMs === null) return {effectiveNowMs: nowMs, allowDelete: false};
+  const fetchedAt = policy?.fetchedAtDeviceMs;
+  if (typeof fetchedAt !== 'number' || !Number.isFinite(fetchedAt)) {
     return {effectiveNowMs: nowMs, allowDelete: false};
   }
-  return {effectiveNowMs: serverNowMs, allowDelete: true};
+  const offsetMs = serverNowMs - fetchedAt;
+  if (Math.abs(offsetMs) > AUDIO_RETENTION_CLOCK_SKEW_MS) {
+    return {effectiveNowMs: nowMs, allowDelete: false};
+  }
+  return {effectiveNowMs: nowMs + offsetMs, allowDelete: true};
+}
+
+/**
+ * Read existing device armed stamp, or write once. Never moves armedAt later.
+ * Key `audio-retention-armed` holds `{contract, armedAt}` only (no title).
+ */
+export async function readOrStampDeviceArmedAt(
+  store: AudioRetentionStore,
+  nowMs: number,
+): Promise<string> {
+  const prior = await store.read(AUDIO_RETENTION_ARMED_KEY);
+  if (prior && typeof prior === 'object' && !Array.isArray(prior)) {
+    const o = prior as Record<string, unknown>;
+    if (
+      o.contract === AUDIO_RETENTION_ARMED_CONTRACT
+      && typeof o.armedAt === 'string'
+      && parseIsoMs(o.armedAt) !== null
+    ) {
+      return o.armedAt;
+    }
+  }
+  const armedAt = new Date(nowMs).toISOString();
+  const next: AudioRetentionArmed = {contract: AUDIO_RETENTION_ARMED_CONTRACT, armedAt};
+  await store.write(AUDIO_RETENTION_ARMED_KEY, prior, next);
+  return armedAt;
 }
 
 export function audioRetentionAnchor(
@@ -146,7 +195,8 @@ export function audioRetentionAnchor(
     : manifest.updatedAt;
   const anchorMs = Date.parse(raw);
   if (!Number.isFinite(anchorMs)) return null;
-  const start = Math.max(anchorMs, enabledAtMs);
+  const deviceArmedAtMs = parseIsoMs(policy?.deviceArmedAt);
+  const start = Math.max(anchorMs, enabledAtMs, deviceArmedAtMs ?? enabledAtMs);
   const deadlineMs = start + retentionMs;
   const remainingMs = deadlineMs - nowMs;
   return {
@@ -209,11 +259,13 @@ export function buildAudioDeletedStub(
  * Delete audio chunks then the audio manifest. Never touches ledger, transcript,
  * visit-binding, transfer, or display-title keys. Crash mid-delete then retry
  * finishes without resurrecting chunks.
+ * When `scope` is provided, writes the audio-deleted stub before removing the manifest.
  */
 export async function deletePrivateRecordingAudio(
   store: AudioRetentionStore,
   recordingId: string,
   chunkCountHint?: number,
+  options?: {scope?: string; deletedAtIso?: string},
 ): Promise<void> {
   const prefix = `chunk:${recordingId}:`;
   const keys = (await store.keys()).filter((key) => key === `manifest:${recordingId}` || key.startsWith(prefix));
@@ -227,6 +279,12 @@ export async function deletePrivateRecordingAudio(
     await store.delete(key);
   }
   for (const key of chunks) await store.delete(key);
+  if (options?.scope) {
+    const stubKey = `audio-deleted:${recordingId}`;
+    const prior = await store.read(stubKey);
+    const iso = options.deletedAtIso ?? new Date().toISOString();
+    await store.write(stubKey, prior, buildAudioDeletedStub(recordingId, options.scope, iso));
+  }
   if (keys.includes(`manifest:${recordingId}`) || (await store.read(`manifest:${recordingId}`)) !== null) {
     await store.delete(`manifest:${recordingId}`);
   }
@@ -244,7 +302,7 @@ export type SweepPrivateRecordingAudioOptions = {
   shouldSkipRecording?: (recordingId: string, manifest: AudioRetentionManifestLike) => boolean;
   /** Per-recording failure hook; one poison row must not abort the sweep. */
   recordFailure?: (recordingId: string, error: unknown) => void;
-  /** After a successful audio delete — write tombstone + audio-deleted stub. */
+  /** After a successful audio delete — write tombstone (stub is written before manifest delete). */
   onDeleted?: (recordingId: string) => void | Promise<void>;
 };
 
@@ -265,6 +323,7 @@ export async function sweepPrivateRecordingAudio(
   const effectiveNowMs = clock.effectiveNowMs;
   const keys = (await options.store.keys()).filter((key) => key.startsWith('manifest:'));
   const deleted: string[] = [];
+  const deletedAtIso = new Date(nowMs).toISOString();
   for (const key of keys) {
     const recordingId = key.slice('manifest:'.length);
     try {
@@ -282,7 +341,10 @@ export async function sweepPrivateRecordingAudio(
         anchor = audioRetentionAnchor(manifest, effectiveNowMs, options.policy);
         if (!anchor?.expired) continue;
       }
-      await deletePrivateRecordingAudio(options.store, recordingId, manifest.chunks.length);
+      await deletePrivateRecordingAudio(options.store, recordingId, manifest.chunks.length, {
+        scope: options.scope,
+        deletedAtIso,
+      });
       deleted.push(recordingId);
       await options.onDeleted?.(recordingId);
     } catch (error) {

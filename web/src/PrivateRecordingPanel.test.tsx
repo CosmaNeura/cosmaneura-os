@@ -734,7 +734,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
   });
   it('shows deletes-in label only when both retention switches are on',async()=>{
     const now=()=>Date.parse('2026-11-19T12:00:00.000Z');
-    props={...props,audioRetention:{enabled:true,enabledAt:'2026-11-01T00:00:00.000Z'},now};
+    props={...props,audioRetention:{enabled:true,enabledAt:'2026-11-01T00:00:00.000Z',serverNow:new Date(now()).toISOString(),fetchedAtDeviceMs:now()},now};
     await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
     await act(async()=>sources[0].chunk(42));await click('Stop and save recording');
     await wait(()=>status()==='Saved on this device');
@@ -755,9 +755,10 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     const seed=await openPrivateRecordingStore(scope,'desktop',{indexedDB:factory,crypto:webcrypto});
     await seed.write('manifest:'+rid,null,row);
     await seed.write('chunk:'+rid+':0',null,{contract:'cosmabot.private-pcm.v1',recordingId:rid,scope,sequence:0,sha256:'a'.repeat(64),durationMs:1,data:'AA=='});
+    await seed.write('audio-retention-armed',null,{contract:'cosmabot.private-recording-audio-retention-armed.v1',armedAt:'2026-10-01T00:00:00.000Z'});
     seed.close();
     const sweep=vi.spyOn(await import('./private-recording-runtime'),'sweepExpiredPrivateRecordingAudio');
-    props={...props,audioRetention:{enabled:true,enabledAt:'2026-10-01T00:00:00.000Z'},now:()=>start+AUDIO_RETENTION_MS};
+    props={...props,audioRetention:{enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:start},now:()=>start+AUDIO_RETENTION_MS};
     await render();
     await wait(()=>sweep.mock.calls.length>=1);
     await act(async()=>root.unmount());

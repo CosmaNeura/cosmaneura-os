@@ -147,7 +147,10 @@ export const privateRecordingApi={
   /** Effective 48h audio policy. Fetch failure → off. */
   async audioRetention(identity:AuthenticatedWorkspaceIdentity,workspaceId:string,signal?:AbortSignal):Promise<AudioRetentionPolicy>{
     need(vendorUuid(workspaceId));
-    try{return normalizeAudioRetentionPolicy(await request(identity,'/workspaces/'+workspaceId+'/private-recordings/audio-retention',undefined,signal))??{enabled:false};}
+    try{
+      const raw=await request(identity,'/workspaces/'+workspaceId+'/private-recordings/audio-retention',undefined,signal);
+      return normalizeAudioRetentionPolicy(raw,Date.now())??{enabled:false};
+    }
     catch{return {enabled:false};}
   },
   async readVisitBinding(identity:AuthenticatedWorkspaceIdentity,v:PrivateRecordingIntent,team:ProviderTeam,receipt:PrivateRecordingReceipt,signal?:AbortSignal){

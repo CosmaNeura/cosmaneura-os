@@ -70,13 +70,19 @@ it('does not dispatch after late token acquisition exceeds its deadline',async()
   const result=expect(privateRecordingApi.attach(access,v,team)).rejects.toThrow();
   await vi.waitFor(()=>expect(release).toBeTypeOf('function'));await vi.advanceTimersByTimeAsync(15001);await result;release('late');await vi.advanceTimersByTimeAsync(1);expect(fetcher).not.toHaveBeenCalled();
 });
-it('audioRetention GET normalizes snake_case and treats fetch failure as off',async()=>{
-  const body={enabled:true,hours:48,warn_hours:36,enabled_at:'2026-11-15T00:00:00.000Z',server_now:'2026-11-16T00:00:00.000Z'};
+it('audioRetention GET normalizes snake_case, pins hours, stamps fetchedAtDeviceMs, and treats fetch failure as off',async()=>{
+  const body={enabled:true,hours:72,warn_hours:36,enabled_at:'2026-11-15T00:00:00.000Z',server_now:'2026-11-16T00:00:00.000Z'};
   const fetcher=vi.fn().mockResolvedValueOnce(json(body)).mockRejectedValueOnce(new Error('net'));
   vi.stubGlobal('fetch',fetcher);
-  expect(await privateRecordingApi.audioRetention(identity,id(1))).toEqual({
+  const before=Date.now();
+  const got=await privateRecordingApi.audioRetention(identity,id(1));
+  const after=Date.now();
+  expect(got).toMatchObject({
     enabled:true,hours:48,warnHours:36,enabledAt:'2026-11-15T00:00:00.000Z',serverNow:'2026-11-16T00:00:00.000Z',
   });
+  expect(typeof got.fetchedAtDeviceMs).toBe('number');
+  expect(got.fetchedAtDeviceMs!).toBeGreaterThanOrEqual(before);
+  expect(got.fetchedAtDeviceMs!).toBeLessThanOrEqual(after);
   expect(fetcher.mock.calls[0][0]).toBe(`http://127.0.0.1:8018/workspaces/${id(1)}/private-recordings/audio-retention`);
   expect(await privateRecordingApi.audioRetention(identity,id(1))).toEqual({enabled:false});
 });
