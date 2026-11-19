@@ -19,16 +19,18 @@ const fingerprint=files=>createHash('sha256').update(JSON.stringify(files)).dige
 //   const fp=f=>createHash('sha256').update(JSON.stringify(f)).digest('hex');
 //   console.log(fp(render(structuredClone(sample))));
 //   "
-// Regenerated after schema_revision bump to b57c3d0e9142 (account_delete_intents).
-const DEDICATED_AUDIENCE_FINGERPRINT='d905f23a38bc908aca675744a2de9b6a67a2731d97dd9a064f80b5bc3f82b8a2';
-const DEDICATED_SHARED_STAGING_FINGERPRINT='68b6fad649ce96733f2cf8e462fc73c0af33fb27968c040c79a179449384f54f';
-const OWNED_STAGING_FINGERPRINT='9841c565c3bcd0ad985cb5581b48366707a6fe9e6f8fd70e424c6835505dde0f';
+// Regenerated after schema_revision bump to c68f2a91b053 and explicit-false
+// INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED (T2a process switch, default off).
+const DEDICATED_AUDIENCE_FINGERPRINT='cff36fbdaaaedfca6c8249c6db9323454e358585889bba83d0e36dc27e865af0';
+const DEDICATED_SHARED_STAGING_FINGERPRINT='7fa9fcd05cafd0073097ebead337474a4666c5774d9a23f9d9988850910a85f5';
+const OWNED_STAGING_FINGERPRINT='3f7d1cc06b0d63f2485e6b5fe3943a9c6fd1d1252959b2bb664a9f8312cc9a6d';
 
 const EXPLICIT_FALSE=[
   'WORKSPACE_CAPTURE_PROXY_ENABLED','GOOGLE_CONNECTION_BROKER_ENABLED',
   'WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED','WORKSPACE_ENROLLMENT_MANAGED',
   'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
   'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED',
+  'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
 ];
 
 test('audience dedicated package fingerprint and explicit-false backend switches',()=>{
@@ -48,7 +50,7 @@ test('shared_staging dedicated package fingerprint and explicit-false backend sw
   for(const flag of EXPLICIT_FALSE)assert.equal(files['api-public.json'][flag],'false',flag);
 });
 
-test('owned staging package fingerprint keeps the eight switches false',()=>{
+test('owned staging package fingerprint keeps the nine switches false',()=>{
   const value=structuredClone(sample);
   value.resource_scope='owned-cosmabot-vm-instance';
   value.web_origin='https://staging.cosmas.ai';value.api_origin='https://api.staging.cosmas.ai';

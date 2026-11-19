@@ -100,8 +100,8 @@ function assertNoRealPatientOn(files){
 // Off-path must stay byte-identical to origin/main after #361 (eight Settings
 // bools rendered explicitly false). Values match render-goldens.test.mjs.
 // Regenerated after schema_revision bump to b57c3d0e9142 (account_delete_intents).
-const MAIN_DEDICATED_FINGERPRINT='d905f23a38bc908aca675744a2de9b6a67a2731d97dd9a064f80b5bc3f82b8a2';
-const MAIN_OWNED_STAGING_FINGERPRINT='9841c565c3bcd0ad985cb5581b48366707a6fe9e6f8fd70e424c6835505dde0f';
+const MAIN_DEDICATED_FINGERPRINT='cff36fbdaaaedfca6c8249c6db9323454e358585889bba83d0e36dc27e865af0';
+const MAIN_OWNED_STAGING_FINGERPRINT='3f7d1cc06b0d63f2485e6b5fe3943a9c6fd1d1252959b2bb664a9f8312cc9a6d';
 
 test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const baseline=render(structuredClone(sample));
@@ -172,7 +172,7 @@ test('opt-in on renders exact capture and agent-tools keys for synthetic staging
     'GOOGLE_CONNECTION_BROKER_ENABLED','WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED',
     'WORKSPACE_ENROLLMENT_MANAGED','COSMAS_EHR_REAL_DATA_ENABLED',
     'WORKSPACE_RX_SANDBOX_ENABLED','REAL_PATIENT_RECORDING_ENABLED',
-    'WORKSPACE_EFAX_SANDBOX_ENABLED',
+    'WORKSPACE_EFAX_SANDBOX_ENABLED','INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
   ])assert.equal(env[flag],'false',flag);
   assert.match(files['api-public.env'],/^WORKSPACE_AGENT_TOOLS_ENABLED="true"$/m);
   assert.match(files['api-public.env'],/^WORKSPACE_CAPTURE_BACKEND="core"$/m);
