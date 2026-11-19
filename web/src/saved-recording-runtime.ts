@@ -10,7 +10,8 @@ import {creatorReviewApi} from './creator-review-api';
 import {openCaptureQueueStorage} from './capture-storage';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {SavedRecordingSource} from './saved-recording-source';
-import type {AudioRetentionClock,AudioRetentionPolicy,PrivateRecordingRuntime} from './private-recording-runtime';
+import type {AudioRetentionClock,AudioRetentionPolicy,PrivateRecordingRuntime,PrivateRecordingStore} from './private-recording-runtime';
+import {isAudioRetentionProtected} from './private-recording-runtime';
 import {audioRetentionEffective,refuseExpiredAudio} from './private-recording-retention';
 import {acquireCaptureFlowLock} from '../../clients/capture/src/flow/capture-lock';
 import {workspaceAuthHeaders} from './workspace-auth-headers';
@@ -62,15 +63,27 @@ export function savedRecordingImportStoreNames(input:{scope:string;workspaceId:s
 export async function openSavedRecordingRuntime(options:{workspaceId:string;admitted:PreparedCapture;identity:AuthenticatedWorkspaceIdentity;
   scope:string;recording:PrivateRecordingRuntime;chunks:number;platform:'ios'|'desktop';isCurrent:()=>boolean;
   /** T1: refuse expired audio when both switches are on. Absent means off. */
-  audioRetention?:AudioRetentionPolicy|null;now?:AudioRetentionClock}){
+  audioRetention?:AudioRetentionPolicy|null;now?:AudioRetentionClock;
+  /** Private-recording store for retention protection + transfer-key cleanup. */
+  store?:PrivateRecordingStore}){
   const {workspaceId,admitted,identity}=options,sessionId=admitted.session_id;
   // Refuse before any import/transfer when both switches are on. Safe code; no audio bytes.
+  // Protected rows (open owner, attach/finish pending, transfer: key) skip refuse.
+  let transferRecordingId:string|undefined=options.recording.snapshot?.recordingId;
   if(audioRetentionEffective(options.audioRetention)){
     const proof=await options.recording.snapshotForLedger();
-    const ended=options.recording.snapshot.endedAt;
-    refuseExpiredAudio({recordingId:proof.recordingId,phase:proof.phase,endedAt:ended,updatedAt:proof.updatedAt,
-      chunks:Array.from({length:proof.chunks},(_,sequence)=>({sequence}))},options.now?.()??Date.now(),options.audioRetention);
+    transferRecordingId??=proof.recordingId;
+    const protectedRow=options.store?await isAudioRetentionProtected(options.store,proof.recordingId):false;
+    if(!protectedRow){
+      const ended=options.recording.snapshot?.endedAt;
+      refuseExpiredAudio({recordingId:proof.recordingId,phase:proof.phase,endedAt:ended,updatedAt:proof.updatedAt,
+        chunks:Array.from({length:proof.chunks},(_,sequence)=>({sequence}))},options.now?.()??Date.now(),options.audioRetention);
+    }
   }
+  const clearTransfer=async()=>{
+    if(!options.store||!transferRecordingId)return;
+    try{await options.store.delete('transfer:'+transferRecordingId);}catch{/* best-effort end of transfer protection */}
+  };
   const abort=new AbortController();let active=true,task:Promise<void>|null=null;
   let reference:string|null=null;
   const current=()=>active&&!abort.signal.aborted&&options.isCurrent();
@@ -140,7 +153,7 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
           await captureQueue.retryRejectedUploads(sessionId,transport);
         }
         await importSavedChunks(selected,source,options.chunks,current);
-      })().finally(()=>{task=null;});
+      })().finally(()=>{task=null;return clearTransfer();});
     },releaseUploadedCapture:()=>reviewOnly?Promise.resolve():selected.releaseUploadedCapture(),
     uploadProgress:async()=>{
       const rows=await queue!.storage.listMetadata();

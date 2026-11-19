@@ -1,10 +1,11 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import type {SecureQueuePlugin,VersionedSecureQueueRecord} from '../../clients/capture/plugins/secure-queue/definitions';
-import {openPrivateRecordingStore,sweepExpiredPrivateRecordingAudio,type PrivateRecordingManifest,type PrivateRecordingStore} from './private-recording-runtime';
+import {audioSweepSkipIds,isAudioRetentionProtected,listPrivateRecordings,openPrivateRecordingStore,PrivateRecordingRuntime,sweepExpiredPrivateRecordingAudio,type PrivateRecordingManifest,type PrivateRecordingStore} from './private-recording-runtime';
 import {privateRecordingLedgerKey} from './private-recording-ledger';
 import {
   AUDIO_DELETED_STUB_CONTRACT,
+  AUDIO_DELETED_USER_MESSAGE,
   AUDIO_RETENTION_ARMED_CONTRACT,
   AUDIO_RETENTION_ARMED_KEY,
   AUDIO_RETENTION_CLOCK_SKEW_MS,
@@ -540,4 +541,74 @@ it('tombstone and audio-deleted stub contracts omit title',()=>{
     phase:'audio_deleted',
     updatedAt:'2026-11-17T00:00:00.000Z',
   });
+  expect(AUDIO_DELETED_USER_MESSAGE).toBe('Audio deleted on this device; transcript and notes kept.');
+});
+
+it('refuseExpiredAudio skip option and transfer protection gate delete',async()=>{
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  const row=manifest(id(26),ended);
+  refuseExpiredAudio(row,start+AUDIO_RETENTION_MS,policy,{skip:true}); // must not throw
+  try{refuseExpiredAudio(row,start+AUDIO_RETENTION_MS,policy);expect.unreachable();}
+  catch(error){expect(error).toMatchObject({code:EXPIRED_AUDIO_REFUSED});}
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,row);
+  await armAt(store,Date.parse(policy.enabledAt!));
+  await store.write('transfer:'+id(26),null,{contract:'cosmas.saved-transfer.v1',recording_id:id(26)});
+  expect(await isAudioRetentionProtected(store,id(26))).toBe(true);
+  expect((await audioSweepSkipIds(store)).has(id(26))).toBe(true);
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(26))).not.toBeNull();
+  await store.delete('transfer:'+id(26));
+  expect(await isAudioRetentionProtected(store,id(26))).toBe(false);
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([id(26)]);
+  store.close();
+});
+
+it('unreadable ledger rows are skipped (fail closed for delete)',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  await seed(store,manifest(id(27),ended));
+  await armAt(store,Date.parse(policy.enabledAt!));
+  const ledgerKey=privateRecordingLedgerKey(id(27));
+  await store.write(ledgerKey,null,{state:'attach_pending'});
+  const realRead=store.read.bind(store);
+  store.read=async(key:string)=>{if(key===ledgerKey)throw new Error('Synthetic ledger unread');return realRead(key);};
+  expect((await audioSweepSkipIds(store)).has(id(27))).toBe(true);
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([]);
+  expect(await realRead('manifest:'+id(27))).not.toBeNull();
+  store.close();
+});
+
+it('opens audio-deleted stub without manifest and surfaces exact user message',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const updatedAt='2026-11-17T00:00:00.000Z';
+  await store.write('audio-deleted:'+id(28),null,buildAudioDeletedStub(id(28),scope,updatedAt));
+  store.close();
+  const runtime=await PrivateRecordingRuntime.open({scope,platform:'desktop',isCurrent:()=>true,
+    openStore:()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto})},
+    {recordingId:id(28),title:'Synthetic deleted clip'});
+  expect(runtime.snapshot).toMatchObject({phase:'audio_deleted',retentionLabel:AUDIO_DELETED_USER_MESSAGE,failure:AUDIO_DELETED_USER_MESSAGE});
+  await runtime.close();
+  const rows=await listPrivateRecordings(scope,'desktop',()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto}));
+  expect(rows[0]).toMatchObject({recordingId:id(28),phase:'audio_deleted',retentionLabel:AUDIO_DELETED_USER_MESSAGE});
+});
+
+it('live getAudioRetention getter is consulted each time (not a stale open capture)',async()=>{
+  const bag:{current:AudioRetentionPolicy|null|undefined}={current:{enabled:false}};
+  const source={kind:'microphone' as const,async start(){},async stop(){}};
+  const fresh=()=>({...consent(),granted_at:new Date().toISOString()});
+  const runtime=await PrivateRecordingRuntime.open({scope,platform:'desktop',isCurrent:()=>true,
+    openStore:()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto}),
+    createSource:async()=>source as never,acquireLock:async()=>async()=>{},
+    getAudioRetention:()=>bag.current,now:()=>Date.now()},
+    {title:'Synthetic live policy',consent:fresh()});
+  expect(runtime.snapshot.retentionLabel??null).toBeNull();
+  bag.current=policyOn({enabledAt:'2026-11-01T00:00:00.000Z',now:Date.now()});
+  await runtime.start(fresh());
+  await runtime.stop();
+  // Getter flipped on after open; seal pins endedAt and label appears from live policy.
+  expect(runtime.snapshot.retentionLabel).toMatch(/Audio is removed from this device about/);
+  bag.current={enabled:false};
+  expect(runtime.snapshot.retentionLabel??null).toBeNull();
+  await runtime.close();
 });

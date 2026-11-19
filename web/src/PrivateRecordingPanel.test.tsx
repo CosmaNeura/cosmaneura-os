@@ -768,12 +768,36 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     check.close();
   });
   it('treats policy fetch failure as off and shows no retention label',async()=>{
-    const fetchPolicy=vi.spyOn(privateRecordingApi,'audioRetention').mockResolvedValue({enabled:false});
-    props={...props,workspaceId:id}; // no audioRetention prop — panel fetches
+    const fetchPolicy=vi.spyOn(privateRecordingApi,'audioRetention').mockRejectedValue(new Error('Synthetic policy fetch failed'));
+    props={...props,workspaceId:id}; // no audioRetention prop — panel fetches; .catch → off
     await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
     await act(async()=>sources[0].chunk(3));await click('Stop and save recording');
     await wait(()=>status()==='Saved on this device');
     expect(fetchPolicy).toHaveBeenCalled();
     expect(container.querySelector('[data-retention-label]')).toBeNull();
+  });
+  it('fetch-path policy (no audioRetention prop) enables retention label when GET returns full clock',async()=>{
+    const now=()=>Date.parse('2026-11-19T12:00:00.000Z');
+    const fetchPolicy=vi.spyOn(privateRecordingApi,'audioRetention').mockResolvedValue({
+      enabled:true,enabledAt:'2026-11-01T00:00:00.000Z',serverNow:new Date(now()).toISOString(),fetchedAtDeviceMs:now(),
+    });
+    props={...props,workspaceId:id,now}; // omit audioRetention — panel uses getter over fetched policy
+    await render();
+    await wait(()=>fetchPolicy.mock.calls.length>=1);
+    await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(5));await click('Stop and save recording');
+    await wait(()=>status()==='Saved on this device');
+    expect(container.textContent).toMatch(/Audio is removed from this device about \d+ h from now; transcript and notes are kept\./);
+    expect(container.querySelector('[data-retention-label]')).toBeTruthy();
+  });
+  it('opens an audio-deleted stub and shows the exact deleted-audio message',async()=>{
+    const rid='00000000-0000-4000-8000-000000000088';
+    const seed=await openPrivateRecordingStore(scope,'desktop',{indexedDB:factory,crypto:webcrypto});
+    await seed.write('audio-deleted:'+rid,null,{contract:'cosmabot.private-recording-audio-deleted.v1',recordingId:rid,scope,phase:'audio_deleted',updatedAt:'2026-11-17T00:00:00.000Z'});
+    seed.close();
+    props={...props,recordingId:rid,title:'Synthetic deleted'};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    await wait(()=>container.textContent?.includes('Audio deleted on this device; transcript and notes kept.')??false);
+    expect(container.textContent).toContain('Audio deleted on this device; transcript and notes kept.');
   });
 });

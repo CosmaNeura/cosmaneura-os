@@ -147,6 +147,33 @@ it('refuses expired audio with a safe code and never reads chunk bytes',async()=
   expect(fetch).not.toHaveBeenCalled();
 });
 
+it('skips refuse while transfer key protects, then refuses after transfer key is removed',async()=>{
+  const ended='2026-11-01T00:00:00.000Z';
+  const recording={
+    snapshot:{recordingId:sessionId,phase:'sealed',endedAt:ended,createdAt:ended},
+    snapshotForLedger:async()=>({recordingId:sessionId,scope,consent:{modality:'in_person',participant_regions:[],method:'verbal_attestation',all_parties_consented:true,granted_at:ended,language:'en-US'},consentIntervals:[],startedAt:ended,phase:'sealed',frames:16,chunks,manifestSHA256:'a'.repeat(64),updatedAt:ended}),
+    savedChunks:vi.fn(async function*(){throw Error('audio bytes must not be read');}),
+  } as unknown as PrivateRecordingRuntime;
+  const keys=new Set<string>(['transfer:'+sessionId]);
+  const store={
+    keys:async()=>[...keys],
+    read:async(key:string)=>keys.has(key)?{ok:true}:null,
+    write:async()=>{},
+    delete:async(key:string)=>{keys.delete(key);},
+    close:()=>{},
+  };
+  const policy={enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:Date.parse(ended)};
+  const now=()=>Date.parse(ended)+48*60*60*1000;
+  // Protected by transfer: — refuse is skipped; open may succeed as review-only.
+  const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,audioRetention:policy,now,store});
+  expect(recording.savedChunks).not.toHaveBeenCalled();
+  await opened.close();
+  await store.delete('transfer:'+sessionId);
+  await expect(openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,audioRetention:policy,now,store})).rejects.toMatchObject({code:'private_recording_audio_expired'});
+});
+
 it('saved-import store names include sessionId (session-scoped queue, not long-lived workspace queue)',()=>{
   const names=savedRecordingImportStoreNames({scope,workspaceId,sessionId});
   expect(names.flow).toContain(sessionId);

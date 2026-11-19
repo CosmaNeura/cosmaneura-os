@@ -10,6 +10,8 @@ export const AUDIO_TOMBSTONE_CONTRACT = 'cosmabot.private-recording-audio-tombst
 export const AUDIO_DELETED_STUB_CONTRACT = 'cosmabot.private-recording-audio-deleted.v1';
 export const AUDIO_RETENTION_ARMED_CONTRACT = 'cosmabot.private-recording-audio-retention-armed.v1';
 export const AUDIO_RETENTION_ARMED_KEY = 'audio-retention-armed';
+/** Exact user-facing copy when device audio was removed; transcript/notes remain. */
+export const AUDIO_DELETED_USER_MESSAGE = 'Audio deleted on this device; transcript and notes kept.';
 
 export type AudioRetentionClock = () => number;
 export type AudioRetentionPolicy = {
@@ -360,7 +362,9 @@ export function refuseExpiredAudio(
   manifest: AudioRetentionManifestLike,
   nowMs: number,
   policy: AudioRetentionPolicy | null | undefined,
+  options?: {skip?: boolean},
 ): void {
+  if (options?.skip) return;
   const clock = resolveAudioRetentionClock(policy, nowMs);
   if (!clock.allowDelete) return;
   const anchor = audioRetentionAnchor(manifest, clock.effectiveNowMs, policy);
