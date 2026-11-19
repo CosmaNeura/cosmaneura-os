@@ -134,7 +134,8 @@ def test_follow_up_complete_valid():
         {"expected_version": 0},
         {"evidence": ""},
         {"evidence": "a" * 2001},
-        {"idempotency_key": "bad key"},
+        {"idempotency_key": "bad key 0001"},
+        {"idempotency_key": "abc1234"},
     ],
 )
 def test_follow_up_complete_invalid(overrides):
