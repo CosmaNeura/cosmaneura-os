@@ -46,6 +46,10 @@ class BoxContext(Base):
     real_patient_recording_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Kill engaged by default: real-patient recording stays off until ops clears it.
     real_patient_recording_kill_engaged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # T2a: CosmaBot independent transcription Box opt-in. Default false; process switch also required.
+    independent_recording_transcription_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
 
 
 class Principal(Base):
