@@ -1,5 +1,5 @@
 """Attach device-local audio metadata without patient or upstream capture authority."""
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, or_, select
 
@@ -22,6 +22,10 @@ from cosmas_os.private_recording_models import (
     PrivateRecordingTransfer,
     PrivateRecordingVisitBinding,
 )
+
+
+def _iso_z(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 def digest(kind, command):
@@ -208,7 +212,11 @@ def read(s, box, owner, wid, rid, *, external):
 
 
 def audio_retention(s, box, owner, wid, *, external):
-    """Read-only effective policy: process switch AND Box opt-in. Default off."""
+    """Read-only effective policy: process switch AND Box opt-in. Default off.
+
+    enabled_at / server_now let clients grandfather recordings that existed
+    before the Box opt-in for 30 days instead of applying 48h retroactively.
+    """
     scope(s, box, owner, wid, external)
     row = s.get(BoxContext, box)
     if row is None:
@@ -217,7 +225,15 @@ def audio_retention(s, box, owner, wid, *, external):
         runtime_settings.recording_audio_48h_retention_enabled
         and row.recording_audio_48h_retention_enabled
     )
-    return {"enabled": enabled, "hours": 48, "warn_hours": 36}
+    now = s.scalar(select(func.clock_timestamp()))
+    enabled_at = row.recording_audio_48h_retention_enabled_at
+    return {
+        "enabled": enabled,
+        "hours": 48,
+        "warn_hours": 36,
+        "enabled_at": _iso_z(enabled_at) if enabled_at is not None else None,
+        "server_now": _iso_z(now),
+    }
 
 
 def source_digest(recording, finish_row, appointment_link):

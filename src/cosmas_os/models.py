@@ -51,6 +51,11 @@ class BoxContext(Base):
     recording_audio_48h_retention_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Set by BEFORE INSERT/UPDATE trigger when enabled becomes true; cleared
+    # when enabled becomes false. Clients use this for 30-day grandfathering.
+    recording_audio_48h_retention_enabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Principal(Base):
