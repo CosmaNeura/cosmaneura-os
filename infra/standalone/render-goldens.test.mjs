@@ -19,11 +19,12 @@ const fingerprint=files=>createHash('sha256').update(JSON.stringify(files)).dige
 //   const fp=f=>createHash('sha256').update(JSON.stringify(f)).digest('hex');
 //   console.log(fp(render(structuredClone(sample))));
 //   "
-// Regenerated after schema_revision bump to c68f2a91b053 and explicit-false
-// INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED (T2a process switch, default off).
-const DEDICATED_AUDIENCE_FINGERPRINT='cff36fbdaaaedfca6c8249c6db9323454e358585889bba83d0e36dc27e865af0';
-const DEDICATED_SHARED_STAGING_FINGERPRINT='7fa9fcd05cafd0073097ebead337474a4666c5774d9a23f9d9988850910a85f5';
-const OWNED_STAGING_FINGERPRINT='3f7d1cc06b0d63f2485e6b5fe3943a9c6fd1d1252959b2bb664a9f8312cc9a6d';
+// Regenerated after schema_revision bump to c68d4e1f0253 (recording_audio_48h_retention).
+// Regenerated after RECORDING_AUDIO_48H_RETENTION_ENABLED explicit false.
+// Regenerated after merge of #404 and rechain to c68f2a91b053.
+const DEDICATED_AUDIENCE_FINGERPRINT='e46859a75beb56bab2babd8595b657cb51bd25c29fea472f94e5223c845bb6c7';
+const DEDICATED_SHARED_STAGING_FINGERPRINT='e3759161087a426ac23c234b697ae7a6fe9ef1cc4e9a52bde136f39a9b1b383a';
+const OWNED_STAGING_FINGERPRINT='92e0e66cf0d23e21a51289475f27d8878f3133eb284b5aec6800a138b3de97e9';
 
 const EXPLICIT_FALSE=[
   'WORKSPACE_CAPTURE_PROXY_ENABLED','GOOGLE_CONNECTION_BROKER_ENABLED',
@@ -31,6 +32,7 @@ const EXPLICIT_FALSE=[
   'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
   'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED',
   'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
+  'RECORDING_AUDIO_48H_RETENTION_ENABLED',
 ];
 
 test('audience dedicated package fingerprint and explicit-false backend switches',()=>{

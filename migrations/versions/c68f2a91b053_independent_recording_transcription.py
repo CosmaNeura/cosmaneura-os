@@ -7,7 +7,7 @@ transcripts, jobs and purge receipts are separate. Existing live users unchanged
 from alembic import op
 
 revision = "c68f2a91b053"
-down_revision = "b57c3d0e9142"
+down_revision = "c68d4e1f0253"
 branch_labels = None
 depends_on = None
 

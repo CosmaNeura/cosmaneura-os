@@ -43,7 +43,8 @@ test('dedicated host preparation binds every client, database, service, TLS and 
     'WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED','WORKSPACE_ENROLLMENT_MANAGED',
     'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
     'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED',
-    'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED'])
+    'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
+    'RECORDING_AUDIO_48H_RETENTION_ENABLED'])
     assert.equal(env[flag],'false',flag);
   assert.deepEqual(files['instance.json'],{schema:'cosmabot-standalone-runtime/v1',instance_id:sample.instance_id});
   assert.equal(contract.resource_identity.file_marker.mode,'0600');
@@ -100,7 +101,8 @@ test('staging session policy must be explicitly matched to existing development 
     'WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED','WORKSPACE_ENROLLMENT_MANAGED',
     'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
     'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED',
-    'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED'])
+    'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
+    'RECORDING_AUDIO_48H_RETENTION_ENABLED'])
     assert.equal(files['api-public.json'][flag],'false',flag);
   assert.equal(files['clients/desktop-identity.json'].profile,'operational-staging-v1');
   assert.equal(files['host-preparation.json'].clerk_session_proof.default_session_token_required,true);
