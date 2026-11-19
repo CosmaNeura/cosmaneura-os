@@ -19,11 +19,11 @@ const fingerprint=files=>createHash('sha256').update(JSON.stringify(files)).dige
 //   const fp=f=>createHash('sha256').update(JSON.stringify(f)).digest('hex');
 //   console.log(fp(render(structuredClone(sample))));
 //   "
-// Regenerated after schema_revision bump to c68f2a91b053 and explicit-false
-// INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED (T2a process switch, default off).
-const DEDICATED_AUDIENCE_FINGERPRINT='cff36fbdaaaedfca6c8249c6db9323454e358585889bba83d0e36dc27e865af0';
-const DEDICATED_SHARED_STAGING_FINGERPRINT='7fa9fcd05cafd0073097ebead337474a4666c5774d9a23f9d9988850910a85f5';
-const OWNED_STAGING_FINGERPRINT='3f7d1cc06b0d63f2485e6b5fe3943a9c6fd1d1252959b2bb664a9f8312cc9a6d';
+// Regenerated after T2a-azure explicit-false
+// INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED (default off).
+const DEDICATED_AUDIENCE_FINGERPRINT='154ca3654e5edee9e7ad16b8021b1cce8291c996cf5e5ed31c62097b65c679d4';
+const DEDICATED_SHARED_STAGING_FINGERPRINT='94ce5f68a2e83dabeaf7581b2647a6a57a01c5e9996bd19f36773bab8b8bc226';
+const OWNED_STAGING_FINGERPRINT='883e9c02a9775308f8556510613a568aabc65e74c4ef82c0657a0362838a2494';
 
 const EXPLICIT_FALSE=[
   'WORKSPACE_CAPTURE_PROXY_ENABLED','GOOGLE_CONNECTION_BROKER_ENABLED',
@@ -31,6 +31,7 @@ const EXPLICIT_FALSE=[
   'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
   'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED',
   'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
+  'INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED',
 ];
 
 test('audience dedicated package fingerprint and explicit-false backend switches',()=>{
@@ -50,7 +51,7 @@ test('shared_staging dedicated package fingerprint and explicit-false backend sw
   for(const flag of EXPLICIT_FALSE)assert.equal(files['api-public.json'][flag],'false',flag);
 });
 
-test('owned staging package fingerprint keeps the nine switches false',()=>{
+test('owned staging package fingerprint keeps the ten switches false',()=>{
   const value=structuredClone(sample);
   value.resource_scope='owned-cosmabot-vm-instance';
   value.web_origin='https://staging.cosmas.ai';value.api_origin='https://api.staging.cosmas.ai';

@@ -100,8 +100,8 @@ function assertNoRealPatientOn(files){
 // Off-path must stay byte-identical to origin/main after #361 (eight Settings
 // bools rendered explicitly false). Values match render-goldens.test.mjs.
 // Regenerated after schema_revision bump to b57c3d0e9142 (account_delete_intents).
-const MAIN_DEDICATED_FINGERPRINT='cff36fbdaaaedfca6c8249c6db9323454e358585889bba83d0e36dc27e865af0';
-const MAIN_OWNED_STAGING_FINGERPRINT='3f7d1cc06b0d63f2485e6b5fe3943a9c6fd1d1252959b2bb664a9f8312cc9a6d';
+const MAIN_DEDICATED_FINGERPRINT='154ca3654e5edee9e7ad16b8021b1cce8291c996cf5e5ed31c62097b65c679d4';
+const MAIN_OWNED_STAGING_FINGERPRINT='883e9c02a9775308f8556510613a568aabc65e74c4ef82c0657a0362838a2494';
 
 test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const baseline=render(structuredClone(sample));
@@ -173,6 +173,7 @@ test('opt-in on renders exact capture and agent-tools keys for synthetic staging
     'WORKSPACE_ENROLLMENT_MANAGED','COSMAS_EHR_REAL_DATA_ENABLED',
     'WORKSPACE_RX_SANDBOX_ENABLED','REAL_PATIENT_RECORDING_ENABLED',
     'WORKSPACE_EFAX_SANDBOX_ENABLED','INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
+    'INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED',
   ])assert.equal(env[flag],'false',flag);
   assert.match(files['api-public.env'],/^WORKSPACE_AGENT_TOOLS_ENABLED="true"$/m);
   assert.match(files['api-public.env'],/^WORKSPACE_CAPTURE_BACKEND="core"$/m);

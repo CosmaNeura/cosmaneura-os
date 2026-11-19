@@ -210,7 +210,8 @@ WORKSPACE_CAPTURE_PROXY_ENABLED GOOGLE_CONNECTION_BROKER_ENABLED
 WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED WORKSPACE_ENROLLMENT_MANAGED
 COSMAS_EHR_REAL_DATA_ENABLED WORKSPACE_RX_SANDBOX_ENABLED
 REAL_PATIENT_RECORDING_ENABLED WORKSPACE_EFAX_SANDBOX_ENABLED
-INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED`.split(/\s+/);
+INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED
+INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED`.split(/\s+/);
 
 function service({name,user,config,release,intended,writePaths,environment=false,https=false}){
   return `[Unit]\nDescription=${name} (review only; startup held)\n\n[Service]\nType=exec\nUser=${user}\nGroup=${user}\nWorkingDirectory=${release}\n${environment?`EnvironmentFile=${config}/api-public.env\nEnvironmentFile=${config}/api-private.env\n`:''}ExecStart=/bin/sh ${release}/STARTUP-HELD.sh\n# Intended command for a separately qualified release only:\n# ${intended}\nRestart=no\nUMask=0077\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\nProtectHome=true\nReadWritePaths=${writePaths.join(' ')}\nCapabilityBoundingSet=${https?'CAP_NET_BIND_SERVICE':''}\n${https?'AmbientCapabilities=CAP_NET_BIND_SERVICE\n':''}RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6\n\n# No Install section: this review unit cannot be enabled as a release.\n`;

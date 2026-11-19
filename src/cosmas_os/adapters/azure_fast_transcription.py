@@ -72,14 +72,15 @@ class AzureFastTranscriptionProcessor:
             return cls(endpoint=endpoint, key_env_name=key_env_name, transport=transport)
 
         def token_provider() -> str:
-            factory = credential_factory
-            if factory is None:
+            resolved = credential_factory
+            if resolved is None:
                 from azure.identity import DefaultAzureCredential
 
-                def factory():
+                def default_factory() -> Any:
                     return DefaultAzureCredential(exclude_interactive_browser_credential=True)
 
-            return factory().get_token(TOKEN_SCOPE).token
+                resolved = default_factory
+            return resolved().get_token(TOKEN_SCOPE).token
 
         return cls(endpoint=endpoint, token_provider=token_provider, transport=transport)
 

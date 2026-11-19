@@ -93,6 +93,7 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
                 self.assertEqual(public["REAL_PATIENT_RECORDING_ENABLED"], "false")
                 self.assertEqual(public["WORKSPACE_EFAX_SANDBOX_ENABLED"], "false")
                 self.assertEqual(public["INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED"], "false")
+                self.assertEqual(public["INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED"], "false")
                 self.assertEqual(contract["database"]["schema_revision"], EXPECTED_SCHEMA_REVISION)
                 # Invented process-only values; no file, account or database is opened.
                 database = contract["database"]
@@ -222,6 +223,7 @@ const files=render(input);console.log(JSON.stringify({environment:files['api-pub
         # #361 renders REAL_PATIENT_RECORDING_ENABLED explicitly false; opt-in never flips it.
         self.assertEqual(public["REAL_PATIENT_RECORDING_ENABLED"], "false")
         self.assertEqual(public["INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED"], "false")
+        self.assertEqual(public["INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED"], "false")
         for flag in (
             "GOOGLE_CONNECTION_BROKER_ENABLED",
             "WORKSPACE_ATHENA_FHIR_SANDBOX_ENABLED",
