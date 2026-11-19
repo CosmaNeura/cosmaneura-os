@@ -64,3 +64,13 @@ def test_migration_upgrade_sets_lock_timeout_first():
     upgrade = source.split("UPGRADE = r\"\"\"", 1)[1].split("\"\"\"", 1)[0]
     first_stmt = next(line.strip() for line in upgrade.splitlines() if line.strip())
     assert first_stmt == "SET LOCAL lock_timeout = '5s';"
+
+
+def test_synthetic_environment_reads_settings_data_mode_directly(monkeypatch):
+    from cosmas_os.application import independent_transcription as tx
+
+    assert "data_mode" in Settings.model_fields
+    monkeypatch.setattr(tx, "settings", _settings(data_mode="synthetic"))
+    assert tx._synthetic_environment() is True
+    monkeypatch.setattr(tx, "settings", _settings(data_mode="authorized_beta"))
+    assert tx._synthetic_environment() is False

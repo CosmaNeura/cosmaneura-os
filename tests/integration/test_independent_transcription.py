@@ -663,10 +663,17 @@ def test_revoke_works_when_process_switch_off(enabled_case, monkeypatch):
 
 
 def test_unbound_recording_fails_closed_outside_synthetic(enabled_case, monkeypatch):
+    from cosmas_os.config import Settings
+
     c = enabled_case
-    monkeypatch.setattr(
-        tx, "settings", c["f"].configuration.model_copy(update={"data_mode": "authorized_beta"})
+    # Build through Settings(...) so a drifted field name fails closed at construct time.
+    configured = Settings(
+        _env_file=None,  # pyright: ignore[reportCallIssue]
+        data_mode="authorized_beta",
+        independent_recording_transcription_enabled=True,
+        blob_root=str(c["blob"].root),
     )
+    monkeypatch.setattr(tx, "settings", configured)
     with pytest.raises(ws.WorkspaceError) as err:
         tx._derive_recording_class(c["session"], c["f"].box, c["row"]["recording_id"])
     assert err.value.code == "real_patient_recording_refused"
@@ -708,3 +715,328 @@ def test_attempts_exhausted_commits_terminal_before_raise(enabled_case):
     assert stored is not None
     assert stored.state == "failed_terminal"
     assert stored.error_kind == "attempts_exhausted"
+
+
+def test_upload_put_fails_once_then_retry_leaves_readable_blob(enabled_case):
+    c = enabled_case
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-put-retry")
+
+    class FlakyBlob(LocalBlobAdapter):
+        def __init__(self, root):
+            super().__init__(root)
+            self.failures_left = 1
+
+        def put_bytes(self, key: str, data: bytes, content_type: str) -> str:
+            if self.failures_left > 0:
+                self.failures_left -= 1
+                raise RuntimeError("injected put failure")
+            return super().put_bytes(key, data, content_type)
+
+    flaky = FlakyBlob(c["blob"].root)
+    with pytest.raises(ws.WorkspaceError) as err:
+        tx.upload_audio(
+            c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+            payload, external=c["external"], blob=flaky, clock=c["clock"],
+        )
+    assert err.value.code == "independent_transcription_unavailable"
+    assert err.value.status == 503
+    row = c["session"].scalar(
+        select(IndependentRecordingAudioUpload).where(
+            IndependentRecordingAudioUpload.operation_id == payload["operation_id"]
+        )
+    )
+    assert row is not None and row.blob_key is not None
+    with pytest.raises(FileNotFoundError):
+        flaky.get_bytes(row.blob_key)
+
+    retried = tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=flaky, clock=c["clock"],
+    )
+    assert retried["duplicate"] is True
+    assert flaky.get_bytes(row.blob_key) == payload["audio"]
+    started = tx.start_transcription(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        {"operation_id": payload["operation_id"]},
+        external=c["external"], blob=flaky, clock=c["clock"],
+    )
+    assert started["status"] == "ready"
+
+
+def test_unavailable_processor_failure_is_retryable(enabled_case):
+    c = enabled_case
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-unavailable")
+    tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    failing = FakeTranscriptionProcessor(
+        fail_operations={payload["operation_id"]: "unavailable"}
+    )
+    with pytest.raises(ws.WorkspaceError) as err:
+        tx.start_transcription(
+            c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+            {"operation_id": payload["operation_id"]},
+            external=c["external"], blob=c["blob"], clock=c["clock"], processor=failing,
+        )
+    assert err.value.code == "independent_transcription_unavailable"
+    assert err.value.status == 503
+    job = c["session"].scalar(
+        select(IndependentRecordingTranscriptionJob).where(
+            IndependentRecordingTranscriptionJob.operation_id == payload["operation_id"]
+        )
+    )
+    assert job is not None and job.state == "failed_retryable" and job.error_kind == "unavailable"
+    recovered = tx.start_transcription(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        {"operation_id": payload["operation_id"]},
+        external=c["external"], blob=c["blob"], clock=c["clock"],
+        processor=FakeTranscriptionProcessor(),
+    )
+    assert recovered["status"] == "ready"
+
+
+def test_finish_lock_timeout_returns_503(enabled_case, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    c = enabled_case
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-lock-to")
+    uploaded = tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    upload = c["session"].get(IndependentRecordingAudioUpload, uploaded["upload_id"])
+    assert upload is not None
+    job = tx._claim_job(c["session"], upload=upload, now=now)
+    claim_attempt = job.attempts
+    c["session"].commit()
+
+    class LockTimeout(Exception):
+        pgcode = "55P03"
+        sqlstate = "55P03"
+
+    def boom_get(*args, **kwargs):
+        raise OperationalError("SELECT", {}, LockTimeout("canceling statement due to lock timeout"))
+
+    from cosmas_os.ports.recording_transcription import TranscriptionRequest
+
+    monkeypatch.setattr(c["session"], "get", boom_get)
+    outcome = FakeTranscriptionProcessor().transcribe(
+        TranscriptionRequest(
+            audio=b"tone-lock-to",
+            sha256=payload["sha256"],
+            duration_ms=1000,
+            language="en-US",
+            operation_id=payload["operation_id"],
+            synthetic=True,
+        )
+    )
+    with pytest.raises(ws.WorkspaceError) as err:
+        tx._finish_transcription(
+            c["session"],
+            c=svc.Container(c["session"], clock=c["clock"], blob=c["blob"]),
+            upload_id=upload.id,
+            box_id=c["f"].box,
+            owner_id=c["f"].actor,
+            wid=c["draft"]["id"],
+            rid=c["row"]["recording_id"],
+            operation_id=payload["operation_id"],
+            outcome=outcome,
+            now=now,
+            claim_attempt=claim_attempt,
+        )
+    assert err.value.code == "independent_transcription_unavailable"
+    assert err.value.status == 503
+
+
+def test_delete_own_account_blob_failure_rolls_back(enabled_case, monkeypatch):
+    from cosmas_os.adapters.local import LocalBlobAdapter
+    from cosmas_os.application.account_deletion import CONFIRM_PHRASE, delete_own_account
+    from cosmas_os.domain.enums import PrincipalState
+    from cosmas_os.models import Principal
+
+    c = enabled_case
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-acct-boom")
+    uploaded = tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    upload_id = uploaded["upload_id"]
+
+    def boom_delete(self, key: str) -> None:
+        raise RuntimeError("storage unavailable")
+
+    monkeypatch.setattr(LocalBlobAdapter, "delete", boom_delete)
+    monkeypatch.setattr(svc, "settings", c["f"].configuration.model_copy(
+        update={"blob_root": str(c["blob"].root)}
+    ))
+
+    class FakeClerk:
+        def require_user(self, subject: str) -> dict:
+            return {"id": subject}
+
+        def delete_user(self, subject: str) -> None:
+            raise AssertionError("Clerk delete must not run after wipe failure")
+
+    with pytest.raises(ws.WorkspaceError) as err:
+        delete_own_account(
+            c["session"],
+            box_id=c["f"].box,
+            principal_id=c["f"].actor,
+            external_identity_id=c["external"],
+            confirm=CONFIRM_PHRASE,
+            clerk=FakeClerk(),
+        )
+    assert err.value.status == 503
+    actor = c["session"].get(Principal, c["f"].actor)
+    assert actor is not None and actor.state == PrincipalState.ACTIVE.value
+    remaining = c["session"].get(IndependentRecordingAudioUpload, upload_id)
+    assert remaining is not None and remaining.blob_key is not None
+
+
+def test_box_switch_off_refuses_while_process_switch_on(enabled_case):
+    c = enabled_case
+    box = c["session"].get(BoxContext, c["f"].box)
+    assert box is not None
+    box.independent_recording_transcription_enabled = False
+    c["session"].commit()
+    now = c["clock"].now()
+    with pytest.raises(ws.WorkspaceError) as err:
+        tx.upload_audio(
+            c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+            independent_payload(now, b"tone-box-off"),
+            external=c["external"], blob=c["blob"], clock=c["clock"],
+        )
+    assert err.value.code == "independent_recording_transcription_disabled"
+    assert err.value.status == 403
+
+
+def test_http_revoke_on_and_with_switch_off(enabled_case, monkeypatch):
+    from cosmas_os.api import app as api_module
+
+    c = enabled_case
+    f, draft, row = c["f"], c["draft"], c["row"]
+    now = datetime.now(UTC)
+    audio = b"tone-http-revoke"
+    body = {
+        "operation_id": str(uuid4()),
+        "sha256": hashlib.sha256(audio).hexdigest(),
+        "duration_ms": 1000,
+        "language": "en-US",
+        "lease_expires_at": (now + timedelta(hours=1)).isoformat(),
+        "consent": independent_consent(now),
+        "audio_base64": base64.b64encode(audio).decode(),
+    }
+    assert f.client.post(
+        f"{base(draft)}/{row['recording_id']}/audio", headers=headers(f), json=body
+    ).status_code == 200
+    revoked = f.client.post(
+        f"{base(draft)}/{row['recording_id']}/transcription/revoke",
+        headers=headers(f),
+        json={"operation_id": body["operation_id"]},
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["status"] == "revoked"
+
+    audio2 = b"tone-http-rev2"
+    body2 = {
+        "operation_id": str(uuid4()),
+        "sha256": hashlib.sha256(audio2).hexdigest(),
+        "duration_ms": 1000,
+        "language": "en-US",
+        "lease_expires_at": (now + timedelta(hours=1)).isoformat(),
+        "consent": independent_consent(now),
+        "audio_base64": base64.b64encode(audio2).decode(),
+    }
+    assert f.client.post(
+        f"{base(draft)}/{row['recording_id']}/audio", headers=headers(f), json=body2
+    ).status_code == 200
+    off = f.configuration.model_copy(
+        update={"independent_recording_transcription_enabled": False, "blob_root": str(c["blob"].root)}
+    )
+    monkeypatch.setattr(tx, "settings", off)
+    monkeypatch.setattr(api_module, "settings", off)
+    monkeypatch.setattr(svc, "settings", off)
+    revoked_off = f.client.post(
+        f"{base(draft)}/{row['recording_id']}/transcription/revoke",
+        headers=headers(f),
+        json={"operation_id": body2["operation_id"]},
+    )
+    assert revoked_off.status_code == 200, revoked_off.text
+    assert revoked_off.json()["status"] == "revoked"
+
+
+def test_worker_task_purges_expired_rows(enabled_case, monkeypatch):
+    from cosmas_os.worker import tasks as worker_tasks
+
+    c = enabled_case
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-worker-purge")
+    uploaded = tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    upload = c["session"].get(IndependentRecordingAudioUpload, uploaded["upload_id"])
+    assert upload is not None
+    c["clock"].set(upload.audio_expires_at)
+    monkeypatch.setattr(
+        svc, "settings",
+        c["f"].configuration.model_copy(update={
+            "blob_root": str(c["blob"].root),
+            "cosmas_clock_now": c["clock"].now().isoformat(),
+            "independent_recording_transcription_enabled": True,
+        }),
+    )
+
+    class BoundSession:
+        def __init__(self, session):
+            self._session = session
+
+        def __getattr__(self, name):
+            return getattr(self._session, name)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(worker_tasks, "SessionLocal", lambda: BoundSession(c["session"]))
+    count = worker_tasks.purge_independent_recording_audio_task(box_id=c["f"].box)
+    assert count >= 1
+    c["session"].refresh(upload)
+    assert upload.blob_key is None and upload.audio_purged_at is not None
+
+
+def test_http_purge_with_injected_clock_actually_purges(enabled_case, monkeypatch):
+    from cosmas_os.api import app as api_module
+
+    c = enabled_case
+    f, draft = c["f"], c["draft"]
+    now = c["clock"].now()
+    payload = independent_payload(now, b"tone-http-clock")
+    uploaded = tx.upload_audio(
+        c["session"], c["f"].box, c["f"].actor, c["draft"]["id"], c["row"]["recording_id"],
+        payload, external=c["external"], blob=c["blob"], clock=c["clock"],
+    )
+    upload = c["session"].get(IndependentRecordingAudioUpload, uploaded["upload_id"])
+    assert upload is not None and upload.blob_key is not None
+    purge_at = upload.audio_expires_at
+    configuration = f.configuration.model_copy(update={
+        "independent_recording_transcription_enabled": True,
+        "blob_root": str(c["blob"].root),
+        "cosmas_clock_now": purge_at.isoformat(),
+    })
+    monkeypatch.setattr(tx, "settings", configuration)
+    monkeypatch.setattr(api_module, "settings", configuration)
+    monkeypatch.setattr(svc, "settings", configuration)
+    purged = f.client.post(
+        f"/workspaces/{draft['id']}/private-recordings/audio-purge",
+        headers=headers(f),
+    )
+    assert purged.status_code == 200, purged.text
+    receipts = purged.json()["receipts"]
+    assert any(item["upload_id"] == upload.id and item["outcome"] == "purged" for item in receipts)
+    c["session"].refresh(upload)
+    assert upload.blob_key is None and upload.audio_purged_at is not None

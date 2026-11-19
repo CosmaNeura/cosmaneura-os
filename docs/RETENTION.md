@@ -71,14 +71,14 @@ Honest limits:
 
 ## Recording audio uploaded for transcription (48 hours)
 
-- CosmaBot-independent transcription audio blobs are deleted **48 hours after**
-  receipt (`audio_expires_at`). Purge runs when an owner calls the
-  `/private-recordings/audio-purge` route, or when the
-  `cosmas_os.purge_independent_recording_audio` Celery task is invoked (for
-  example by ops). There is no Celery beat schedule for this sweep in v1. The
-  purge path does not re-check the feature switch, so leftover audio can still
-  age out after the switch is turned off. Tests use an injectable clock. Reads
-  refuse expired audio even before purge runs.
+- CosmaBot-independent transcription audio becomes **unreadable after 48 hours**
+  (`audio_expires_at`). Blobs are removed only when purge runs: an owner calls
+  the `/private-recordings/audio-purge` route, or ops invokes the
+  `cosmas_os.purge_independent_recording_audio` Celery task. There is no Celery
+  beat schedule for this sweep in v1 (beat registration is a separate pre-flip
+  ticket). The purge path does not re-check the feature switch, so leftover
+  audio can still be swept after the switch is turned off. Tests use an
+  injectable clock. Reads refuse expired audio even before purge runs.
 - Purge deletes **audio blobs only**. Immutable transcript rows, transcript
   content, jobs, and audit rows stay under existing retention.
 - On a failed blob delete the row keeps `blob_key`, records outcome `failed`,
