@@ -55,11 +55,13 @@ default so prepared hosts match code defaults (Fable hole 2a / PR #361):
 - `WORKSPACE_RX_SANDBOX_ENABLED`
 - `REAL_PATIENT_RECORDING_ENABLED`
 - `WORKSPACE_EFAX_SANDBOX_ENABLED`
+- `INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED`
 
 Only the synthetic beta capture + tools opt-in below may set
 `WORKSPACE_CAPTURE_PROXY_ENABLED=true` (with `WORKSPACE_CAPTURE_PROXY_ORIGIN`).
-The other seven stay `'false'` even when that opt-in is on.
-`REAL_PATIENT_RECORDING_ENABLED` is never rendered `'true'`.
+The other eight stay `'false'` even when that opt-in is on.
+`REAL_PATIENT_RECORDING_ENABLED` and
+`INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED` are never rendered `'true'`.
 
 ## Synthetic beta capture + tools opt-in (default off)
 

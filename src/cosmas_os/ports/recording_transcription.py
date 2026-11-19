@@ -44,6 +44,7 @@ class TranscriptionFailure:
 class TranscriptionProcessor(Protocol):
     def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult | TranscriptionFailure:
         """Process audio into an immutable transcript or a typed failure."""
+        ...
 
 
 class FakeTranscriptionProcessor:
