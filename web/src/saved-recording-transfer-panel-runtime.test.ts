@@ -8,6 +8,7 @@ import {EncryptedIndexedDbFlowStore} from '../../clients/capture/src/configured/
 import type {ActiveCaptureState} from '../../clients/capture/src/configured/flow/types';
 import {workspaceCaptureBff} from './capture-api';
 import {
+  clearTransferRetentionReleased,
   isAudioRetentionProtected,
   isTransferRetentionReleased,
   openPrivateRecordingStore,
@@ -15,8 +16,11 @@ import {
   type PrivateRecordingRuntime,
   type PrivateRecordingStore,
 } from './private-recording-runtime';
-import {openSavedRecordingRuntime,savedRecordingImportStoreNames} from './saved-recording-runtime';
+import {importSavedChunks,openSavedRecordingRuntime,savedRecordingImportQueueDatabaseName,savedRecordingImportStoreNames} from './saved-recording-runtime';
 import type {PreparedCapture} from './capture-api';
+import {persistSavedRecordingTransfer} from './SavedRecordingTranscriptionPanel';
+import type {SavedRecordingEntry} from './session/recording-model';
+import type {SavedRecordingSource} from './saved-recording-source';
 
 const review=vi.hoisted(()=>({read:vi.fn()}));
 const native=vi.hoisted(()=>({list:vi.fn(),get:vi.fn(),create:vi.fn(),compareAndSwap:vi.fn()}));
@@ -62,10 +66,7 @@ async function seedFlow(value:ActiveCaptureState){
   try{await store.putActiveCaptureState(value);}finally{store.close();}
 }
 
-/** Same CAS write the panel's persist() uses (SavedRecordingTranscriptionPanel.tsx:213-214). */
-async function panelPersist(store:PrivateRecordingStore,prior:unknown,next:unknown){
-  await store.write('transfer:'+recordingId,prior,next);
-}
+const entry:SavedRecordingEntry={recordingId,scope,platform:'desktop'};
 
 async function relaunchResume(store:PrivateRecordingStore){
   return store.read('transfer:'+recordingId);
@@ -118,8 +119,9 @@ it('panel persist and relaunch-resume work after successful import (real runtime
   expect(await store.read('transfer:'+recordingId)).toEqual(prior);
   expect(await isTransferRetentionReleased(store,recordingId)).toBe(true);
   expect(await isAudioRetentionProtected(store,recordingId)).toBe(false);
-  const next=legacyTransfer({admitted});
-  await panelPersist(store,prior,next);
+  // Real panel persist path (validate + CAS). Keep a valid empty v1 shape (no partial admitted).
+  const next=legacyTransfer();
+  await persistSavedRecordingTransfer(store,entry,workspaceId,prior,next);
   expect(await relaunchResume(store)).toEqual(next);
   store.close();
   const relaunched=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
@@ -136,35 +138,39 @@ it('panel persist and relaunch-resume work after failed import (real runtime; tr
   const recording=sealedRecording(vi.fn(async function*(){throw Error('must not read audio on failed import');}));
   const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
     scope,recording,chunks,platform:'desktop',isCurrent:()=>current,store,audioRetention:retentionOn});
-  // Owner retires mid-import → terminal failure before release marker; transfer: must remain.
+  // Restored processing is proven completion → release marker at open; transfer: row stays for CAS.
+  expect(await isTransferRetentionReleased(store,recordingId)).toBe(true);
+  expect(await store.read('transfer:'+recordingId)).toEqual(prior);
+  // Sticky-rejection guard: after .finally clears task, a later call runs fresh (succeeds once current).
   current=false;
   await expect(opened.transcribe()).rejects.toMatchObject({code:'capture_access_unavailable'});
   current=true;
+  await opened.transcribe();
   await opened.close();
   expect(await store.read('transfer:'+recordingId)).toEqual(prior);
-  expect(await isTransferRetentionReleased(store,recordingId)).toBe(false);
-  expect(await isAudioRetentionProtected(store,recordingId)).toBe(true);
-  const next=legacyTransfer({admitted});
-  await panelPersist(store,prior,next);
+  const next=legacyTransfer();
+  await persistSavedRecordingTransfer(store,entry,workspaceId,prior,next);
   expect(await relaunchResume(store)).toEqual(next);
   store.close();
 });
 
-it('pre-PR legacy transfer shape survives import and still supports panel persist/resume',async()=>{
+it('pre-PR legacy transfer shape survives restored processing import and panel persist/resume',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
   // Old shape: transfer: row only — no transfer-retention-released: key exists yet.
-  const prior=legacyTransfer({receipt:{local_recording_id:recordingId,state:'linked_metadata'}});
+  // Store may hold legacy receipt-shaped rows; persist path validates closed v1 without partial receipt.
+  const prior=legacyTransfer();
   await store.write('transfer:'+recordingId,null,prior);
   expect(await store.read(transferRetentionReleasedKey(recordingId))).toBeNull();
-  await seedFlow(active());
-  const recording=sealedRecording(vi.fn(async function*(){throw Error('review-only must not read audio');}));
+  await seedFlow(active()); // restored processing path (not reviewOnly)
+  const recording=sealedRecording(vi.fn(async function*(){throw Error('processing path must not read audio');}));
   const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
     scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:retentionOn});
+  expect(opened.reviewOnly).toBe(false);
   await opened.transcribe();
   await opened.close();
   expect(await store.read('transfer:'+recordingId)).toEqual(prior);
-  const next=legacyTransfer({receipt:prior.receipt,admitted});
-  await panelPersist(store,prior,next);
+  const next=legacyTransfer();
+  await persistSavedRecordingTransfer(store,entry,workspaceId,prior,next);
   expect(await relaunchResume(store)).toEqual(next);
   store.close();
 });
@@ -176,19 +182,129 @@ it('with retention policy off, web panel/runtime deletes nothing on transfer:',a
   const deleted:string[]=[];
   const realDelete=store.delete.bind(store);
   store.delete=async(key:string)=>{deleted.push(key);return realDelete(key);};
-  await seedFlow(active());
-  const recording=sealedRecording(vi.fn(async function*(){throw Error('review-only must not read audio');}));
+  await seedFlow(active()); // restored processing path (not reviewOnly)
+  const recording=sealedRecording(vi.fn(async function*(){throw Error('processing path must not read audio');}));
   // Absent / off policy — live users tonight.
   const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
     scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:{enabled:false}});
+  expect(opened.reviewOnly).toBe(false);
   await opened.transcribe();
   await opened.close();
   expect(deleted.filter(k=>k.startsWith('transfer:'))).toEqual([]);
   expect(await store.read('transfer:'+recordingId)).toEqual(prior);
   expect(await isTransferRetentionReleased(store,recordingId)).toBe(false);
   expect(await store.read(transferRetentionReleasedKey(recordingId))).toBeNull();
-  const next=legacyTransfer({admitted});
-  await panelPersist(store,prior,next);
+  const next=legacyTransfer();
+  await persistSavedRecordingTransfer(store,entry,workspaceId,prior,next);
   expect(await relaunchResume(store)).toEqual(next);
+  store.close();
+});
+
+it('true reviewOnly branch releases protection without reading chunks',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
+  const prior=legacyTransfer({admitted});
+  await store.write('transfer:'+recordingId,null,prior);
+  // No seeded flow → restore fails; review status uploaded → reviewOnly=true.
+  review.read.mockResolvedValue({status:'uploaded'});
+  const recording=sealedRecording(vi.fn(async function*(){throw Error('reviewOnly must not read audio');}));
+  const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:retentionOn});
+  expect(opened.reviewOnly).toBe(true);
+  await opened.transcribe();
+  await opened.close();
+  expect(await isTransferRetentionReleased(store,recordingId)).toBe(true);
+  expect(await store.read('transfer:'+recordingId)).toEqual(prior);
+  store.close();
+});
+
+it('mid-upload importSavedChunks failure pauses and rethrows without completing',async()=>{
+  let recorded=0;
+  const controller={
+    get snapshot(){return {state:recorded>=chunks?'paused':'recording',recordedChunks:recorded,sessionId};},
+    startRecording:async()=>{},
+    pauseRecording:async()=>{},
+    prepareContinuation:async()=>{},
+    stopRecording:async()=>{throw new Error('stop must not run after mid-feed failure');},
+    resumePendingWork:async()=>{throw new Error('resume must not run');},
+  };
+  const source={feed:async(first:number)=>{
+    if(first===0){recorded=1;return 1;}
+    throw Object.assign(new Error('Synthetic mid-upload failure'),{code:'capture_chunk_position_conflict'});
+  }} as unknown as SavedRecordingSource;
+  await expect(importSavedChunks(controller as never,source,chunks,()=>true))
+    .rejects.toMatchObject({code:'capture_chunk_position_conflict'});
+  expect(recorded).toBe(1);
+});
+
+it('clearTransferRetentionReleased restores protection for renew-consent re-import',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
+  const prior=legacyTransfer({admitted});
+  await store.write('transfer:'+recordingId,null,prior);
+  const {markTransferRetentionReleased}=await import('./private-recording-runtime');
+  await markTransferRetentionReleased(store,recordingId,'2026-10-09T12:00:00.000Z');
+  expect(await isAudioRetentionProtected(store,recordingId)).toBe(false);
+  await clearTransferRetentionReleased(store,recordingId);
+  expect(await isTransferRetentionReleased(store,recordingId)).toBe(false);
+  expect(await isAudioRetentionProtected(store,recordingId)).toBe(true);
+  store.close();
+});
+
+it('releaseUploadedCapture deletes session import-queue DB only when retention is effective',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
+  await store.write('transfer:'+recordingId,null,legacyTransfer({admitted}));
+  await seedFlow(active());
+  const recording=sealedRecording(vi.fn(async function*(){throw Error('confirmed upload must not read audio');}));
+  const deleteSpy=vi.spyOn(indexedDB,'deleteDatabase');
+  const on=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:retentionOn});
+  await on.releaseUploadedCapture();
+  expect(deleteSpy).toHaveBeenCalledWith(savedRecordingImportQueueDatabaseName(sessionId));
+  await on.close();
+  store.close();
+});
+
+it('with retention off, releaseUploadedCapture matches main (queue stays; real uploadProgress after release/re-release/close/reopen)',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
+  await store.write('transfer:'+recordingId,null,legacyTransfer({admitted}));
+  await seedFlow(active());
+  const recording=sealedRecording(vi.fn(async function*(){throw Error('confirmed upload must not read audio');}));
+  const deleteSpy=vi.spyOn(indexedDB,'deleteDatabase');
+  const first=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:{enabled:false}});
+  await first.releaseUploadedCapture();
+  await first.releaseUploadedCapture(); // second Continue after Return — must not hit closed storage
+  expect(deleteSpy).not.toHaveBeenCalled();
+  const progress=await first.uploadProgress();
+  expect(progress).toMatchObject({total:chunks});
+  expect(typeof progress.confirmed).toBe('number');
+  expect(progress.confirmed).toBeGreaterThanOrEqual(0);
+  await first.close();
+  // Reopen after close — same off-path contract.
+  await seedFlow(active());
+  const second=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:{enabled:false}});
+  await second.releaseUploadedCapture();
+  const again=await second.uploadProgress();
+  expect(again).toMatchObject({total:chunks});
+  expect(typeof again.confirmed).toBe('number');
+  expect(deleteSpy).not.toHaveBeenCalled();
+  await second.close();
+  store.close();
+});
+
+it('admitted transfer mid-upload (no proven completion) does not release; stays protected past deadline',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
+  const prior=legacyTransfer({admitted});
+  await store.write('transfer:'+recordingId,null,prior);
+  // Partial / in-flight: restore fails; capturing status blocks reviewOnly — open throws before any release.
+  review.read.mockResolvedValue({status:'capturing'});
+  const recording=sealedRecording(vi.fn(async function*(){throw Error('partial must not read audio');}));
+  const pastDeadline=()=>Date.parse('2026-10-09T12:00:00.000Z')+48*60*60*1000;
+  await expect(openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:retentionOn,now:pastDeadline}))
+    .rejects.toMatchObject({code:'capture_saved_session_changed'});
+  expect(await isTransferRetentionReleased(store,recordingId)).toBe(false);
+  expect(await isAudioRetentionProtected(store,recordingId)).toBe(true);
+  expect(await store.read('transfer:'+recordingId)).toEqual(prior);
   store.close();
 });

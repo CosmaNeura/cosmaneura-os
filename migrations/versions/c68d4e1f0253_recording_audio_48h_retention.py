@@ -4,8 +4,8 @@ Additive only. Default false so existing live users keep today's behavior.
 Process switch recording_audio_48h_retention_enabled must also be true.
 
 enabled_at stamps when the Box opt-in first becomes true so clients can
-grandfather pre-enable recordings (30-day window) instead of applying 48h
-retroactively.
+grandfather pre-enable recordings (flip + 48h grace) instead of applying
+48h retroactively from an old ended_at.
 """
 
 from alembic import op

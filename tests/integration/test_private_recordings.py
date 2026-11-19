@@ -412,8 +412,8 @@ def test_audio_retention_enabled_only_when_process_and_box_opt_in(recording, ses
     _assert_audio_retention_shape(again.json(), enabled=False, enabled_at_present=False)
 
 
-def test_audio_retention_returns_30_day_grandfathering_fields(recording, session, monkeypatch):
-    """enabled_at + server_now are the fields clients need for 30-day grandfathering."""
+def test_audio_retention_returns_flip_plus_48h_grandfathering_fields(recording, session, monkeypatch):
+    """enabled_at + server_now are the fields clients need for flip+48h grandfathering."""
     from datetime import UTC, datetime
 
     from cosmas_os.application import private_recording as service
@@ -440,8 +440,8 @@ def test_audio_retention_returns_30_day_grandfathering_fields(recording, session
     server_now = datetime.fromisoformat(payload["server_now"].replace("Z", "+00:00"))
     assert enabled_at.tzinfo is not None and server_now.tzinfo is not None
     assert enabled_at <= server_now.astimezone(UTC)
-    # Clients use enabled_at as the grandfather cutover; pre-cutover audio keeps
-    # the prior 30-day expectation instead of an immediate 48h wipe.
+    # Clients use enabled_at as the grandfather cutover; pre-cutover audio gets
+    # flip+48h grace instead of an immediate wipe from an old ended_at.
     assert (server_now - enabled_at).total_seconds() < 60
 
 

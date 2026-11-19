@@ -22,7 +22,8 @@ When a Box opts in, Postgres stamps `recording_audio_48h_retention_enabled_at`
 (`enabled_at`). The 48h clock starts at
 `max(ended_at_or_last_audio_write, box enabled_at, device first-seen armedAt)`:
 a recording that ended before cutover is not wiped from an old `ended_at`
-alone — the deadline is cutover (and device arm) plus 48h.
+alone — the deadline is cutover (and device arm) plus 48h. That cutover grace
+is flip + 48h (not a separate 30-day window).
 
 When both switches are on:
 
@@ -38,18 +39,25 @@ When both switches are on:
   device deletes on its next panel open.
 
 Parents may pass `audioRetention` (preferred for tests). When that prop is
-omitted, the panel GETs
-`/workspaces/{id}/private-recordings/audio-retention` once a workspace id is
-known (`workspaceId` prop, notebook, or attached snapshot). Fetch failure is
-treated as off (`enabled: false`). Production `WorkspaceShell` currently passes
-neither `audioRetention` nor `workspaceId` into the panel; retention stays off
-there until a parent wires one of those.
+omitted, the web private-recording panel and the saved-recording transcription
+panel GET `/workspaces/{id}/private-recordings/audio-retention` once a
+workspace id is known (`workspaceId` prop, notebook, or attached snapshot).
+Fetch failure is treated as off (`enabled: false`). Once both switches are on,
+those GETs return enabled and the web panels enforce deletion — no further
+parent wiring is required.
 
 Saved-recording import (`openSavedRecordingRuntime`) opens a **session-scoped**
 import queue / flow / profile DB (names include `sessionId`; browser queue open
-uses `sessionId` as the queue namespace key). That is not a second long-lived
-private-recording audio copy. The durable private-recording store remains the
-retention target; the import queue is session-scoped.
+uses `sessionId` as the queue namespace key → `cosmas-capture-queue:${sessionId}`).
+That queue may hold a temporary PCM copy for the import session. Browser builds
+delete that IndexedDB on `releaseUploadedCapture` after a successful upload;
+retention sweeps do not touch it. Until release (or browser eviction), it is a
+bounded session-scoped copy, not a second long-lived private-recording store.
+
+Web and iOS clients stamp a local `audio-retention-armed` time on first
+allowDelete observation and clear it when policy is observed off, so kill-switch
+rollback restores a fresh grace window. Desktop durable recorder does not
+implement that armed stamp yet and stays unwired.
 
 Mac Electron: `DesktopProviderRecorder` sweeps a durable private-recording
 namespace when the desktop recorder is open/read/deactivated and main
@@ -62,8 +70,11 @@ Honest limits:
   cannot delete anything until that path runs again.
 - Server backup copies age out on the normal backup cycle under BAA 2.3
   section 4.3.3. This document does not change the BAA.
-- The server holds no recording audio today (`audio_uploaded: false`), so T1
-  has no server purge. T2a adds the server purge for audio it uploads.
+- The server holds no recording audio today as durable private-recording
+  storage (`audio_uploaded: false` on that path). Transcription upload may
+  send chunks to the capture BFF for the active session; T1 has no server
+  purge of private-recording device audio. T2a adds server purge for audio
+  it retains.
 - If device clock and `server_now` differ by more than five minutes, clients
   **refuse delete** (and expired-audio refuse) until skew recovers; labels still
   use device time.
