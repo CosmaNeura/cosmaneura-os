@@ -44,7 +44,7 @@ adding OCR or OS accessibility control implicitly.
 or does it conflict with that deferral? No default or implementation resolution
 is assigned here. BLOCKED: no V0-8 PR, including fake-only, until John answers the recording/Scribe boundary.
 Independent recording-to-note is a separate gated proposal.
-DL-20261117-02 clarifies: “Yes, maybe for initial beta we rely on legacy but
+DL-20261117-02 clarifies (relayed via CoS, 17 Nov, time not recorded): “Yes, maybe for initial beta we rely on legacy but
 going forward we need independent recording and notes.” Record that beta
 exception honestly; do not label a Core-backed note independent. Scribe stays
 a separate product sharing the recorder, and new Scribe sign-ups use CosmaBot
@@ -56,19 +56,18 @@ from the first Mac slice. Windows work (V0-W) starts no earlier than week three 
 
 ### John's answers: November 17, 2:23pm ET via CoS
 
-(a) "A doctor should be able to see what is on his employees emr screen if it's a different login. We get user auth issues with larger groups in different departments but for small practices that isn't an issue, especially for V0, 1 and 2."
+(a) (relayed via CoS, 17 Nov 2:23pm ET) "A doctor should be able to see what is on his employees emr screen if it's a different login. We get user auth issues with larger groups in different departments but for small practices that isn't an issue, especially for V0, 1 and 2."
 
-John's decisions (via CoS decision card):
+John's decisions (relayed via CoS):
 
-- viewing roles — John, in-app card, Nov 19 2026 9:28am ET: "Doctor or practice owner".
-- practice-size bound — John, in-app card, Nov 19 2026 9:28am ET: "Practices with 5 or fewer clinicians".
+These quotes were relayed via CoS and are not verified or recorded in a decision log. Every status that rests on them is provisional until they are.
 
-For V0, V1 and V2 only, a doctor or a practice owner with current viewing grants
-may view an employee's loaded EMR screen under a different EMR login for small practices under the practice-size rule above. This does not transfer the employee's identity or
-private grants, grant agent impersonation, or permit EMR control. Larger practices
-and multi-department groups are out of scope and later.
+- viewing roles — John, relayed via CoS, 19 Nov 9:28am ET: "Doctor or practice owner".
+- practice-size bound — **OPEN-JOHN** — John, relayed via CoS, 19 Nov 9:28am ET: "Practices with 5 or fewer clinicians".
 
-John's rule (17 Nov 2026): for V0-V2 small practices, a doctor may view an employee's EMR screen across logins.
+For V0, V1 and V2 only, the 17 Nov doctor rule in (a) permits a granted doctor to view an employee's loaded EMR screen under a different EMR login. That quote stands (relayed via CoS, 17 Nov 2:23pm ET). The 19 Nov viewing-roles quote says "Doctor or practice owner" (relayed via CoS, 19 Nov 9:28am ET); the 17 Nov quote says doctor. **OPEN-JOHN:** their difference does not widen the 17 Nov different-login rule here. This does not transfer the employee's identity or private grants, grant agent impersonation, or permit EMR control. Larger practices and multi-department groups are out of scope and later.
+
+**OPEN-JOHN (practice size):** "Practices with 5 or fewer clinicians" (relayed via CoS, 19 Nov 9:28am ET). "Clinician" and the source of the count are not yet defined by John. The count is never derived from seat count, plan, pricing tier or member roles. No gate is claimed until John defines both.
 
 Require a visible **“being observed”** indicator on the observed computer,
 a staff notice the practice gives employees, explicit human session enablement,
@@ -78,7 +77,7 @@ a locked measurement. Stop on revocation, sign-out, lock, expiry or nobody-prese
 state. Cannot establish human presence/lock state? Refuse new reads; the
 extension-only mode needs an explicit foreground/presence check before admission.
 
-Sessions are started and renewed only by a doctor or practice owner at the observed computer. An owner/doctor cannot remotely start, renew or extend a session on an employee's computer. Remote start is not proposed.
+Sessions are started and renewed only at the observed computer by the person signed into it. An owner/doctor cannot remotely start, renew or extend a session on an employee's computer; they may only read a session that employee started. Remote start is not proposed. **OPEN-JOHN (H1):** the employee-started-session wording conflicts with N1 when that employee is neither doctor nor practice owner. N1 controls start/renew; no combined permission is inferred.
 Notice wording and employee-monitoring law sufficiency are unreviewed by counsel.
 
 **Proposed V0 human-present signal to qualify:** OS input idle time no greater
@@ -96,7 +95,7 @@ This proposal supplies refusal criteria, not permission for unattended reading.
 did not decide these. Default off until he answers; `background_page_reads_enabled`
 / V0-7 remains off. Idle-logout measurement does not require enabling these reads.
 
-(b) "We could use the existing Athena sandbox to test, maybe? I'm sure there are others out there we'll find."
+(b) (relayed via CoS, 17 Nov 2:23pm ET) "We could use the existing Athena sandbox to test, maybe? I'm sure there are others out there we'll find."
 
 Week 2 targets the athenahealth sandbox with invented patients only. Confirmation
 is still needed that it offers a browser login with an idle timeout, along with
@@ -105,14 +104,14 @@ suggested target, not proof of access or permission. Other vendor sandboxes come
 later. If unavailable, report those cells **unrun**; no fabricated results or real
 patient charts.
 
-(c) "One login per user should sync across the 3 major features of phone app, desktop app and browser plugin."
+(c) (relayed via CoS, 17 Nov 2:23pm ET) "One login per user should sync across the 3 major features of phone app, desktop app and browser plugin."
 
 Answer (c) retains shared CosmaBot identity and separate product/Box authority;
 the r2 reading of a separate sign-in on each device is replaced by answer (1).
 
 ### John's answers: November 17, 3:07pm ET via CoS
 
-(1) "One login means you sign in once and all three apps unlock automatically."
+(1) (relayed via CoS, 17 Nov 3:07pm ET) "One login means you sign in once and all three apps unlock automatically."
 
 The user signs in once and the phone app, desktop app and browser extension all
 unlock automatically: sign-in-once single sign-on (SSO), not three sign-ins to
@@ -121,21 +120,22 @@ Section 4 separates the existing native contract from the missing SSO work.
 V0-5 and all shared-identity/SSO work are BLOCKED on John's yes to the exact Clerk settings list that section 4's discovery step will produce (no such list exists yet). Changes must be additive; existing users
 keep signing in the same way until that yes. Codex changes no live or staging Clerk setting and creates no secrets.
 
-(2) "Every practice member probably has their own EMR login. We don't obviously control that but that user access control is outside the realm of HIPAA for our purposes. So a medical coder who has an EMR login can start or renew a viewing session."
+(2) (relayed via CoS, 17 Nov 3:07pm ET) "Every practice member probably has their own EMR login. We don't obviously control that but that user access control is outside the realm of HIPAA for our purposes. So a medical coder who has an EMR login can start or renew a viewing session." The start/renew line is **superseded by the 19 Nov 10:51am relayed answer**; the rest of answer (2) is not superseded.
 
-Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one; they read only their own session. Agents and ungranted members get nothing from this rule. This Nov 19 decision supersedes answer (2) on who may start or renew a session. The V0–V2 rule permits a granted doctor or practice owner
-to view an employee's different-login screen for small practices under the practice-size rule above. Starting/renewing remains explicit human action at the observed
+Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one. The 10:51am answer decides start/renew only (N1, relayed via CoS, 19 Nov 10:51am ET). Agents and ungranted members get nothing from this rule. The 19 Nov 10:51am answer supersedes only answer (2)'s start/renew line. The observed person is the CosmaBot user who
+starts that own session. The 17 Nov V0–V2 rule permits a granted doctor
+to view an employee's different-login screen for small practices under the **OPEN-JOHN** practice-size rule above; no size gate is claimed. Starting/renewing remains explicit human action at the observed
 computer, with current practice authority, the visible “being observed” indicator,
 the practice's staff notice, stop control and bounded expiry. The 15-minute bound
 above remains a **proposed V0 default to qualify**. Agents never start, renew or
 widen a session themselves.
 
-John's stated product decision (3:07pm ET via CoS): "We don't obviously control that but that user access control is outside the realm of HIPAA for our purposes."
+John's stated product decision (relayed via CoS, 17 Nov 3:07pm ET): "We don't obviously control that but that user access control is outside the realm of HIPAA for our purposes."
 This statement has not been checked against the BAA or by counsel. It is not a
 compliance, legal or HIPAA-coverage finding; BAA 2.3 coverage of EMR page
 observations remains **unverified**. No BAA change or new acceptance step follows.
 
-Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one; they read only their own session. (John, in-app chat, Nov 19 2026 10:51am ET: 'Doctor or owner only for now'.)
+Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one. The 10:51am answer decides start/renew only (N1, relayed via CoS, 19 Nov 10:51am ET). **N1 DECIDED** (provisional per section 11). Question (CoS, in-app): "But your 9:28 card this morning said only a doctor or practice owner can start one. Which should the plan say? Reply 'any member with an EMR login' or 'doctor or owner only'." John's answer: "Doctor or owner only for now". Label: relayed via CoS, 19 Nov 10:51am ET. This record covers start/renew only, not different-login viewing.
 
 ## 2. Existing implementation to reuse
 
@@ -431,6 +431,8 @@ security-monitoring feature.
 
 ## 5. Screen packs are versioned data, never remote code
 
+The observed person is the CosmaBot user who starts that session under their own EMR login. Sessions are started and renewed only at the observed computer by the person signed into it. An owner/doctor cannot remotely start, renew or extend a session on an employee's computer; they may only read a session that employee started. Remote start is not proposed. **OPEN-JOHN (H1):** the employee-started-session wording conflicts with N1 when that employee is neither doctor nor practice owner. N1 controls start/renew; no combined permission is inferred.
+
 Backend serves immutable JSON screen packs over authenticated HTTPS. Proposed
 contract: `cosmas.screen-pack.v1`. A manifest names pack ID, semantic version,
 content hash, compatible interpreter versions, system ID, exact allowed
@@ -465,12 +467,12 @@ unsupported/partial result and diagnostic codes, not guessed field values.
 ## 6. Page read to observation to existing F-8 work
 
 1. An already granted endpoint reads a supported loaded page in the observed
-   human's EMR browser session. A granted doctor or practice owner may view an
-   employee's different login in V0–V2 for small practices under section 1(a).
-   Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one; they read only their own session. Agents and ungranted members get nothing from this rule.
-   Sessions are started and renewed only by a doctor or practice owner at the observed computer. An owner/doctor cannot remotely start, renew or extend a session on an employee's computer. Remote start is not proposed.
-   The doctor or practice owner starts that session at the observed computer,
-   with staff notice and visible indicator. Agents never start,
+   human's EMR browser session. A granted doctor may view an
+   employee's different login in V0–V2 for small practices under the **OPEN-JOHN** practice-size rule in section 1(a); no gate is claimed until John defines "clinician" and the count source.
+   Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one. The 10:51am answer decides start/renew only (N1, relayed via CoS, 19 Nov 10:51am ET). Agents and ungranted members get nothing from this rule.
+   Sessions are started and renewed only at the observed computer by the person signed into it. An owner/doctor cannot remotely start, renew or extend a session on an employee's computer; they may only read a session that employee started. Remote start is not proposed. **OPEN-JOHN (H1):** the employee-started-session wording conflicts with N1 when that employee is neither doctor nor practice owner. N1 controls start/renew; no combined permission is inferred.
+   The observed person is the CosmaBot user who starts that session under their
+   own EMR login, with staff notice and visible indicator. Agents never start,
    renew or widen it themselves;
    passive page changes are admitted only while unlocked, human-present and
    within that session, current grants and expiry. Phone requests stage a fresh-read request against this
@@ -547,7 +549,7 @@ a six-year access-record retention rule measured from session end, separate from
 observation expiry. Include
 the actor for each start/renew/end where different from viewer. No chart content,
 patient labels/bindings or observation payloads; no general staff activity history.
-John, in-app card, Nov 19 2026 9:28am ET: "Keep access records 6 years".
+John, relayed via CoS, 19 Nov 9:28am ET: "Keep access records 6 years".
 The six years run from session end; the action at six years is not decided. This is John's product decision, not a compliance finding.
 V0-4 is no longer blocked on this duration; the implementation prerequisites remain.
 
@@ -583,7 +585,7 @@ refusals: `cosmas_ehr_real_data_enabled` defaults off, must not be set in
 hosted/production, and also requires a recorded practice-BAA flag on the connection.
 Respect `workspace_hosted_enabled` and existing EHR availability's hosted refusal;
 `real_patient_recording_enabled` must stay false in process configuration.
-No new observation/read switch or Box allowlist overrides these gates. This plan
+No new observation/read switch or Box allowlist (for the new capability only) overrides these gates. This plan
 admits synthetic data only. Test forbidden real-data/hosted/BAA/recording combinations
 fail closed on admission, dispatch and response, not just in UI.
 
@@ -627,7 +629,7 @@ posture scans, keylogging or staff-surveillance history.
 | Caller | Which computer and information may be requested |
 | --- | --- |
 | Owner or explicitly granted practice administrator | Register/revoke endpoints and select the anchor; see permitted practice device health. Device administration alone does not grant access to every clinician's private content. |
-| Provider/staff with explicit device-read and clinical-context grants | Ask about the anchor or a named granted endpoint within their Box and allowed patient/work context. The doctor or practice owner starts or renews at the observed computer, with notice, indicator and bounded session; viewing an employee's different EMR login remains permitted under (a). Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one; they read only their own session. Agents and ungranted members get nothing from this rule. For V0–V2 small practices under section 1(a), a granted doctor or practice owner may observe an employee's different EMR login under (a). No impersonation or unrelated private-source access. |
+| Provider/staff with explicit device-read and clinical-context grants | Ask about the anchor or a named granted endpoint within their Box and allowed patient/work context. The observed person is the CosmaBot user who starts the session at that computer under their own EMR login, with notice, indicator and bounded session. N1 limits start/renew to a doctor or practice owner; **OPEN-JOHN (H1):** the employee-started-session conflict remains unresolved; viewing an employee's different EMR login remains permitted under (a). Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one. The 10:51am answer decides start/renew only (N1, relayed via CoS, 19 Nov 10:51am ET). Agents and ungranted members get nothing from this rule. For V0–V2, a granted doctor may observe an employee's different EMR login under (a). Practice size is **OPEN-JOHN** under section 1(a); no gate is claimed until John defines "clinician" and the count source. No impersonation or unrelated private-source access. |
 | Agent principal | Read only for an authorized task under its installed capability and existing human-enabled/context scope; never start, renew or widen a viewing session, impersonate, expand grants or self-approve, and never wider than the requesting human's current viewing permission. |
 | Other Box, removed member, ungranted member or support/coding agent | Deny endpoint discovery, status and clinical answers; owning a phone or knowing a device ID supplies no authority. |
 
@@ -643,6 +645,8 @@ app response flow because push notifications remain deferred. Revocation
 during a read suppresses the reply and leaves a safe unavailable result.
 
 ## 8. Behavior by computer state
+
+The observed person is the CosmaBot user who starts that session under their own EMR login. Sessions are started and renewed only at the observed computer by the person signed into it. An owner/doctor cannot remotely start, renew or extend a session on an employee's computer; they may only read a session that employee started. Remote start is not proposed. **OPEN-JOHN (H1):** the employee-started-session wording conflicts with N1 when that employee is neither doctor nor practice owner. N1 controls start/renew; no combined permission is inferred.
 
 Lock, nobody-present state, sleep, EMR timeout and app/browser availability are
 separate facts. Missing heartbeats cannot distinguish them. Locked-screen
@@ -667,12 +671,12 @@ behavior remains unmeasured. Do not weaken lock or timeout to qualify it.
 
 Each implementation PR is a later approval-dependent change. Proposed switches
 below do not exist yet; all default false on server and relevant client, with
-an explicit Box allowlist. Today switches are process settings in
+an explicit Box allowlist for the new capability only. Today switches are process settings in
 `src/cosmas_os/config.py`; there is **no existing Box-level allowlist mechanism**.
 Propose a Postgres Box-capability record keyed by permanent Box ID, capability,
-revision, owner authorization and expiry, checked on admission/dispatch/reply;
-revocation invalidates grants and caches. This must be built and tested first,
-not assumed present. Unknown/omitted switch values refuse activation.
+revision, owner authorization and expiry,
+checked on admission/dispatch/reply for the new capability only; revoking the record invalidates only that capability's grants and caches. A Box with no record keeps all existing access. Unknown/omitted switch values refuse activation of that capability only.
+This must be built and tested first, not assumed present.
 Disabling a switch stops new admission/dispatch, retains history and lets an
 already accepted receipt reconcile without starting new work. No switch grants
 EMR writes, real-data processing or production activation by itself.
@@ -724,7 +728,7 @@ A full S/M/E or S/W/E path needs R0 plus explicit platform and identity approval
 
 | Slice / independent release | Deliverable | Tests required in that PR | Default-off switch / rollback | Runtime / environment / profile |
 | --- | --- | --- | --- | --- |
-| R0: synthetic runtime prerequisite | Additive endpoint/grant/Box-allowlist and retention schemas, admitted synthetic routes, F-8 read producer/revisions/Operation, endpoint transport, worker/purge lifecycle and Messages authorization/compatibility; no live instance configuration change | Startup refuses unknown flags and forbidden hosted/real-data combinations; cross-Box/expired/revoked admission denied; crash/retry/response-loss reconciles same intent; purge failure preserves normal sign-in/practice/notes, expires content and retains content-free access records/bound hashes; old/new protocol rollback | Proposed `extension_desktop_runtime_enabled`; false by default with Box allowlist; stop new observation admission/dispatch, reconcile accepted receipts and purge expiry, preserve normal access/history. Existing standalone guards remain until explicit reviewed admission. | L schema/port fakes, then S only after #400 and approval; live configuration untouched |
+| R0: synthetic runtime prerequisite | Additive endpoint/grant/Box-allowlist and retention schemas, admitted synthetic routes, F-8 read producer/revisions/Operation, endpoint transport, worker/purge lifecycle and Messages authorization/compatibility; no live instance configuration change | Startup refuses unknown flags and forbidden hosted/real-data combinations; cross-Box/expired/revoked admission denied; crash/retry/response-loss reconciles same intent; purge failure preserves normal sign-in/practice/notes, expires content and retains content-free access records/bound hashes; old/new protocol rollback | Proposed `extension_desktop_runtime_enabled`; false by default with Box allowlist for the new capability only; stop new observation admission/dispatch, reconcile accepted receipts and purge expiry, preserve normal access/history. Existing standalone guards remain until explicit reviewed admission. | L schema/port fakes, then S only after #400 and approval; live configuration untouched |
 | V0-1: data contracts and fake observation | Screen-pack schema, bounded packaged-interpreter contract and synthetic page fixtures behind EHR read ports; no browser installation | Unsupported version/opcode, oversized pack, hash/origin mismatch, ambiguous layout, partial lists, malicious page instructions and patient mismatch all refuse correctly. Golden allowed fixtures and negative mutations. | `screen_pack_reads_enabled`; disable pack selection, retain pinned evidence. | L; isolated fake interpreter, no service activation |
 | V0-2: endpoint registration/status | Additive Box-scoped endpoint records, device key binding, last-seen timestamps and anchor selection in existing settings | Allowed/denied Box/member/device matrix; stale/skewed times, duplicate enrollment, revoked key, anchor replacement and concurrent owner edits; restart retains same endpoint. | `desktop_endpoint_presence_enabled`; stop presence writes and new enrollment without deleting history. | S + M; BLOCKED on R0 endpoint/allowlist/config admission |
 | V0-3: paired relay | Native-messaging host, strict packaged-extension allowlist, explicit pairing and revocation, one synthetic read round trip | Rogue page/extension/profile, challenge replay/expiry, malformed/oversized messages, sign-out in flight, relay crash/restart and lost receipt retry; existing desktop sandbox/auth tests. Mac install/signing verification outside Linux CI. | `desktop_extension_pairing_enabled`; unpair/refuse new relay traffic, preserve app sign-in and recording. | L + M + E for fake relay; S pairing service BLOCKED on R0 and credential/ID approval |
@@ -785,9 +789,8 @@ missing. No test results have been collected by this PR.
 L/M/E fixture tests first; S integration only after R0. Inventory synthetic
 OS/browser/app versions and session/power policy without real device/tenant IDs.
 Qualify explicit pairing, notice/indicator, proposed 15-minute expiry/stop/renewal,
-the doctor or practice owner starting at the observed computer under the Nov 19 decision. Qualify this rule: Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one; they read only their own session. Agents and ungranted members get nothing from this rule.
-Retain the V0–V2 different-login viewing exception for a granted doctor or practice
-owner in small practices under section 1(a), proposed OS-idle/foreground presence
+the doctor or practice owner starting at the observed computer under the Nov 19 decision. Qualify this rule: Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one. The 10:51am answer decides start/renew only (N1, relayed via CoS, 19 Nov 10:51am ET). Agents and ungranted members get nothing from this rule.
+Retain the 17 Nov V0–V2 different-login viewing exception for a granted doctor. Practice size is **OPEN-JOHN** under section 1(a); no gate is claimed until John defines "clinician" and the count source. Qualify the proposed OS-idle/foreground presence
 signal and unknown-state refusal, wrong-profile denial, caller/context grants,
 pack rollback and stale/partial labels. Qualify
 extension-only only after exact Clerk approval and lock/presence admission proof.
@@ -864,20 +867,19 @@ means the invariant still applies, not that a proposed runtime passed tests.
 **SCOPED** or **RESOLVED** means this plan supplies the compatible scope/dependency, not build
 completion. **OPEN-JOHN** means owner decision still required; no inferred answer.
 **PENDING #400** means the prerequisite decision PR must land on main before
-this plan can merge or a V0 build PR can begin. **DECIDED** means John supplied
-the stated product decision; it does not mean implementation or qualification is complete.
-Legend: H1 = observed-person/session definition; H2 = Clerk exact-list discovery gate; N3 = content-free access record; NL = later-review clarification labels (NL1–NL5).
+this plan can merge or a V0 build PR can begin. **DECIDED** means a relayed John decision is recorded here, provisional until it is in a decision log; it does not mean implementation or qualification is complete.
+Legend: H1 = observed person is the CosmaBot user who starts the session under their own EMR login; employee-started-session conflict with N1 is **OPEN-JOHN**, and N1 controls start/renew; H2 = Clerk exact-list discovery gate; N3 = content-free access record; NL = later-review clarification labels (NL1–NL5).
 No fatal counterexample to the authority/queue/data invariants was established.
 
 | Row / decision or rule | Status / conflict or tension | Smallest compatible alternative / resolution |
 | --- | --- | --- |
 | 1. `DL-20261117-01` / `DL-20261117-02` | **PENDING #400** — #400 is an open draft, not baseline main; historical confirmation markers are resolved by its follow-up. | Cite exact recorded rulings, do not copy decision documents; no V0 build PR until #400 lands. Re-check if text changes from `d965d3595a20bbbcc7fd2479ccc581324489253b`. |
 | 2. D-001/D-002/D-012; repository boundary | **CONFIRMED** — legacy capture is not an independent path; no Track A import/shared DB. | Owned local custody and fake-first OS port proposal; future Core integration explicitly named/versioned, never hidden fallback. Shared identity does not grant shared product authority. |
-| 3. Canonical browser-automation deferral / AGENTS prohibition (gap 3) | **PENDING #400** — #400 must land before this plan; the current AGENTS.md browser-automation prohibition governs until then. | A granted doctor or practice owner may observe employee's loaded screen with grants, notice, indicator and bounded session. Different-login viewing applies to V0–V2 small practices under section 1(a). Locked/nobody-present reads stay off pending Thursday, November 19, 2026. No browsing/navigation/login/privilege expansion; dated evidence or separately authorized API on expiry. |
+| 3. Canonical browser-automation deferral / AGENTS prohibition (gap 3) | **PENDING #400** — #400 must land before this plan; the current AGENTS.md browser-automation prohibition governs until then. | A granted doctor may observe employee's loaded screen with grants, notice, indicator and bounded session. Different-login viewing applies to V0–V2 small practices under the **OPEN-JOHN** practice-size rule in section 1(a); no gate is claimed until John defines "clinician" and the count source. Locked/nobody-present reads stay off pending Thursday, November 19, 2026. No browsing/navigation/login/privilege expansion; dated evidence or separately authorized API on expiry. |
 | 4. Canonical “Rebuilding the existing Scribe inside OS” deferral | **OPEN-JOHN** — independent direction / possible beta legacy exception does not decide whether V0-8 conflicts with deferred rebuilding. | Thursday, November 19, 2026 decide new OS recording path versus deferral; no default. Keep page reading separate, shared recorder/separate Scribe and independent fake-first proposal; no migration/replacement or covert Core fallback. Independent complete recording-to-note: none found, not every path disproven. |
 | 5. D-003/D-011; second-EHR deferral | **CONFIRMED** — generic packs cannot activate vendors or change ArtifactChase/pricing scope. | One synthetic fixture system/screen first, athenahealth sandbox timeout target with confirmed terms/access; each vendor/real-data rung separately approved. No payment recovery or blanket browser support. |
 | 6. D-004 | **CONFIRMED** — devices cannot become separate Boxes. | One permanent logical Box, registered endpoints and explicit anchor beneath it. |
-| 7. D-005/D-007; shared identity `DL-20260927-01` (gap 7) | **RESOLVED** — employee login observation is permitted by (a), not identity inheritance or agent impersonation; (1) replaces r2's separate-sign-in reading. | V0–V2 observation by a granted doctor or practice owner in small practices under section 1(a) within caller/device/patient/work grants; deny wins. Notice/indicator/session bound; no unrelated private-source access, self-approval/signing or agent login. One sign-in automatically unlocks all three apps, with separate device/product authority; SSO unverified and BLOCKED on John's yes to the exact Clerk settings list that section 4's discovery step will produce (no such list exists yet). |
+| 7. D-005/D-007; shared identity `DL-20260927-01` (gap 7) | **RESOLVED** — employee login observation is permitted by (a), not identity inheritance or agent impersonation; (1) replaces r2's separate-sign-in reading. | V0–V2 observation by a granted doctor within caller/device/patient/work grants; deny wins. Practice size is **OPEN-JOHN** under section 1(a); no gate is claimed until John defines "clinician" and the count source. Notice/indicator/session bound; no unrelated private-source access, self-approval/signing or agent login. One sign-in automatically unlocks all three apps, with separate device/product authority; SSO unverified and BLOCKED on John's yes to the exact Clerk settings list that section 4's discovery step will produce (no such list exists yet). |
 | 8. D-008/D-009 | **RESOLVED** — extension work/retries cannot create another queue; F-8 is not available in every runtime. | R0 before standalone service work: F-8 producer/revisions/Operation, workers/dispatch/receipts and recovery. Postgres intent, exact hashes/stable retries, unconfirmed outcomes. No invented approval for each passive observation. |
 | 9. D-010/D-011; PHI/credential boundary (incomplete row 9) | **SCOPED** — raw uploads/default-on processing lack retention and existing gates. | Section 6 proposed 24-hour chart purge plus a content-free access record kept six years from session end and retained immutable-bound hashes before V0-4; later approved RETENTION update. Purge failure blocks only new observation admission, preserving sign-in/practice/notes/normal access. Every switch respects real-data, hosted, recorded practice-BAA and process-recording refusals. John's HIPAA sentence is an unchecked product statement, not coverage/legal evidence; BAA 2.3 unverified, synthetic only, no BAA change. Section 9 credentials need John's yes. |
 | 10. D-013 / `DL-20261023-01` | **CONFIRMED** — no second UI/queue, remote control or automatic private-source sharing. | Existing settings and Messages/Workspace work cards only after runtime support; shared state/per-device presentation. No new push/camera/live dictation. Complete phone path remains proposed. |
@@ -893,12 +895,12 @@ No fatal counterexample to the authority/queue/data invariants was established.
 | M2. Standalone runtime restrictions | **RESOLVED** — standalone has no F-8/worker execution for new slices; unlisted enabled flags refuse startup, AI Send/member management unavailable. | Section 9 assigns L/S/M/W/E profiles per slice and R0 built first. Narrow existing personal-service hooks are not new connector lifespans. Cannot run service-bearing slices in standalone until explicit admitted schemas/routes/queue/workers/Messages/retention/compatibility exist. |
 | M3. Sign-in-once SSO / live Clerk settings (H2) | **RESOLVED** — discovery step added; (1) does not approve settings. | Section 4 sequences read-only Clerk research plus a staging-realm-only synthetic-account trial whose only output is the exact Clerk settings list; any staging-setting changes need their own John's yes first. V0-5/all shared identity and SSO remain BLOCKED on John's yes to that exact list, additive and not implemented today. Codex changes no live or staging Clerk setting and creates no secrets; the founder/operator makes any approved staging or live change. Existing users keep current sign-in until that yes; unknown settings stay unqualified. Establishment, all-app sign-out/revoke and lost/shared-device recovery still require qualification. |
 | M4. Credentials / Azure VM | **RESOLVED** — no implicit authority to create credentials or infrastructure here. | Section 9 lists custody/creator for each secret/account; John's yes for each, Codex creates/commits/exposes none. Founder-only Terraform/apply click plus John's yes and confirmed cost; estimate is not a quote. Synthetic endpoint, not second cloud. |
-| M5. Whose EMR session / start and renew (H1) | **SCOPED** — doctor/practice-owner viewing and the numerical size bound are decided; start/renew roles are decided (N1); clinician definition/count source and locked/unattended permission remain open. | Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one; they read only their own session. Agents and ungranted members get nothing from this rule. A granted doctor or practice owner may view an employee's different-login screen in V0–V2 small practices under section 1(a). Sessions are started and renewed only by a doctor or practice owner at the observed computer. An owner/doctor cannot remotely start, renew or extend a session on an employee's computer. Remote start is not proposed. Notice, visible observed-computer indicator, stop and proposed 15-minute bound remain; locked/unattended/nobody-present reads stay default off. |
+| M5. Whose EMR session / start and renew (H1) | **SCOPED** — start/renew is provisionally DECIDED (N1, relayed via CoS, 19 Nov 10:51am ET); different-login viewing follows the 17 Nov doctor rule (relayed via CoS, 17 Nov 2:23pm ET). Practice size is **OPEN-JOHN**, with no inferred gate; H1 and locked/unattended permission remain open. | Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one. The 10:51am answer decides start/renew only (N1, relayed via CoS, 19 Nov 10:51am ET). Agents and ungranted members get nothing from this rule. A granted doctor may view an employee's different-login screen in V0–V2 small practices under the **OPEN-JOHN** practice-size rule in section 1(a); no gate is claimed until John defines "clinician" and the count source. Sessions are started and renewed only at the observed computer by the person signed into it. An owner/doctor cannot remotely start, renew or extend a session on an employee's computer; they may only read a session that employee started. Remote start is not proposed. **OPEN-JOHN (H1):** the employee-started-session wording conflicts with N1 when that employee is neither doctor nor practice owner. N1 controls start/renew; no combined permission is inferred. Notice, visible observed-computer indicator, stop and proposed 15-minute bound remain; locked/unattended/nobody-present reads stay default off. |
 | M6. Stale lower docs | **PENDING #400** — lower docs still ban browser automation and #400 does not reconcile them. | `docs/BUILD_AND_DEPLOYMENT_ROADMAP.md` and `docs/handoff/CODEX_D3_TO_COMPLETE_BUILD_HANDOFF.md` remain stale on that prohibition; the AGENTS.md prohibition still governs until #400 is on main. This plan must not merge before #400. Note only here; edit no other docs or decision files. |
-| N1. Different-login viewing roles | **DECIDED** — John, in-app chat, Nov 19 2026 10:51am ET: 'Doctor or owner only for now'. | Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one; they read only their own session. Agents and ungranted members get nothing from this rule. Preserve the V0–V2 different-login exception for a granted doctor or practice owner in small practices under section 1(a). No remote start or renewal. |
-| N2. Session initiator and renewal | **SCOPED** — apply John's Nov 19 2026 10:51am ET decision, superseding answer (2) on start/renew roles. | Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one; they read only their own session. Agents and ungranted members get nothing from this rule. A doctor or practice owner starts or renews at the observed computer. A granted doctor or practice owner may view an employee's different-login screen in V0–V2 small practices under section 1(a); never remotely start/renew/extend it. Proposed 15-minute bound, visible indicator/staff notice and human-presence gate remain. HIPAA sentence remains unchecked against BAA/counsel, no compliance/coverage claim. |
+| N1. Start/renew roles (not a different-login viewing decision) | **DECIDED** — provisional per the legend. Question (CoS, in-app): "But your 9:28 card this morning said only a doctor or practice owner can start one. Which should the plan say? Reply 'any member with an EMR login' or 'doctor or owner only'." John's answer: "Doctor or owner only for now". Label: relayed via CoS, 19 Nov 10:51am ET. | Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one. The 10:51am answer decides start/renew only (N1, relayed via CoS, 19 Nov 10:51am ET). Agents and ungranted members get nothing from this rule. Preserve the V0–V2 different-login exception for a granted doctor in small practices under the **OPEN-JOHN** practice-size rule in section 1(a); no gate is claimed until John defines "clinician" and the count source. No remote start or renewal. |
+| N2. Session initiator and renewal | **SCOPED** — apply N1's start/renew-only answer (relayed via CoS, 19 Nov 10:51am ET), superseding only answer (2)'s start/renew line. Practice size is **OPEN-JOHN**; no inferred gate. **OPEN-JOHN (H1):** employee-started-session wording conflicts when the employee is neither doctor nor practice owner; N1 controls start/renew. | Only a doctor or practice owner may start or renew a viewing session. Other practice members cannot start or renew one. The 10:51am answer decides start/renew only (N1, relayed via CoS, 19 Nov 10:51am ET). Agents and ungranted members get nothing from this rule. The observed person is the CosmaBot user who starts that session under their own EMR login. An owner/doctor cannot remotely start, renew or extend a session on an employee's computer; they may only read a session that employee started. N1 controls start/renew; the H1 conflict above remains open. A granted doctor may view an employee's different-login screen in V0–V2 small practices under the **OPEN-JOHN** practice-size rule in section 1(a); no gate is claimed until John defines "clinician" and the count source; never remotely start/renew/extend it. Proposed 15-minute bound, visible indicator/staff notice and human-presence gate remain. HIPAA sentence remains unchecked against BAA/counsel, no compliance/coverage claim. |
 | N3. Access record after chart purge | **SCOPED** — 24-hour content expiry must not erase access accountability or immutable hash bindings. | Section 6 keeps content-free who-viewed-whose-screen and start/renew/end times; its access-record retention is 6 years from session end per John (NL1); the action at six years is undecided, and this is a product decision, not a compliance finding. No chart/patient/payload data. Expired revisions retain exact content-free payload/hash, bound evidence hashes, decisions/Operation/audit linkage; expiry blocks dependent execution and requires fresh evidence/new revision. Later approved RETENTION update required; purge-failure recovery preserves normal access. |
-| NL1. Content-free access-record duration | **DECIDED** — John, in-app card, Nov 19 2026 9:28am ET: "Keep access records 6 years". | Access records are kept 6 years from session end; the action at six years is not decided. This is John's product decision, not a compliance finding. V0-4 is no longer blocked on this duration. Later approved RETENTION documentation and implementation proofs remain required. |
+| NL1. Content-free access-record duration | **DECIDED** — John, relayed via CoS, 19 Nov 9:28am ET: "Keep access records 6 years". | Access records are kept 6 years from session end; the action at six years is not decided. This is John's product decision, not a compliance finding. V0-4 is no longer blocked on this duration. Later approved RETENTION documentation and implementation proofs remain required. |
 | NL2. Observation backup expiry | **RESOLVED** — proposed 24-hour backup-copy maximum is unproven. | Before V0-4 prove backup deletion/restore expiry enforcement meets that maximum, or use purge-on-restore before restored observations become accessible. No claim it works today. |
 | NL3. Offline SSO lock scope | **RESOLVED** — new offline authority lock is scoped to sign-in-once sessions. | It does not apply to existing non-SSO sessions; existing users retain their current sign-in/access path. |
 | NL4. New-device binding | **RESOLVED** — adding a device requires full credential sign-in. | A stolen signed-in phone cannot unlock a new device; automatic unlock is for already registered, qualified bindings. |
@@ -906,7 +908,8 @@ No fatal counterexample to the authority/queue/data invariants was established.
 
 ### John's Thursday decisions still open
 
-- Open for John: who counts as a 'clinician' for the V0-V2 small-practice bound, and what supplies the count.
+- OPEN-JOHN (practice size): who counts as a "clinician", what supplies the count, and whether the bound stays 5 or fewer. No default.
+- OPEN-JOHN (H1): employee-started-session wording versus N1 for employees who are neither doctor nor practice owner; N1 controls start/renew. No merged rule.
 - Recording inside OS versus deferred Scribe rebuilding: is V0-8 a new path or a conflict? No default; independent recording-to-note remains “none found.”
 - Windows scope: how far V0 Windows goes, including audio. No default.
 - Model choice: speech-to-text/drafting providers and explicit optional on-device model yes. No default selection; fake-only processing and dark application LLM until named.
