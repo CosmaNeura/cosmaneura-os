@@ -15,6 +15,8 @@ import {
   audioRetentionAnchor,
   audioRetentionEffective,
   audioRetentionLabel,
+  AUDIO_RETENTION_OFF,
+  audioRetentionSweepable,
   buildAudioDeletedStub,
   buildAudioTombstone,
   clearDeviceArmedAt,
@@ -35,20 +37,22 @@ const scope='d'.repeat(64),otherScope='e'.repeat(64);
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const consent=()=>({modality:'in_person' as const,participant_regions:['US-NY'],method:'verbal_attestation' as const,all_parties_consented:true as const,granted_at:'2026-11-01T12:00:00.000Z',language:'en-US' as const});
 
-/** Enabled policy with aligned server/device clocks (offset 0 → effectiveNow tracks injected now). */
-function policyOn(opts:{enabledAt:string;now?:number;deviceArmedAt?:string;serverNow?:string;fetchedAtDeviceMs?:number}):AudioRetentionPolicy{
+/** Enabled policy with aligned server/device clocks (offset 0 → effectiveNow tracks injected now).
+ * Defaults deviceArmedAt to enabledAt so direct sweeps stay sweepable; pass null to omit. */
+function policyOn(opts:{enabledAt:string;now?:number;deviceArmedAt?:string|null;serverNow?:string;fetchedAtDeviceMs?:number}):AudioRetentionPolicy{
   const now=opts.now??Date.parse(opts.enabledAt);
   const fetchedAtDeviceMs=opts.fetchedAtDeviceMs??now;
   const serverNow=opts.serverNow??new Date(fetchedAtDeviceMs).toISOString();
-  return {
+  const policy:AudioRetentionPolicy={
     enabled:true,
     hours:48,
     warnHours:36,
     enabledAt:opts.enabledAt,
     serverNow,
     fetchedAtDeviceMs,
-    ...(opts.deviceArmedAt?{deviceArmedAt:opts.deviceArmedAt}:{}),
   };
+  if(opts.deviceArmedAt!==null)policy.deviceArmedAt=opts.deviceArmedAt??opts.enabledAt;
+  return policy;
 }
 
 /** enabledAt at/before ended so deadline stays endedAt+48h for classic clock tests. */
@@ -260,6 +264,13 @@ it('either switch off means no deletion and no label',async()=>{
   store.close();
 });
 
+it('AUDIO_RETENTION_OFF is a stable module-level off constant (shell/panel switches-off)',()=>{
+  expect(AUDIO_RETENTION_OFF).toEqual({enabled:false});
+  expect(AUDIO_RETENTION_OFF).toBe(AUDIO_RETENTION_OFF);
+  expect(audioRetentionEffective(AUDIO_RETENTION_OFF)).toBe(false);
+  expect(audioRetentionSweepable(AUDIO_RETENTION_OFF)).toBe(false);
+});
+
 it('absent enabledAt means no deletion and no label (fail closed)',async()=>{
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
   const row=manifest(id(120),ended);
@@ -276,6 +287,48 @@ it('absent enabledAt means no deletion and no label (fail closed)',async()=>{
   expect((await sweepPrivateRecordingAudio({store,scope,policy:badAt,now:()=>start+AUDIO_RETENTION_MS,
     parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
   expect(await store.read('manifest:'+id(120))).not.toBeNull();
+  store.close();
+});
+
+it('enabled without deviceArmedAt is not sweepable (list/sweep fail closed)',async()=>{
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  const row=manifest(id(121),ended);
+  const noArmed=policyOn({enabledAt:'2026-10-01T00:00:00.000Z',now:start,deviceArmedAt:null});
+  expect(noArmed.deviceArmedAt).toBeUndefined();
+  expect(audioRetentionSweepable(noArmed)).toBe(false);
+  expect(audioRetentionSweepable(policy)).toBe(true);
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,row);
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:noArmed,now:()=>start+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(121))).not.toBeNull();
+  expect(await store.read('chunk:'+id(121)+':0')).not.toBeNull();
+  // list path: missing serverNow → resolve leaves no deviceArmedAt → sweep no-op, row remains.
+  const noServerNoArmed={enabled:true as const,hours:48,warnHours:36,enabledAt:'2026-10-01T00:00:00.000Z',fetchedAtDeviceMs:start};
+  expect(audioRetentionSweepable(noServerNoArmed)).toBe(false);
+  const listed=await listPrivateRecordings(scope,'desktop',{
+    openStore:async()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto}),
+    audioRetention:noServerNoArmed,now:()=>start+AUDIO_RETENTION_MS,
+  });
+  expect(listed.some(item=>item.recordingId===id(121))).toBe(true);
+  expect(await store.read('manifest:'+id(121))).not.toBeNull();
+  store.close();
+});
+
+it('future enabledAt does not restamp (armedAt never moves later)',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const first=Date.parse('2026-10-01T00:00:00.000Z');
+  const stamped=new Date(first).toISOString();
+  await readOrStampDeviceArmedAt(store,first);
+  const futureEnabled=first+7*24*60*60*1000;
+  const ahead=policyOn({enabledAt:new Date(futureEnabled).toISOString(),now:first,deviceArmedAt:null});
+  const resolved=await resolveArmedAudioRetentionPolicy(store,ahead,first);
+  expect(resolved?.deviceArmedAt).toBe(stamped);
+  expect(await readDeviceArmedAt(store)).toBe(stamped);
+  // Second resolve must not clear/restamp while enabledAt stays in the future.
+  const again=await resolveArmedAudioRetentionPolicy(store,ahead,first+60_000);
+  expect(again?.deviceArmedAt).toBe(stamped);
+  expect(await readDeviceArmedAt(store)).toBe(stamped);
   store.close();
 });
 
@@ -505,6 +558,7 @@ it('stamps armedAt only when allowDelete, using effectiveNowMs not raw device cl
     enabledAt:'2026-10-01T00:00:00.000Z',
     fetchedAtDeviceMs:deviceNow,
     serverNow:new Date(deviceNow+AUDIO_RETENTION_CLOCK_SKEW_MS+1).toISOString(),
+    deviceArmedAt:null,
   });
   expect(resolveAudioRetentionClock(skewed,deviceNow).allowDelete).toBe(false);
   const noStamp=await resolveArmedAudioRetentionPolicy(store,skewed,deviceNow);
@@ -514,6 +568,7 @@ it('stamps armedAt only when allowDelete, using effectiveNowMs not raw device cl
     enabledAt:'2026-10-01T00:00:00.000Z',
     fetchedAtDeviceMs:deviceNow,
     serverNow:new Date(serverAhead).toISOString(),
+    deviceArmedAt:null,
   });
   const stamped=await resolveArmedAudioRetentionPolicy(store,aligned,deviceNow);
   // effectiveNowMs = deviceNow + (serverAhead - deviceNow) = serverAhead

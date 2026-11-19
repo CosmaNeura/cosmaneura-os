@@ -40,6 +40,7 @@ import {prewarmPrivateRecordingNative} from './private-recording-runtime';
 import {RecordingVisitPanel} from './RecordingVisitPanel';
 import {PrivateDraftLinkPanel} from './PrivateDraftLinkPanel';
 import {SavedRecordingTranscriptionPanel} from './SavedRecordingTranscriptionPanel';
+import {AUDIO_RETENTION_OFF} from './private-recording-retention';
 import {ChiefStartActions,InitialTeamAction} from './ChiefStartActions';
 import {ChiefOpenVisit} from './ChiefOpenVisit';
 import type {CoreConnectionCommand} from './core-connection-contract';
@@ -1835,7 +1836,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} scratchpad={workspace.entries.filter(e=>e.kind==='scratchpad').at(-1)}
             notebookDirty={note!==latestNote} onNotebook={()=>{setSavedRecordingNotebook(savedRecordingEntry);setPanel('Notebook');setMobilePanel('Notebook');}}
             onRecordings={goHome} onNavigationLock={setCaptureNavigationLocked}
-            audioRetention={{enabled:false}}
+            audioRetention={AUDIO_RETENTION_OFF}
             taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}/>}
         </div>
         <div hidden={messagesMode&&(!!reviewHandoffId||mobilePanel!=='Notebook')&&!privateLinkPending}>{authenticated&&workspace.private_draft&&!savedRecordingEntry&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null} forTranscription={!!savedRecordingEntry} compact={nativePrivateNote}

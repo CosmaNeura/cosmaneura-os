@@ -26,6 +26,9 @@ export type AudioRetentionPolicy = {
   deviceArmedAt?: string | null;
 };
 
+/** Stable switches-off policy for parents that do not yet hold a live retention bag. */
+export const AUDIO_RETENTION_OFF: AudioRetentionPolicy = {enabled: false};
+
 export type AudioRetentionManifestLike = {
   recordingId: string;
   phase: string;
@@ -222,13 +225,22 @@ export async function resolveArmedAudioRetentionPolicy(
   const existing = await readDeviceArmedAt(store);
   const existingMs = existing ? parseIsoMs(existing) : null;
   // Re-enable after a later enabledAt: discard stale armedAt and stamp fresh.
+  // Only when enabledAt is not in the future — never move armedAt later on a future enabledAt.
   if (existing !== null && existingMs !== null && existingMs < enabledAtMs) {
+    if (enabledAtMs > clock.effectiveNowMs) {
+      return {...policy, deviceArmedAt: existing};
+    }
     await clearDeviceArmedAt(store);
   } else if (existing !== null && existingMs !== null && existingMs >= enabledAtMs) {
     return {...policy, deviceArmedAt: existing};
   }
   const deviceArmedAt = await readOrStampDeviceArmedAt(store, clock.effectiveNowMs);
   return {...policy, deviceArmedAt};
+}
+
+/** Sweepable only with usable enabledAt and a stamped deviceArmedAt (device grace). */
+export function audioRetentionSweepable(policy: AudioRetentionPolicy | null | undefined): boolean {
+  return audioRetentionEnabledAtMs(policy) !== null && parseIsoMs(policy?.deviceArmedAt) !== null;
 }
 
 export function audioRetentionAnchor(
@@ -370,6 +382,8 @@ export async function sweepPrivateRecordingAudio(
 ): Promise<SweepPrivateRecordingAudioResult> {
   if (!audioRetentionEffective(options.policy)) return {deleted: [], inspected: 0};
   if (audioRetentionEnabledAtMs(options.policy) === null) return {deleted: [], inspected: 0};
+  // Enabled without deviceArmedAt is not sweepable (no device grace) — list/sweep agree.
+  if (!audioRetentionSweepable(options.policy)) return {deleted: [], inspected: 0};
   const nowMs = options.now();
   const clock = resolveAudioRetentionClock(options.policy, nowMs);
   if (!clock.allowDelete) return {deleted: [], inspected: 0};

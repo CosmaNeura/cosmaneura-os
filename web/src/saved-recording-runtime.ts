@@ -132,6 +132,11 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
     if(activeFlow&&activeFlow.sessionId!==sessionId)throw new QueueInvariantError('capture_saved_session_changed');
     let reviewOnly=false;
     let provenComplete=false;
+    /** Positive allowlist: only proven-complete upload statuses release protection at open. */
+    const PROVEN_COMPLETE_REVIEW_STATUSES=new Set([
+      'uploaded','processing','speech_failed','speech_retryable','transcript_ready','handed_off',
+      'translation_pending','quality_blocked',
+    ]);
     if(activeFlow?.reviewAfterUpload===true&&activeFlow.phase==='processing'){
       // This encrypted terminal record proves upload, not transcript readiness.
       // The mounted review panel reauthorizes every actual transcript read.
@@ -145,15 +150,17 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
       const view=await creatorReviewApi(workspaceId,sessionId,identity,abort.signal).read();
       if(!current())throw new QueueInvariantError('capture_access_unavailable');
       if(!await controller.restore()){
-        if(!['created','capturing'].includes(view.status)){reviewOnly=true;provenComplete=true;}
+        if(PROVEN_COMPLETE_REVIEW_STATUSES.has(view.status)){reviewOnly=true;provenComplete=true;}
         else if(view.status==='capturing')throw new QueueInvariantError('capture_saved_session_changed');
-        else await controller.prepareConfigured(sessionId);
+        else if(view.status==='created')await controller.prepareConfigured(sessionId);
+        else throw new QueueInvariantError('capture_saved_session_changed'); // failed/cancelled/unknown
       }
     }
     if(!current())throw new QueueInvariantError('capture_access_unavailable');
     // Release only on proven completion (reviewOnly or restored processing) — never on mere admitted.
     if(provenComplete)await releaseTransferProtection();
     const selected=controller;
+    let released=false;
     /** Drop session-scoped import-queue IndexedDB only when retention is effective (identical to main when off). */
     const dropImportQueueCopy=()=>{
       if(!audioRetentionEffective(options.audioRetention))return;
@@ -178,7 +185,9 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
       if(reviewOnly)return;
       // Switches off: identical to main — only releaseUploadedCapture, leave queue open.
       if(!audioRetentionEffective(options.audioRetention))return selected.releaseUploadedCapture();
+      if(released)return;
       await selected.releaseUploadedCapture();
+      released=true;
       queue?.close();queue=undefined;dropImportQueueCopy();
     },
     uploadProgress:async()=>{
@@ -191,6 +200,6 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
         total:options.chunks,reference:reference??terminal??null};
     },
     close:async()=>{if(!active)return;active=false;abort.abort();await source.stop();await task?.catch(()=>{});
-      try{await selected.deactivate();}finally{flow.close();profiles.close();queue?.close();queue=undefined;await unlock();}}};
+      try{if(!released)await selected.deactivate();}finally{flow.close();profiles.close();queue?.close();queue=undefined;await unlock();}}};
   }catch(error){active=false;abort.abort();try{await controller?.deactivate();}finally{flow.close();profiles.close();queue?.close();await unlock();}throw error;}
 }
