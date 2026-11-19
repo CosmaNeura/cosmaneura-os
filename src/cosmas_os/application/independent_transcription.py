@@ -10,6 +10,7 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from cosmas_os.adapters.azure_fast_transcription import AzureFastTranscriptionProcessor
 from cosmas_os.application import private_recording as private
 from cosmas_os.application import real_patient_recording as real_patient
 from cosmas_os.application import services as svc
@@ -66,7 +67,14 @@ def enabled_status(session: Session, box_id: str, owner_id: str, wid: str, *, ex
 def _processor() -> TranscriptionProcessor:
     if _PROCESSOR is not None:
         return _PROCESSOR
-    # Fake is the only processor in PR1 / tests / CI. Azure lands in T2a-azure.
+    if settings.independent_recording_transcription_azure_enabled:
+        endpoint = settings.azure_fast_transcription_endpoint
+        if not endpoint:
+            raise ws.WorkspaceError("independent_recording_transcription_unavailable", 503)
+        return AzureFastTranscriptionProcessor.from_settings(
+            endpoint=endpoint,
+            key_env_name=settings.azure_fast_transcription_key_env_name,
+        )
     return FakeTranscriptionProcessor()
 
 

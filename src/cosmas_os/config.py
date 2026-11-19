@@ -138,6 +138,12 @@ class Settings(BaseSettings):
     # T2a: CosmaBot independent transcription. Default off for existing live users.
     # Box opt-in is separate (box_contexts.independent_recording_transcription_enabled).
     independent_recording_transcription_enabled: bool = False
+    # T2a-azure: Azure Fast Transcription adapter. Default off; requires main switch + endpoint.
+    independent_recording_transcription_azure_enabled: bool = False
+    # HTTPS URL without query or credentials. Never a secret value.
+    azure_fast_transcription_endpoint: str | None = None
+    # Env var NAME only; John sets the value himself. Never store or log the value.
+    azure_fast_transcription_key_env_name: str | None = None
 
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)
@@ -695,6 +701,24 @@ class Settings(BaseSettings):
                 "REAL_PATIENT_RECORDING_ENABLED must remain false in process "
                 "configuration; enable only via Box after clinic, BAA and PHI refs"
             )
+        # T2a-azure: Azure Fast Transcription refuses to start without the main
+        # switch and a valid endpoint. Never echo configured values.
+        if self.independent_recording_transcription_azure_enabled:
+            if not self.independent_recording_transcription_enabled:
+                errors.append(
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED requires "
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED"
+                )
+            from cosmas_os.adapters.azure_fast_transcription import (
+                validate_azure_fast_transcription_endpoint,
+            )
+
+            endpoint = self.azure_fast_transcription_endpoint
+            if not endpoint or not validate_azure_fast_transcription_endpoint(endpoint):
+                errors.append(
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED requires a "
+                    "valid https AZURE_FAST_TRANSCRIPTION_ENDPOINT without query or credentials"
+                )
         if self.cosmas_env in STANDALONE_ENVS:
             return errors + self._standalone_configuration_errors()
         errors.extend(self.workspace_enrollment_configuration_errors())
