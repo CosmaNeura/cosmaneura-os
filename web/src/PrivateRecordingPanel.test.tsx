@@ -4,9 +4,10 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import type {CaptureSource,CaptureSourceStartOptions} from '../../clients/capture/src/capture/source';
 import {PrivateRecordingPanel,type PrivateRecordingPanelProps,type PrivateNotebookResult} from './PrivateRecordingPanel';
-import {PrivateRecordingRuntime,openPrivateRecordingStore,listPrivateRecordings,type PrivateRecordingNativeReceipt} from './private-recording-runtime';
+import {PrivateRecordingRuntime,openPrivateRecordingStore,listPrivateRecordings,type PrivateRecordingNativeReceipt,type PrivateRecordingManifest} from './private-recording-runtime';
 import {workspaceApi,WorkspaceApiError} from './workspace-api';
 import {privateRecordingApi,type PrivateRecordingReceipt,type PrivateRecordingIntent} from './private-recording-api';
+import {AUDIO_RETENTION_MS} from './private-recording-retention';
 import {vendorCanonical,vendorSha256} from './vendor-contract';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const {Blob:NodeBlob}=await vi.importActual<{Blob:typeof Blob}>('node:buffer');
@@ -218,7 +219,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     metadata.attach.mockImplementationOnce(async(...args)=>{await original(...args);rejected=true;throw new WorkspaceApiError(503);});
     const resolve=vi.spyOn(privateRecordingApi,'resolve').mockImplementation(async()=>({outcome:'saved',recording:metadata.receipt()}));
     props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe,prepareStore:async()=>{
-      const store=await prepareStore();return {keys:()=>store.keys(),close:()=>store.close(),write:(key,prior,value)=>store.write(key,prior,value),read:async key=>{
+      const store=await prepareStore();return {keys:()=>store.keys(),close:()=>store.close(),delete:(key)=>store.delete(key),write:(key,prior,value)=>store.write(key,prior,value),read:async key=>{
         const retained=await store.read(key);
         if(rejected&&key==='ledger:'+runtimes[0].snapshot.recordingId&&++pendingReads===2){rereading=true;await held;}
         return retained;
@@ -317,7 +318,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
       const store=await prepareStore();
       if(!recovering)return store;
       const key='manifest:'+runtimes[0].snapshot.recordingId;
-      return {keys:()=>store.keys(),close:()=>store.close(),write:async(k,prior,value)=>{recoveryWrites(k,value);await store.write(k,prior,value);},read:async k=>{
+      return {keys:()=>store.keys(),close:()=>store.close(),delete:(k)=>store.delete(k),write:async(k,prior,value)=>{recoveryWrites(k,value);await store.write(k,prior,value);},read:async k=>{
         const retained=await store.read(k);
         if(k===key&&++manifestReads===2){
           const changed={...(retained as Record<string,unknown>),phase:'recording'};
@@ -499,7 +500,8 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(button('Stop and save recording').disabled).toBe(false);
     await wait(()=>container.textContent?.includes('Waiting for recording to start')===true);
     expect(container.textContent).not.toContain('Checking notebook recording status');expect(status()).toBe('Requesting microphone access');
-    const help=timers.mock.calls.find(call=>call[1]===15000)?.[0];expect(typeof help).toBe('function');
+    // Policy fetch also uses a 15s abort timer; permission-help is the latest 15s callback.
+    const help=[...timers.mock.calls].reverse().find(call=>call[1]===15000)?.[0];expect(typeof help).toBe('function');
     await act(async()=>{if(typeof help==='function')help();});expect(container.textContent).toContain('Still waiting?');
     await click('Stop and save recording');await wait(()=>status()==='Stopped · no audio captured');
     await act(async()=>finish());expect(status()).toBe('Stopped · no audio captured');
@@ -729,5 +731,73 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     await click('Close recording');expect(close).toHaveBeenCalledOnce();await act(async()=>resolve(notebook));
     expect(opened).not.toHaveBeenCalled();expect(attach).not.toHaveBeenCalled();expect(finish).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
     expect(runtimes.at(-1)!.snapshot).toMatchObject({recordingId,workspaceId:id,recordedChunks:1,phase:'sealed'});expect(sources).toHaveLength(1);
+  });
+  it('shows deletes-in label only when both retention switches are on',async()=>{
+    const now=()=>Date.parse('2026-11-19T12:00:00.000Z');
+    props={...props,audioRetention:{enabled:true,enabledAt:'2026-11-01T00:00:00.000Z',serverNow:new Date(now()).toISOString(),fetchedAtDeviceMs:now()},now};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(42));await click('Stop and save recording');
+    await wait(()=>status()==='Saved on this device');
+    expect(container.textContent).toMatch(/Audio is removed from this device about \d+ h from now; transcript and notes are kept\./);
+    expect(container.querySelector('[data-retention-label]')).toBeTruthy();
+  });
+  it('hides the retention label when the policy is absent',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(7));await click('Stop and save recording');
+    await wait(()=>status()==='Saved on this device');
+    expect(container.textContent).not.toMatch(/Audio is removed from this device about/);
+    expect(container.querySelector('[data-retention-label]')).toBeNull();
+  });
+  it('sweeps expired audio on open and again on close when retention is on',async()=>{
+    const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended),rid='00000000-0000-4000-8000-000000000099';
+    const consentRow={modality:'in_person' as const,participant_regions:['US-NY'],method:'verbal_attestation' as const,all_parties_consented:true as const,granted_at:'2026-11-01T12:00:00.000Z',language:'en-US' as const};
+    const row:PrivateRecordingManifest={contract:'cosmabot.private-recording.v1',recordingId:rid,scope,title:'Synthetic expired',consent:consentRow,consentIntervals:[],workspaceId:null,createdAt:ended,updatedAt:ended,endedAt:ended,phase:'sealed',chunks:[{sequence:0,sha256:'a'.repeat(64),bytes:76,durationMs:1}]};
+    const seed=await openPrivateRecordingStore(scope,'desktop',{indexedDB:factory,crypto:webcrypto});
+    await seed.write('manifest:'+rid,null,row);
+    await seed.write('chunk:'+rid+':0',null,{contract:'cosmabot.private-pcm.v1',recordingId:rid,scope,sequence:0,sha256:'a'.repeat(64),durationMs:1,data:'AA=='});
+    await seed.write('audio-retention-armed',null,{contract:'cosmabot.private-recording-audio-retention-armed.v1',armedAt:'2026-10-01T00:00:00.000Z'});
+    seed.close();
+    const sweep=vi.spyOn(await import('./private-recording-runtime'),'sweepExpiredPrivateRecordingAudio');
+    props={...props,audioRetention:{enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:start},now:()=>start+AUDIO_RETENTION_MS};
+    await render();
+    await wait(()=>sweep.mock.calls.length>=1);
+    await act(async()=>root.unmount());
+    await wait(()=>sweep.mock.calls.length>=2);
+    const check=await openPrivateRecordingStore(scope,'desktop',{indexedDB:factory,crypto:webcrypto});
+    expect(await check.read('manifest:'+rid)).toBeNull();
+    check.close();
+  });
+  it('treats policy fetch failure as off and shows no retention label',async()=>{
+    const fetchPolicy=vi.spyOn(privateRecordingApi,'audioRetention').mockRejectedValue(new Error('Synthetic policy fetch failed'));
+    props={...props,workspaceId:id}; // no audioRetention prop — panel fetches; .catch → off
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(3));await click('Stop and save recording');
+    await wait(()=>status()==='Saved on this device');
+    expect(fetchPolicy).toHaveBeenCalled();
+    expect(container.querySelector('[data-retention-label]')).toBeNull();
+  });
+  it('fetch-path policy (no audioRetention prop) enables retention label when GET returns full clock',async()=>{
+    const now=()=>Date.parse('2026-11-19T12:00:00.000Z');
+    const fetchPolicy=vi.spyOn(privateRecordingApi,'audioRetention').mockResolvedValue({
+      enabled:true,enabledAt:'2026-11-01T00:00:00.000Z',serverNow:new Date(now()).toISOString(),fetchedAtDeviceMs:now(),
+    });
+    props={...props,workspaceId:id,now}; // omit audioRetention — panel uses getter over fetched policy
+    await render();
+    await wait(()=>fetchPolicy.mock.calls.length>=1);
+    await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(5));await click('Stop and save recording');
+    await wait(()=>status()==='Saved on this device');
+    expect(container.textContent).toMatch(/Audio is removed from this device about \d+ h from now; transcript and notes are kept\./);
+    expect(container.querySelector('[data-retention-label]')).toBeTruthy();
+  });
+  it('opens an audio-deleted stub and shows the exact deleted-audio message',async()=>{
+    const rid='00000000-0000-4000-8000-000000000088';
+    const seed=await openPrivateRecordingStore(scope,'desktop',{indexedDB:factory,crypto:webcrypto});
+    await seed.write('audio-deleted:'+rid,null,{contract:'cosmabot.private-recording-audio-deleted.v1',recordingId:rid,scope,phase:'audio_deleted',updatedAt:'2026-11-17T00:00:00.000Z'});
+    seed.close();
+    props={...props,recordingId:rid,title:'Synthetic deleted'};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    await wait(()=>container.textContent?.includes('Audio deleted on this device; transcript and notes kept.')??false);
+    expect(container.textContent).toContain('Audio deleted on this device; transcript and notes kept.');
   });
 });
