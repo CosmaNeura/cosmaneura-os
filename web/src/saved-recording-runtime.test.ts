@@ -147,19 +147,19 @@ it('refuses expired audio with a safe code and never reads chunk bytes',async()=
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it('skips refuse while transfer key protects, then refuses after transfer key is removed',async()=>{
+it('skips refuse while transfer key protects, then refuses after retention release marker',async()=>{
   const ended='2026-11-01T00:00:00.000Z';
   const recording={
     snapshot:{recordingId:sessionId,phase:'sealed',endedAt:ended,createdAt:ended},
     snapshotForLedger:async()=>({recordingId:sessionId,scope,consent:{modality:'in_person',participant_regions:[],method:'verbal_attestation',all_parties_consented:true,granted_at:ended,language:'en-US'},consentIntervals:[],startedAt:ended,phase:'sealed',frames:16,chunks,manifestSHA256:'a'.repeat(64),updatedAt:ended}),
     savedChunks:vi.fn(async function*(){throw Error('audio bytes must not be read');}),
   } as unknown as PrivateRecordingRuntime;
-  const keys=new Set<string>(['transfer:'+sessionId]);
+  const rows=new Map<string,unknown>([['transfer:'+sessionId,{ok:true}]]);
   const store={
-    keys:async()=>[...keys],
-    read:async(key:string)=>keys.has(key)?{ok:true}:null,
-    write:async()=>{},
-    delete:async(key:string)=>{keys.delete(key);},
+    keys:async()=>[...rows.keys()],
+    read:async(key:string)=>rows.has(key)?rows.get(key)??null:null,
+    write:async(key:string,_before:unknown,next:unknown)=>{rows.set(key,next);},
+    delete:async(key:string)=>{rows.delete(key);},
     close:()=>{},
   };
   const policy={enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:Date.parse(ended)};
@@ -168,8 +168,12 @@ it('skips refuse while transfer key protects, then refuses after transfer key is
   const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
     scope,recording,chunks,platform:'desktop',isCurrent:()=>true,audioRetention:policy,now,store});
   expect(recording.savedChunks).not.toHaveBeenCalled();
+  expect(rows.has('transfer:'+sessionId)).toBe(true);
   await opened.close();
-  await store.delete('transfer:'+sessionId);
+  // End protection without deleting transfer: (panel CAS needs the row).
+  const {markTransferRetentionReleased}=await import('./private-recording-runtime');
+  await markTransferRetentionReleased(store,sessionId,ended);
+  expect(rows.has('transfer:'+sessionId)).toBe(true);
   await expect(openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
     scope,recording,chunks,platform:'desktop',isCurrent:()=>true,audioRetention:policy,now,store})).rejects.toMatchObject({code:'private_recording_audio_expired'});
 });

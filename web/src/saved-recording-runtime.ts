@@ -11,7 +11,7 @@ import {openCaptureQueueStorage} from './capture-storage';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {SavedRecordingSource} from './saved-recording-source';
 import type {AudioRetentionClock,AudioRetentionPolicy,PrivateRecordingRuntime,PrivateRecordingStore} from './private-recording-runtime';
-import {isAudioRetentionProtected} from './private-recording-runtime';
+import {isAudioRetentionProtected,markTransferRetentionReleased} from './private-recording-runtime';
 import {audioRetentionEffective,refuseExpiredAudio} from './private-recording-retention';
 import {acquireCaptureFlowLock} from '../../clients/capture/src/flow/capture-lock';
 import {workspaceAuthHeaders} from './workspace-auth-headers';
@@ -64,11 +64,12 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
   scope:string;recording:PrivateRecordingRuntime;chunks:number;platform:'ios'|'desktop';isCurrent:()=>boolean;
   /** T1: refuse expired audio when both switches are on. Absent means off. */
   audioRetention?:AudioRetentionPolicy|null;now?:AudioRetentionClock;
-  /** Private-recording store for retention protection + transfer-key cleanup. */
+  /** Private-recording store for retention protection + release marker (never deletes transfer:). */
   store?:PrivateRecordingStore}){
   const {workspaceId,admitted,identity}=options,sessionId=admitted.session_id;
   // Refuse before any import/transfer when both switches are on. Safe code; no audio bytes.
-  // Protected rows (open owner, attach/finish pending, transfer: key) skip refuse.
+  // Protected rows (open owner, attach/finish pending, unreleased transfer:) skip refuse.
+  // Never delete the panel's transfer:<recordingId> row — that breaks CAS persist/resume.
   let transferRecordingId:string|undefined=options.recording.snapshot?.recordingId;
   if(audioRetentionEffective(options.audioRetention)){
     const proof=await options.recording.snapshotForLedger();
@@ -80,9 +81,11 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
         chunks:Array.from({length:proof.chunks},(_,sequence)=>({sequence}))},options.now?.()??Date.now(),options.audioRetention);
     }
   }
-  const clearTransfer=async()=>{
-    if(!options.store||!transferRecordingId)return;
-    try{await options.store.delete('transfer:'+transferRecordingId);}catch{/* best-effort end of transfer protection */}
+  /** Ends sweep protection only; leaves transfer:<id> intact for panel persist/relaunch. */
+  const releaseTransferProtection=async()=>{
+    if(!audioRetentionEffective(options.audioRetention)||!options.store||!transferRecordingId)return;
+    const iso=new Date(options.now?.()??Date.now()).toISOString();
+    try{await markTransferRetentionReleased(options.store,transferRecordingId,iso);}catch{/* best-effort marker */}
   };
   const abort=new AbortController();let active=true,task:Promise<void>|null=null;
   let reference:string|null=null;
@@ -145,15 +148,20 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
     if(!current())throw new QueueInvariantError('capture_access_unavailable');
     const selected=controller;
     return {controller:selected,reviewOnly,transcribe:()=>{
-      if(reviewOnly)return Promise.resolve();
+      // Terminal success (review-only or imported chunks): release sweep protection when retention is on.
+      // Never delete transfer:<id> — panel CAS persist/relaunch needs that row.
+      if(reviewOnly)return releaseTransferProtection();
       if(!task)reference=null;
       return task??=(async()=>{
-        if(!current())throw new QueueInvariantError('capture_access_unavailable');
-        if(selected.snapshot.state==='error'||selected.snapshot.state==='uploading'){
-          await captureQueue.retryRejectedUploads(sessionId,transport);
-        }
-        await importSavedChunks(selected,source,options.chunks,current);
-      })().finally(()=>{task=null;return clearTransfer();});
+        try{
+          if(!current())throw new QueueInvariantError('capture_access_unavailable');
+          if(selected.snapshot.state==='error'||selected.snapshot.state==='uploading'){
+            await captureQueue.retryRejectedUploads(sessionId,transport);
+          }
+          await importSavedChunks(selected,source,options.chunks,current);
+          await releaseTransferProtection();
+        }finally{task=null;}
+      })();
     },releaseUploadedCapture:()=>reviewOnly?Promise.resolve():selected.releaseUploadedCapture(),
     uploadProgress:async()=>{
       const rows=await queue!.storage.listMetadata();

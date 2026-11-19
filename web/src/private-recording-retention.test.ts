@@ -1,7 +1,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import type {SecureQueuePlugin,VersionedSecureQueueRecord} from '../../clients/capture/plugins/secure-queue/definitions';
-import {audioSweepSkipIds,isAudioRetentionProtected,listPrivateRecordings,openPrivateRecordingStore,PrivateRecordingRuntime,sweepExpiredPrivateRecordingAudio,type PrivateRecordingManifest,type PrivateRecordingStore} from './private-recording-runtime';
+import {audioSweepSkipIds,isAudioRetentionProtected,isTransferRetentionReleased,listPrivateRecordings,markTransferRetentionReleased,openPrivateRecordingStore,PrivateRecordingRuntime,sweepExpiredPrivateRecordingAudio,type PrivateRecordingManifest,type PrivateRecordingStore} from './private-recording-runtime';
 import {privateRecordingLedgerKey} from './private-recording-ledger';
 import {
   AUDIO_DELETED_STUB_CONTRACT,
@@ -558,7 +558,10 @@ it('refuseExpiredAudio skip option and transfer protection gate delete',async()=
   expect((await audioSweepSkipIds(store)).has(id(26))).toBe(true);
   expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([]);
   expect(await store.read('manifest:'+id(26))).not.toBeNull();
-  await store.delete('transfer:'+id(26));
+  // Protection ends via release marker — transfer: row stays for panel CAS persist.
+  await markTransferRetentionReleased(store,id(26),'2026-11-03T00:00:00.000Z');
+  expect(await isTransferRetentionReleased(store,id(26))).toBe(true);
+  expect(await store.read('transfer:'+id(26))).not.toBeNull();
   expect(await isAudioRetentionProtected(store,id(26))).toBe(false);
   expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([id(26)]);
   store.close();

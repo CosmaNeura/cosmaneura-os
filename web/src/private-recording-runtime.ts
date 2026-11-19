@@ -337,7 +337,7 @@ export async function openPrivateRecordingStore(scope:string,platform:'ios'|'des
   need(HASH.test(scope));
   const crypt=deps.crypto??globalThis.crypto;need(crypt?.subtle);
   const name='cosmas-private-recording:v1:'+scope;
-  const validKey=(key:string)=>key==='audio-retention-armed'||/^(?:(?:manifest|ledger|transfer|visit-binding|display-title|private-transcript|audio-tombstone|audio-deleted):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
+  const validKey=(key:string)=>key==='audio-retention-armed'||/^(?:(?:manifest|ledger|transfer|transfer-retention-released|visit-binding|display-title|private-transcript|audio-tombstone|audio-deleted):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
   const serialize=(value:unknown)=>{const bytes=encode(value);need(bytes.length<=450000);return bytes;};
   if(platform==='ios'){
     const plugin=deps.native??(await import('../../clients/capture/plugins/secure-queue')).SecureQueue;
@@ -383,15 +383,32 @@ export type ListPrivateRecordingsOptions={
   skipRecordingIds?:Iterable<string>;
 };
 
+/** Marker written only after a confirmed import success while retention is on. Never deletes transfer:. */
+export const TRANSFER_RETENTION_RELEASED_CONTRACT='cosmabot.private-recording-transfer-retention-released.v1';
+export function transferRetentionReleasedKey(recordingId:string){return 'transfer-retention-released:'+recordingId;}
+export async function isTransferRetentionReleased(store:PrivateRecordingStore,recordingId:string):Promise<boolean>{
+  const row=await store.read(transferRetentionReleasedKey(recordingId));
+  return !!row&&typeof row==='object'&&(row as {contract?:unknown}).contract===TRANSFER_RETENTION_RELEASED_CONTRACT;
+}
+/** Ends transfer protection without deleting the panel's transfer:<id> row. */
+export async function markTransferRetentionReleased(store:PrivateRecordingStore,recordingId:string,releasedAtIso:string):Promise<void>{
+  const key=transferRetentionReleasedKey(recordingId),prior=await store.read(key);
+  await store.write(key,prior,{contract:TRANSFER_RETENTION_RELEASED_CONTRACT,recordingId,releasedAt:releasedAtIso});
+}
+
 /**
  * Skip active owner, ledger attach/finish pending, and in-flight transfer imports.
- * Unreadable ledger rows are skipped (fail closed for delete).
+ * transfer: protects only while present AND not retention-released. Unreadable ledger → skip.
  */
 export async function audioSweepSkipIds(store:PrivateRecordingStore,extra?:Iterable<string>):Promise<Set<string>>{
   const skip=new Set<string>();const active=activePrivateRecordingId();if(active)skip.add(active);
   if(extra)for(const id of extra)if(id)skip.add(id);
   for(const key of await store.keys()){
-    if(key.startsWith('transfer:')){skip.add(key.slice(9));continue;}
+    if(key.startsWith('transfer:')){
+      const recordingId=key.slice('transfer:'.length);
+      if(!(await isTransferRetentionReleased(store,recordingId)))skip.add(recordingId);
+      continue;
+    }
     if(!key.startsWith('ledger:'))continue;
     try{
       const row=await store.read(key);const state=row&&typeof row==='object'&&'state' in row?String((row as {state:unknown}).state):'';
@@ -401,7 +418,7 @@ export async function audioSweepSkipIds(store:PrivateRecordingStore,extra?:Itera
   return skip;
 }
 
-/** True when sweep/refuse must not delete this recording (owner, pending ledger, or transfer key). */
+/** True when sweep/refuse must not delete this recording (owner, pending ledger, or unreleased transfer). */
 export async function isAudioRetentionProtected(store:PrivateRecordingStore,recordingId:string):Promise<boolean>{
   return (await audioSweepSkipIds(store)).has(recordingId);
 }
