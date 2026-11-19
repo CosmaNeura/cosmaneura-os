@@ -186,16 +186,11 @@ human attention is genuinely required.
 John Clemente, CEO, November 17, 2026. Recorded in `docs/DECISION_LOG.md`
 as `DL-20261117-01`.
 
-Narrowed by `DL-20261117-01` decision 10 below. Read both before acting. The
-exact scope of "this workstream" is PENDING / OPEN-JOHN. Until John Clemente
-confirms it, treat every task as belonging to the workstream: no production
-deploys, no store submissions, no publishing of signed builds, no
-infrastructure applies that reach production and no live identity changes
-without John Clemente's explicit instruction in the task.
-
-PENDING / OPEN-JOHN (PR #400): the precise definition of "this workstream"
-awaits John's confirmation. Do not invent a scope sentence until then.
-Until John confirms, treat every task as belonging to the workstream.
+Narrowed by `DL-20261117-01` decision 10 below. Read both before acting. Scope
+confirmed by John Clemente on 19 Nov 2026: "This workstream makes no
+production deploys, no App Store submissions and no changes to live
+sign-ins." If it is unclear whether a task belongs to this workstream,
+treat it as belonging to it.
 
 Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
 Item 6 also incorporates John's 19 Nov 2026 9:28am ET answer recorded as

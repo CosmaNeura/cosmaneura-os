@@ -38,12 +38,11 @@ settings, signed Mac and iPhone builds, and production deploy is the October
 
 ## Owner decision, October 30, 2026
 
-Narrowed by `DL-20261117-01` decision 10 below. Read both before acting. The
-exact scope of "this workstream" is PENDING / OPEN-JOHN. Until John Clemente
-confirms it, treat every task as belonging to the workstream: no production
-deploys, no store submissions, no publishing of signed builds, no
-infrastructure applies that reach production and no live identity changes
-without John Clemente's explicit instruction in the task.
+Narrowed by `DL-20261117-01` decision 10 below. Read both before acting. Scope
+confirmed by John Clemente on 19 Nov 2026: "This workstream makes no
+production deploys, no App Store submissions and no changes to live
+sign-ins." If it is unclear whether a task belongs to this workstream,
+treat it as belonging to it.
 
 On Friday, October 30, 2026, at 9:04am ET, John Clemente, CEO, decided that
 Cursor agents working in this repository may do the following without asking
@@ -73,11 +72,11 @@ John Clemente, CEO, November 17, 2026. Recorded as `DL-20261117-01` in
 `docs/DECISION_LOG.md`. Decision 10 supersedes the October 30 production,
 store and live identity authority for this workstream.
 
-PENDING / OPEN-JOHN (PR #400): the precise definition of "this workstream"
-(and whether signed-build publishing and infrastructure applies that reach
-production are covered by decision 10) awaits John's confirmation. Do not
-invent a scope sentence until then. Until John confirms, treat every task as
-belonging to the workstream.
+Narrowed by `DL-20261117-01` decision 10 below. Read both before acting. Scope
+confirmed by John Clemente on 19 Nov 2026: "This workstream makes no
+production deploys, no App Store submissions and no changes to live
+sign-ins." If it is unclear whether a task belongs to this workstream,
+treat it as belonging to it.
 
 Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
 Item 6 also incorporates John's 19 Nov 2026 9:28am ET answer recorded as

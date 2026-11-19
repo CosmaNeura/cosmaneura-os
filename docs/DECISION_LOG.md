@@ -436,7 +436,7 @@ IMPLEMENTATION IMPACT:
 ### DL-20261117-01
 
 - **Status:** ACCEPTED (items 6 and 7 resolved by DL-20261117-02;
-  DL-20261119-01)
+  DL-20261119-01; workstream scope confirmed 19 Nov 2026 4:08pm ET)
 - **Date:** 2026-11-17
 - **Owner acceptance evidence:** Direct owner message from John Clemente, CEO,
   November 17, 2026.
@@ -487,8 +487,11 @@ IMPLEMENTATION IMPACT:
   are John's, from his November 17, 2026 owner-message drafting (not
   agent-invented); items 6 and 7 were answered the same day by
   `DL-20261117-02`. Legacy-for-beta substance resolved by `DL-20261119-01`.
-  PENDING / OPEN-JOHN (PR #400) on "this workstream" scope sentence. Until
-  John confirms, treat every task as belonging to the workstream.
+  Narrowed by `DL-20261117-01` decision 10. Read both before acting. Scope
+  confirmed by John Clemente on 19 Nov 2026 4:08pm ET: "This workstream
+  makes no production deploys, no App Store submissions and no changes to
+  live sign-ins." If it is unclear whether a task belongs to this
+  workstream, treat it as belonging to it.
 - **Supersedes:** Conflicting browser, prescription, model and workstream
   authority statements in `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`;
   `DL-20261030-01` production, store and live identity authority for this
