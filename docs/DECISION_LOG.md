@@ -460,18 +460,9 @@ IMPLEMENTATION IMPACT:
    Chinese origin, including derivatives. The cloud remains the reasoning
    layer. Every consequential on-device output is verified by code or
    escalated.
-   Gloss (reviewer reading, PENDING / OPEN-JOHN): "call notes" here means
-   short on-screen staff help, not drafting clinical notes.
-   "Consequential" means any on-device output that could affect a clinical
-   or system-of-record action. If it is unclear whether an output is
-   consequential, treat it as consequential. "Chinese origin, including
-   derivatives" covers developer, fine-tune, distillation and quantisation
-   provenance; the specific on-device model is still pending John's pick.
 5. Desktop targets are Windows and Mac. Development starts on Mac for two
    weeks and moves to Windows from week three. Platform-specific code sits
-   behind interfaces. (PR #400: start date for the two-week Mac window is
-   pending; Windows signing and distribution are not authorised by the
-   October 30 text; pending John)
+   behind interfaces.
 6. [CONFIRM] CosmaBot must record a visit and produce a note without
    depending on the legacy platform.
 7. Scribe remains a separate product that shares the recorder.
@@ -491,7 +482,16 @@ IMPLEMENTATION IMPACT:
   confirmed by John Clemente on 19 Nov 2026 4:08pm ET: "This workstream
   makes no production deploys, no App Store submissions and no changes to
   live sign-ins." If it is unclear whether a task belongs to this
-  workstream, treat it as belonging to it.
+  workstream, treat it as belonging to it. Decision 4 gloss (reviewer
+  reading, PENDING / OPEN-JOHN): "call notes" here means short on-screen
+  staff help, not drafting clinical notes. "Consequential" means any
+  on-device output that could affect a clinical or system-of-record action.
+  If it is unclear whether an output is consequential, treat it as
+  consequential. "Chinese origin, including derivatives" covers developer,
+  fine-tune, distillation and quantisation provenance; the specific
+  on-device model is still pending John's pick. Decision 5 (PR #400: start
+  date for the two-week Mac window is pending; Windows signing and
+  distribution are not authorised by the October 30 text; pending John).
 - **Supersedes:** Conflicting browser, prescription, model and workstream
   authority statements in `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`;
   `DL-20261030-01` production, store and live identity authority for this
