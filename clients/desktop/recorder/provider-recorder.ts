@@ -16,6 +16,7 @@ import type { DesktopPCMCoverage } from "./native-pcm-driver.js";
 import { NativeProcessPCMDriver, type AuthorizedDesktopSelection, type NativeProcessDriverOptions } from "./native-process-driver.js";
 import {
   desktopAudioRetentionEnabled,
+  normalizeDesktopAudioRetentionPolicy,
   sweepDurablePrivateRecordingAudio,
   type DesktopAudioRetentionPolicy,
 } from "./durable-provider-records.js";
@@ -64,11 +65,9 @@ export interface DesktopProviderRecorderOptions {
   readonly retireSource: () => Promise<void>;
   /** Close creator-scoped stores and release exclusive host ownership after stop. */
   readonly release: () => Promise<void>;
-  /**
-   * T1: 48-hour audio retention. Absent/unknown means OFF (no deletion).
-   * Effective only when enabled===true. Optional durable namespace for private audio.
-   */
+  /** T1: main fetches policy; absent/unknown/throw → OFF. */
   readonly audioRetention?: DesktopAudioRetentionPolicy | null;
+  readonly fetchAudioRetentionPolicy?: () => Promise<unknown>;
   readonly audioRetentionRecords?: DesktopRecordNamespace;
   readonly now?: () => number;
 }
@@ -110,7 +109,7 @@ export class DesktopProviderRecorder implements ProviderRecorderController {
   private audioRetention: DesktopAudioRetentionPolicy | null | undefined;
 
   private constructor(private readonly options: DesktopProviderRecorderOptions) {
-    this.audioRetention = options.audioRetention;
+    this.audioRetention = normalizeDesktopAudioRetentionPolicy(options.audioRetention);
     if (typeof process === "undefined" || !process.versions.node || typeof window !== "undefined"
       || "type" in process && process.type === "renderer" || options.enabled !== true
       || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(options.sessionId) || options.signal.aborted) throw unavailable();
@@ -186,14 +185,27 @@ export class DesktopProviderRecorder implements ProviderRecorderController {
     options.signal.addEventListener("abort", this.onRevocation, { once: true });
   }
 
-  /** Renderer-supplied policy. Absent or unknown keeps deletion off. */
-  setAudioRetentionPolicy(policy: DesktopAudioRetentionPolicy | null | undefined): void {
+  /** Test helper; production policy comes from fetchAudioRetentionPolicy. */
+  setAudioRetentionPolicy(policy: unknown): void {
     this.requireOpen();
-    this.audioRetention = policy && typeof policy === "object" ? policy : null;
+    this.audioRetention = normalizeDesktopAudioRetentionPolicy(policy);
+  }
+
+  /** Fetch (or fall back), normalize; throw/invalid → OFF. */
+  private async refreshAudioRetentionPolicy(): Promise<DesktopAudioRetentionPolicy | null> {
+    if (!this.options.fetchAudioRetentionPolicy) {
+      return normalizeDesktopAudioRetentionPolicy(this.audioRetention);
+    }
+    try {
+      return normalizeDesktopAudioRetentionPolicy(await this.options.fetchAudioRetentionPolicy());
+    } catch {
+      return { enabled: false };
+    }
   }
 
   async sweepExpiredAudio(): Promise<{ deleted: string[]; inspected: number }> {
     this.requireOpen();
+    this.audioRetention = await this.refreshAudioRetentionPolicy();
     if (!desktopAudioRetentionEnabled(this.audioRetention) || !this.options.audioRetentionRecords) {
       return { deleted: [], inspected: 0 };
     }
@@ -208,7 +220,7 @@ export class DesktopProviderRecorder implements ProviderRecorderController {
     options = Object.freeze({ ...options, native: Object.freeze({ ...options.native }) });
     const recorder = new DesktopProviderRecorder(options);
     try {
-      await recorder.sweepExpiredAudio().catch(() => undefined);
+      await recorder.sweepExpiredAudio(); // fetch→OFF; other failures deactivate via catch
       await recorder.run("prepare", async () => {
         const current = Object.freeze({ ...await options.authorizePreparation(recorder.signal) }); recorder.requireOpen();
         if (current.sessionId !== options.sessionId || ![
