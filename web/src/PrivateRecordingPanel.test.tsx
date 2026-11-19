@@ -730,4 +730,20 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(opened).not.toHaveBeenCalled();expect(attach).not.toHaveBeenCalled();expect(finish).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
     expect(runtimes.at(-1)!.snapshot).toMatchObject({recordingId,workspaceId:id,recordedChunks:1,phase:'sealed'});expect(sources).toHaveLength(1);
   });
+  it('shows deletes-in label only when both retention switches are on',async()=>{
+    const now=()=>Date.parse('2026-11-19T12:00:00.000Z');
+    props={...props,audioRetention:{enabled:true},now};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(42));await click('Stop and save recording');
+    await wait(()=>status()==='Saved on this device');
+    expect(container.textContent).toMatch(/deletes in \d+ h/);
+    expect(container.querySelector('[data-retention-label]')).toBeTruthy();
+  });
+  it('hides the retention label when the policy is absent',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(7));await click('Stop and save recording');
+    await wait(()=>status()==='Saved on this device');
+    expect(container.textContent).not.toMatch(/deletes in \d+ h/);
+    expect(container.querySelector('[data-retention-label]')).toBeNull();
+  });
 });

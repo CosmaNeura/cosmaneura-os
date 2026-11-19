@@ -1,7 +1,8 @@
 import type {NotebookSummaries} from './notebook-metadata-contract';
 import {useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
-import {PrivateRecordingRuntime,openPrivateRecordingStore,prewarmPrivateRecordingNative,consumePrivateRecordingNativeReceipt,type PrivateRecordingNativeReceipt,type PrivateRecordingOptions,type PrivateRecordingSnapshot,type PrivateRecordingStore} from './private-recording-runtime';
+import {PrivateRecordingRuntime,openPrivateRecordingStore,prewarmPrivateRecordingNative,consumePrivateRecordingNativeReceipt,sweepExpiredPrivateRecordingAudio,type AudioRetentionPolicy,type PrivateRecordingNativeReceipt,type PrivateRecordingOptions,type PrivateRecordingSnapshot,type PrivateRecordingStore} from './private-recording-runtime';
 import {PrivateRecordingLedgerController,type PrivateRecordingLedger} from './private-recording-ledger';
+import {audioRetentionEffective} from './private-recording-retention';
 import {readPrivateRecordingLanguage,savePrivateRecordingLanguage} from './recording-preferences';
 import type {CaptureAttestation,CaptureLanguage} from './capture-api';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
@@ -29,6 +30,9 @@ export type PrivateRecordingPanelProps={
   prepareStore?:()=>Promise<PrivateRecordingStore>;prepareNative?:(input:{scope:string;revision:string})=>Promise<PrivateRecordingNativeReceipt>;
   consumeNative?:(receipt:PrivateRecordingNativeReceipt)=>Promise<Pick<PrivateRecordingNativeReceipt,'receiptId'|'revision'>|null>;
   readInputSignal?:()=>Promise<unknown>;
+  /** T1: both switches. Absent/false means no label and no deletion. */
+  audioRetention?:AudioRetentionPolicy|null;
+  now?:()=>number;
 };
 const elapsed=(seconds:number)=>`${Math.floor(seconds/60)}:${String(Math.floor(seconds%60)).padStart(2,'0')}`;
 const startupLabels={native_session:'Checking your session',physical_exclusion:'Checking for another recording',microphone_permission:'Requesting microphone access',audio_engine:'Starting audio',preparing_storage:'Preparing encrypted recording'} as const;
@@ -119,14 +123,34 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       if(storage.status==='rejected')throw storage.reason;
       const store=storage.value;
       if(!selected.alive||owner.current!==selected||!current()){store.close();return;}selected.store=store;
+      if(audioRetentionEffective(live.current.audioRetention)){
+        await sweepExpiredPrivateRecordingAudio(scope,platform,{store,audioRetention:live.current.audioRetention,now:live.current.now});
+        if(!selected.alive||owner.current!==selected||!current()){store.close();return;}
+      }
       if(recordingId){
-        const runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope,platform,isCurrent:()=>owner.current===selected&&current(),openStore:async()=>store,...(platform==='ios'?{nativePreparation:()=>owner.current===selected?takeNativeReceipt():null}:{})},{recordingId,title});
+        const runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope,platform,isCurrent:()=>owner.current===selected&&current(),openStore:async()=>store,audioRetention:live.current.audioRetention,now:live.current.now,...(platform==='ios'?{nativePreparation:()=>owner.current===selected?takeNativeReceipt():null}:{})},{recordingId,title});
         if(!selected.alive||owner.current!==selected){await runtime.close();return;}
         selected.runtime=runtime;selected.unsubscribe=runtime.subscribe(value=>{if(selected.alive&&owner.current===selected)setSnapshot(value);});
       }
       setPrepared(true);
     })().catch(cause=>{if(selected.alive&&owner.current===selected){setPreparationError(recordingId?'Saved recording recovery could not be confirmed. Its encrypted audio is retained. Check microphone status before starting another recording.':'Recording is not ready: current access or encrypted storage could not be prepared. Check your connection and try again.');if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))live.current.onAccessLost?.(cause);}});
-    return()=>{selected.alive=false;const binding=ledgerOwner.current;if(binding?.selected===selected){ledgerOwner.current=null;void binding.chain.finally(()=>binding.store?.close()).catch(()=>{});}selected.unsubscribe?.();if(selected.runtime)void closeRuntime(selected).catch(()=>{});else selected.store?.close();if(audioRef.current)URL.revokeObjectURL(audioRef.current);audioRef.current=null;};
+    return()=>{
+      selected.alive=false;
+      const retention=live.current.audioRetention,clock=live.current.now,closingStore=selected.store;
+      const binding=ledgerOwner.current;if(binding?.selected===selected){ledgerOwner.current=null;void binding.chain.finally(()=>binding.store?.close()).catch(()=>{});}selected.unsubscribe?.();
+      void(async()=>{
+        try{
+          // Sign-out / panel close: delete expired audio only, while the store is still open.
+          if(closingStore&&audioRetentionEffective(retention)){
+            await sweepExpiredPrivateRecordingAudio(scope,platform,{store:closingStore,audioRetention:retention,now:clock}).catch(()=>{});
+          }
+        }finally{
+          if(selected.runtime)await closeRuntime(selected).catch(()=>{});
+          else closingStore?.close();
+        }
+      })();
+      if(audioRef.current)URL.revokeObjectURL(audioRef.current);audioRef.current=null;
+    };
   },[identity,scope,platform,recordingId]);
   function takeNativeReceipt(){
     const receipt=consumedReceipt.current;consumedReceipt.current=null;
@@ -157,7 +181,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       if(owner.current!==selected||!current()){storage.value.close();return;}
       selected.store?.close();selected.store=storage.value;
       if(recordingId){
-        const runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope,platform,isCurrent:()=>owner.current===selected&&current(),openStore:async()=>storage.value,...(platform==='ios'?{nativePreparation:()=>owner.current===selected?takeNativeReceipt():null}:{})},{recordingId,title});
+        const runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope,platform,isCurrent:()=>owner.current===selected&&current(),openStore:async()=>storage.value,audioRetention:live.current.audioRetention,now:live.current.now,...(platform==='ios'?{nativePreparation:()=>owner.current===selected?takeNativeReceipt():null}:{})},{recordingId,title});
         if(owner.current!==selected||!current()){await runtime.close();return;}
         selected.runtime=runtime;selected.unsubscribe=runtime.subscribe(value=>{if(selected.alive&&owner.current===selected)setSnapshot(value);});
       }
@@ -172,9 +196,23 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     accessStopped.current=true;setConsented(false);setNotebook(null);notebookRef.current=null;setLedger(null);clearAudio();
     void(async()=>{try{
       await selected.runtime?.pause();
+      if(selected.store&&audioRetentionEffective(live.current.audioRetention)){
+        await sweepExpiredPrivateRecordingAudio(scope,platform,{store:selected.store,audioRetention:live.current.audioRetention,now:live.current.now}).catch(()=>{});
+      }
       if(owns(selected)&&!current())live.current.onAccessLost?.(new WorkspaceApiError(401));
     }catch{if(owns(selected)&&!current())setError('Access changed and the microphone stop is unconfirmed. Keep this panel open and check Stop.');}})();
   });
+  // While open and both switches on, periodically delete expired audio only.
+  useEffect(()=>{
+    if(!audioRetentionEffective(props.audioRetention))return;
+    const tick=()=>{
+      const selected=owner.current;
+      if(!selected?.alive||!selected.store||!current())return;
+      void sweepExpiredPrivateRecordingAudio(scope,platform,{store:selected.store,audioRetention:live.current.audioRetention,now:live.current.now}).catch(()=>{});
+    };
+    const timer=setInterval(tick,60_000);
+    return()=>clearInterval(timer);
+  },[identity,scope,platform,props.audioRetention]);
   useEffect(()=>{
     if(!props.prepareNotebook||!recordingId&&!notebookTitle)return;
     const selected=owner.current,finalize=props.onNotebookPrepared;let active=true;
@@ -300,7 +338,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     setTitle(chosenTitle);setNotebookTitle(previous=>previous??chosenTitle);
     try{
       let runtime=selected.runtime;
-      if(!runtime){runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope,platform,isCurrent:()=>owner.current===selected&&current(),openStore:async()=>selected.store!,...(platform==='ios'?{nativePreparation:()=>owner.current===selected?takeNativeReceipt():null}:{})},{title:chosenTitle,consent});selected.runtime=runtime;selected.unsubscribe=runtime.subscribe(value=>{if(selected.alive&&owner.current===selected)setSnapshot(value);});}
+      if(!runtime){runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope,platform,isCurrent:()=>owner.current===selected&&current(),openStore:async()=>selected.store!,audioRetention:live.current.audioRetention,now:live.current.now,...(platform==='ios'?{nativePreparation:()=>owner.current===selected?takeNativeReceipt():null}:{})},{title:chosenTitle,consent});selected.runtime=runtime;selected.unsubscribe=runtime.subscribe(value=>{if(selected.alive&&owner.current===selected)setSnapshot(value);});}
       if(!current())throw new WorkspaceApiError(401);
       if(platform==='ios'){
         const receipt=nativeReceipt.current;nativeReceipt.current=null;setNativeReady(false);nativeConsumed.current=true;
@@ -413,7 +451,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       if(!owns(selected)||!current()||closedRecovery.current!==recovery)throw new WorkspaceApiError(403);
       let restoring=true;
       const mayRead=()=>owns(selected)&&current()&&(!restoring||closedRecovery.current===recovery)&&notebookRef.current?.workspace.id===workspaceId;
-      const recoveryStore:PrivateRecordingStore={keys:()=>store.keys(),write:(key,prior,value)=>store.write(key,prior,value),close:()=>store.close(),read:async key=>{
+      const recoveryStore:PrivateRecordingStore={keys:()=>store.keys(),write:(key,prior,value)=>store.write(key,prior,value),delete:(key)=>store.delete(key),close:()=>store.close(),read:async key=>{
         if(!mayRead())throw new WorkspaceApiError(403);
         const retained=await store.read(key);
         if(!mayRead())throw new WorkspaceApiError(403);
@@ -429,7 +467,8 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       }};
       await recoveryStore.read('manifest:'+recordingId);
       runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope:selected.scope,platform,
-        isCurrent:()=>owns(selected)&&current(),openStore:async()=>recoveryStore},{recordingId,title:selected.runtime?.snapshot.title??title});
+        isCurrent:()=>owns(selected)&&current(),openStore:async()=>recoveryStore,
+        audioRetention:live.current.audioRetention,now:live.current.now},{recordingId,title:selected.runtime?.snapshot.title??title});
       const reopened=await runtime.snapshotForLedger();
       if(!owns(selected)||!current()||closedRecovery.current!==recovery||notebookRef.current?.workspace.id!==workspaceId||runtime.snapshot.workspaceId!==workspaceId||
         reopened.phase!=='sealed'||reopened.recordingId!==proof.recordingId||reopened.scope!==proof.scope||reopened.manifestSHA256!==proof.manifestSHA256||
@@ -506,6 +545,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       {snapshot?.phase==='recording'&&platform==='desktop'&&<><meter min="0" max="1" value={snapshot.inputLevel??0} aria-label="Microphone activity"/><span>Microphone signal</span></>}
       {snapshot?.phase==='recording'&&inputSignal&&<><meter min="0" max="1" value={inputSignal.level} aria-label="Microphone activity"/><span>{inputSignal.route} · {inputSignal.message}</span></>}
       {snapshot&&['paused','interrupted'].includes(snapshot.phase)&&<span>{snapshot.failure==='capture_backgrounded'?'Recording paused when the app became inactive.':snapshot.failure==='audio_route_changed'?'Recording paused because the microphone route changed.':snapshot.failure==='audio_session_interrupted'?'Recording paused because iOS interrupted the audio session.':snapshot.failure?'Recording paused because microphone startup or capture was interrupted.':'Microphone off.'} {platform==='ios'?'Resume only if everyone still agrees.':'Select consent and Resume recording when ready.'}</span>}
+      {snapshot?.retentionLabel&&<span data-retention-label={snapshot.retentionWarn?'warn':'ok'} role={snapshot.retentionWarn?'status':undefined}>{snapshot.retentionLabel}{snapshot.retentionWarn?' · audio deletes soon':''}</span>}
       </div>
     {snapshot&&!activeAudio&&snapshot.recordedChunks>0&&<div className="private-recording-playback" aria-label="Saved recording playback">
       {playbackBusy&&<p role="status">Preparing playback… Your recording is saved.</p>}
