@@ -38,9 +38,12 @@ settings, signed Mac and iPhone builds, and production deploy is the October
 
 ## Owner decision, October 30, 2026
 
-PENDING / OPEN-JOHN (Fable H4): whether and how this section is narrowed by
-`DL-20261117-01` decision 10 (workstream scope, store submissions, production
-deploys) is awaiting John's confirmation.
+Narrowed by `DL-20261117-01` decision 10 below. Read both before acting. The
+exact scope of "this workstream" is PENDING / OPEN-JOHN. Until John Clemente
+confirms it, treat every task as belonging to the workstream: no production
+deploys, no store submissions, no publishing of signed builds, no
+infrastructure applies that reach production and no live identity changes
+without John Clemente's explicit instruction in the task.
 
 On Friday, October 30, 2026, at 9:04am ET, John Clemente, CEO, decided that
 Cursor agents working in this repository may do the following without asking
@@ -70,10 +73,11 @@ John Clemente, CEO, November 17, 2026. Recorded as `DL-20261117-01` in
 `docs/DECISION_LOG.md`. Decision 10 supersedes the October 30 production,
 store and live identity authority for this workstream.
 
-PENDING / OPEN-JOHN (Fable H4): the precise definition of "this workstream"
+PENDING / OPEN-JOHN (PR #400): the precise definition of "this workstream"
 (and whether signed-build publishing and infrastructure applies that reach
 production are covered by decision 10) awaits John's confirmation. Do not
-invent a scope sentence until then.
+invent a scope sentence until then. Until John confirms, treat every task as
+belonging to the workstream.
 
 Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
 Item 6 also incorporates John's 19 Nov 2026 9:28am ET answer recorded as
@@ -91,8 +95,9 @@ invented patients only.
    Send or Sign.
 3. Actions started from the phone stage work at the desktop. They never
    send. CosmaBot never signs or transmits a prescription; it may prepare
-   one for the prescriber to sign in the EMR. (N6: "the phone stage" is not
-   a lift of the deferred Native mobile/Capacitor item; that remains deferred.)
+   one for the prescriber to sign in the EMR. (PR #400: "the phone stage" is
+   not a lift of the deferred Native mobile/Capacitor item; that remains
+   deferred.)
 4. A small on-device model is permitted in the desktop app for three kinds
    of work: perception (recognising screens, patients and changes),
    protection (PHI minimisation, pre-fill checks, mismatch warnings), and
@@ -102,23 +107,25 @@ invented patients only.
    Chinese origin, including derivatives. The cloud remains the reasoning
    layer. Every consequential on-device output is verified by code or
    escalated.
-   Gloss (Fable N3; owner text unchanged): "call notes" here means short
-   on-screen staff help, not drafting clinical notes. "Consequential" means
-   any on-device output that could affect a clinical or system-of-record
-   action. "Chinese origin, including derivatives" covers developer,
-   fine-tune, distillation and quantisation provenance; the specific
-   on-device model is still pending John's pick.
+   Gloss (reviewer reading, PENDING / OPEN-JOHN): "call notes" here means
+   short on-screen staff help, not drafting clinical notes.
+   "Consequential" means any on-device output that could affect a clinical
+   or system-of-record action. If it is unclear whether an output is
+   consequential, treat it as consequential. "Chinese origin, including
+   derivatives" covers developer, fine-tune, distillation and quantisation
+   provenance; the specific on-device model is still pending John's pick.
 5. Desktop targets are Windows and Mac. Development starts on Mac for two
    weeks and moves to Windows from week three. Platform-specific code sits
-   behind interfaces. (Fable N4: start date for the two-week Mac window is
-   pending; Windows signing and distribution are not covered by the
-   October 30 text alone.)
+   behind interfaces. (PR #400: start date for the two-week Mac window is
+   pending; Windows signing and distribution are not authorised by the
+   October 30 text; pending John)
 6. CosmaBot must record a visit and produce a note without depending on
    the legacy platform. Owner follow-up (`DL-20261117-02`): "Yes, maybe
    for initial beta we rely on legacy but going forward we need
    independent recording and notes." John's answer of 19 Nov 2026
    9:28am ET: "Beta does not rely on the legacy platform". Do not add
-   any dependency on the legacy platform for beta.
+   any dependency on the legacy platform for beta. Do not remove or change
+   an existing legacy dependency without John's instruction.
 7. Scribe remains a separate product that shares the recorder. New Scribe
    sign-ups use CosmaBot identity (confirmed, `DL-20261117-02`). This sets
    direction only. Existing Scribe users, their logins and their access

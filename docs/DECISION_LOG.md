@@ -435,7 +435,8 @@ IMPLEMENTATION IMPACT:
 
 ### DL-20261117-01
 
-- **Status:** ACCEPTED (items 6 and 7 resolved by DL-20261117-02)
+- **Status:** ACCEPTED (items 6 and 7 resolved by DL-20261117-02;
+  DL-20261119-01)
 - **Date:** 2026-11-17
 - **Owner acceptance evidence:** Direct owner message from John Clemente, CEO,
   November 17, 2026.
@@ -459,9 +460,18 @@ IMPLEMENTATION IMPACT:
    Chinese origin, including derivatives. The cloud remains the reasoning
    layer. Every consequential on-device output is verified by code or
    escalated.
+   Gloss (reviewer reading, PENDING / OPEN-JOHN): "call notes" here means
+   short on-screen staff help, not drafting clinical notes.
+   "Consequential" means any on-device output that could affect a clinical
+   or system-of-record action. If it is unclear whether an output is
+   consequential, treat it as consequential. "Chinese origin, including
+   derivatives" covers developer, fine-tune, distillation and quantisation
+   provenance; the specific on-device model is still pending John's pick.
 5. Desktop targets are Windows and Mac. Development starts on Mac for two
    weeks and moves to Windows from week three. Platform-specific code sits
-   behind interfaces.
+   behind interfaces. (PR #400: start date for the two-week Mac window is
+   pending; Windows signing and distribution are not authorised by the
+   October 30 text; pending John)
 6. [CONFIRM] CosmaBot must record a visit and produce a note without
    depending on the legacy platform.
 7. Scribe remains a separate product that shares the recorder.
@@ -472,13 +482,13 @@ IMPLEMENTATION IMPACT:
    timeouts.
 10. For this workstream: no production deploys, no store submissions and no
     live identity changes without my explicit instruction in the task.
-    ("my" = John Clemente.)
 
-- **Note (Fable N5):** The `[CONFIRM]` markers above are preserved as in the
-  original owner message drafting; items 6 and 7 were answered the same day
-  by `DL-20261117-02` (also November 17, 2026). Legacy-for-beta substance
-  resolved by `DL-20261119-01`. PENDING / OPEN-JOHN (Fable H4) on "this
-  workstream" scope sentence.
+- **Note (PR #400):** ("my" = John Clemente.) The `[CONFIRM]` markers above
+  are John's, from his November 17, 2026 owner-message drafting (not
+  agent-invented); items 6 and 7 were answered the same day by
+  `DL-20261117-02`. Legacy-for-beta substance resolved by `DL-20261119-01`.
+  PENDING / OPEN-JOHN (PR #400) on "this workstream" scope sentence. Until
+  John confirms, treat every task as belonging to the workstream.
 - **Supersedes:** Conflicting browser, prescription, model and workstream
   authority statements in `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`;
   `DL-20261030-01` production, store and live identity authority for this
@@ -494,7 +504,7 @@ IMPLEMENTATION IMPACT:
 - **Owner acceptance evidence:** Direct follow-up from John Clemente, CEO,
   November 17, 2026, answering the two confirmation questions about
   independent recording and notes, and new Scribe sign-ups using CosmaBot
-  identity. (Fable N5: confirmed same calendar day as `DL-20261117-01`.)
+  identity. (PR #400: confirmed same calendar day as `DL-20261117-01`.)
 - **Ruling (verbatim owner follow-up):**
 
 1. Yes, maybe for initial beta we rely on legacy but going forward we need independent recording and notes.
@@ -512,7 +522,7 @@ IMPLEMENTATION IMPACT:
 - **Status:** ACCEPTED
 - **Date:** 2026-11-19
 - **Owner acceptance evidence:** Direct answer from John Clemente, CEO,
-  19 Nov 2026 9:28am ET, settling Fable H1 (legacy-for-beta) on
+  19 Nov 2026 9:28am ET, settling PR #400 legacy-for-beta (H1) on
   `DL-20261117-01` item 6.
 - **Ruling (verbatim owner answer):**
 
@@ -524,4 +534,5 @@ IMPLEMENTATION IMPACT:
 - **Affected contract version:** 1.10-draft
 - **Implementation impact:** Reconcile item 6 in
   `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`. Docs only. Do not add
-  any dependency on the legacy platform for beta.
+  any dependency on the legacy platform for beta. Do not remove or change
+  an existing legacy dependency without John's instruction.
