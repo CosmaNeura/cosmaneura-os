@@ -7,7 +7,7 @@ import {IosNativeMicrophoneCaptureSource} from '../../clients/capture/src/native
 import {BrowserMicrophoneCaptureSource} from '../../clients/capture/src/audio/browser-microphone-source';
 import {acquireCaptureFlowLock,type CaptureFlowLockManager} from '../../clients/capture/src/flow/capture-lock';
 import type {SecureQueuePlugin,VersionedSecureQueueRecord} from '../../clients/capture/plugins/secure-queue/definitions';
-import {PrivateRecordingRuntime,listPrivateRecordings,openPrivateRecordingStore,validatePrivateRecordingConsent,type PrivateRecordingOptions,type PrivateRecordingManifest,type PrivateRecordingStore} from './private-recording-runtime';
+import {PrivateRecordingRuntime,activePrivateRecordingId,listPrivateRecordings,openPrivateRecordingStore,validatePrivateRecordingConsent,type PrivateRecordingOptions,type PrivateRecordingManifest,type PrivateRecordingStore} from './private-recording-runtime';
 vi.mock('../../clients/capture/src/audio/pcm-capture-worklet.ts?worker&url',()=>({default:'/simulated-os-worklet.js'}));
 
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
@@ -230,4 +230,23 @@ it('can close a stopped recording again after access changes without reopening a
   await runtime.start(consent());await source.emit();await runtime.close();current=false;
   await runtime.close();expect(source.stops).toBe(1);expect(runtime.snapshot.recordedChunks).toBe(1);
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it('ledger manifestSHA256 ignores endedAt and retention-off writes omit endedAt',async()=>{
+  const nowMs=Date.parse('2026-11-01T00:00:00.000Z'),policy={enabled:true as const,enabledAt:'2026-10-01T00:00:00.000Z'};
+  const on=new ControlledSource(),runtime=await open(on,{audioRetention:policy,now:()=>nowMs});
+  expect(activePrivateRecordingId()).toBeNull();
+  await runtime.start(consent());expect(activePrivateRecordingId()).toBe(runtime.snapshot.recordingId);
+  await on.emit();await runtime.stop();expect(activePrivateRecordingId()).toBeNull();
+  expect(runtime.snapshot.endedAt).toBeTruthy();
+  const withEnded=await runtime.snapshotForLedger();
+  const encrypted=await store(),saved=await encrypted.read('manifest:'+runtime.snapshot.recordingId) as PrivateRecordingManifest;
+  const stripped={...saved};delete (stripped as {endedAt?:string}).endedAt;
+  await encrypted.write('manifest:'+runtime.snapshot.recordingId,saved,stripped);encrypted.close();
+  const id=runtime.snapshot.recordingId;await runtime.close();
+  const reopened=await open(new ControlledSource(),{audioRetention:policy,now:()=>nowMs},{recordingId:id});
+  expect((await reopened.snapshotForLedger()).manifestSHA256).toBe(withEnded.manifestSHA256);
+  const source=new ControlledSource(),plain=await open(source);await plain.start(consent());await source.emit();await plain.stop();
+  const s=await store(),row=await s.read('manifest:'+plain.snapshot.recordingId) as PrivateRecordingManifest;s.close();
+  expect(row).not.toHaveProperty('endedAt');
 });
