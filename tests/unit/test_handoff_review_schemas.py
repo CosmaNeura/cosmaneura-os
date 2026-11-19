@@ -14,6 +14,15 @@ BASE = {
     "decision": "accepted",
 }
 
+REQUIRED_FIELDS = (
+    "expected_revision",
+    "idempotency_key",
+    "attempt_id",
+    "result_entry_id",
+    "result_sha256",
+    "decision",
+)
+
 
 def review(**overrides):
     body = {**BASE, **overrides}
@@ -57,22 +66,27 @@ def _assert_one_error(exc: ValidationError, *, loc: tuple, type_: str) -> None:
     assert errors[0]["type"] == type_
 
 
+def _assert_feedback_required(exc: ValidationError) -> None:
+    _assert_one_error(exc, loc=(), type_="value_error")
+    assert "handoff_review_feedback_required" in exc.errors()[0]["msg"]
+
+
 def test_rejects_nul_in_feedback():
     with pytest.raises(ValidationError) as exc:
         review(feedback="a\0b")
-    _assert_one_error(exc.value, loc=(), type_="value_error")
+    _assert_feedback_required(exc.value)
 
 
 def test_rejects_changes_requested_with_empty_feedback():
     with pytest.raises(ValidationError) as exc:
         review(decision="changes_requested", feedback="")
-    _assert_one_error(exc.value, loc=(), type_="value_error")
+    _assert_feedback_required(exc.value)
 
 
 def test_rejects_changes_requested_with_blank_feedback():
     with pytest.raises(ValidationError) as exc:
         review(decision="changes_requested", feedback="  \n")
-    _assert_one_error(exc.value, loc=(), type_="value_error")
+    _assert_feedback_required(exc.value)
 
 
 def test_rejects_unknown_decision():
@@ -87,13 +101,14 @@ def test_rejects_expected_revision_below_one():
     _assert_one_error(exc.value, loc=("expected_revision",), type_="greater_than_equal")
 
 
-def test_rejects_expected_revision_string():
+@pytest.mark.parametrize("value", ["1", True, 1.0])
+def test_rejects_expected_revision_non_int(value):
     with pytest.raises(ValidationError) as exc:
-        review(expected_revision="1")
+        review(expected_revision=value)
     _assert_one_error(exc.value, loc=("expected_revision",), type_="int_type")
 
 
-@pytest.mark.parametrize("value", ["a" * 63, "A" * 64])
+@pytest.mark.parametrize("value", ["a" * 63, "A" * 64, "a" * 65, "g" * 64])
 def test_rejects_result_sha256_pattern(value):
     with pytest.raises(ValidationError) as exc:
         review(result_sha256=value)
@@ -112,10 +127,11 @@ def test_rejects_idempotency_key_pattern():
     _assert_one_error(exc.value, loc=("idempotency_key",), type_="string_pattern_mismatch")
 
 
-def test_rejects_attempt_id_not_uuid():
+@pytest.mark.parametrize("field", ["attempt_id", "result_entry_id"])
+def test_rejects_uuid_fields_not_uuid(field):
     with pytest.raises(ValidationError) as exc:
-        review(attempt_id="nope")
-    _assert_one_error(exc.value, loc=("attempt_id",), type_="uuid_parsing")
+        review(**{field: "nope"})
+    _assert_one_error(exc.value, loc=(field,), type_="uuid_parsing")
 
 
 def test_rejects_extra_key():
@@ -130,9 +146,17 @@ def test_rejects_feedback_too_long():
     _assert_one_error(exc.value, loc=("feedback",), type_="string_too_long")
 
 
-def test_rejects_missing_decision():
+def test_rejects_feedback_too_long_hides_input():
+    with pytest.raises(ValidationError) as exc:
+        review(feedback="SECRET" + "x" * 2000)
+    _assert_one_error(exc.value, loc=("feedback",), type_="string_too_long")
+    assert "SECRET" not in str(exc.value)
+
+
+@pytest.mark.parametrize("field", REQUIRED_FIELDS)
+def test_rejects_missing_required_field(field):
     body = {**BASE}
-    del body["decision"]
+    del body[field]
     with pytest.raises(ValidationError) as exc:
         HandoffReview.model_validate(body)
-    _assert_one_error(exc.value, loc=("decision",), type_="missing")
+    _assert_one_error(exc.value, loc=(field,), type_="missing")
