@@ -5,6 +5,15 @@ import {acquireCaptureFlowLock,type ReleaseCaptureFlowLock} from '../../clients/
 import type {CaptureAttestation,CaptureLanguage} from './capture-api';
 import type {SecureQueuePlugin} from '../../clients/capture/plugins/secure-queue/definitions';
 import type {IosPrivateRecordingReceipt} from '../../clients/capture/plugins/ios-pcm/definitions';
+import {
+  audioRetentionEffective,
+  audioRetentionLabel,
+  deletePrivateRecordingAudio,
+  refuseExpiredAudio,
+  sweepPrivateRecordingAudio,
+  type AudioRetentionClock,
+  type AudioRetentionPolicy,
+} from './private-recording-retention';
 
 const UUID=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const HASH=/^[a-f0-9]{64}$/;
@@ -19,20 +28,29 @@ let owner:PrivateRecordingRuntime|null=null;
 export type PrivateRecordingPhase='ready'|'starting'|'recording'|'pausing'|'paused'|'stopping'|'sealed'|'interrupted'|'stop_unconfirmed';
 export type PrivateRecordingStartupStage=CaptureSourceStartupStage|'preparing_storage';
 export type PrivateRecordingManifest={contract:'cosmabot.private-recording.v1';recordingId:string;scope:string;title:string;
-  consent:CaptureAttestation&{language:CaptureLanguage};consentIntervals:(CaptureAttestation&{language:CaptureLanguage})[];workspaceId:string|null;createdAt:string;updatedAt:string;phase:PrivateRecordingPhase;
+  consent:CaptureAttestation&{language:CaptureLanguage};consentIntervals:(CaptureAttestation&{language:CaptureLanguage})[];workspaceId:string|null;createdAt:string;updatedAt:string;
+  /** Optional seal/last-audio instant. Old records omit it; retention falls back to updatedAt. */
+  endedAt?:string;phase:PrivateRecordingPhase;
   chunks:{sequence:number;sha256:string;bytes:number;durationMs:number}[]};
-export type PrivateRecordingSnapshot={recordingId:string;title:string;createdAt?:string;phase:PrivateRecordingPhase;elapsedSeconds:number;recordedChunks:number;
-  inputLevel?:number;recordedBytes:number;workspaceId:string|null;busy:boolean;localOnly:true;transcription:'not_requested';failure:string|null;startupStage:PrivateRecordingStartupStage|null};
+export type PrivateRecordingSnapshot={recordingId:string;title:string;createdAt?:string;endedAt?:string;phase:PrivateRecordingPhase;elapsedSeconds:number;recordedChunks:number;
+  inputLevel?:number;recordedBytes:number;workspaceId:string|null;busy:boolean;localOnly:true;transcription:'not_requested';failure:string|null;startupStage:PrivateRecordingStartupStage|null;
+  /** Present only when both retention switches are on. */
+  retentionLabel?:string|null;retentionWarn?:boolean};
 export interface PrivateRecordingStore {
   read(key:string):Promise<unknown|null>;
   keys():Promise<string[]>;
   write(key:string,expected:unknown|null,value:unknown):Promise<void>;
+  /** Remove one key. Idempotent when missing. Audio retention uses this for chunks/manifest only. */
+  delete(key:string):Promise<void>;
   close():void;
 }
 export type PrivateRecordingOptions={scope:string;isCurrent:()=>boolean;signal?:AbortSignal;platform:'ios'|'desktop';
   /** Tests may inject actual PCM adapters/storage; production uses the bundled OS sources and encrypted store. */
   createSource?:(context?:{recordingId:string;scope:string;consent:CaptureAttestation&{language:CaptureLanguage}})=>Promise<CaptureSource>;openStore?:()=>Promise<PrivateRecordingStore>;acquireLock?:()=>Promise<ReleaseCaptureFlowLock>;
   nativePreparation?:()=>Pick<IosPrivateRecordingReceipt,'receiptId'|'revision'>|null;
+  /** T1: both process+Box switches. Absent/unknown/false means no deletion. */
+  audioRetention?:AudioRetentionPolicy|null;
+  now?:AudioRetentionClock;
 };
 export type PrivateRecordingNativeReceipt=IosPrivateRecordingReceipt;
 export async function prewarmPrivateRecordingNative(options:{scope:string;revision:string}):Promise<PrivateRecordingNativeReceipt>{
@@ -53,19 +71,26 @@ export function validatePrivateRecordingConsent(value:unknown):asserts value is 
 }
 
 function manifest(value:unknown,scope:string,id:string):PrivateRecordingManifest {
-  need(closed(value,'contract,recordingId,scope,title,consent,consentIntervals,workspaceId,createdAt,updatedAt,phase,chunks')&&value.contract==='cosmabot.private-recording.v1'&&value.scope===scope&&value.recordingId===id&&UUID.test(id));
-  need(typeof value.title==='string'&&value.title.trim()===value.title&&value.title.length>0&&value.title.length<=160&&!/[\u0000-\u001f]/.test(value.title));
-  validatePrivateRecordingConsent(value.consent);need(Array.isArray(value.consentIntervals)&&value.consentIntervals.length<=1000);value.consentIntervals.forEach(validatePrivateRecordingConsent);need(value.workspaceId===null||typeof value.workspaceId==='string'&&UUID.test(value.workspaceId));
-  need(['createdAt','updatedAt'].every(k=>typeof value[k]==='string'&&Number.isFinite(Date.parse(value[k] as string))));
-  need(typeof value.phase==='string'&&['ready','starting','recording','pausing','paused','stopping','sealed','interrupted','stop_unconfirmed'].includes(value.phase));
-  need(Array.isArray(value.chunks)&&value.chunks.length<=MAX_CHUNKS);
+  const base='chunks,consent,consentIntervals,contract,createdAt,phase,recordingId,scope,title,updatedAt,workspaceId';
+  const withEnded=(base+',endedAt').split(',').sort().join(',');
+  const required=base.split(',').sort().join(',');
+  need(!!value&&typeof value==='object'&&!Array.isArray(value));
+  const keys=Object.keys(value as object).sort().join(',');
+  need((keys===required||keys===withEnded)&&(value as {contract:unknown}).contract==='cosmabot.private-recording.v1'&&(value as {scope:unknown}).scope===scope&&(value as {recordingId:unknown}).recordingId===id&&UUID.test(id));
+  const row=value as Record<string,unknown>;
+  need(typeof row.title==='string'&&row.title.trim()===row.title&&row.title.length>0&&row.title.length<=160&&!/[\u0000-\u001f]/.test(row.title));
+  validatePrivateRecordingConsent(row.consent);need(Array.isArray(row.consentIntervals)&&row.consentIntervals.length<=1000);row.consentIntervals.forEach(validatePrivateRecordingConsent);need(row.workspaceId===null||typeof row.workspaceId==='string'&&UUID.test(row.workspaceId));
+  need(['createdAt','updatedAt'].every(k=>typeof row[k]==='string'&&Number.isFinite(Date.parse(row[k] as string))));
+  if('endedAt' in row)need(typeof row.endedAt==='string'&&Number.isFinite(Date.parse(row.endedAt)));
+  need(typeof row.phase==='string'&&['ready','starting','recording','pausing','paused','stopping','sealed','interrupted','stop_unconfirmed'].includes(row.phase));
+  need(Array.isArray(row.chunks)&&row.chunks.length<=MAX_CHUNKS);
   let total=0;
-  value.chunks.forEach((row:unknown,index:number)=>{
-    need(closed(row,'sequence,sha256,bytes,durationMs')&&row.sequence===index&&typeof row.sha256==='string'&&HASH.test(row.sha256)&&Number.isSafeInteger(row.bytes)&&Number(row.bytes)>=46&&Number(row.bytes)<=320044&&typeof row.durationMs==='number'&&row.durationMs>0&&row.durationMs<=10000);
-    total+=Number(row.bytes);
+  (row.chunks as unknown[]).forEach((chunk:unknown,index:number)=>{
+    need(closed(chunk,'sequence,sha256,bytes,durationMs')&&chunk.sequence===index&&typeof chunk.sha256==='string'&&HASH.test(chunk.sha256)&&Number.isSafeInteger(chunk.bytes)&&Number(chunk.bytes)>=46&&Number(chunk.bytes)<=320044&&typeof chunk.durationMs==='number'&&chunk.durationMs>0&&chunk.durationMs<=10000);
+    total+=Number(chunk.bytes);
   });
   need(total<=MAX_BYTES);
-  return structuredClone(value) as PrivateRecordingManifest;
+  return structuredClone(row) as PrivateRecordingManifest;
 }
 function displayTitle(value:unknown,scope:string,id:string):string|null {
   if(value===null)return null;
@@ -102,21 +127,31 @@ export class PrivateRecordingRuntime {
     try{
       need(options.isCurrent()&&!options.signal?.aborted);
       let saved=await store.read('manifest:'+id);
-      if(saved===null){validatePrivateRecordingConsent(input.consent);const now=new Date().toISOString();saved={contract:'cosmabot.private-recording.v1',recordingId:id,scope:options.scope,title:input.title,consent:structuredClone(input.consent),consentIntervals:[],workspaceId:null,createdAt:now,updatedAt:now,phase:'ready',chunks:[]};manifest(saved,options.scope,id);await store.write('manifest:'+id,null,saved);}
+      if(saved===null){validatePrivateRecordingConsent(input.consent);const now=new Date(options.now?.()??Date.now()).toISOString();saved={contract:'cosmabot.private-recording.v1',recordingId:id,scope:options.scope,title:input.title,consent:structuredClone(input.consent),consentIntervals:[],workspaceId:null,createdAt:now,updatedAt:now,phase:'ready',chunks:[]};manifest(saved,options.scope,id);await store.write('manifest:'+id,null,saved);}
       const checked=manifest(saved,options.scope,id),renamed=displayTitle(await store.read('display-title:'+id),options.scope,id);need(options.isCurrent()&&!options.signal?.aborted);
       // A prior renderer's active phase cannot establish physical cessation or auto-resume.
       if(['starting','recording','pausing','stopping','stop_unconfirmed'].includes(checked.phase)){
         const source=await(options.createSource?.()??privateRecordingRecoverySource(options.platform));need(source.kind==='microphone'&&!owner&&await source.confirmRecoveryClosed?.()===true);
         need(options.isCurrent()&&!options.signal?.aborted);
-        const next={...checked,phase:'interrupted' as const,updatedAt:new Date().toISOString()};await store.write('manifest:'+id,checked,next);
+        const updatedAt=new Date(options.now?.()??Date.now()).toISOString();
+        const next:PrivateRecordingManifest={...checked,phase:'interrupted' as const,updatedAt,endedAt:checked.endedAt??updatedAt};
+        await store.write('manifest:'+id,checked,next);
         return new PrivateRecordingRuntime(options,store,next,renamed);
+      }
+      if(audioRetentionEffective(options.audioRetention)){
+        refuseExpiredAudio(checked,options.now?.()??Date.now(),options.audioRetention);
       }
       return new PrivateRecordingRuntime(options,store,checked,renamed);
     }catch(error){store.close();throw error;}
   }
-  get snapshot():PrivateRecordingSnapshot{return {recordingId:this.saved.recordingId,title:this.displayTitle??this.saved.title,createdAt:this.saved.createdAt,phase:this.saved.phase,inputLevel:this.saved.phase==='recording'?this.inputLevel:0,
-    elapsedSeconds:this.saved.chunks.reduce((sum,c)=>sum+c.durationMs,0)/1000,recordedChunks:this.saved.chunks.length,
-    recordedBytes:this.saved.chunks.reduce((sum,c)=>sum+c.bytes,0),workspaceId:this.saved.workspaceId,busy:['starting','pausing','stopping'].includes(this.saved.phase),localOnly:true,transcription:'not_requested',failure:this.failure,startupStage:this.startupStage};}
+  get snapshot():PrivateRecordingSnapshot{
+    const base={recordingId:this.saved.recordingId,title:this.displayTitle??this.saved.title,createdAt:this.saved.createdAt,endedAt:this.saved.endedAt,phase:this.saved.phase,inputLevel:this.saved.phase==='recording'?this.inputLevel:0,
+      elapsedSeconds:this.saved.chunks.reduce((sum,c)=>sum+c.durationMs,0)/1000,recordedChunks:this.saved.chunks.length,
+      recordedBytes:this.saved.chunks.reduce((sum,c)=>sum+c.bytes,0),workspaceId:this.saved.workspaceId,busy:['starting','pausing','stopping'].includes(this.saved.phase),localOnly:true as const,transcription:'not_requested' as const,failure:this.failure,startupStage:this.startupStage};
+    if(!audioRetentionEffective(this.options.audioRetention))return base;
+    const label=audioRetentionLabel(this.saved,this.clock(),this.options.audioRetention);
+    return {...base,retentionLabel:label?.text??null,retentionWarn:label?.warn??false};
+  }
   subscribe(listener:(snapshot:PrivateRecordingSnapshot)=>void):()=>void{this.current();this.listeners.add(listener);listener(this.snapshot);return()=>this.listeners.delete(listener);}
   private publish(){for(const listener of this.listeners)try{listener(this.snapshot);}catch{/* Observer isolation. */}}
   private reportStartup(stage:PrivateRecordingStartupStage,ticket:number,source?:CaptureSource){
@@ -127,7 +162,16 @@ export class PrivateRecordingRuntime {
   private async makeSource(consent:CaptureAttestation&{language:CaptureLanguage}){const context={recordingId:this.saved.recordingId,scope:this.saved.scope,consent};
     const source=await(this.options.createSource?.(context)??privateRecordingSource(this.options.platform,context,this.options.nativePreparation?.()??null));need(source.kind==='microphone');return source;}
   private enqueue(task:()=>Promise<void>):Promise<void>{const next=this.chain.catch(()=>{}).then(task);this.chain=next;return next;}
-  private async update(phase:PrivateRecordingPhase){await this.enqueue(async()=>{const next={...this.saved,phase,updatedAt:new Date().toISOString()};await this.store.write('manifest:'+this.saved.recordingId,this.saved,next);this.saved=next;this.publish();});}
+  private clock(){return this.options.now?.()??Date.now();}
+  private stamp(){return new Date(this.clock()).toISOString();}
+  private async update(phase:PrivateRecordingPhase){await this.enqueue(async()=>{
+    const updatedAt=this.stamp();
+    // Terminal phases pin endedAt once. Metadata-only updates never move it.
+    const terminal=['sealed','interrupted','stop_unconfirmed'].includes(phase);
+    const next:PrivateRecordingManifest={...this.saved,phase,updatedAt,
+      ...(terminal?{endedAt:this.saved.endedAt??updatedAt}:{})};
+    await this.store.write('manifest:'+this.saved.recordingId,this.saved,next);this.saved=next;this.publish();
+  });}
   async start(consent:CaptureAttestation&{language:CaptureLanguage}):Promise<void>{
     validatePrivateRecordingConsent(consent);need(Date.now()-Date.parse(consent.granted_at)<=300000);
     this.current();need(!this.storageFailed&&!this.source&&!this.stopFlight&&(!owner||owner===this)&&['ready','paused','interrupted'].includes(this.saved.phase)&&this.saved.chunks.length<MAX_CHUNKS);
@@ -138,7 +182,7 @@ export class PrivateRecordingRuntime {
       const release=await(this.options.acquireLock?.()??acquireCaptureFlowLock());
       if(ticket!==this.generation){await release();return;}this.releaseLock=release;this.current();
       this.reportStartup('preparing_storage',ticket);
-      await this.enqueue(async()=>{const next={...this.saved,consentIntervals:[...this.saved.consentIntervals,structuredClone(consent)],phase:'starting' as const,updatedAt:new Date().toISOString()};need(next.consentIntervals.length<=1000);await this.store.write('manifest:'+this.saved.recordingId,this.saved,next);this.saved=next;this.publish();});this.intervalSequence=0;
+      await this.enqueue(async()=>{const next:PrivateRecordingManifest={...this.saved,consentIntervals:[...this.saved.consentIntervals,structuredClone(consent)],phase:'starting' as const,updatedAt:this.stamp()};need(next.consentIntervals.length<=1000);await this.store.write('manifest:'+this.saved.recordingId,this.saved,next);this.saved=next;this.publish();});this.intervalSequence=0;
       const source=await this.makeSource(consent);this.current();need(ticket===this.generation);this.source=source;
       const remaining=Math.min(90,MAX_CHUNKS-this.saved.chunks.length);
       // These are local PCM adapter bounds, not fabricated Core capabilities/lease receipts.
@@ -169,7 +213,9 @@ export class PrivateRecordingRuntime {
         const record={contract:'cosmabot.private-pcm.v1',recordingId:this.saved.recordingId,scope:this.saved.scope,sequence,sha256:digest,durationMs:chunk.durationMs,data:base64(bytes)};
         // An orphan chunk after an interrupted manifest CAS is never overwritten or counted as committed.
         await this.store.write(key,null,record);
-        const next={...this.saved,updatedAt:new Date().toISOString(),chunks:[...this.saved.chunks,{sequence,sha256:digest,bytes:bytes.length,durationMs:chunk.durationMs}]};
+        const updatedAt=this.stamp();
+        // Last audio write anchors retention for unfinished recordings; metadata cannot push it.
+        const next:PrivateRecordingManifest={...this.saved,updatedAt,endedAt:updatedAt,chunks:[...this.saved.chunks,{sequence,sha256:digest,bytes:bytes.length,durationMs:chunk.durationMs}]};
         await this.store.write('manifest:'+this.saved.recordingId,this.saved,next);this.saved=next;this.intervalSequence++;this.publish();
       });
     }catch(error){this.storageFailed=true;this.failure='audio_storage_unconfirmed';throw error;}
@@ -213,7 +259,8 @@ export class PrivateRecordingRuntime {
   async attachWorkspace(workspaceId:string,confirmed:true):Promise<void>{
     this.current();need(confirmed===true&&UUID.test(workspaceId));
     await this.enqueue(async()=>{this.current();need(this.saved.workspaceId===null||this.saved.workspaceId===workspaceId);if(this.saved.workspaceId===workspaceId)return;
-      const next={...this.saved,workspaceId,updatedAt:new Date().toISOString()};await this.store.write('manifest:'+this.saved.recordingId,this.saved,next);this.saved=next;this.publish();});
+      // Metadata-only: do not update endedAt (deadline must not move).
+      const next:PrivateRecordingManifest={...this.saved,workspaceId,updatedAt:this.stamp()};await this.store.write('manifest:'+this.saved.recordingId,this.saved,next);this.saved=next;this.publish();});
   }
   /** Build a verified private WAV for local playback/download. No network or automatic transfer. */
   async exportWav():Promise<{blob:Blob;sha256:string;bytes:number;durationMs:number;hasNonzeroAudio:boolean}>{
@@ -266,7 +313,7 @@ export async function openPrivateRecordingStore(scope:string,platform:'ios'|'des
       const prior=await read(key);need(JSON.stringify(prior?.value??null)===JSON.stringify(expected));const bytes=serialize(value),data=base64(bytes);bytes.fill(0);
       try{if(prior)await plugin.compareAndSwap({key:name+':'+key,data,expectedRevision:prior.revision});else await plugin.create({key:name+':'+key,data});}
       catch(error){const observed=await read(key);if(JSON.stringify(observed?.value)!==JSON.stringify(value))throw error;}
-    },close(){active=false;}};
+    },delete:async(key)=>{need(active&&validKey(key));const prior=await read(key);if(prior===null)return;await plugin.delete({key:name+':'+key});},close(){active=false;}};
   }
   const factory=deps.indexedDB??globalThis.indexedDB;need(factory);
   const result=<T,>(request:IDBRequest<T>)=>new Promise<T>((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(unavailable());});
@@ -287,17 +334,59 @@ export async function openPrivateRecordingStore(scope:string,platform:'ios'|'des
     return {keys:async()=>{need(active);const tx=db.transaction('records','readonly'),settled=done(tx),keys=await result(tx.objectStore('records').getAllKeys());await settled;need(keys.length<=10000&&keys.every(k=>typeof k==='string'));return keys as string[];},read:async id=>(await read(id))?.value??null,write:async(id,expected,value)=>{const prior=await read(id);need(JSON.stringify(prior?.value??null)===JSON.stringify(expected));const revision=(prior?.revision??0)+1,nonce=crypt.getRandomValues(new Uint8Array(12)),plain=serialize(value);let ciphertext:ArrayBuffer;
       try{ciphertext=await crypt.subtle.encrypt({name:'AES-GCM',iv:nonce,additionalData:encode([name,id,revision])},cipher,plain);}finally{plain.fill(0);}
       const tx=db.transaction('records','readwrite'),committed=done(tx),lookup=tx.objectStore('records').get(id);lookup.onsuccess=()=>{if((lookup.result?.revision??null)!==(prior?.revision??null)){tx.abort();return;}tx.objectStore('records').put({key:id,revision,nonce,ciphertext});};await committed;
+    },delete:async(id)=>{need(active&&validKey(id));const prior=await read(id);if(prior===null)return;
+      const tx=db.transaction('records','readwrite'),committed=done(tx),lookup=tx.objectStore('records').get(id);
+      lookup.onsuccess=()=>{if(!lookup.result)return;if(lookup.result.revision!==prior.revision){tx.abort();return;}tx.objectStore('records').delete(id);};await committed;
     },close(){active=false;db.close();}};
   }catch(error){db.close();throw error;}
 }
 
-export async function listPrivateRecordings(scope:string,platform:'ios'|'desktop',openStore?:()=>Promise<PrivateRecordingStore>):Promise<PrivateRecordingSnapshot[]> {
+export type ListPrivateRecordingsOptions={
+  openStore?:()=>Promise<PrivateRecordingStore>;
+  audioRetention?:AudioRetentionPolicy|null;
+  now?:AudioRetentionClock;
+};
+
+/** Sweep expired audio for one scope. No-op when policy is off. Sign-out uses the same path. */
+export async function sweepExpiredPrivateRecordingAudio(
+  scope:string,
+  platform:'ios'|'desktop',
+  options:ListPrivateRecordingsOptions&{
+    sealInProgress?:(recordingId:string)=>Promise<PrivateRecordingManifest|null>;
+    store?:PrivateRecordingStore;
+  }={},
+):Promise<{deleted:string[];inspected:number}>{
   need(HASH.test(scope));
-  const store=await(openStore?.()??openPrivateRecordingStore(scope,platform));
-  try{const keys=(await store.keys()).filter(k=>k.startsWith('manifest:'));need(keys.length<=1000);
+  if(!audioRetentionEffective(options.audioRetention))return {deleted:[],inspected:0};
+  const owned=options.store===undefined;
+  const store=options.store??await(options.openStore?.()??openPrivateRecordingStore(scope,platform));
+  try{
+    return await sweepPrivateRecordingAudio({
+      store,scope,policy:options.audioRetention,now:options.now??(()=>Date.now()),
+      sealInProgress:options.sealInProgress,
+      parseManifest:(value,recordingId)=>manifest(value,scope,recordingId),
+    });
+  }finally{if(owned)store.close();}
+}
+
+export async function listPrivateRecordings(scope:string,platform:'ios'|'desktop',openStore?:(()=>Promise<PrivateRecordingStore>)|ListPrivateRecordingsOptions):Promise<PrivateRecordingSnapshot[]> {
+  need(HASH.test(scope));
+  const options:ListPrivateRecordingsOptions=typeof openStore==='function'?{openStore}:openStore??{};
+  const store=await(options.openStore?.()??openPrivateRecordingStore(scope,platform));
+  try{
+    if(audioRetentionEffective(options.audioRetention)){
+      await sweepPrivateRecordingAudio({
+        store,scope,policy:options.audioRetention,now:options.now??(()=>Date.now()),
+        parseManifest:(value,recordingId)=>manifest(value,scope,recordingId),
+      });
+    }
+    const keys=(await store.keys()).filter(k=>k.startsWith('manifest:'));need(keys.length<=1000);
     const rows:(PrivateRecordingSnapshot&{createdAt:string})[]=[];
     for(const key of keys){const row=manifest(await store.read(key),scope,key.slice('manifest:'.length));rows.push({recordingId:row.recordingId,title:displayTitle(await store.read('display-title:'+row.recordingId),scope,row.recordingId)??row.title,createdAt:row.createdAt,phase:row.phase,elapsedSeconds:row.chunks.reduce((n,c)=>n+c.durationMs,0)/1000,recordedChunks:row.chunks.length,recordedBytes:row.chunks.reduce((n,c)=>n+c.bytes,0),workspaceId:row.workspaceId,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null});}
     // Manifest validation guarantees finite instants; metadata edits leave creation order intact.
     return rows.sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)||(a.recordingId<b.recordingId?-1:a.recordingId>b.recordingId?1:0));
   }finally{store.close();}
 }
+
+export {deletePrivateRecordingAudio,refuseExpiredAudio,audioRetentionEffective};
+export type {AudioRetentionPolicy,AudioRetentionClock};

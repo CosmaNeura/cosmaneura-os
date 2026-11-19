@@ -10,7 +10,8 @@ import {creatorReviewApi} from './creator-review-api';
 import {openCaptureQueueStorage} from './capture-storage';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {SavedRecordingSource} from './saved-recording-source';
-import type {PrivateRecordingRuntime} from './private-recording-runtime';
+import type {AudioRetentionClock,AudioRetentionPolicy,PrivateRecordingRuntime} from './private-recording-runtime';
+import {audioRetentionEffective,refuseExpiredAudio} from './private-recording-retention';
 import {acquireCaptureFlowLock} from '../../clients/capture/src/flow/capture-lock';
 import {workspaceAuthHeaders} from './workspace-auth-headers';
 import {workspaceApiBase} from './workspace-base';
@@ -41,8 +42,17 @@ export async function importSavedChunks(controller:Pick<CaptureFlowController,'s
 
 /** Separate session stores preserve the original clip and any live visit queue. */
 export async function openSavedRecordingRuntime(options:{workspaceId:string;admitted:PreparedCapture;identity:AuthenticatedWorkspaceIdentity;
-  scope:string;recording:PrivateRecordingRuntime;chunks:number;platform:'ios'|'desktop';isCurrent:()=>boolean}){
+  scope:string;recording:PrivateRecordingRuntime;chunks:number;platform:'ios'|'desktop';isCurrent:()=>boolean;
+  /** T1: refuse expired audio when both switches are on. Absent means off. */
+  audioRetention?:AudioRetentionPolicy|null;now?:AudioRetentionClock}){
   const {workspaceId,admitted,identity}=options,sessionId=admitted.session_id;
+  // Refuse before any import/transfer when both switches are on. Safe code; no audio bytes.
+  if(audioRetentionEffective(options.audioRetention)){
+    const proof=await options.recording.snapshotForLedger();
+    const ended=options.recording.snapshot.endedAt;
+    refuseExpiredAudio({recordingId:proof.recordingId,phase:proof.phase,endedAt:ended,updatedAt:proof.updatedAt,
+      chunks:Array.from({length:proof.chunks},(_,sequence)=>({sequence}))},options.now?.()??Date.now(),options.audioRetention);
+  }
   const abort=new AbortController();let active=true,task:Promise<void>|null=null;
   let reference:string|null=null;
   const current=()=>active&&!abort.signal.aborted&&options.isCurrent();

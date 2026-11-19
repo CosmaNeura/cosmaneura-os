@@ -130,3 +130,18 @@ it.each(['ready','uploading'] as const)('rejects a foreign retained %s session i
   await expect(f.open()).rejects.toThrow('capture_saved_session_changed');expect(review.read).not.toHaveBeenCalled();noCaptureWork(f);
   expect(await retained()).toEqual(proof);expect(held).toBe(false);expect(releases).toBe(1);
 });
+
+it('refuses expired audio with a safe code and never reads chunk bytes',async()=>{
+  const ended='2026-11-01T00:00:00.000Z';
+  const recording={
+    snapshot:{recordingId:sessionId,phase:'sealed',endedAt:ended,createdAt:ended},
+    snapshotForLedger:async()=>({recordingId:sessionId,scope,consent:{modality:'in_person',participant_regions:[],method:'verbal_attestation',all_parties_consented:true,granted_at:ended,language:'en-US'},consentIntervals:[],startedAt:ended,phase:'sealed',frames:16,chunks,manifestSHA256:'a'.repeat(64),updatedAt:ended}),
+    savedChunks:vi.fn(async function*(){throw Error('audio bytes must not be read');}),
+  } as unknown as PrivateRecordingRuntime;
+  let current=true;
+  await expect(openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>current,audioRetention:{enabled:true},
+    now:()=>Date.parse(ended)+48*60*60*1000})).rejects.toMatchObject({code:'private_recording_audio_expired'});
+  expect(recording.savedChunks).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+});
