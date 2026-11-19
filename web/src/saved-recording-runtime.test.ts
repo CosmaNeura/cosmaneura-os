@@ -2,7 +2,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import {EncryptedIndexedDbFlowStore} from '../../clients/capture/src/configured/flow/encrypted-store';
 import type {ActiveCaptureState} from '../../clients/capture/src/configured/flow/types';
-import {openSavedRecordingRuntime} from './saved-recording-runtime';
+import {openSavedRecordingRuntime,savedRecordingImportStoreNames} from './saved-recording-runtime';
 import {workspaceCaptureBff} from './capture-api';
 import type {PrivateRecordingRuntime} from './private-recording-runtime';
 import type {PreparedCapture} from './capture-api';
@@ -18,7 +18,8 @@ const scope='c'.repeat(64),chunks=3;
 const admitted:PreparedCapture={status:'prepared',workspace_id:workspaceId,session_id:sessionId,
   consent_record_id:'20000000-0000-4000-8000-000000000003',configured_capture:{schema_version:'1.0',language_mode:'en-US'}};
 let held=false,releases=0;
-const flow=()=>EncryptedIndexedDbFlowStore.open({databaseName:`cosmas-saved-flow:v1:${scope}:${workspaceId}:${sessionId}`});
+const importStores=()=>savedRecordingImportStoreNames({scope,workspaceId,sessionId});
+const flow=()=>EncryptedIndexedDbFlowStore.open({databaseName:importStores().flow});
 beforeEach(()=>{
   vi.clearAllMocks();held=false;releases=0;
   vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('indexedDB',new IDBFactory());
@@ -144,4 +145,16 @@ it('refuses expired audio with a safe code and never reads chunk bytes',async()=
     now:()=>Date.parse(ended)+48*60*60*1000})).rejects.toMatchObject({code:'private_recording_audio_expired'});
   expect(recording.savedChunks).not.toHaveBeenCalled();
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it('saved-import store names include sessionId (session-scoped queue, not long-lived workspace queue)',()=>{
+  const names=savedRecordingImportStoreNames({scope,workspaceId,sessionId});
+  expect(names.flow).toContain(sessionId);
+  expect(names.profile).toContain(sessionId);
+  expect(names.flow).toBe(`cosmas-saved-flow:v1:${scope}:${workspaceId}:${sessionId}`);
+  expect(names.profile).toBe(`cosmas-saved-profile:v1:${scope}:${workspaceId}:${sessionId}`);
+  // Browser IndexedDB becomes cosmas-capture-queue:${sessionId} — not the visit workspace queue.
+  expect(names.captureQueueOpenArgs.workspaceId).toBe(sessionId);
+  expect(names.captureQueueOpenArgs.sessionId).toBe(sessionId);
+  expect(names.captureQueueOpenArgs.workspaceId).not.toBe(workspaceId);
 });

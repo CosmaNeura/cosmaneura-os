@@ -196,7 +196,7 @@ const idleSnapshot = {
   desktop: { phase: "ready", coverage: "not_started", trimmedStartMs: 0, trimmedEndMs: null },
 };
 
-it("poison/grandpa/wipe + IPC fetch authority (ok=true when sweep throws)", async () => {
+it("poison/cutover/wipe + IPC fetch authority (ok=true when sweep throws)", async () => {
   const { store, records } = await openStore();
   const ended = "2026-11-01T00:00:00.000Z", start = Date.parse(ended), flip = "2026-11-01T00:00:00.000Z";
   await put(records, `manifest:${id(19)}`, { recordingId: id(19), updatedAt: "bad", phase: "sealed", chunks: [] });
@@ -208,12 +208,12 @@ it("poison/grandpa/wipe + IPC fetch authority (ok=true when sweep throws)", asyn
   });
   expect(failures).toEqual([id(19)]);
   await seed(records, id(21), "2026-10-15T00:00:00.000Z");
-  const grandpa = { enabled: true as const, enabledAt: flip };
+  const cutover = { enabled: true as const, enabledAt: flip };
   expect((await sweepDurablePrivateRecordingAudio({
-    records, policy: grandpa, now: () => Date.parse(flip) + RETENTION_MS - 1,
+    records, policy: cutover, now: () => Date.parse(flip) + RETENTION_MS - 1,
   })).deleted).toEqual([]);
   await sweepDurablePrivateRecordingAudio({
-    records, policy: grandpa, now: () => Date.parse(flip) + RETENTION_MS,
+    records, policy: cutover, now: () => Date.parse(flip) + RETENTION_MS,
   });
   expect(await records.get(`manifest:${id(21)}`)).toBeNull();
   await put(records, `ledger:${id(20)}`, { kept: true });

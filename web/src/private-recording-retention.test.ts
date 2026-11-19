@@ -167,13 +167,13 @@ it('skips active recording when sealInProgress is missing or returns null',async
   store.close();
 });
 
-it('offline then sweep on launch deletes expired audio',async()=>{
+it('offline then sweep on next open deletes expired audio',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
   await seed(store,manifest(id(5),ended));
   await armAt(store,Date.parse(policy.enabledAt!));
   store.close();
-  // Device offline: no sweep. Reopen = launch.
+  // Device offline: no sweep. Next panel/store open can delete.
   const relaunch=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store:relaunch,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([id(5)]);
   relaunch.close();
@@ -302,21 +302,21 @@ it('legacy manifest without endedAt falls back to updatedAt',()=>{
   expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS,policy)?.expired).toBe(true);
 });
 
-it('grandfathering: 30-day-old recording waits until flip+48h',async()=>{
+it('cutover: recording with old endedAt waits until max(anchor, enabledAt)+48h',async()=>{
   const flip='2026-11-15T12:00:00.000Z',flipMs=Date.parse(flip);
-  const oldEnded='2026-10-16T12:00:00.000Z'; // 30 days before flip
-  const grandpa=policyOn({enabledAt:flip,now:flipMs});
+  const oldEnded='2026-10-16T12:00:00.000Z'; // ended before Box enabled_at
+  const cutover=policyOn({enabledAt:flip,now:flipMs});
   const row=manifest(id(16),oldEnded);
-  expect(audioRetentionAnchor(row,flipMs+AUDIO_RETENTION_MS-1,grandpa)?.expired).toBe(false);
-  expect(audioRetentionLabel(row,flipMs+AUDIO_RETENTION_MS-1,grandpa)?.text)
+  expect(audioRetentionAnchor(row,flipMs+AUDIO_RETENTION_MS-1,cutover)?.expired).toBe(false);
+  expect(audioRetentionLabel(row,flipMs+AUDIO_RETENTION_MS-1,cutover)?.text)
     .toBe('Audio is removed from this device about 1 h from now; transcript and notes are kept.');
-  expect(audioRetentionAnchor(row,flipMs+AUDIO_RETENTION_MS,grandpa)?.expired).toBe(true);
+  expect(audioRetentionAnchor(row,flipMs+AUDIO_RETENTION_MS,cutover)?.expired).toBe(true);
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   await seed(store,row);
-  expect((await sweepPrivateRecordingAudio({store,scope,policy:grandpa,now:()=>flipMs+AUDIO_RETENTION_MS-1,
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:cutover,now:()=>flipMs+AUDIO_RETENTION_MS-1,
     parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
   expect(await store.read('manifest:'+id(16))).not.toBeNull();
-  expect((await sweepPrivateRecordingAudio({store,scope,policy:grandpa,now:()=>flipMs+AUDIO_RETENTION_MS,
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:cutover,now:()=>flipMs+AUDIO_RETENTION_MS,
     parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([id(16)]);
   expect(await store.read('manifest:'+id(16))).toBeNull();
   store.close();
@@ -393,7 +393,7 @@ it('server ahead within skew at fetch: offset tracks so device-behind still dele
 
 it('Box-first then process: deviceArmedAt gates until flip+48h (H1)',async()=>{
   const flip='2026-11-15T12:00:00.000Z',flipMs=Date.parse(flip);
-  const enabledLongAgo='2026-10-16T12:00:00.000Z'; // Box on 30 days ago
+  const enabledLongAgo='2026-10-16T12:00:00.000Z'; // Box enabled_at before device arm
   const oldEnded='2026-09-01T12:00:00.000Z';
   const armed=policyOn({enabledAt:enabledLongAgo,deviceArmedAt:flip,now:flipMs});
   const row=manifest(id(26),oldEnded);

@@ -40,6 +40,24 @@ export async function importSavedChunks(controller:Pick<CaptureFlowController,'s
   await controller.stopRecording();
 }
 
+/**
+ * Saved-import queue/flow/profile DB names. All include `sessionId` so PCM is not
+ * duplicated into the visit's long-lived workspace capture-queue
+ * (`cosmas-capture-queue:${workspaceId}`). Browser queue open uses sessionId as
+ * the first `openCaptureQueueStorage` arg → `cosmas-capture-queue:${sessionId}`.
+ */
+export function savedRecordingImportStoreNames(input:{scope:string;workspaceId:string;sessionId:string}):{
+  flow:string;profile:string;captureQueueOpenArgs:{workspaceId:string;sessionId:string};
+}{
+  const {scope,workspaceId,sessionId}=input;
+  return {
+    flow:`cosmas-saved-flow:v1:${scope}:${workspaceId}:${sessionId}`,
+    profile:`cosmas-saved-profile:v1:${scope}:${workspaceId}:${sessionId}`,
+    // Intentionally sessionId (not visit workspaceId): session-scoped import queue.
+    captureQueueOpenArgs:{workspaceId:sessionId,sessionId},
+  };
+}
+
 /** Separate session stores preserve the original clip and any live visit queue. */
 export async function openSavedRecordingRuntime(options:{workspaceId:string;admitted:PreparedCapture;identity:AuthenticatedWorkspaceIdentity;
   scope:string;recording:PrivateRecordingRuntime;chunks:number;platform:'ios'|'desktop';isCurrent:()=>boolean;
@@ -57,16 +75,17 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
   let reference:string|null=null;
   const current=()=>active&&!abort.signal.aborted&&options.isCurrent();
   const unlock=await acquireCaptureFlowLock();
+  const stores=savedRecordingImportStoreNames({scope:options.scope,workspaceId,sessionId});
   let flow:EncryptedIndexedDbFlowStore;
-  try{flow=await EncryptedIndexedDbFlowStore.open({databaseName:`cosmas-saved-flow:v1:${options.scope}:${workspaceId}:${sessionId}`});}catch(error){await unlock();throw error;}
+  try{flow=await EncryptedIndexedDbFlowStore.open({databaseName:stores.flow});}catch(error){await unlock();throw error;}
   let profiles:QueueProfileStore;
-  try{profiles=await QueueProfileStore.open({databaseName:`cosmas-saved-profile:v1:${options.scope}:${workspaceId}:${sessionId}`});}catch(error){flow.close();await unlock();throw error;}
+  try{profiles=await QueueProfileStore.open({databaseName:stores.profile});}catch(error){flow.close();await unlock();throw error;}
   let queue:Awaited<ReturnType<typeof openCaptureQueueStorage>>|undefined,controller:CaptureFlowController|undefined;
   try{
     const desired=options.platform==='ios'?'native':'browser',previous=await profiles.getQueueStorageKind(sessionId);
     if(previous&&previous!==desired)throw new QueueInvariantError('queue_storage_profile_changed');
-    // The UUID namespace is the unique server session, separate from the visit's live queue.
-    queue=await openCaptureQueueStorage(sessionId,sessionId,options.platform==='ios');
+    // Session-scoped import queue — not the visit's long-lived private-recording / workspace queue.
+    queue=await openCaptureQueueStorage(stores.captureQueueOpenArgs.workspaceId,stores.captureQueueOpenArgs.sessionId,options.platform==='ios');
     await profiles.claimQueueStorageKind(sessionId,queue.kind);
     const source=new SavedRecordingSource(options.recording,current);
     const bff=workspaceCaptureBff(workspaceId,sessionId,identity,abort.signal,(kind,status)=>{
