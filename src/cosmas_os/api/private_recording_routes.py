@@ -121,6 +121,13 @@ def router(*, workspace_gate, get_session, identity, fence):
         command = await body(request, AttachRecording)
         return await invoke(request, session, member, service.resolve, str(wid), command)
 
+    # Static paths before {rid} so FastAPI does not treat them as UUIDs.
+    @routes.get("/workspaces/{wid}/private-recordings/audio-retention")
+    async def audio_retention(wid: UUID, request: Request, session=Depends(get_session), member=Depends(identity)):
+        if request.headers.getlist("content-length") not in ([], ["0"]):
+            raise ws.WorkspaceError("invalid_private_recording_request", 422)
+        return await invoke(request, session, member, service.audio_retention, str(wid))
+
     # T2a static paths before {rid} so FastAPI does not treat them as UUIDs.
     @routes.get("/workspaces/{wid}/private-recordings/transcription-enabled")
     async def transcription_enabled(wid: UUID, request: Request, session=Depends(get_session), member=Depends(identity)):

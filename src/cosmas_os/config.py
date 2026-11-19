@@ -134,6 +134,9 @@ class Settings(BaseSettings):
     # Process env must stay false. Real-patient recording is a Box DB switch only
     # and takes effect solely when clinic/BAA/PHI refs are present (T-REL-6).
     real_patient_recording_enabled: bool = False
+    # T1: process switch for 48-hour recording AUDIO retention. Default false.
+    # Effective only when this is true AND the Box opt-in is true.
+    recording_audio_48h_retention_enabled: bool = False
 
     # T2a: CosmaBot independent transcription. Default off for existing live users.
     # Box opt-in is separate (box_contexts.independent_recording_transcription_enabled).
