@@ -518,6 +518,10 @@ jobs:
             clients/desktop/recorder/continuous-capture.test.ts
             clients/desktop/recorder/durable-queue-store.test.ts
           )
+          EXCLUDED_VITEST=(
+            clients/desktop/recorder/workspace-capture-host.test.ts # Mac-only; see #409
+            clients/desktop/recorder/recording-operational.test.ts # Mac-only; see #409
+          )
           INCLUDED_NODE=(
             clients/desktop/api-proxy.test.mjs
             clients/desktop/auth-helper-client.test.mjs
@@ -588,9 +592,26 @@ jobs:
             clients/desktop/spawn-auth-helper.test.mjs
           )
 
-          for path in "${INCLUDED_VITEST[@]}" "${INCLUDED_NODE[@]}" "${EXCLUDED_NODE[@]}"; do
+          for path in "${INCLUDED_VITEST[@]}" "${EXCLUDED_VITEST[@]}" "${INCLUDED_NODE[@]}" "${EXCLUDED_NODE[@]}"; do
             if [[ ! -f "$path" ]]; then
               echo "listed path is not a regular file: $path" >&2
+              exit 1
+            fi
+          done
+
+          mapfile -t on_disk < <(printf '%s\n' clients/desktop/recorder/*.test.ts | LC_ALL=C sort)
+          mapfile -t expected < <(printf '%s\n' "${INCLUDED_VITEST[@]}" "${EXCLUDED_VITEST[@]}" | LC_ALL=C sort)
+          if [[ "${#on_disk[@]}" -ne "${#expected[@]}" ]]; then
+            echo "clients/desktop/recorder/*.test.ts count ${#on_disk[@]} != INCLUDED_VITEST+EXCLUDED_VITEST ${#expected[@]}" >&2
+            printf 'on_disk:\n'; printf '  %s\n' "${on_disk[@]}"
+            printf 'expected:\n'; printf '  %s\n' "${expected[@]}"
+            exit 1
+          fi
+          for i in "${!on_disk[@]}"; do
+            if [[ "${on_disk[$i]}" != "${expected[$i]}" ]]; then
+              echo "clients/desktop/recorder/*.test.ts inventory drift at index $i:" >&2
+              echo "  on_disk=${on_disk[$i]}" >&2
+              echo "  expected=${expected[$i]}" >&2
               exit 1
             fi
           done
