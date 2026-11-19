@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     # and takes effect solely when clinic/BAA/PHI refs are present (T-REL-6).
     real_patient_recording_enabled: bool = False
 
+    # T2a: CosmaBot independent transcription. Default off for existing live users.
+    # Box opt-in is separate (box_contexts.independent_recording_transcription_enabled).
+    independent_recording_transcription_enabled: bool = False
+
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)
     execution_backend: Literal["celery", "postgres_local"] = "celery"
