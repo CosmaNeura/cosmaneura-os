@@ -1,8 +1,8 @@
 # Canonical product decisions
 
 Status: reconciled owner rulings for Cursor revalidation  
-Date: 2026-11-17
-Working version: 1.9-draft
+Date: 2026-11-17  
+Working version: 1.10-draft
 
 These decisions supersede contradictory statements in the uploaded roadmap,
 context pack, brief, and JSON pack. Cursor must challenge a locked decision only
@@ -186,7 +186,14 @@ human attention is genuinely required.
 John Clemente, CEO, November 17, 2026. Recorded in `docs/DECISION_LOG.md`
 as `DL-20261117-01`.
 
+PENDING / OPEN-JOHN (Fable H4): the precise definition of "this workstream"
+awaits John's confirmation. Do not invent a scope sentence until then.
+
 Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
+
+These decisions set product scope. They do not change the build gate or
+the synthetic-data rule. Build and test against invented pages and
+invented patients only.
 
 1. A read-only browser extension that reads pages in the signed-in user's
    own browser session is in scope. Unattended automation and agent-held
@@ -196,7 +203,8 @@ Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
    Send or Sign.
 3. Actions started from the phone stage work at the desktop. They never
    send. CosmaBot never signs or transmits a prescription; it may prepare
-   one for the prescriber to sign in the EMR.
+   one for the prescriber to sign in the EMR. (N6: "the phone stage" is not
+   a lift of the deferred Native mobile/Capacitor item; that remains deferred.)
 4. A small on-device model is permitted in the desktop app for three kinds
    of work: perception (recognising screens, patients and changes),
    protection (PHI minimisation, pre-fill checks, mismatch warnings), and
@@ -206,19 +214,34 @@ Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
    Chinese origin, including derivatives. The cloud remains the reasoning
    layer. Every consequential on-device output is verified by code or
    escalated.
+   Gloss (Fable N3; owner text unchanged): "call notes" here means short
+   on-screen staff help, not drafting clinical notes. "Consequential" means
+   any on-device output that could affect a clinical or system-of-record
+   action. "Chinese origin, including derivatives" covers developer,
+   fine-tune, distillation and quantisation provenance; the specific
+   on-device model is still pending John's pick.
 5. Desktop targets are Windows and Mac. Development starts on Mac for two
    weeks and moves to Windows from week three. Platform-specific code sits
-   behind interfaces.
-6. Yes, maybe for initial beta we rely on legacy but going forward we need
-   independent recording and notes.
-7. Scribe remains a separate product that shares the recorder.
-   new Scribe sign-ups use CosmaBot identity.
+   behind interfaces. (Fable N4: start date for the two-week Mac window is
+   pending; Windows signing and distribution are not covered by the
+   October 30 text alone.)
+6. PENDING / OPEN-JOHN (Fable H1): Yes, maybe for initial beta we rely on
+   legacy but going forward we need independent recording and notes.
+   Substance of legacy-for-beta sequencing is awaiting John's decision;
+   until then do not treat this line as permission to add, remove or change
+   any dependency on the legacy platform.
+7. Scribe remains a separate product that shares the recorder. New Scribe
+   sign-ups use CosmaBot identity (confirmed, `DL-20261117-02`). This sets
+   direction only. Existing Scribe users, their logins and their access
+   are not changed, migrated or walled. Turning this on for live sign-ups
+   is a live identity change under decision 10.
 8. Device compliance checks are deferred to V2 and are described as
    compliance checks, not security monitoring.
 9. CosmaBot never asks a practice to disable screen locks or EMR session
    timeouts.
 10. For this workstream: no production deploys, no store submissions and no
     live identity changes without my explicit instruction in the task.
+    ("my" = John Clemente.)
 
 ## Validation-required technology hypothesis
 
@@ -258,14 +281,18 @@ cross-Box networking, and no automatic patient sends.
 - Shared multi-Org runtime
 - Second EHR
 - Unattended automation and agent-held EMR logins
-- Provider-triggered form fill is approved for V1, not V0.
+- Provider-triggered form fill (V1, not V0)
 - Evidence/open-web retrieval zone
 - Teams
-- Native mobile/Capacitor
+- Native mobile/Capacitor (N6: decision 3's "phone stage" does not lift this)
 - Payment-card chase or PAN handling
 - Claims
 - RRM workbook demo
 - Full self-service onboarding
-- Rebuilding the existing Scribe inside OS
-- Device compliance checks are deferred to V2 and are described as
-  compliance checks, not security monitoring.
+- PENDING / OPEN-JOHN (Fable H1): Rebuilding the existing Scribe inside OS
+  (independent recording and notes per DL-20261117-01 item 6 is not this;
+  sequencing pending owner decision)
+- Device compliance checks (V2; described as compliance checks, not
+  security monitoring)
+- Signing or transmitting a prescription (never; DL-20261117-01 item 3).
+  Stage for prescription preparation is pending.

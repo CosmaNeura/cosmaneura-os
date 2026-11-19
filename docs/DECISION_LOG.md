@@ -435,7 +435,7 @@ IMPLEMENTATION IMPACT:
 
 ### DL-20261117-01
 
-- **Status:** ACCEPTED
+- **Status:** ACCEPTED (items 6 and 7 resolved by DL-20261117-02)
 - **Date:** 2026-11-17
 - **Owner acceptance evidence:** Direct owner message from John Clemente, CEO,
   November 17, 2026.
@@ -472,12 +472,18 @@ IMPLEMENTATION IMPACT:
    timeouts.
 10. For this workstream: no production deploys, no store submissions and no
     live identity changes without my explicit instruction in the task.
+    ("my" = John Clemente.)
 
+- **Note (Fable N5):** The `[CONFIRM]` markers above are preserved as in the
+  original owner message drafting; items 6 and 7 were answered the same day
+  by `DL-20261117-02` (also November 17, 2026). PENDING / OPEN-JOHN
+  (Fable H1) on legacy-for-beta substance; PENDING / OPEN-JOHN (Fable H4)
+  on "this workstream" scope sentence.
 - **Supersedes:** Conflicting browser, prescription, model and workstream
   authority statements in `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`;
   `DL-20261030-01` production, store and live identity authority for this
   workstream.
-- **Affected contract version:** 1.9-draft
+- **Affected contract version:** 1.10-draft
 - **Implementation impact:** Docs-only transcription and reconciliation of
   `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`.
 
@@ -488,7 +494,7 @@ IMPLEMENTATION IMPACT:
 - **Owner acceptance evidence:** Direct follow-up from John Clemente, CEO,
   November 17, 2026, answering the two confirmation questions about
   independent recording and notes, and new Scribe sign-ups using CosmaBot
-  identity.
+  identity. (Fable N5: confirmed same calendar day as `DL-20261117-01`.)
 - **Ruling (verbatim owner follow-up):**
 
 1. Yes, maybe for initial beta we rely on legacy but going forward we need independent recording and notes.
@@ -496,6 +502,6 @@ IMPLEMENTATION IMPACT:
 
 - **Supersedes:** The confirmation markers in items 6 and 7 of
   `DL-20261117-01`; item 6 is clarified by the owner's initial-beta wording.
-- **Affected contract version:** 1.9-draft
+- **Affected contract version:** 1.10-draft
 - **Implementation impact:** Reconcile items 6 and 7 in
   `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`. Docs only.
