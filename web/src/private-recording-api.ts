@@ -5,6 +5,7 @@ import {permittedWorkspaceApi} from './workspace-origin';
 import {parseVendorJson,vendorCanonical,vendorSha256,vendorUuid} from './vendor-contract';
 import {botAddress,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
 import type {CaptureAttestation} from './capture-api';
+import {normalizeAudioRetentionPolicy,type AudioRetentionPolicy} from './private-recording-retention';
 
 export type PrivateRecordingAttach={idempotency_key:string;local_recording_id:string;expected_workspace_revision:number;
   bot:{address:string;team_revision:number};consent:CaptureAttestation;started_at:string};
@@ -143,6 +144,15 @@ async function request(identity:AuthenticatedWorkspaceIdentity,path:string,body:
 }
 const root=(v:PrivateRecordingIntent)=>'/workspaces/'+v.workspace_id+'/private-recordings';
 export const privateRecordingApi={
+  /** Effective 48h audio policy. Fetch failure → off. */
+  async audioRetention(identity:AuthenticatedWorkspaceIdentity,workspaceId:string,signal?:AbortSignal):Promise<AudioRetentionPolicy>{
+    need(vendorUuid(workspaceId));
+    try{
+      const raw=await request(identity,'/workspaces/'+workspaceId+'/private-recordings/audio-retention',undefined,signal);
+      return normalizeAudioRetentionPolicy(raw,Date.now())??{enabled:false};
+    }
+    catch{return {enabled:false};}
+  },
   async readVisitBinding(identity:AuthenticatedWorkspaceIdentity,v:PrivateRecordingIntent,team:ProviderTeam,receipt:PrivateRecordingReceipt,signal?:AbortSignal){
     await validatePrivateRecordingIntent(v,team);await parsePrivateRecordingReceipt(receipt,v);
     const value=await request(identity,root(v)+'/'+receipt.recording_id+'/visit-binding',undefined,signal);

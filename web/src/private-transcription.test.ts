@@ -10,7 +10,7 @@ async function fixture(){
  const source={recordingId:id,scope,phase:'sealed' as const,audioSHA256:fingerprint,chunks:2,frames:4,consent:{language:'en-US' as 'en-US'|'en-US+es-US'}};
  const recording={snapshot:{recordingId:id,workspaceId:null},snapshotForPrivateTranscript:vi.fn(async()=>({...source})),savedChunks:vi.fn(async function*(){for(let sequence=0;sequence<2;sequence++)yield{sequence,sha256:sha,wavBytes:bytes.slice()};})} as unknown as PrivateTranscriptAudio;
  const rows=new Map<string,unknown>();
- const store:PrivateRecordingStore={read:vi.fn(async key=>rows.get(key)??null),keys:vi.fn(async()=>[...rows.keys()]),write:vi.fn(async(key,expected,value)=>{expect(rows.get(key)??null).toEqual(expected);rows.set(key,structuredClone(value));}),close:vi.fn()};
+ const store:PrivateRecordingStore={read:vi.fn(async key=>rows.get(key)??null),keys:vi.fn(async()=>[...rows.keys()]),write:vi.fn(async(key,expected,value)=>{expect(rows.get(key)??null).toEqual(expected);rows.set(key,structuredClone(value));}),delete:vi.fn(async key=>{rows.delete(key);}),close:vi.fn()};
  const result={runId,recordingId:id,audioSHA256:fingerprint,frames:4,text:'Invented private machine words.',engine:'ios-speech-on-device-v1' as const,language:'en-US' as const};
  const native:PrivateSpeechPlugin={begin:vi.fn(async()=>({runId})),append:vi.fn(async v=>({sequence:v.sequence})),finish:vi.fn(async()=>result),cancel:vi.fn(async()=>{})};
  const controller=()=>new PrivateTranscriptionController({scope,revision:'synthetic-revision',recording,store,native,isCurrent:()=>true});

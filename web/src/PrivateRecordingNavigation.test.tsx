@@ -39,7 +39,7 @@ beforeEach(()=>{
   child.prepare.mockImplementation(async()=>{events.push('saved-words');});ledger.read.mockResolvedValue(finishedLedger());
   const identity={mode:'clerk_jwt' as const,getToken:vi.fn(),nativeSession:{revision:'invented-native-session',isCurrent:()=>true}};
   mapping={identity,workspace:{id:uuid(2),appointment_id:null,label:'Invented private notebook',revision:1,entries:[],work_candidates:[],private_draft:{title:'Invented private notebook',state:'unlinked',link_receipt_id:null,linked_at:null}},team:{revision:1,recovery_scope:scope,template_version:'provider-team-v1',llm:{enabled:false,model:'gpt-4.1'},configuration:{practice_context:'',bots:[]},members:[]}};
-  const store:PrivateRecordingStore={read:vi.fn(),write:vi.fn(),keys:vi.fn(async()=>[]),close:vi.fn()};
+  const store:PrivateRecordingStore={read:vi.fn(),write:vi.fn(),keys:vi.fn(async()=>[]),delete:vi.fn(),close:vi.fn()};
   props={identity,scope,platform:'ios',recordingId:uuid(1),isCurrent:()=>true,onClose:closed,onNotebook:opened,onTranscribe:transcribed,
     prepareNotebook:async()=>mapping,prepareStore:async()=>store,prepareNative:async({revision})=>({receiptId:uuid(3),revision,expiresAt:new Date(Date.now()+60000).toISOString()}),
     runtimeFactory:async(_options,input)=>{const value=runtime(input.recordingId!);runtimes.push(value);return value;}};
