@@ -493,11 +493,36 @@ jobs:
           cd web
           corepack pnpm exec vitest run src/EnrollmentServerJourney.test.tsx --maxWorkers=1
 
+  # Platform-neutral desktop recorder suite only. Mac-only files
+  # (workspace-capture-host.test.ts, recording-operational.test.ts) stay
+  # local until the MacStadium Cursor worker mac-studio runs them.
+  desktop-recorder:
+    name: desktop-recorder-neutral
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install
+        run: ./scripts/install-client-deps.sh
+      - name: Platform-neutral desktop recorder tests
+        run: |
+          set -euo pipefail
+          # Explicit file list so Mac-only tests are never pulled in by glob.
+          clients/capture/node_modules/.bin/vitest run --root clients/desktop \
+            recorder/native-provider-presentation-cleanup.test.ts \
+            recorder/native-continuation.test.ts \
+            recorder/continuous-capture.test.ts \
+            recorder/durable-queue-store.test.ts
+
   synth-gate:
     name: synth-ci-gate
     runs-on: ubuntu-24.04
     if: always()
-    needs: [ci-mode, python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey]
+    needs: [ci-mode, python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey, desktop-recorder]
     steps:
       - name: Require every needed job succeeded
         env:
@@ -532,5 +557,5 @@ jobs:
           PY
       - name: Confirm all synth gates passed
         run: |
-          echo "python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey all green"
+          echo "python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey, desktop-recorder all green"
           echo "No production secrets used. No deploy performed."
