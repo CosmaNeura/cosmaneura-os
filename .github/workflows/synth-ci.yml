@@ -494,13 +494,12 @@ jobs:
           corepack pnpm exec vitest run src/EnrollmentServerJourney.test.tsx --maxWorkers=1
 
   # Platform-neutral desktop recorder + ubuntu-passing desktop *.test.mjs.
-  # Mac-only vitest files (workspace-capture-host.test.ts,
-  # recording-operational.test.ts) stay local until MacStadium Cursor worker
-  # mac-studio runs them. Four *.test.mjs files that fail on Linux today are
-  # listed in the PR body and omitted from the explicit node --test list.
+  # Mac-only vitest (workspace-capture-host.test.ts, recording-operational.test.ts)
+  # stays local until #409 runs on MacStadium Cursor worker mac-studio (by 26 Nov 2026).
   desktop-recorder:
     name: desktop-recorder-neutral
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -510,77 +509,112 @@ jobs:
         run: corepack enable
       - name: Install
         run: ./scripts/install-client-deps.sh
-      - name: Platform-neutral desktop recorder tests
+      - name: Platform-neutral desktop recorder and ubuntu node suites
         run: |
           set -euo pipefail
-          # Explicit file list so Mac-only tests are never pulled in by glob.
-          clients/capture/node_modules/.bin/vitest run --root clients/desktop \
-            recorder/native-provider-presentation-cleanup.test.ts \
-            recorder/native-continuation.test.ts \
-            recorder/continuous-capture.test.ts \
-            recorder/durable-queue-store.test.ts
-      - name: Ubuntu-passing desktop node --test suites
-        run: |
-          set -euo pipefail
-          # Explicit file list: only *.test.mjs that pass on ubuntu today.
-          node --test \
-            clients/desktop/api-proxy.test.mjs \
-            clients/desktop/auth-helper-client.test.mjs \
-            clients/desktop/auth-ipc.test.mjs \
-            clients/desktop/auth-session.test.mjs \
-            clients/desktop/capture-content-security.test.mjs \
-            clients/desktop/close-protection.electron.test.mjs \
-            clients/desktop/close-protection.test.mjs \
-            clients/desktop/connector-api-routes.agent-research.test.mjs \
-            clients/desktop/connector-api-routes.conversations.test.mjs \
-            clients/desktop/connector-api-routes.ehr-read.test.mjs \
-            clients/desktop/connector-api-routes.google-message.test.mjs \
-            clients/desktop/connector-api-routes.microsoft-calendar.test.mjs \
-            clients/desktop/connector-api-routes.microsoft-message.test.mjs \
-            clients/desktop/connector-api-routes.scheduling-patient.test.mjs \
-            clients/desktop/connector-auth-http.test.mjs \
-            clients/desktop/connector-auth-proxy.test.mjs \
-            clients/desktop/connector-catalog-v2.test.mjs \
-            clients/desktop/core-connection-auth-proxy.test.mjs \
-            clients/desktop/core-record-auth-proxy.test.mjs \
-            clients/desktop/cosmaneura-navigation-dom.test.mjs \
-            clients/desktop/cosmaneura-navigation.test.mjs \
-            clients/desktop/desktop-update-guidance.test.mjs \
-            clients/desktop/finance-setup-auth-http.test.mjs \
-            clients/desktop/finance-setup-auth-proxy.test.mjs \
-            clients/desktop/google-navigation.test.mjs \
-            clients/desktop/handoff-review-auth-proxy.test.mjs \
-            clients/desktop/hosted-auth-http.test.mjs \
-            clients/desktop/inbox-auth-proxy.test.mjs \
-            clients/desktop/installation-state.test.mjs \
-            clients/desktop/local-auth-http.test.mjs \
-            clients/desktop/membership-auth-http.test.mjs \
-            clients/desktop/membership-auth-proxy.test.mjs \
-            clients/desktop/membership-retirement-auth-http.test.mjs \
-            clients/desktop/membership-retirement-auth-proxy.test.mjs \
-            clients/desktop/membership-saved-evidence-auth-http.test.mjs \
-            clients/desktop/membership-saved-evidence-auth-proxy.test.mjs \
-            clients/desktop/microphone-permissions.test.mjs \
-            clients/desktop/microsoft-navigation.test.mjs \
-            clients/desktop/model-activity-auth-proxy.test.mjs \
-            clients/desktop/native-identity-config.test.mjs \
-            clients/desktop/practice-access-proxy.test.mjs \
-            clients/desktop/practice-https-wire.test.mjs \
-            clients/desktop/practice-infos-config.test.mjs \
-            clients/desktop/practice-ipc.test.mjs \
-            clients/desktop/practice-session.test.mjs \
-            clients/desktop/research-routes.test.mjs \
-            clients/desktop/routine-run-auth-proxy.test.mjs \
-            clients/desktop/scheduling-navigation.test.mjs \
-            clients/desktop/scribe-source-requests.test.mjs \
-            clients/desktop/sign-in-presentation.test.mjs \
-            clients/desktop/startup-recovery.test.mjs \
-            clients/desktop/team-contract-v5.test.mjs \
-            clients/desktop/vendor-setup-auth-http.test.mjs \
-            clients/desktop/vendor-setup-auth-proxy.test.mjs \
-            clients/desktop/workspace-auth-proxy.test.mjs \
-            clients/desktop/workspace-lifecycle.test.mjs \
+          INCLUDED_VITEST=(
+            clients/desktop/recorder/native-provider-presentation-cleanup.test.ts
+            clients/desktop/recorder/native-continuation.test.ts
+            clients/desktop/recorder/continuous-capture.test.ts
+            clients/desktop/recorder/durable-queue-store.test.ts
+          )
+          INCLUDED_NODE=(
+            clients/desktop/api-proxy.test.mjs
+            clients/desktop/auth-helper-client.test.mjs
+            clients/desktop/auth-ipc.test.mjs
+            clients/desktop/auth-session.test.mjs
+            clients/desktop/capture-content-security.test.mjs
+            clients/desktop/close-protection.electron.test.mjs
+            clients/desktop/close-protection.test.mjs
+            clients/desktop/connector-api-routes.agent-research.test.mjs
+            clients/desktop/connector-api-routes.conversations.test.mjs
+            clients/desktop/connector-api-routes.ehr-read.test.mjs
+            clients/desktop/connector-api-routes.google-message.test.mjs
+            clients/desktop/connector-api-routes.microsoft-calendar.test.mjs
+            clients/desktop/connector-api-routes.microsoft-message.test.mjs
+            clients/desktop/connector-api-routes.scheduling-patient.test.mjs
+            clients/desktop/connector-auth-http.test.mjs
+            clients/desktop/connector-auth-proxy.test.mjs
+            clients/desktop/connector-catalog-v2.test.mjs
+            clients/desktop/core-connection-auth-proxy.test.mjs
+            clients/desktop/core-record-auth-proxy.test.mjs
+            clients/desktop/cosmaneura-navigation-dom.test.mjs
+            clients/desktop/cosmaneura-navigation.test.mjs
+            clients/desktop/desktop-update-guidance.test.mjs
+            clients/desktop/finance-setup-auth-http.test.mjs
+            clients/desktop/finance-setup-auth-proxy.test.mjs
+            clients/desktop/google-navigation.test.mjs
+            clients/desktop/handoff-review-auth-proxy.test.mjs
+            clients/desktop/hosted-auth-http.test.mjs
+            clients/desktop/inbox-auth-proxy.test.mjs
+            clients/desktop/installation-state.test.mjs
+            clients/desktop/local-auth-http.test.mjs
+            clients/desktop/membership-auth-http.test.mjs
+            clients/desktop/membership-auth-proxy.test.mjs
+            clients/desktop/membership-retirement-auth-http.test.mjs
+            clients/desktop/membership-retirement-auth-proxy.test.mjs
+            clients/desktop/membership-saved-evidence-auth-http.test.mjs
+            clients/desktop/membership-saved-evidence-auth-proxy.test.mjs
+            clients/desktop/microphone-permissions.test.mjs
+            clients/desktop/microsoft-navigation.test.mjs
+            clients/desktop/model-activity-auth-proxy.test.mjs
+            clients/desktop/native-identity-config.test.mjs
+            clients/desktop/practice-access-proxy.test.mjs
+            clients/desktop/practice-https-wire.test.mjs
+            clients/desktop/practice-infos-config.test.mjs
+            clients/desktop/practice-ipc.test.mjs
+            clients/desktop/practice-session.test.mjs
+            clients/desktop/research-routes.test.mjs
+            clients/desktop/routine-run-auth-proxy.test.mjs
+            clients/desktop/scheduling-navigation.test.mjs
+            clients/desktop/scribe-source-requests.test.mjs
+            clients/desktop/sign-in-presentation.test.mjs
+            clients/desktop/startup-recovery.test.mjs
+            clients/desktop/team-contract-v5.test.mjs
+            clients/desktop/vendor-setup-auth-http.test.mjs
+            clients/desktop/vendor-setup-auth-proxy.test.mjs
+            clients/desktop/workspace-auth-proxy.test.mjs
+            clients/desktop/workspace-lifecycle.test.mjs
             clients/desktop/workspace-protocol.test.mjs
+          )
+          EXCLUDED_NODE=(
+            # Hard-coded /private/tmp mkdtemp path fails on Linux; #410
+            clients/desktop/auth-access-store.test.mjs
+            # Product assert drift vs connector Google Calendar contract (not OS); #408
+            clients/desktop/connector-api-routes.google-calendar.test.mjs
+            # Requires COSMAS_DESKTOP_COMPOSED composed app directory; #410
+            clients/desktop/reused-boundary.test.mjs
+            # Native session unavailable on Linux (1 of 3 cases); #410
+            clients/desktop/spawn-auth-helper.test.mjs
+          )
+
+          for path in "${INCLUDED_VITEST[@]}" "${INCLUDED_NODE[@]}" "${EXCLUDED_NODE[@]}"; do
+            if [[ ! -f "$path" ]]; then
+              echo "listed path is not a regular file: $path" >&2
+              exit 1
+            fi
+          done
+
+          mapfile -t on_disk < <(printf '%s\n' clients/desktop/*.test.mjs | LC_ALL=C sort)
+          mapfile -t expected < <(printf '%s\n' "${INCLUDED_NODE[@]}" "${EXCLUDED_NODE[@]}" | LC_ALL=C sort)
+          if [[ "${#on_disk[@]}" -ne "${#expected[@]}" ]]; then
+            echo "clients/desktop/*.test.mjs count ${#on_disk[@]} != INCLUDED_NODE+EXCLUDED_NODE ${#expected[@]}" >&2
+            printf 'on_disk:\n'; printf '  %s\n' "${on_disk[@]}"
+            printf 'expected:\n'; printf '  %s\n' "${expected[@]}"
+            exit 1
+          fi
+          for i in "${!on_disk[@]}"; do
+            if [[ "${on_disk[$i]}" != "${expected[$i]}" ]]; then
+              echo "clients/desktop/*.test.mjs inventory drift at index $i:" >&2
+              echo "  on_disk=${on_disk[$i]}" >&2
+              echo "  expected=${expected[$i]}" >&2
+              exit 1
+            fi
+          done
+
+          clients/capture/node_modules/.bin/vitest run --root clients/desktop \
+            "${INCLUDED_VITEST[@]#clients/desktop/}"
+          node --test "${INCLUDED_NODE[@]}"
 
   synth-gate:
     name: synth-ci-gate
