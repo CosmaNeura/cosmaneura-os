@@ -24,9 +24,15 @@ vi.mock('./PrivateTranscriptPanel',async original=>{
 });
 vi.mock('./private-transcription-native',async original=>({...await original<typeof import('./private-transcription-native')>(),privateSpeechNative:{begin:mocks.privateBegin,append:mocks.privateAppend,finish:mocks.privateFinish,cancel:mocks.privateCancel}}));
 vi.mock('./saved-recording-runtime',()=>({openSavedRecordingRuntime:mocks.savedRuntime}));
-vi.mock('./private-recording-runtime',()=>({openPrivateRecordingStore:async()=>({read:mocks.read,write:mocks.write,close:mocks.close}),PrivateRecordingRuntime:{open:mocks.open}}));
+vi.mock('./private-recording-runtime',()=>({
+  openPrivateRecordingStore:async()=>({read:mocks.read,write:mocks.write,close:mocks.close,keys:async()=>[],delete:async()=>{}}),
+  PrivateRecordingRuntime:{open:mocks.open},
+  clearTransferRetentionReleased:async()=>{},
+  isTransferRetentionReleased:async()=>false,
+  markTransferRetentionReleased:async()=>{},
+}));
 vi.mock('./private-recording-ledger',()=>({PrivateRecordingLedgerController:class{readCurrent=mocks.ledger;}}));
-vi.mock('./private-recording-api',()=>({parsePrivateRecordingReceipt:async()=>{},parseRecordingVisitBinding:async()=>{},privateRecordingApi:{read:async()=>activeReceipt,readVisitBinding:async()=>activeBinding,bindVisit:mocks.bindVisit}}));
+vi.mock('./private-recording-api',()=>({parsePrivateRecordingReceipt:async()=>{},parseRecordingVisitBinding:async()=>{},privateRecordingApi:{read:async()=>activeReceipt,readVisitBinding:async()=>activeBinding,bindVisit:mocks.bindVisit,audioRetention:async()=>({enabled:false})}}));
 vi.mock('./capture-api',()=>({prepareCapture:vi.fn()}));
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const identity={mode:'clerk_jwt' as const,getToken:async()=>null};

@@ -13,8 +13,8 @@ import {
   audioRetentionLabel,
   buildAudioTombstone,
   deletePrivateRecordingAudio,
-  readOrStampDeviceArmedAt,
   refuseExpiredAudio,
+  resolveArmedAudioRetentionPolicy,
   sweepPrivateRecordingAudio,
   type AudioRetentionClock,
   type AudioRetentionPolicy,
@@ -131,48 +131,56 @@ export class PrivateRecordingRuntime {
   private failure:string|null=null;
   private startupStage:PrivateRecordingStartupStage|null=null;
   private audioDeleted=false;
+  /** Device armedAt resolved once at open; merged into live policy for label/refuse parity with sweep. */
+  private deviceArmedAt:string|null=null;
   private constructor(private options:PrivateRecordingOptions,private store:PrivateRecordingStore,private saved:PrivateRecordingManifest,private displayTitle:string|null=null){options.signal?.addEventListener('abort',this.onAbort,{once:true});}
-  /** Live policy each call; falls back to one-shot `audioRetention` when getter absent. */
+  /** Live policy each call; merges resolved deviceArmedAt so label honors the grace window. */
   private policy():AudioRetentionPolicy|null|undefined{
-    return this.options.getAudioRetention?this.options.getAudioRetention():this.options.audioRetention;
+    const base=this.options.getAudioRetention?this.options.getAudioRetention():this.options.audioRetention;
+    if(!retentionOn(base))return base;
+    return this.deviceArmedAt?{...base!,deviceArmedAt:this.deviceArmedAt}:base;
   }
   static async open(options:PrivateRecordingOptions,input:{recordingId?:string;title:string;consent?:CaptureAttestation&{language:CaptureLanguage}}):Promise<PrivateRecordingRuntime>{
     need(HASH.test(options.scope)&&options.isCurrent()&&!options.signal?.aborted);
     if(input.consent)validatePrivateRecordingConsent(input.consent);const id=input.recordingId??crypto.randomUUID();need(UUID.test(id));
     // Capture once for back-compat when only `audioRetention` is supplied (no live getter).
     const resolved:PrivateRecordingOptions=options.getAudioRetention?options:{...options,audioRetention:options.audioRetention};
-    const policy=()=>resolved.getAudioRetention?resolved.getAudioRetention():resolved.audioRetention;
+    const bag=()=>resolved.getAudioRetention?resolved.getAudioRetention():resolved.audioRetention;
     const store=await(options.openStore?.()??openPrivateRecordingStore(options.scope,options.platform));
     try{
       need(options.isCurrent()&&!options.signal?.aborted);
+      const nowMs=options.now?.()??Date.now();
+      // Resolve armed once per open so refuse/label agree with sweep; clears stamp when policy off.
+      const armed=await resolveArmedAudioRetentionPolicy(store,bag(),nowMs);
+      const armedAt=typeof armed?.deviceArmedAt==='string'?armed.deviceArmedAt:null;
       let saved=await store.read('manifest:'+id);
       if(saved===null){
         const stub=await store.read('audio-deleted:'+id);
         if(stub&&typeof stub==='object'&&(stub as {contract?:unknown}).contract===AUDIO_DELETED_STUB_CONTRACT
           &&(stub as {recordingId?:unknown}).recordingId===id&&(stub as {scope?:unknown}).scope===options.scope
           &&(stub as {phase?:unknown}).phase==='audio_deleted'){
-          const updatedAt=typeof (stub as {updatedAt?:unknown}).updatedAt==='string'?(stub as {updatedAt:string}).updatedAt:new Date(options.now?.()??Date.now()).toISOString();
+          const updatedAt=typeof (stub as {updatedAt?:unknown}).updatedAt==='string'?(stub as {updatedAt:string}).updatedAt:new Date(nowMs).toISOString();
           const renamed=displayTitle(await store.read('display-title:'+id),options.scope,id);
           const placeholder:PrivateRecordingManifest={contract:'cosmabot.private-recording.v1',recordingId:id,scope:options.scope,title:input.title||'Private recording',
             consent:{modality:'in_person',participant_regions:[],method:'verbal_attestation',all_parties_consented:true,granted_at:updatedAt,language:'en-US'},
             consentIntervals:[],workspaceId:null,createdAt:updatedAt,updatedAt,phase:'sealed',chunks:[]};
           const runtime=new PrivateRecordingRuntime(resolved,store,placeholder,renamed);
-          runtime.audioDeleted=true;runtime.failure=AUDIO_DELETED_USER_MESSAGE;return runtime;
+          runtime.audioDeleted=true;runtime.failure=AUDIO_DELETED_USER_MESSAGE;runtime.deviceArmedAt=armedAt;return runtime;
         }
-        validatePrivateRecordingConsent(input.consent);const now=new Date(options.now?.()??Date.now()).toISOString();saved={contract:'cosmabot.private-recording.v1',recordingId:id,scope:options.scope,title:input.title,consent:structuredClone(input.consent),consentIntervals:[],workspaceId:null,createdAt:now,updatedAt:now,phase:'ready',chunks:[]};manifest(saved,options.scope,id);await store.write('manifest:'+id,null,saved);}
+        validatePrivateRecordingConsent(input.consent);const now=new Date(nowMs).toISOString();saved={contract:'cosmabot.private-recording.v1',recordingId:id,scope:options.scope,title:input.title,consent:structuredClone(input.consent),consentIntervals:[],workspaceId:null,createdAt:now,updatedAt:now,phase:'ready',chunks:[]};manifest(saved,options.scope,id);await store.write('manifest:'+id,null,saved);}
       const checked=manifest(saved,options.scope,id),renamed=displayTitle(await store.read('display-title:'+id),options.scope,id);need(options.isCurrent()&&!options.signal?.aborted);
       // A prior renderer's active phase cannot establish physical cessation or auto-resume.
       if(['starting','recording','pausing','stopping','stop_unconfirmed'].includes(checked.phase)){
         const source=await(options.createSource?.()??privateRecordingRecoverySource(options.platform));need(source.kind==='microphone'&&!owner&&await source.confirmRecoveryClosed?.()===true);
         need(options.isCurrent()&&!options.signal?.aborted);
-        const updatedAt=new Date(options.now?.()??Date.now()).toISOString();
+        const updatedAt=new Date(nowMs).toISOString();
         const next:PrivateRecordingManifest={...checked,phase:'interrupted' as const,updatedAt,
-          ...(retentionOn(policy())?{endedAt:checked.endedAt??updatedAt}:{})};
+          ...(retentionOn(armed)?{endedAt:checked.endedAt??updatedAt}:{})};
         await store.write('manifest:'+id,checked,next);
-        return new PrivateRecordingRuntime(resolved,store,next,renamed);
+        const runtime=new PrivateRecordingRuntime(resolved,store,next,renamed);runtime.deviceArmedAt=armedAt;return runtime;
       }
-      if(retentionOn(policy()))refuseExpiredAudio(checked,options.now?.()??Date.now(),policy());
-      return new PrivateRecordingRuntime(resolved,store,checked,renamed);
+      if(retentionOn(armed))refuseExpiredAudio(checked,nowMs,armed);
+      const runtime=new PrivateRecordingRuntime(resolved,store,checked,renamed);runtime.deviceArmedAt=armedAt;return runtime;
     }catch(error){store.close();throw error;}
   }
   get snapshot():PrivateRecordingSnapshot{
@@ -395,10 +403,14 @@ export async function markTransferRetentionReleased(store:PrivateRecordingStore,
   const key=transferRetentionReleasedKey(recordingId),prior=await store.read(key);
   await store.write(key,prior,{contract:TRANSFER_RETENTION_RELEASED_CONTRACT,recordingId,releasedAt:releasedAtIso});
 }
+/** Clear release marker so a renew-consent re-import is protected again until success. */
+export async function clearTransferRetentionReleased(store:PrivateRecordingStore,recordingId:string):Promise<void>{
+  try{await store.delete(transferRetentionReleasedKey(recordingId));}catch{/* best-effort */}
+}
 
 /**
  * Skip active owner, ledger attach/finish pending, and in-flight transfer imports.
- * transfer: protects only while present AND not retention-released. Unreadable ledger → skip.
+ * transfer: protects only while present AND not retention-released. Unreadable ledger/marker → skip.
  */
 export async function audioSweepSkipIds(store:PrivateRecordingStore,extra?:Iterable<string>):Promise<Set<string>>{
   const skip=new Set<string>();const active=activePrivateRecordingId();if(active)skip.add(active);
@@ -406,7 +418,9 @@ export async function audioSweepSkipIds(store:PrivateRecordingStore,extra?:Itera
   for(const key of await store.keys()){
     if(key.startsWith('transfer:')){
       const recordingId=key.slice('transfer:'.length);
-      if(!(await isTransferRetentionReleased(store,recordingId)))skip.add(recordingId);
+      try{
+        if(!(await isTransferRetentionReleased(store,recordingId)))skip.add(recordingId);
+      }catch{skip.add(recordingId);}
       continue;
     }
     if(!key.startsWith('ledger:'))continue;
@@ -440,15 +454,13 @@ function audioSweepHooks(store:PrivateRecordingStore,_scope:string,now:AudioRete
   };
 }
 
-/** Stamp device armedAt once, then merge into policy for deadline max(anchor, enabledAt, armedAt). */
+/** Resolve armed policy once (stamp/clear) so list/sweep labels match open refuse. */
 async function policyWithDeviceArmed(
   store:PrivateRecordingStore,
   policy:AudioRetentionPolicy|null|undefined,
   nowMs:number,
 ):Promise<AudioRetentionPolicy|null|undefined>{
-  if(!retentionOn(policy)||!policy)return policy;
-  const deviceArmedAt=await readOrStampDeviceArmedAt(store,nowMs);
-  return {...policy,deviceArmedAt};
+  return resolveArmedAudioRetentionPolicy(store,policy,nowMs);
 }
 
 /** Sweep expired audio for one scope. No-op when policy is off. Sign-out uses the same path. */
@@ -461,13 +473,14 @@ export async function sweepExpiredPrivateRecordingAudio(
   }={},
 ):Promise<{deleted:string[];inspected:number}>{
   need(HASH.test(scope));
-  if(!retentionOn(options.audioRetention))return {deleted:[],inspected:0};
   const owned=options.store===undefined;
   const store=options.store??await(options.openStore?.()??openPrivateRecordingStore(scope,platform));
   const clock=options.now??(()=>Date.now());
   try{
-    const skip=await audioSweepSkipIds(store,options.skipRecordingIds);
+    // Always resolve: policy-off clears the armed stamp so a later re-enable gets a fresh grace window.
     const policy=await policyWithDeviceArmed(store,options.audioRetention,clock());
+    if(!retentionOn(policy))return {deleted:[],inspected:0};
+    const skip=await audioSweepSkipIds(store,options.skipRecordingIds);
     return await sweepPrivateRecordingAudio({
       store,scope,policy,now:clock,sealInProgress:options.sealInProgress,
       parseManifest:(value,recordingId)=>manifest(value,scope,recordingId),...audioSweepHooks(store,scope,clock,skip),
@@ -486,9 +499,11 @@ export async function listPrivateRecordings(scope:string,platform:'ios'|'desktop
   need(HASH.test(scope));
   const options:ListPrivateRecordingsOptions=typeof openStore==='function'?{openStore}:openStore??{};
   const store=await(options.openStore?.()??openPrivateRecordingStore(scope,platform));
-  const clock=options.now??(()=>Date.now());const nowMs=clock();const on=retentionOn(options.audioRetention);
+  const clock=options.now??(()=>Date.now());const nowMs=clock();
   try{
-    const policy=on?await policyWithDeviceArmed(store,options.audioRetention,nowMs):options.audioRetention;
+    // Resolve once (also clears armed stamp when policy is off).
+    const policy=await policyWithDeviceArmed(store,options.audioRetention,nowMs);
+    const on=retentionOn(policy);
     if(on){const skip=await audioSweepSkipIds(store,options.skipRecordingIds);await sweepPrivateRecordingAudio({
       store,scope,policy,now:clock,parseManifest:(value,recordingId)=>manifest(value,scope,recordingId),
       ...audioSweepHooks(store,scope,clock,skip),

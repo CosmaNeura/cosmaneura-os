@@ -13,6 +13,8 @@ import {SavedRecordingSource} from './saved-recording-source';
 import type {AudioRetentionClock,AudioRetentionPolicy,PrivateRecordingRuntime,PrivateRecordingStore} from './private-recording-runtime';
 import {isAudioRetentionProtected,markTransferRetentionReleased} from './private-recording-runtime';
 import {audioRetentionEffective,refuseExpiredAudio} from './private-recording-retention';
+/** Session-scoped import queue DB name; PCM copy is bounded to this sessionId namespace. */
+export function savedRecordingImportQueueDatabaseName(sessionId:string){return `cosmas-capture-queue:${sessionId}`;}
 import {acquireCaptureFlowLock} from '../../clients/capture/src/flow/capture-lock';
 import {workspaceAuthHeaders} from './workspace-auth-headers';
 import {workspaceApiBase} from './workspace-base';
@@ -147,22 +149,30 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
     }
     if(!current())throw new QueueInvariantError('capture_access_unavailable');
     const selected=controller;
+    /** Drop the session-scoped import-queue IndexedDB after the handle is closed (bounds PCM copy). */
+    const dropImportQueueCopy=()=>{
+      if(options.platform!=='desktop'||typeof indexedDB==='undefined')return;
+      try{indexedDB.deleteDatabase(savedRecordingImportQueueDatabaseName(sessionId));}catch{/* best-effort bound */}
+    };
     return {controller:selected,reviewOnly,transcribe:()=>{
       // Terminal success (review-only or imported chunks): release sweep protection when retention is on.
       // Never delete transfer:<id> — panel CAS persist/relaunch needs that row.
       if(reviewOnly)return releaseTransferProtection();
       if(!task)reference=null;
+      // Outer .finally clears task so a sync rejection cannot stick on the runtime.
       return task??=(async()=>{
-        try{
-          if(!current())throw new QueueInvariantError('capture_access_unavailable');
-          if(selected.snapshot.state==='error'||selected.snapshot.state==='uploading'){
-            await captureQueue.retryRejectedUploads(sessionId,transport);
-          }
-          await importSavedChunks(selected,source,options.chunks,current);
-          await releaseTransferProtection();
-        }finally{task=null;}
-      })();
-    },releaseUploadedCapture:()=>reviewOnly?Promise.resolve():selected.releaseUploadedCapture(),
+        if(!current())throw new QueueInvariantError('capture_access_unavailable');
+        if(selected.snapshot.state==='error'||selected.snapshot.state==='uploading'){
+          await captureQueue.retryRejectedUploads(sessionId,transport);
+        }
+        await importSavedChunks(selected,source,options.chunks,current);
+        await releaseTransferProtection();
+      })().finally(()=>{task=null;});
+    },releaseUploadedCapture:async()=>{
+      if(reviewOnly)return;
+      await selected.releaseUploadedCapture();
+      queue?.close();queue=undefined;dropImportQueueCopy();
+    },
     uploadProgress:async()=>{
       const rows=await queue!.storage.listMetadata();
       if(!current())throw new QueueInvariantError('capture_access_unavailable');
@@ -172,6 +182,6 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
         total:options.chunks,reference:reference??terminal??null};
     },
     close:async()=>{if(!active)return;active=false;abort.abort();await source.stop();await task?.catch(()=>{});
-      try{await selected.deactivate();}finally{flow.close();profiles.close();queue?.close();await unlock();}}};
+      try{await selected.deactivate();}finally{flow.close();profiles.close();queue?.close();queue=undefined;await unlock();}}};
   }catch(error){active=false;abort.abort();try{await controller?.deactivate();}finally{flow.close();profiles.close();queue?.close();await unlock();}throw error;}
 }

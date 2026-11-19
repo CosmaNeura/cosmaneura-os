@@ -17,11 +17,14 @@ import {
   audioRetentionLabel,
   buildAudioDeletedStub,
   buildAudioTombstone,
+  clearDeviceArmedAt,
   deletePrivateRecordingAudio,
   EXPIRED_AUDIO_REFUSED,
   normalizeAudioRetentionPolicy,
+  readDeviceArmedAt,
   readOrStampDeviceArmedAt,
   refuseExpiredAudio,
+  resolveArmedAudioRetentionPolicy,
   resolveAudioRetentionClock,
   sweepPrivateRecordingAudio,
   type AudioRetentionPolicy,
@@ -436,6 +439,112 @@ it('readOrStampDeviceArmedAt stamps once and never moves armedAt later',async()=
   expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{
     store,audioRetention:pol,now:()=>first+AUDIO_RETENTION_MS,
   })).deleted).toEqual([id(27)]);
+  store.close();
+});
+
+it('policy-off clears armed stamp; re-enable gets a fresh grace window (H2)',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const first=Date.parse('2026-10-01T00:00:00.000Z');
+  const oldEnded='2026-09-01T00:00:00.000Z';
+  await seed(store,manifest(id(40),oldEnded));
+  const on=policyOn({enabledAt:'2026-09-15T00:00:00.000Z',now:first});
+  const armed=await resolveArmedAudioRetentionPolicy(store,on,first);
+  expect(armed?.deviceArmedAt).toBe(new Date(first).toISOString());
+  expect(await readDeviceArmedAt(store)).toBe(new Date(first).toISOString());
+  // Kill switch: observing policy off must clear the stamp.
+  await resolveArmedAudioRetentionPolicy(store,{enabled:false},first+AUDIO_RETENTION_MS);
+  expect(await readDeviceArmedAt(store)).toBeNull();
+  expect(await store.read(AUDIO_RETENTION_ARMED_KEY)).toBeNull();
+  // Re-enable later: fresh armedAt, old audio kept until newArm+48h (not first+48h).
+  const reenable=first+AUDIO_RETENTION_MS+60_000;
+  const again=policyOn({enabledAt:'2026-09-15T00:00:00.000Z',now:reenable});
+  const restamped=await resolveArmedAudioRetentionPolicy(store,again,reenable);
+  expect(restamped?.deviceArmedAt).toBe(new Date(reenable).toISOString());
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{
+    store,audioRetention:again,now:()=>reenable+AUDIO_RETENTION_MS-1,
+  })).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(40))).not.toBeNull();
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{
+    store,audioRetention:again,now:()=>reenable+AUDIO_RETENTION_MS,
+  })).deleted).toEqual([id(40)]);
+  store.close();
+});
+
+it('stamps armedAt only when allowDelete, using effectiveNowMs not raw device clock (H2)',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const deviceNow=Date.parse('2026-11-15T12:00:00.000Z');
+  const serverAhead=deviceNow+60_000; // +1 min → effectiveNow = deviceNow+60s
+  const skewed=policyOn({
+    enabledAt:'2026-10-01T00:00:00.000Z',
+    fetchedAtDeviceMs:deviceNow,
+    serverNow:new Date(deviceNow+AUDIO_RETENTION_CLOCK_SKEW_MS+1).toISOString(),
+  });
+  expect(resolveAudioRetentionClock(skewed,deviceNow).allowDelete).toBe(false);
+  const noStamp=await resolveArmedAudioRetentionPolicy(store,skewed,deviceNow);
+  expect(noStamp?.deviceArmedAt).toBeUndefined();
+  expect(await readDeviceArmedAt(store)).toBeNull();
+  const aligned=policyOn({
+    enabledAt:'2026-10-01T00:00:00.000Z',
+    fetchedAtDeviceMs:deviceNow,
+    serverNow:new Date(serverAhead).toISOString(),
+  });
+  const stamped=await resolveArmedAudioRetentionPolicy(store,aligned,deviceNow);
+  // effectiveNowMs = deviceNow + (serverAhead - deviceNow) = serverAhead
+  expect(stamped?.deviceArmedAt).toBe(new Date(serverAhead).toISOString());
+  expect(stamped?.deviceArmedAt).not.toBe(new Date(deviceNow).toISOString());
+  store.close();
+});
+
+it('open refuse and snapshot label honor device armed grace for Box-first flip (H2)',async()=>{
+  const flip='2026-11-15T12:00:00.000Z',flipMs=Date.parse(flip);
+  const enabledLongAgo='2026-10-16T12:00:00.000Z';
+  const oldEnded='2026-09-01T12:00:00.000Z';
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const row=manifest(id(41),oldEnded);
+  await seed(store,row);
+  const bag={current:policyOn({enabledAt:enabledLongAgo,now:flipMs})};
+  // Device first armed at flip (Box enabled long ago). Open must merge that stamp.
+  await resolveArmedAudioRetentionPolicy(store,bag.current,flipMs);
+  store.close();
+  const duringGrace=flipMs+AUDIO_RETENTION_MS-1;
+  // Unarmed bag alone would treat enabledAt+48h as expired; armed grace keeps it open.
+  expect(audioRetentionLabel(row,duringGrace,bag.current)).toBeNull();
+  const runtime=await PrivateRecordingRuntime.open({
+    scope,platform:'desktop',isCurrent:()=>true,
+    openStore:()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto}),
+    getAudioRetention:()=>bag.current,now:()=>duringGrace,
+  },{recordingId:id(41),title:'Synthetic Box-first'});
+  expect(runtime.snapshot.retentionLabel).toMatch(/Audio is removed from this device about/);
+  await runtime.close();
+  // After armed grace, refuse on open.
+  await expect(PrivateRecordingRuntime.open({
+    scope,platform:'desktop',isCurrent:()=>true,
+    openStore:()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto}),
+    getAudioRetention:()=>bag.current,now:()=>flipMs+AUDIO_RETENTION_MS,
+  },{recordingId:id(41),title:'Synthetic Box-first'})).rejects.toMatchObject({code:EXPIRED_AUDIO_REFUSED});
+});
+
+it('clearDeviceArmedAt removes the stamp key',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await readOrStampDeviceArmedAt(store,Date.parse('2026-11-15T12:00:00.000Z'));
+  expect(await readDeviceArmedAt(store)).not.toBeNull();
+  await clearDeviceArmedAt(store);
+  expect(await readDeviceArmedAt(store)).toBeNull();
+  store.close();
+});
+
+it('unreadable transfer-retention-released marker keeps protection (fail closed)',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  await seed(store,manifest(id(42),ended));
+  await armAt(store,Date.parse(policy.enabledAt!));
+  await store.write('transfer:'+id(42),null,{contract:'cosmas.saved-transfer.v1',recording_id:id(42)});
+  await markTransferRetentionReleased(store,id(42),'2026-11-03T00:00:00.000Z');
+  const markerKey='transfer-retention-released:'+id(42);
+  const realRead=store.read.bind(store);
+  store.read=async(key:string)=>{if(key===markerKey)throw new Error('Synthetic marker unread');return realRead(key);};
+  expect((await audioSweepSkipIds(store)).has(id(42))).toBe(true);
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([]);
   store.close();
 });
 

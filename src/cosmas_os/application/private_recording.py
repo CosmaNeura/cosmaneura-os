@@ -215,7 +215,8 @@ def audio_retention(s, box, owner, wid, *, external):
     """Read-only effective policy: process switch AND Box opt-in. Default off.
 
     enabled_at / server_now let clients grandfather recordings that existed
-    before the Box opt-in for 30 days instead of applying 48h retroactively.
+    before the Box opt-in for flip+48h instead of applying 48h retroactively
+    from an old ended_at.
     """
     scope(s, box, owner, wid, external)
     row = s.get(BoxContext, box)
