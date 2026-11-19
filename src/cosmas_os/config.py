@@ -140,10 +140,10 @@ class Settings(BaseSettings):
     independent_recording_transcription_enabled: bool = False
     # T2a-azure: Azure Fast Transcription adapter. Default off; requires main switch + endpoint.
     independent_recording_transcription_azure_enabled: bool = False
-    # HTTPS URL without query or credentials. Never a secret value.
+    # HTTPS Cognitive Services URL (US region host, fixed path). Never a secret value.
     azure_fast_transcription_endpoint: str | None = None
-    # Env var NAME only; John sets the value himself. Never store or log the value.
-    azure_fast_transcription_key_env_name: str | None = None
+    # Explicit auth: entra (default, reused DefaultAzureCredential) or key (FIXED_KEY_ENV_NAME).
+    azure_fast_transcription_auth: Literal["entra", "key"] = "entra"
 
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)
@@ -692,6 +692,17 @@ class Settings(BaseSettings):
             and not parsed.fragment
         )
 
+    def _independent_transcription_real_processor_configured(self) -> bool:
+        """True when Azure Fast Transcription is enabled with a valid endpoint."""
+        if not self.independent_recording_transcription_azure_enabled:
+            return False
+        from cosmas_os.adapters.azure_fast_transcription import (
+            validate_azure_fast_transcription_endpoint,
+        )
+
+        endpoint = self.azure_fast_transcription_endpoint
+        return bool(endpoint and validate_azure_fast_transcription_endpoint(endpoint))
+
     def runtime_configuration_errors(self) -> list[str]:
         """Return configuration faults without exposing configured values."""
 
@@ -701,6 +712,17 @@ class Settings(BaseSettings):
                 "REAL_PATIENT_RECORDING_ENABLED must remain false in process "
                 "configuration; enable only via Box after clinic, BAA and PHI refs"
             )
+        # T2a: refuse enabling the process switch in standalone/production until a
+        # real processor is configured. Fake-only stays for synth_os tests/CI.
+        if self.independent_recording_transcription_enabled:
+            real_processor = self._independent_transcription_real_processor_configured()
+            if not real_processor and (
+                self.cosmas_env in STANDALONE_ENVS or self.cosmas_env == "early_adopter_beta"
+            ):
+                errors.append(
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED requires a configured "
+                    "real transcription processor in standalone and production"
+                )
         # T2a-azure: Azure Fast Transcription refuses to start without the main
         # switch and a valid endpoint. Never echo configured values.
         if self.independent_recording_transcription_azure_enabled:

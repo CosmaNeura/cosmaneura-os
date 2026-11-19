@@ -14,7 +14,6 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
-    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -181,7 +180,7 @@ class PrivateRecordingTransferRejection(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-# --- T2a: CosmaBot independent transcription (audio + transcript + purge) ---
+# --- T2a: CosmaBot independent transcription (audio + job + transcript + purge) ---
 
 
 class IndependentRecordingAudioUpload(Base):
@@ -198,8 +197,21 @@ class IndependentRecordingAudioUpload(Base):
                 "private_recordings.owner_id",
             ],
         ),
-        UniqueConstraint("owner_id", "operation_id", name="uq_independent_audio_operation"),
-        UniqueConstraint("owner_id", "operation_id", "sha256", name="uq_independent_audio_op_sha"),
+        UniqueConstraint(
+            "box_id",
+            "workspace_id",
+            "recording_id",
+            "operation_id",
+            name="uq_independent_audio_operation",
+        ),
+        UniqueConstraint(
+            "id",
+            "recording_id",
+            "workspace_id",
+            "box_id",
+            "owner_id",
+            name="uq_independent_audio_scope",
+        ),
         CheckConstraint("sha256 ~ '^[a-f0-9]{64}$'", name="ck_independent_audio_sha"),
         CheckConstraint(
             "recording_class IN ('synthetic', 'demo', 'real')",
@@ -227,31 +239,87 @@ class IndependentRecordingAudioUpload(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class IndependentRecordingTranscriptionJob(Base):
+    """Claimable transcription work. Provider call runs outside the claim lock."""
+
+    __tablename__ = "independent_recording_transcription_jobs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["upload_id", "recording_id", "workspace_id", "box_id", "owner_id"],
+            [
+                "independent_recording_audio_uploads.id",
+                "independent_recording_audio_uploads.recording_id",
+                "independent_recording_audio_uploads.workspace_id",
+                "independent_recording_audio_uploads.box_id",
+                "independent_recording_audio_uploads.owner_id",
+            ],
+        ),
+        UniqueConstraint(
+            "box_id",
+            "workspace_id",
+            "recording_id",
+            "operation_id",
+            name="uq_independent_transcription_job_operation",
+        ),
+        CheckConstraint(
+            "state IN ('pending', 'claimed', 'ready', 'failed_retryable', 'failed_terminal')",
+            name="ck_independent_transcription_job_state",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_independent_transcription_job_attempts"),
+    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    upload_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    recording_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    operation_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    state: Mapped[str] = mapped_column(String(32))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class IndependentRecordingTranscript(Base):
-    """Immutable CosmaBot transcript row. Survives audio purge."""
+    """Immutable CosmaBot transcript row. Survives audio purge. Label from processor."""
 
     __tablename__ = "independent_recording_transcripts"
     __table_args__ = (
         ForeignKeyConstraint(
-            ["upload_id"],
-            ["independent_recording_audio_uploads.id"],
+            ["upload_id", "recording_id", "workspace_id", "box_id", "owner_id"],
+            [
+                "independent_recording_audio_uploads.id",
+                "independent_recording_audio_uploads.recording_id",
+                "independent_recording_audio_uploads.workspace_id",
+                "independent_recording_audio_uploads.box_id",
+                "independent_recording_audio_uploads.owner_id",
+            ],
         ),
-        UniqueConstraint("owner_id", "operation_id", name="uq_independent_transcript_operation"),
+        UniqueConstraint(
+            "box_id",
+            "workspace_id",
+            "recording_id",
+            "operation_id",
+            name="uq_independent_transcript_operation",
+        ),
         CheckConstraint("source_sha256 ~ '^[a-f0-9]{64}$'", name="ck_independent_transcript_sha"),
+        CheckConstraint("char_length(label) >= 1", name="ck_independent_transcript_label"),
     )
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
     upload_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
-    recording_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("private_recordings.id"))
+    recording_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
     workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
     box_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
     owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
     operation_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
     processor_id: Mapped[str] = mapped_column(String(64))
     profile_id: Mapped[str] = mapped_column(String(64))
-    synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False)
     source_sha256: Mapped[str] = mapped_column(String(64))
     segments: Mapped[list] = mapped_column(JSONB)
-    label: Mapped[str] = mapped_column(String(64), default="SYNTHETIC TRANSCRIPT")
+    label: Mapped[str] = mapped_column(String(64))  # processor-supplied; no default
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -259,6 +327,9 @@ class IndependentRecordingAudioPurgeReceipt(Base):
     """Content-free purge receipt. No patient label, blob path, or deleted-bytes hash."""
 
     __tablename__ = "independent_recording_audio_purge_receipts"
+    __table_args__ = (
+        CheckConstraint("outcome IN ('purged', 'failed')", name="ck_independent_purge_outcome"),
+    )
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
     box_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("box_contexts.id"))
     upload_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
