@@ -21,6 +21,8 @@ def downgrade():
 
 
 UPGRADE = r"""
+SET LOCAL lock_timeout = '5s';
+
 ALTER TABLE box_contexts
 	ADD COLUMN independent_recording_transcription_enabled BOOLEAN NOT NULL DEFAULT false;
 

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from cosmas_os.config import Settings
+
+ROOT = Path(__file__).resolve().parents[2]
+MIGRATION = ROOT / "migrations/versions/c68f2a91b053_independent_recording_transcription.py"
 
 
 def _settings(**values) -> Settings:
@@ -52,3 +57,10 @@ def test_production_refuses_switch_without_real_processor():
     assert any(
         "requires a configured real transcription processor" in item for item in errors
     )
+
+
+def test_migration_upgrade_sets_lock_timeout_first():
+    source = MIGRATION.read_text(encoding="utf-8")
+    upgrade = source.split("UPGRADE = r\"\"\"", 1)[1].split("\"\"\"", 1)[0]
+    first_stmt = next(line.strip() for line in upgrade.splitlines() if line.strip())
+    assert first_stmt == "SET LOCAL lock_timeout = '5s';"

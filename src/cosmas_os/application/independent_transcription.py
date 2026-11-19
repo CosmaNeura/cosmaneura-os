@@ -35,6 +35,7 @@ from cosmas_os.private_recording_models import (
 
 DISABLED = "independent_recording_transcription_disabled"
 AUDIO_TTL = timedelta(hours=48)
+CLAIM_LEASE = timedelta(seconds=30)
 LOCK_TIMEOUT = "1500ms"
 MAX_JOB_ATTEMPTS = 5
 JOB_PENDING, JOB_CLAIMED, JOB_READY = "pending", "claimed", "ready"
@@ -98,12 +99,20 @@ def _binding(session: Session, recording_id: str):
     return session.scalar(select(_Binding).where(_Binding.recording_id == recording_id))
 
 
+def _synthetic_environment() -> bool:
+    return getattr(settings, "data_mode", "synthetic") == "synthetic"
+
+
 def _derive_recording_class(session: Session, box_id: str, recording_id: str) -> str:
     binding = _binding(session, recording_id)
     if binding is None:
+        if not _synthetic_environment():
+            raise ws.WorkspaceError(real_patient.REFUSED, 403)
         return "synthetic"
     appointment = session.get(AppointmentObservation, binding.appointment_id)
     if appointment is None:
+        if not _synthetic_environment():
+            raise ws.WorkspaceError(real_patient.REFUSED, 403)
         return "synthetic"
     return real_patient.visit_recording_class(appointment, session.get(PatientLink, binding.patient_link_id))
 
@@ -215,11 +224,16 @@ def upload_audio(
     key = f"{box_id}/independent-transcription/{rid}/{upload_id}/{sha256}"
     row = _Upload(
         id=upload_id, recording_id=recording.id, workspace_id=wid, box_id=box_id, owner_id=owner_id,
-        operation_id=oid, blob_key=None, sha256=sha256, byte_count=len(audio_bytes),
+        operation_id=oid, blob_key=key, sha256=sha256, byte_count=len(audio_bytes),
         duration_ms=duration_ms, language=language, recording_class=recording_class, consent=consent,
         lease_expires_at=lease, audio_expires_at=now + AUDIO_TTL,
     )
     session.add(row)
+    session.add(AuditEvent(
+        box_id=box_id, aggregate_type="independent_recording_audio", aggregate_id=row.id,
+        event_type="recording_audio.uploaded", actor_principal_id=owner_id, outcome="saved",
+        detail={"operation_id": oid, "synthetic": synthetic},
+    ))
     try:
         with session.begin_nested():
             session.flush()
@@ -232,14 +246,13 @@ def upload_audio(
             return _dup_upload(raced, now)
         except ws.WorkspaceError as err:
             raise err from None
-    c.blob.put_bytes(key, audio_bytes, "application/octet-stream")
-    row.blob_key = key
-    session.add(AuditEvent(
-        box_id=box_id, aggregate_type="independent_recording_audio", aggregate_id=row.id,
-        event_type="recording_audio.uploaded", actor_principal_id=owner_id, outcome="saved",
-        detail={"operation_id": oid, "synthetic": synthetic},
-    ))
+    # Persist the deterministic key before the blob write so a crash mid-put leaves
+    # a recoverable row instead of an untracked blob (or a row without a key).
     session.commit()
+    try:
+        c.blob.put_bytes(key, audio_bytes, "application/octet-stream")
+    except Exception as exc:  # noqa: BLE001 — storage failure is retryable for the client
+        raise ws.WorkspaceError("independent_transcription_unavailable", 503) from exc
     return {
         "upload_id": row.id, "operation_id": row.operation_id, "sha256": row.sha256,
         "audio_expires_at": row.audio_expires_at.isoformat(), "duplicate": False,
@@ -260,9 +273,13 @@ def _claim_job(session: Session, *, upload: IndependentRecordingAudioUpload, now
         return job
     if job.state == JOB_TERMINAL:
         raise ws.WorkspaceError("independent_transcription_failed", 422)
+    if job.state == JOB_CLAIMED and job.claimed_at is not None:
+        claimed_at = job.claimed_at if job.claimed_at.tzinfo is not None else job.claimed_at.replace(tzinfo=UTC)
+        if now - claimed_at < CLAIM_LEASE:
+            raise ws.WorkspaceError("independent_transcription_unavailable", 503)
     if job.attempts >= MAX_JOB_ATTEMPTS:
         job.state, job.finished_at, job.error_kind = JOB_TERMINAL, now, "attempts_exhausted"
-        session.flush()
+        session.commit()
         raise ws.WorkspaceError("independent_transcription_failed", 422)
     job.state, job.attempts, job.claimed_at, job.error_kind = JOB_CLAIMED, job.attempts + 1, now, None
     session.flush()
@@ -289,6 +306,8 @@ def start_transcription(
     _lease_ok(upload.lease_expires_at, now)
     _consent_ok(upload.consent, now)
     _audio_readable(upload, now)
+    # Re-derive at start so a binding change after upload cannot silently widen class.
+    _require_recording_class(session, box_id, rid, claimed=upload.recording_class)
     if fence:
         fence()
     job = _claim_job(session, upload=upload, now=now)
@@ -296,10 +315,31 @@ def start_transcription(
         ready = _scoped(_Tx, session, box_id, wid, rid, oid)
         if ready is not None:
             return {"status": "ready", "transcript": _view_transcript(ready), "recovered": True}
+    claim_attempt = job.attempts
+    upload_id = upload.id
     session.commit()
-    assert upload.blob_key is not None
-    audio = c.blob.get_bytes(upload.blob_key)
+    upload = session.get(_Upload, upload_id, populate_existing=True)
+    if upload is None or upload.blob_key is None:
+        _finish_claimed_failure(
+            session, box_id=box_id, wid=wid, rid=rid, operation_id=oid,
+            kind="audio_missing", terminal=True, claim_attempt=claim_attempt,
+        )
+        if upload is not None and upload.revoked_at is not None:
+            raise ws.WorkspaceError("independent_transcription_revoked", 409)
+        raise ws.WorkspaceError("independent_transcription_audio_expired", 410)
+    try:
+        audio = c.blob.get_bytes(upload.blob_key)
+    except Exception:
+        _finish_claimed_failure(
+            session, box_id=box_id, wid=wid, rid=rid, operation_id=oid,
+            kind="blob_read", terminal=False, claim_attempt=claim_attempt,
+        )
+        raise ws.WorkspaceError("independent_transcription_unavailable", 503) from None
     if hashlib.sha256(audio).hexdigest() != upload.sha256:
+        _finish_claimed_failure(
+            session, box_id=box_id, wid=wid, rid=rid, operation_id=oid,
+            kind="corrupt", terminal=True, claim_attempt=claim_attempt,
+        )
         raise ws.WorkspaceError("independent_transcription_corrupt", 422)
     request = TranscriptionRequest(
         audio=audio, sha256=upload.sha256, duration_ms=upload.duration_ms, language=upload.language,
@@ -308,40 +348,64 @@ def start_transcription(
     try:
         outcome = (processor or _processor()).transcribe(request)
     except Exception:
-        _finish_job_retryable(session, box_id=box_id, wid=wid, rid=rid, operation_id=oid, kind="crash")
+        _finish_claimed_failure(
+            session, box_id=box_id, wid=wid, rid=rid, operation_id=oid,
+            kind="crash", terminal=False, claim_attempt=claim_attempt,
+        )
         raise ws.WorkspaceError("independent_transcription_processor_crash", 503) from None
     return _finish_transcription(
         session, c=c, upload_id=upload.id, box_id=box_id, owner_id=owner_id, wid=wid, rid=rid,
-        operation_id=oid, outcome=outcome, now=_now(c),
+        operation_id=oid, outcome=outcome, now=_now(c), claim_attempt=claim_attempt,
     )
 
 
-def _finish_job_retryable(session: Session, *, box_id: str, wid: str, rid: str, operation_id: str, kind: str) -> None:
+def _finish_claimed_failure(
+    session: Session,
+    *,
+    box_id: str,
+    wid: str,
+    rid: str,
+    operation_id: str,
+    kind: str,
+    terminal: bool,
+    claim_attempt: int | None = None,
+) -> None:
+    """Mark a claimed job retryable/terminal. No-op when the claim attempt no longer matches."""
     _lock_timeout(session)
     job = _scoped(_Job, session, box_id, wid, rid, operation_id, lock=True, state=JOB_CLAIMED)
     if job is None:
         session.commit()
         return
-    if job.attempts >= MAX_JOB_ATTEMPTS:
-        job.state, job.finished_at = JOB_TERMINAL, datetime.now(UTC)
+    if claim_attempt is not None and job.attempts != claim_attempt:
+        session.commit()
+        return
+    now = datetime.now(UTC)
+    if terminal or job.attempts >= MAX_JOB_ATTEMPTS:
+        job.state, job.finished_at, job.error_kind = JOB_TERMINAL, now, kind
     else:
-        job.state = JOB_RETRYABLE
-    job.error_kind = kind
+        job.state, job.error_kind = JOB_RETRYABLE, kind
     session.commit()
+
+
+def _finish_job_retryable(session: Session, *, box_id: str, wid: str, rid: str, operation_id: str, kind: str) -> None:
+    _finish_claimed_failure(
+        session, box_id=box_id, wid=wid, rid=rid, operation_id=operation_id, kind=kind, terminal=False,
+    )
 
 
 def _finish_transcription(
     session: Session, *, c: svc.Container, upload_id: str, box_id: str, owner_id: str, wid: str, rid: str,
     operation_id: str, outcome: TranscriptionResult | TranscriptionFailure, now: datetime,
+    claim_attempt: int,
 ) -> dict[str, Any]:
     _lock_timeout(session)
     job = _scoped(_Job, session, box_id, wid, rid, operation_id, lock=True, state=JOB_CLAIMED)
-    if job is None:
+    if job is None or job.attempts != claim_attempt:
         lost = _scoped(_Tx, session, box_id, wid, rid, operation_id)
         if lost is not None:
             return {"status": "ready", "transcript": _view_transcript(lost), "recovered": True}
         raise ws.WorkspaceError("independent_transcription_unavailable", 503)
-    upload = session.get(_Upload, upload_id)
+    upload = session.get(_Upload, upload_id, with_for_update=True, populate_existing=True)
     if upload is None or upload.revoked_at is not None:
         job.state, job.error_kind, job.finished_at = JOB_TERMINAL, "revoked", now
         session.commit()
@@ -425,7 +489,8 @@ def revoke_transcription(
     session: Session, box_id: str, owner_id: str, wid: str, rid: str, payload: dict[str, Any], *,
     external: str, fence=None, blob=None, clock=None,
 ) -> dict[str, Any]:
-    require_enabled(session, box_id)
+    # Revoke stays available when the process switch is off so leftover audio can
+    # still be deleted after the feature is disabled.
     private.checked(session, box_id, owner_id, wid, external, rid)
     c = svc.Container(session, clock=clock, blob=blob)
     now, oid = _now(c), str(payload["operation_id"])
@@ -491,10 +556,12 @@ def purge_due_recording_audio(
 
 
 def purge_route(
-    session: Session, box_id: str, owner_id: str, wid: str, *, external: str, blob=None, clock=None,
+    session: Session, box_id: str, owner_id: str, wid: str, *, external: str, fence=None, blob=None, clock=None,
 ) -> dict[str, Any]:
     private.identity(session, box_id, owner_id, external)
     ws._workspace(session, box_id, owner_id, wid, writing=True, allow_private=True)
+    if fence:
+        fence()
     return {"receipts": purge_due_recording_audio(svc.Container(session, clock=clock, blob=blob), box_id, owner_id)}
 
 
@@ -503,10 +570,9 @@ def wipe_owner_transcription_data(session: Session, *, box_id: str, owner_id: st
     uploads = session.scalars(select(_Upload).where(_Upload.box_id == box_id, _Upload.owner_id == owner_id)).all()
     for upload in uploads:
         if upload.blob_key:
-            try:
-                c.blob.delete(upload.blob_key)
-            except Exception:
-                pass
+            outcome = _blob_delete(c, upload.blob_key)
+            if outcome != "purged":
+                raise ws.WorkspaceError("independent_transcription_unavailable", 503)
             upload.blob_key = None
     upload_ids = [u.id for u in uploads]
     if not upload_ids:
