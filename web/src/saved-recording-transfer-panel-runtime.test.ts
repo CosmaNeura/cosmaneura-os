@@ -260,12 +260,35 @@ it('releaseUploadedCapture deletes session import-queue DB only when retention i
   await on.releaseUploadedCapture();
   expect(deleteSpy).toHaveBeenCalledWith(savedRecordingImportQueueDatabaseName(sessionId));
   await on.close();
-  deleteSpy.mockClear();
-  const off=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+  store.close();
+});
+
+it('with retention off, releaseUploadedCapture matches main (queue stays; real uploadProgress after release/re-release/close/reopen)',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
+  await store.write('transfer:'+recordingId,null,legacyTransfer({admitted}));
+  await seedFlow(active());
+  const recording=sealedRecording(vi.fn(async function*(){throw Error('confirmed upload must not read audio');}));
+  const deleteSpy=vi.spyOn(indexedDB,'deleteDatabase');
+  const first=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
     scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:{enabled:false}});
-  await off.releaseUploadedCapture();
+  await first.releaseUploadedCapture();
+  await first.releaseUploadedCapture(); // second Continue after Return — must not hit closed storage
   expect(deleteSpy).not.toHaveBeenCalled();
-  await off.close();
+  const progress=await first.uploadProgress();
+  expect(progress).toMatchObject({total:chunks});
+  expect(typeof progress.confirmed).toBe('number');
+  expect(progress.confirmed).toBeGreaterThanOrEqual(0);
+  await first.close();
+  // Reopen after close — same off-path contract.
+  await seedFlow(active());
+  const second=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:{enabled:false}});
+  await second.releaseUploadedCapture();
+  const again=await second.uploadProgress();
+  expect(again).toMatchObject({total:chunks});
+  expect(typeof again.confirmed).toBe('number');
+  expect(deleteSpy).not.toHaveBeenCalled();
+  await second.close();
   store.close();
 });
 

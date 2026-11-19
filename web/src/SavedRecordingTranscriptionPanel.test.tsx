@@ -82,6 +82,13 @@ it('maps EXPIRED_AUDIO_REFUSED open failure to AUDIO_DELETED_USER_MESSAGE',async
     audioRetention={{enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:'2026-10-09T12:00:00.000Z',fetchedAtDeviceMs:Date.parse('2026-10-09T12:00:00.000Z')}}/>));
   await vi.waitFor(()=>expect(host.querySelector('[role="alert"]')?.textContent).toBe('Audio deleted on this device; transcript and notes kept.'));
 });
+it('makes no audioRetention policy request when the parent passes the prop',async()=>{
+  const {privateRecordingApi}=await import('./private-recording-api');
+  const spy=vi.spyOn(privateRecordingApi,'audioRetention');
+  await mount(false,{audioRetention:{enabled:false}});
+  expect(spy).not.toHaveBeenCalled();
+  spy.mockRestore();
+});
 it.each(['capture_request_conflict','capture_consent_required','capture_consent_unavailable'])('retains exact intent and offers recordings rather than futile retry for %s',async code=>{
   const original=structuredClone(stored);
   vi.mocked(prepareCapture).mockRejectedValue(new BffResponseError(409,code,null));

@@ -176,6 +176,8 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
       })().finally(()=>{task=null;});
     },releaseUploadedCapture:async()=>{
       if(reviewOnly)return;
+      // Switches off: identical to main — only releaseUploadedCapture, leave queue open.
+      if(!audioRetentionEffective(options.audioRetention))return selected.releaseUploadedCapture();
       await selected.releaseUploadedCapture();
       queue?.close();queue=undefined;dropImportQueueCopy();
     },

@@ -442,7 +442,7 @@ it('readOrStampDeviceArmedAt stamps once and never moves armedAt later',async()=
   store.close();
 });
 
-it('policy-off clears armed stamp; re-enable gets a fresh grace window (H2)',async()=>{
+it('policy-off leaves armed stamp; re-enable with later enabledAt restamps for fresh grace',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   const first=Date.parse('2026-10-01T00:00:00.000Z');
   const oldEnded='2026-09-01T00:00:00.000Z';
@@ -451,13 +451,14 @@ it('policy-off clears armed stamp; re-enable gets a fresh grace window (H2)',asy
   const armed=await resolveArmedAudioRetentionPolicy(store,on,first);
   expect(armed?.deviceArmedAt).toBe(new Date(first).toISOString());
   expect(await readDeviceArmedAt(store)).toBe(new Date(first).toISOString());
-  // Kill switch: observing policy off must clear the stamp.
-  await resolveArmedAudioRetentionPolicy(store,{enabled:false},first+AUDIO_RETENTION_MS);
-  expect(await readDeviceArmedAt(store)).toBeNull();
-  expect(await store.read(AUDIO_RETENTION_ARMED_KEY)).toBeNull();
-  // Re-enable later: fresh armedAt, old audio kept until newArm+48h (not first+48h).
+  // Switches off: identical to main — return policy unchanged, no store delete.
+  const off=await resolveArmedAudioRetentionPolicy(store,{enabled:false},first+AUDIO_RETENTION_MS);
+  expect(off).toEqual({enabled:false});
+  expect(await readDeviceArmedAt(store)).toBe(new Date(first).toISOString());
+  expect(await store.read(AUDIO_RETENTION_ARMED_KEY)).toEqual({contract:AUDIO_RETENTION_ARMED_CONTRACT,armedAt:new Date(first).toISOString()});
+  // Re-enable with enabledAt newer than stored armedAt → restamp for fresh grace.
   const reenable=first+AUDIO_RETENTION_MS+60_000;
-  const again=policyOn({enabledAt:'2026-09-15T00:00:00.000Z',now:reenable});
+  const again=policyOn({enabledAt:new Date(reenable).toISOString(),now:reenable});
   const restamped=await resolveArmedAudioRetentionPolicy(store,again,reenable);
   expect(restamped?.deviceArmedAt).toBe(new Date(reenable).toISOString());
   expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{
@@ -470,36 +471,28 @@ it('policy-off clears armed stamp; re-enable gets a fresh grace window (H2)',asy
   store.close();
 });
 
-it('unknown/null/missing-enabledAt leaves armed stamp alone (no clear, no stamp)',async()=>{
+it('not-effective resolve returns policy unchanged with no store read or delete',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   const first=Date.parse('2026-10-01T00:00:00.000Z');
   const stamped=new Date(first).toISOString();
   await readOrStampDeviceArmedAt(store,first);
-  expect(await readDeviceArmedAt(store)).toBe(stamped);
+  const read=vi.spyOn(store,'read');
+  const del=vi.spyOn(store,'delete');
   expect(await resolveArmedAudioRetentionPolicy(store,null,first+60_000)).toBeNull();
-  expect(await readDeviceArmedAt(store)).toBe(stamped);
   expect(await resolveArmedAudioRetentionPolicy(store,undefined,first+60_000)).toBeUndefined();
-  expect(await readDeviceArmedAt(store)).toBe(stamped);
-  // enabled without enabledAt: reuse existing stamp, do not clear or invent a new one.
-  const missingAt=await resolveArmedAudioRetentionPolicy(store,{enabled:true},first+60_000);
-  expect(missingAt).toEqual({enabled:true,deviceArmedAt:stamped});
-  expect(await readDeviceArmedAt(store)).toBe(stamped);
-  // Failed-clock / no allowDelete also leaves stamp, does not invent a new one.
-  const skewed=policyOn({
-    enabledAt:'2026-09-01T00:00:00.000Z',
-    fetchedAtDeviceMs:first,
-    serverNow:new Date(first+AUDIO_RETENTION_CLOCK_SKEW_MS+1).toISOString(),
-  });
-  expect(resolveAudioRetentionClock(skewed,first).allowDelete).toBe(false);
-  await resolveArmedAudioRetentionPolicy(store,skewed,first);
+  expect(await resolveArmedAudioRetentionPolicy(store,{enabled:false},first+60_000)).toEqual({enabled:false});
+  expect(await resolveArmedAudioRetentionPolicy(store,{enabled:true},first+60_000)).toEqual({enabled:true});
+  expect(read).not.toHaveBeenCalled();
+  expect(del).not.toHaveBeenCalled();
   expect(await readDeviceArmedAt(store)).toBe(stamped);
   store.close();
 });
 
-it('sweep returns early without opening a store when policy is absent/unknown',async()=>{
-  const openStore=vi.fn(async()=>{throw new Error('store must not open for unknown policy');});
+it('sweep returns early without opening a store when policy is absent/unknown/off',async()=>{
+  const openStore=vi.fn(async()=>{throw new Error('store must not open for off/unknown policy');});
   expect(await sweepExpiredPrivateRecordingAudio(scope,'desktop',{audioRetention:null,openStore})).toEqual({deleted:[],inspected:0});
   expect(await sweepExpiredPrivateRecordingAudio(scope,'desktop',{audioRetention:undefined,openStore})).toEqual({deleted:[],inspected:0});
+  expect(await sweepExpiredPrivateRecordingAudio(scope,'desktop',{audioRetention:{enabled:false},openStore})).toEqual({deleted:[],inspected:0});
   expect(await sweepExpiredPrivateRecordingAudio(scope,'desktop',{audioRetention:{enabled:'maybe' as never},openStore})).toEqual({deleted:[],inspected:0});
   expect(openStore).not.toHaveBeenCalled();
 });

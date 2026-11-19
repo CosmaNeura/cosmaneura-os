@@ -150,7 +150,7 @@ export class PrivateRecordingRuntime {
     try{
       need(options.isCurrent()&&!options.signal?.aborted);
       const nowMs=options.now?.()??Date.now();
-      // Resolve armed once per open so refuse/label agree with sweep; clears stamp when policy off.
+      // Resolve armed once per open so refuse/label agree with sweep (no-op when off).
       const armed=await resolveArmedAudioRetentionPolicy(store,bag(),nowMs);
       const armedAt=typeof armed?.deviceArmedAt==='string'?armed.deviceArmedAt:null;
       let saved=await store.read('manifest:'+id);
@@ -468,7 +468,7 @@ async function policyWithDeviceArmed(
   return resolveArmedAudioRetentionPolicy(store,policy,nowMs);
 }
 
-/** Sweep expired audio for one scope. No-op when policy is off/unknown. Sign-out uses the same path. */
+/** Sweep expired audio for one scope. No-op when policy is off. Sign-out uses the same path. */
 export async function sweepExpiredPrivateRecordingAudio(
   scope:string,
   platform:'ios'|'desktop',
@@ -478,17 +478,13 @@ export async function sweepExpiredPrivateRecordingAudio(
   }={},
 ):Promise<{deleted:string[];inspected:number}>{
   need(HASH.test(scope));
-  const raw=options.audioRetention;
-  // Absent/unknown policy: identical to main — do not open a store.
-  if(raw==null)return {deleted:[],inspected:0};
-  // Explicit off still needs a store so resolve can clear the armed stamp.
-  if(raw.enabled!==true&&raw.enabled!==false)return {deleted:[],inspected:0};
-  if(raw.enabled===true&&!retentionOn(raw))return {deleted:[],inspected:0};
+  // Identical to main: off/unknown never opens a store.
+  if(!retentionOn(options.audioRetention))return {deleted:[],inspected:0};
   const owned=options.store===undefined;
   const store=options.store??await(options.openStore?.()??openPrivateRecordingStore(scope,platform));
   const clock=options.now??(()=>Date.now());
   try{
-    const policy=await policyWithDeviceArmed(store,raw,clock());
+    const policy=await policyWithDeviceArmed(store,options.audioRetention,clock());
     if(!retentionOn(policy))return {deleted:[],inspected:0};
     const skip=await audioSweepSkipIds(store,options.skipRecordingIds);
     return await sweepPrivateRecordingAudio({
@@ -511,9 +507,9 @@ export async function listPrivateRecordings(scope:string,platform:'ios'|'desktop
   const store=await(options.openStore?.()??openPrivateRecordingStore(scope,platform));
   const clock=options.now??(()=>Date.now());const nowMs=clock();
   try{
-    // Resolve when policy is present (explicit off clears stamp; unknown leaves it).
-    const policy=options.audioRetention==null?options.audioRetention:await policyWithDeviceArmed(store,options.audioRetention,nowMs);
-    const on=retentionOn(policy);
+    // Identical to main: resolve/stamp only when retention is on.
+    const on=retentionOn(options.audioRetention);
+    const policy=on?await policyWithDeviceArmed(store,options.audioRetention,nowMs):options.audioRetention;
     if(on){const skip=await audioSweepSkipIds(store,options.skipRecordingIds);await sweepPrivateRecordingAudio({
       store,scope,policy,now:clock,parseManifest:(value,recordingId)=>manifest(value,scope,recordingId),
       ...audioSweepHooks(store,scope,clock,skip),

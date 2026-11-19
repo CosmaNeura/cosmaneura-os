@@ -200,31 +200,32 @@ export async function readOrStampDeviceArmedAt(
 
 /**
  * Resolve armed policy once per store so label, refuse, and sweep agree.
- * Clear the stamp only on an explicit server `enabled:false` (kill switch).
- * Unknown (null/undefined/missing enabledAt/no allowDelete yet) → no clear, no stamp;
- * reuse an existing stamp when present. Stamp only when allowDelete, using effectiveNowMs.
+ * Not effective (null/undefined/off/missing enabledAt) → return policy unchanged;
+ * no store read or delete (identical to main with switches off).
+ * On-path: stamp only when allowDelete using effectiveNowMs; restamp when the
+ * stored armedAt is older than policy.enabledAt so re-enable gets a fresh grace.
  */
 export async function resolveArmedAudioRetentionPolicy(
   store: AudioRetentionStore,
   policy: AudioRetentionPolicy | null | undefined,
   nowMs: number,
 ): Promise<AudioRetentionPolicy | null | undefined> {
-  // Explicit off from server — clear so a later re-enable gets a fresh grace window.
-  if (policy != null && policy.enabled === false) {
-    await clearDeviceArmedAt(store);
-    return policy;
-  }
-  // Unknown / absent / not fully usable — leave stamp alone; do not invent one.
-  if (!audioRetentionEffective(policy) || !policy || audioRetentionEnabledAtMs(policy) === null) {
-    const existing = await readDeviceArmedAt(store);
-    return existing && policy && audioRetentionEffective(policy)
-      ? {...policy, deviceArmedAt: existing}
-      : policy;
-  }
+  // Switches off / unknown — identical to main: touch nothing.
+  if (!audioRetentionEffective(policy) || !policy) return policy;
+  const enabledAtMs = audioRetentionEnabledAtMs(policy);
+  if (enabledAtMs === null) return policy;
   const clock = resolveAudioRetentionClock(policy, nowMs);
   if (!clock.allowDelete) {
     const existing = await readDeviceArmedAt(store);
     return existing ? {...policy, deviceArmedAt: existing} : policy;
+  }
+  const existing = await readDeviceArmedAt(store);
+  const existingMs = existing ? parseIsoMs(existing) : null;
+  // Re-enable after a later enabledAt: discard stale armedAt and stamp fresh.
+  if (existing !== null && existingMs !== null && existingMs < enabledAtMs) {
+    await clearDeviceArmedAt(store);
+  } else if (existing !== null && existingMs !== null && existingMs >= enabledAtMs) {
+    return {...policy, deviceArmedAt: existing};
   }
   const deviceArmedAt = await readOrStampDeviceArmedAt(store, clock.effectiveNowMs);
   return {...policy, deviceArmedAt};
