@@ -2,7 +2,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import {EncryptedIndexedDbFlowStore} from '../../clients/capture/src/configured/flow/encrypted-store';
 import type {ActiveCaptureState} from '../../clients/capture/src/configured/flow/types';
-import {openSavedRecordingRuntime} from './saved-recording-runtime';
+import {openSavedRecordingRuntime,savedRecordingImportStoreNames} from './saved-recording-runtime';
 import {workspaceCaptureBff} from './capture-api';
 import type {PrivateRecordingRuntime} from './private-recording-runtime';
 import type {PreparedCapture} from './capture-api';
@@ -18,7 +18,8 @@ const scope='c'.repeat(64),chunks=3;
 const admitted:PreparedCapture={status:'prepared',workspace_id:workspaceId,session_id:sessionId,
   consent_record_id:'20000000-0000-4000-8000-000000000003',configured_capture:{schema_version:'1.0',language_mode:'en-US'}};
 let held=false,releases=0;
-const flow=()=>EncryptedIndexedDbFlowStore.open({databaseName:`cosmas-saved-flow:v1:${scope}:${workspaceId}:${sessionId}`});
+const importStores=()=>savedRecordingImportStoreNames({scope,workspaceId,sessionId});
+const flow=()=>EncryptedIndexedDbFlowStore.open({databaseName:importStores().flow});
 beforeEach(()=>{
   vi.clearAllMocks();held=false;releases=0;
   vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('indexedDB',new IDBFactory());
@@ -129,4 +130,62 @@ it.each(['ready','uploading'] as const)('rejects a foreign retained %s session i
   const proof=active({phase,sessionId:other,lease:{...base.lease,session_id:other}});await seed(proof);const f=fixture();
   await expect(f.open()).rejects.toThrow('capture_saved_session_changed');expect(review.read).not.toHaveBeenCalled();noCaptureWork(f);
   expect(await retained()).toEqual(proof);expect(held).toBe(false);expect(releases).toBe(1);
+});
+
+it('refuses expired audio with a safe code and never reads chunk bytes',async()=>{
+  const ended='2026-11-01T00:00:00.000Z';
+  const recording={
+    snapshot:{recordingId:sessionId,phase:'sealed',endedAt:ended,createdAt:ended},
+    snapshotForLedger:async()=>({recordingId:sessionId,scope,consent:{modality:'in_person',participant_regions:[],method:'verbal_attestation',all_parties_consented:true,granted_at:ended,language:'en-US'},consentIntervals:[],startedAt:ended,phase:'sealed',frames:16,chunks,manifestSHA256:'a'.repeat(64),updatedAt:ended}),
+    savedChunks:vi.fn(async function*(){throw Error('audio bytes must not be read');}),
+  } as unknown as PrivateRecordingRuntime;
+  let current=true;
+  await expect(openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>current,audioRetention:{enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:Date.parse(ended)},
+    now:()=>Date.parse(ended)+48*60*60*1000})).rejects.toMatchObject({code:'private_recording_audio_expired'});
+  expect(recording.savedChunks).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it('skips refuse while transfer key protects, then refuses after retention release marker',async()=>{
+  const ended='2026-11-01T00:00:00.000Z';
+  const recording={
+    snapshot:{recordingId:sessionId,phase:'sealed',endedAt:ended,createdAt:ended},
+    snapshotForLedger:async()=>({recordingId:sessionId,scope,consent:{modality:'in_person',participant_regions:[],method:'verbal_attestation',all_parties_consented:true,granted_at:ended,language:'en-US'},consentIntervals:[],startedAt:ended,phase:'sealed',frames:16,chunks,manifestSHA256:'a'.repeat(64),updatedAt:ended}),
+    savedChunks:vi.fn(async function*(){throw Error('audio bytes must not be read');}),
+  } as unknown as PrivateRecordingRuntime;
+  const rows=new Map<string,unknown>([['transfer:'+sessionId,{ok:true}]]);
+  const store={
+    keys:async()=>[...rows.keys()],
+    read:async(key:string)=>rows.has(key)?rows.get(key)??null:null,
+    write:async(key:string,_before:unknown,next:unknown)=>{rows.set(key,next);},
+    delete:async(key:string)=>{rows.delete(key);},
+    close:()=>{},
+  };
+  const policy={enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:Date.parse(ended)};
+  const now=()=>Date.parse(ended)+48*60*60*1000;
+  // Protected by transfer: — refuse is skipped; open may succeed as review-only.
+  const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,audioRetention:policy,now,store});
+  expect(recording.savedChunks).not.toHaveBeenCalled();
+  expect(rows.has('transfer:'+sessionId)).toBe(true);
+  await opened.close();
+  // End protection without deleting transfer: (panel CAS needs the row).
+  const {markTransferRetentionReleased}=await import('./private-recording-runtime');
+  await markTransferRetentionReleased(store,sessionId,ended);
+  expect(rows.has('transfer:'+sessionId)).toBe(true);
+  await expect(openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,audioRetention:policy,now,store})).rejects.toMatchObject({code:'private_recording_audio_expired'});
+});
+
+it('saved-import store names include sessionId (session-scoped queue, not long-lived workspace queue)',()=>{
+  const names=savedRecordingImportStoreNames({scope,workspaceId,sessionId});
+  expect(names.flow).toContain(sessionId);
+  expect(names.profile).toContain(sessionId);
+  expect(names.flow).toBe(`cosmas-saved-flow:v1:${scope}:${workspaceId}:${sessionId}`);
+  expect(names.profile).toBe(`cosmas-saved-profile:v1:${scope}:${workspaceId}:${sessionId}`);
+  // Browser IndexedDB becomes cosmas-capture-queue:${sessionId} — not the visit workspace queue.
+  expect(names.captureQueueOpenArgs.workspaceId).toBe(sessionId);
+  expect(names.captureQueueOpenArgs.sessionId).toBe(sessionId);
+  expect(names.captureQueueOpenArgs.workspaceId).not.toBe(workspaceId);
 });
