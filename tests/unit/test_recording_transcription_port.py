@@ -7,6 +7,7 @@ import hashlib
 import pytest
 
 from cosmas_os.ports.recording_transcription import (
+    LABEL_SYNTHETIC,
     FakeTranscriptionProcessor,
     TranscriptionFailure,
     TranscriptionRequest,
@@ -30,9 +31,17 @@ def _request(op: str, audio: bytes = b"tone", **changes) -> TranscriptionRequest
 def test_fake_transcript_starts_with_synthetic_label():
     result = FakeTranscriptionProcessor().transcribe(_request("op-a"))
     assert isinstance(result, TranscriptionResult)
+    assert result.label == LABEL_SYNTHETIC
     assert result.segments[0].text.startswith("SYNTHETIC TRANSCRIPT")
     assert result.synthetic is True
     assert result.processor_id == "fake_transcription"
+
+
+def test_fake_refuses_non_synthetic():
+    outcome = FakeTranscriptionProcessor().transcribe(_request("real-op", synthetic=False))
+    assert isinstance(outcome, TranscriptionFailure)
+    assert outcome.kind == "unavailable"
+    assert outcome.detail == "fake_non_synthetic_refused"
 
 
 def test_fake_corrupt_and_truncated():

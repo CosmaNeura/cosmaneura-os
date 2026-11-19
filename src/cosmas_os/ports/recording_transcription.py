@@ -8,6 +8,7 @@ from typing import Literal, Protocol
 TranscriptionFailureKind = Literal["corrupt", "truncated", "unavailable", "retryable"]
 PROCESSOR_FAKE = "fake_transcription"
 PROFILE_FAKE = "fake_synthetic_v1"
+LABEL_SYNTHETIC = "SYNTHETIC TRANSCRIPT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,7 @@ class TranscriptionResult:
     processor_id: str
     profile_id: str
     synthetic: bool
+    label: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,8 @@ class FakeTranscriptionProcessor:
 
     def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult | TranscriptionFailure:
         self.calls.append(request.operation_id)
+        if not request.synthetic:
+            return TranscriptionFailure(kind="unavailable", detail="fake_non_synthetic_refused")
         if request.operation_id in self.crash_operations:
             raise RuntimeError("injected processor crash")
         failure = self.fail_operations.get(request.operation_id)
@@ -71,10 +75,11 @@ class FakeTranscriptionProcessor:
             return TranscriptionFailure(kind="corrupt", detail="empty audio")
         if len(request.audio) < 4:
             return TranscriptionFailure(kind="truncated", detail="audio too short")
-        text = f"SYNTHETIC TRANSCRIPT operation={request.operation_id} language={request.language}"
+        text = f"{LABEL_SYNTHETIC} operation={request.operation_id} language={request.language}"
         return TranscriptionResult(
             segments=(TranscriptionSegment(text=text, offset_ms=0, duration_ms=request.duration_ms),),
             processor_id=PROCESSOR_FAKE,
             profile_id=PROFILE_FAKE,
             synthetic=True,
+            label=LABEL_SYNTHETIC,
         )

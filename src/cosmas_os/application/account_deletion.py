@@ -317,6 +317,14 @@ def delete_own_account(
             _wipe_personal_connection(session, binding.id)
             binding.active = False
 
+        # T2a: remove owner transcription blobs/rows before tombstone.
+        from cosmas_os.application import independent_transcription as independent_tx
+        from cosmas_os.application import services as svc
+
+        independent_tx.wipe_owner_transcription_data(
+            session, box_id=box_id, owner_id=actor.id, blob=svc.Container(session).blob
+        )
+
         actor.state = PrincipalState.TOMBSTONED.value
         actor.tombstoned_at = _now()
         actor.display_name = "Deleted account"
