@@ -190,6 +190,8 @@ PENDING / OPEN-JOHN (Fable H4): the precise definition of "this workstream"
 awaits John's confirmation. Do not invent a scope sentence until then.
 
 Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
+Item 6 also incorporates John's 19 Nov 2026 9:28am ET answer recorded as
+`DL-20261119-01`.
 
 These decisions set product scope. They do not change the build gate or
 the synthetic-data rule. Build and test against invented pages and
@@ -225,11 +227,12 @@ invented patients only.
    behind interfaces. (Fable N4: start date for the two-week Mac window is
    pending; Windows signing and distribution are not covered by the
    October 30 text alone.)
-6. PENDING / OPEN-JOHN (Fable H1): Yes, maybe for initial beta we rely on
-   legacy but going forward we need independent recording and notes.
-   Substance of legacy-for-beta sequencing is awaiting John's decision;
-   until then do not treat this line as permission to add, remove or change
-   any dependency on the legacy platform.
+6. CosmaBot must record a visit and produce a note without depending on
+   the legacy platform. Owner follow-up (`DL-20261117-02`): "Yes, maybe
+   for initial beta we rely on legacy but going forward we need
+   independent recording and notes." John's answer of 19 Nov 2026
+   9:28am ET: "Beta does not rely on the legacy platform". Do not add
+   any dependency on the legacy platform for beta.
 7. Scribe remains a separate product that shares the recorder. New Scribe
    sign-ups use CosmaBot identity (confirmed, `DL-20261117-02`). This sets
    direction only. Existing Scribe users, their logins and their access
@@ -289,9 +292,9 @@ cross-Box networking, and no automatic patient sends.
 - Claims
 - RRM workbook demo
 - Full self-service onboarding
-- PENDING / OPEN-JOHN (Fable H1): Rebuilding the existing Scribe inside OS
-  (independent recording and notes per DL-20261117-01 item 6 is not this;
-  sequencing pending owner decision)
+- Rebuilding the existing Scribe inside OS (independent recording and
+  notes per DL-20261117-01 item 6 is not this; beta does not rely on the
+  legacy platform per John's 19 Nov 2026 9:28am ET answer)
 - Device compliance checks (V2; described as compliance checks, not
   security monitoring)
 - Signing or transmitting a prescription (never; DL-20261117-01 item 3).

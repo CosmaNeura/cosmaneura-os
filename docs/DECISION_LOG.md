@@ -476,9 +476,9 @@ IMPLEMENTATION IMPACT:
 
 - **Note (Fable N5):** The `[CONFIRM]` markers above are preserved as in the
   original owner message drafting; items 6 and 7 were answered the same day
-  by `DL-20261117-02` (also November 17, 2026). PENDING / OPEN-JOHN
-  (Fable H1) on legacy-for-beta substance; PENDING / OPEN-JOHN (Fable H4)
-  on "this workstream" scope sentence.
+  by `DL-20261117-02` (also November 17, 2026). Legacy-for-beta substance
+  resolved by `DL-20261119-01`. PENDING / OPEN-JOHN (Fable H4) on "this
+  workstream" scope sentence.
 - **Supersedes:** Conflicting browser, prescription, model and workstream
   authority statements in `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`;
   `DL-20261030-01` production, store and live identity authority for this
@@ -501,7 +501,27 @@ IMPLEMENTATION IMPACT:
 2. yes, confirmed.
 
 - **Supersedes:** The confirmation markers in items 6 and 7 of
-  `DL-20261117-01`; item 6 is clarified by the owner's initial-beta wording.
+  `DL-20261117-01`; item 6 is clarified by the owner's initial-beta wording
+  and later settled for beta by `DL-20261119-01`.
 - **Affected contract version:** 1.10-draft
 - **Implementation impact:** Reconcile items 6 and 7 in
   `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`. Docs only.
+
+### DL-20261119-01
+
+- **Status:** ACCEPTED
+- **Date:** 2026-11-19
+- **Owner acceptance evidence:** Direct answer from John Clemente, CEO,
+  19 Nov 2026 9:28am ET, settling Fable H1 (legacy-for-beta) on
+  `DL-20261117-01` item 6.
+- **Ruling (verbatim owner answer):**
+
+1. Beta does not rely on the legacy platform
+
+- **Supersedes:** The unresolved "maybe for initial beta we rely on legacy"
+  reading of `DL-20261117-02` item 1 for beta scope. Independent recording
+  and notes without legacy dependency remain required.
+- **Affected contract version:** 1.10-draft
+- **Implementation impact:** Reconcile item 6 in
+  `CANONICAL_PRODUCT_DECISIONS.md` and `AGENTS.md`. Docs only. Do not add
+  any dependency on the legacy platform for beta.
