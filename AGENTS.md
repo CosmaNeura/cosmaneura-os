@@ -282,5 +282,5 @@ These come from Fable's most common review holes. Breaking one is a HOLE in revi
 ### 8. Before you push
 - Run the relevant tests in your agent first, and push once per round.
 - Synthetic data only, never PHI. No new secrets, no CI or ruleset weakening.
-- On-device model scope is the November 17, 2026 owner decision 4 above.
+- No change to the product runtime model without John's explicit yes; on-device model scope is the November 17, 2026 owner decision 4 above.
 - On high-risk tickets (docs/review-policy.md section 2a), wait for Fable's plan PASS before the first push.
