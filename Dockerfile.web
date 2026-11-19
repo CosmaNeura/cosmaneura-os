@@ -79,7 +79,7 @@ RUN --network=none case "$WEB_BUILD_PROFILE" in \
       pnpm run build:enrollment ;; \
     *) echo "Unknown hosted web build profile" >&2; exit 1 ;; \
     esac
-# Nginx 1.30.6 includes the fixes required by the release vulnerability scan.
+# nginx 1.30.7 (nginx/nginx-unprivileged, successor to the archived nginxinc/ repo) includes the fixes required by the release vulnerability scan.
 FROM nginx/nginx-unprivileged:stable-alpine@sha256:0c53a1f2890c3526bfd201440f0fd3970e5b78f80630f58284aad0d34b5ec7bd
 USER root
 # Apply the verified Alpine security fixes omitted by this pinned base.
