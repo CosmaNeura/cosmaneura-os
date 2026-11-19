@@ -1,4 +1,4 @@
-"""Pin vendor-work JSON helper behavior (json_value, canonical, digests, labels)."""
+"""Pin vendor-work JSON helpers: json_value, canonical, public_digest, timestamp, bounded, safe_label, read_json."""
 
 import json
 from datetime import UTC, datetime, timedelta, timezone
@@ -54,7 +54,7 @@ def test_json_value_rejects_invalid_values(bad, message):
 
 
 def test_json_value_rejects_lone_surrogate():
-    with pytest.raises(ValueError):
+    with pytest.raises(UnicodeEncodeError):
         v.json_value("\ud800")
 
 
@@ -79,7 +79,7 @@ def test_timestamp_normalizes_aware_datetimes_to_utc_z():
 
 
 @pytest.mark.parametrize("bad", [datetime(2026, 11, 19, 15, 0), "2026-11-19"])
-def test_timestamp_requires_aware_utc_datetime(bad):
+def test_timestamp_requires_aware_datetime(bad):
     with pytest.raises(ValueError, match="^UTC timestamp required$"):
         v.timestamp(bad)
 
@@ -133,6 +133,12 @@ def test_read_json_rejects_invalid_payloads(raw, message):
         v.read_json(raw, Body)
 
 
+def test_read_json_accepts_max_json_byte_body():
+    raw = b'{"name":"' + b"a" * 32757 + b'"}'
+    assert len(raw) == 32768
+    assert v.read_json(raw, Body) == Body(name="a" * 32757)
+
+
 def test_read_json_rejects_oversized_body():
     raw = b'{"name":"' + b"a" * 32758 + b'"}'
     assert len(raw) == 32769
@@ -146,14 +152,14 @@ def test_read_json_rejects_when_maximum_is_below_raw_size():
 
 
 def test_read_json_rejects_truncated_json():
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(json.JSONDecodeError):
         v.read_json(b"{", Body)
-    assert isinstance(excinfo.value, json.JSONDecodeError)
 
 
 def test_read_json_forbids_extra_fields():
+    raw = b'{"sequence":0,"sha256":"' + b"a" * 64 + b'","o":1}'
     with pytest.raises(ValidationError) as excinfo:
-        v.read_json(b'{"name":"x","o":1}', Body)
+        v.read_json(raw, v.ObservationHead)
     errors = excinfo.value.errors()
     assert len(errors) == 1
     assert errors[0]["loc"] == ("o",)
