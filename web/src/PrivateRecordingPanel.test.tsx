@@ -732,18 +732,18 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
   });
   it('shows deletes-in label only when both retention switches are on',async()=>{
     const now=()=>Date.parse('2026-11-19T12:00:00.000Z');
-    props={...props,audioRetention:{enabled:true},now};
+    props={...props,audioRetention:{enabled:true,enabledAt:'2026-11-01T00:00:00.000Z'},now};
     await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
     await act(async()=>sources[0].chunk(42));await click('Stop and save recording');
     await wait(()=>status()==='Saved on this device');
-    expect(container.textContent).toMatch(/deletes in \d+ h/);
+    expect(container.textContent).toMatch(/Audio is removed from this device about \d+ h from now; transcript and notes are kept\./);
     expect(container.querySelector('[data-retention-label]')).toBeTruthy();
   });
   it('hides the retention label when the policy is absent',async()=>{
     await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
     await act(async()=>sources[0].chunk(7));await click('Stop and save recording');
     await wait(()=>status()==='Saved on this device');
-    expect(container.textContent).not.toMatch(/deletes in \d+ h/);
+    expect(container.textContent).not.toMatch(/Audio is removed from this device about/);
     expect(container.querySelector('[data-retention-label]')).toBeNull();
   });
 });

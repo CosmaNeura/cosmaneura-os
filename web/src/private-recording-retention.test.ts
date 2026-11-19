@@ -4,12 +4,18 @@ import type {SecureQueuePlugin,VersionedSecureQueueRecord} from '../../clients/c
 import {openPrivateRecordingStore,sweepExpiredPrivateRecordingAudio,type PrivateRecordingManifest,type PrivateRecordingStore} from './private-recording-runtime';
 import {privateRecordingLedgerKey} from './private-recording-ledger';
 import {
+  AUDIO_DELETED_STUB_CONTRACT,
+  AUDIO_RETENTION_CLOCK_SKEW_MS,
   AUDIO_RETENTION_MS,
+  AUDIO_TOMBSTONE_CONTRACT,
   audioRetentionAnchor,
   audioRetentionEffective,
   audioRetentionLabel,
+  buildAudioDeletedStub,
+  buildAudioTombstone,
   deletePrivateRecordingAudio,
   EXPIRED_AUDIO_REFUSED,
+  normalizeAudioRetentionPolicy,
   refuseExpiredAudio,
   sweepPrivateRecordingAudio,
 } from './private-recording-retention';
@@ -18,7 +24,8 @@ const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const scope='d'.repeat(64),otherScope='e'.repeat(64);
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const consent=()=>({modality:'in_person' as const,participant_regions:['US-NY'],method:'verbal_attestation' as const,all_parties_consented:true as const,granted_at:'2026-11-01T12:00:00.000Z',language:'en-US' as const});
-const policy={enabled:true as const,hours:48,warnHours:36};
+/** enabledAt at/before ended so deadline stays endedAt+48h for classic clock tests. */
+const policy={enabled:true as const,hours:48,warnHours:36,enabledAt:'2026-10-01T00:00:00.000Z'};
 let idb:IDBFactory;
 beforeEach(()=>{
   vi.stubGlobal('crypto',webcrypto);
@@ -115,6 +122,20 @@ it('seals an in-progress recording at the deadline then deletes',async()=>{
   store.close();
 });
 
+it('skips active recording when sealInProgress is missing or returns null',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  await seed(store,manifest(id(40),ended,'recording'));
+  expect((await sweepPrivateRecordingAudio({store,scope,policy,now:()=>start+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(40))).not.toBeNull();
+  expect((await sweepPrivateRecordingAudio({store,scope,policy,now:()=>start+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest,
+    sealInProgress:async()=>null})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(40))).not.toBeNull();
+  store.close();
+});
+
 it('offline then sweep on launch deletes expired audio',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
@@ -187,7 +208,8 @@ it('either switch off means no deletion and no label',async()=>{
   expect(audioRetentionEffective({enabled:'yes' as unknown as boolean})).toBe(false);
   expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS,{enabled:false})).toBeNull();
   expect(audioRetentionLabel(row,start+AUDIO_RETENTION_MS/2,{enabled:false})).toBeNull();
-  expect(audioRetentionLabel(row,start+AUDIO_RETENTION_MS/2,policy)?.text).toMatch(/^deletes in \d+ h$/);
+  expect(audioRetentionLabel(row,start+AUDIO_RETENTION_MS/2,policy)?.text)
+    .toBe('Audio is removed from this device about 24 h from now; transcript and notes are kept.');
   expect(audioRetentionLabel(row,start+36*60*60*1000+1,policy)?.warn).toBe(true);
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
   await seed(store,row);
@@ -195,6 +217,24 @@ it('either switch off means no deletion and no label',async()=>{
   expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:null,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([]);
   expect(await store.read('manifest:'+id(12))).not.toBeNull();
   expect(await store.read('chunk:'+id(12)+':0')).not.toBeNull();
+  store.close();
+});
+
+it('absent enabledAt means no deletion and no label (fail closed)',async()=>{
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  const row=manifest(id(120),ended);
+  const noAt={enabled:true as const,hours:48,warnHours:36};
+  const badAt={enabled:true as const,hours:48,warnHours:36,enabledAt:'not-a-date'};
+  expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS,noAt)).toBeNull();
+  expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS,badAt)).toBeNull();
+  expect(audioRetentionLabel(row,start+AUDIO_RETENTION_MS/2,noAt)).toBeNull();
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,row);
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:noAt,now:()=>start+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:badAt,now:()=>start+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(120))).not.toBeNull();
   store.close();
 });
 
@@ -215,4 +255,159 @@ it('metadata write does not push the deadline when endedAt is set',()=>{
   const row={...manifest(id(14),ended),updatedAt:'2026-11-10T00:00:00.000Z'};
   expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS,policy)?.expired).toBe(true);
   expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS-1,policy)?.expired).toBe(false);
+});
+
+it('legacy manifest without endedAt falls back to updatedAt',()=>{
+  const updated='2026-11-01T00:00:00.000Z',start=Date.parse(updated);
+  const row={...manifest(id(15),updated),endedAt:null as unknown as undefined};
+  delete (row as {endedAt?:string}).endedAt;
+  expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS-1,policy)?.expired).toBe(false);
+  expect(audioRetentionAnchor(row,start+AUDIO_RETENTION_MS,policy)?.expired).toBe(true);
+});
+
+it('grandfathering: 30-day-old recording waits until flip+48h',async()=>{
+  const flip='2026-11-15T12:00:00.000Z',flipMs=Date.parse(flip);
+  const oldEnded='2026-10-16T12:00:00.000Z'; // 30 days before flip
+  const grandpa={enabled:true as const,hours:48,warnHours:36,enabledAt:flip};
+  const row=manifest(id(16),oldEnded);
+  expect(audioRetentionAnchor(row,flipMs+AUDIO_RETENTION_MS-1,grandpa)?.expired).toBe(false);
+  expect(audioRetentionLabel(row,flipMs+AUDIO_RETENTION_MS-1,grandpa)?.text)
+    .toBe('Audio is removed from this device about 1 h from now; transcript and notes are kept.');
+  expect(audioRetentionAnchor(row,flipMs+AUDIO_RETENTION_MS,grandpa)?.expired).toBe(true);
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,row);
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:grandpa,now:()=>flipMs+AUDIO_RETENTION_MS-1,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(16))).not.toBeNull();
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:grandpa,now:()=>flipMs+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([id(16)]);
+  expect(await store.read('manifest:'+id(16))).toBeNull();
+  store.close();
+});
+
+it('clock skew over bound → no delete and no expired refuse',async()=>{
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  const deviceNow=start+AUDIO_RETENTION_MS;
+  const skewed={...policy,serverNow:new Date(deviceNow+AUDIO_RETENTION_CLOCK_SKEW_MS+1).toISOString()};
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,manifest(id(17),ended));
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:skewed,now:()=>deviceNow,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(17))).not.toBeNull();
+  refuseExpiredAudio(manifest(id(17),ended),deviceNow,skewed); // must not throw
+  store.close();
+});
+
+it('serverNow within skew bound drives effective clock for delete',async()=>{
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  const serverAtDeadline=start+AUDIO_RETENTION_MS;
+  const deviceBehind=serverAtDeadline-60_000; // 1 min behind, within 5 min
+  const aligned={...policy,serverNow:new Date(serverAtDeadline).toISOString()};
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,manifest(id(18),ended));
+  expect((await sweepPrivateRecordingAudio({store,scope,policy:aligned,now:()=>deviceBehind,
+    parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([id(18)]);
+  store.close();
+});
+
+it('poison manifest does not block later deletes',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  await seed(store,manifest(id(19),ended));
+  await seed(store,manifest(id(20),ended));
+  const failures:string[]=[];
+  const result=await sweepPrivateRecordingAudio({
+    store,scope,policy,now:()=>start+AUDIO_RETENTION_MS,
+    parseManifest:(value,recordingId)=>{
+      if(recordingId===id(19))throw new Error('poison manifest');
+      return value as PrivateRecordingManifest;
+    },
+    recordFailure:(recordingId)=>failures.push(recordingId),
+  });
+  expect(failures).toEqual([id(19)]);
+  expect(result.deleted).toEqual([id(20)]);
+  expect(await store.read('manifest:'+id(19))).not.toBeNull();
+  expect(await store.read('manifest:'+id(20))).toBeNull();
+  store.close();
+});
+
+it('throwing store.delete mid-loop does not stop later recordings',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  await seed(store,manifest(id(21),ended));
+  await seed(store,manifest(id(22),ended));
+  const realDelete=store.delete.bind(store);
+  store.delete=async(key:string)=>{
+    if(key.startsWith('chunk:'+id(21)+':')||key==='manifest:'+id(21))throw new Error('delete boom');
+    return realDelete(key);
+  };
+  const failures:string[]=[];
+  const result=await sweepPrivateRecordingAudio({
+    store,scope,policy,now:()=>start+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest,
+    recordFailure:(recordingId)=>failures.push(recordingId),
+  });
+  expect(failures).toEqual([id(21)]);
+  expect(result.deleted).toEqual([id(22)]);
+  expect(await store.read('manifest:'+id(22))).toBeNull();
+  store.close();
+});
+
+it('shouldSkipRecording skips and onDeleted fires after successful delete',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  await seed(store,manifest(id(23),ended));
+  await seed(store,manifest(id(24),ended));
+  const deletedHooks:string[]=[];
+  const result=await sweepPrivateRecordingAudio({
+    store,scope,policy,now:()=>start+AUDIO_RETENTION_MS,
+    parseManifest:(value)=>value as PrivateRecordingManifest,
+    shouldSkipRecording:(recordingId)=>recordingId===id(23),
+    onDeleted:async(recordingId)=>{deletedHooks.push(recordingId);},
+  });
+  expect(result.deleted).toEqual([id(24)]);
+  expect(deletedHooks).toEqual([id(24)]);
+  expect(await store.read('manifest:'+id(23))).not.toBeNull();
+  store.close();
+});
+
+it('normalizeAudioRetentionPolicy maps snake_case and rejects invalid raw',()=>{
+  expect(normalizeAudioRetentionPolicy(null)).toBeNull();
+  expect(normalizeAudioRetentionPolicy(undefined)).toBeNull();
+  expect(normalizeAudioRetentionPolicy('nope')).toBeNull();
+  expect(normalizeAudioRetentionPolicy({enabled:false})).toEqual({enabled:false});
+  expect(normalizeAudioRetentionPolicy({
+    enabled:true,
+    hours:48,
+    warn_hours:36,
+    enabled_at:'2026-11-15T00:00:00.000Z',
+    server_now:'2026-11-16T00:00:00.000Z',
+  })).toEqual({
+    enabled:true,
+    hours:48,
+    warnHours:36,
+    enabledAt:'2026-11-15T00:00:00.000Z',
+    serverNow:'2026-11-16T00:00:00.000Z',
+  });
+});
+
+it('tombstone and audio-deleted stub contracts omit title',()=>{
+  const tomb=buildAudioTombstone(id(25),'2026-11-17T00:00:00.000Z','deleted');
+  expect(tomb).toEqual({
+    contract:AUDIO_TOMBSTONE_CONTRACT,
+    recordingId:id(25),
+    deletedAt:'2026-11-17T00:00:00.000Z',
+    outcome:'deleted',
+  });
+  expect(tomb).not.toHaveProperty('title');
+  const failed=buildAudioTombstone(id(25),'2026-11-17T00:00:00.000Z','failed');
+  expect(failed.outcome).toBe('failed');
+  const stub=buildAudioDeletedStub(id(25),scope,'2026-11-17T00:00:00.000Z');
+  expect(stub).toEqual({
+    contract:AUDIO_DELETED_STUB_CONTRACT,
+    recordingId:id(25),
+    scope,
+    phase:'audio_deleted',
+    updatedAt:'2026-11-17T00:00:00.000Z',
+  });
 });

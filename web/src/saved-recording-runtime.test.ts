@@ -140,7 +140,7 @@ it('refuses expired audio with a safe code and never reads chunk bytes',async()=
   } as unknown as PrivateRecordingRuntime;
   let current=true;
   await expect(openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
-    scope,recording,chunks,platform:'desktop',isCurrent:()=>current,audioRetention:{enabled:true},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>current,audioRetention:{enabled:true,enabledAt:'2026-10-01T00:00:00.000Z'},
     now:()=>Date.parse(ended)+48*60*60*1000})).rejects.toMatchObject({code:'private_recording_audio_expired'});
   expect(recording.savedChunks).not.toHaveBeenCalled();
   expect(fetch).not.toHaveBeenCalled();

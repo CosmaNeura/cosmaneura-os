@@ -4,12 +4,18 @@ export const AUDIO_RETENTION_HOURS = 48;
 export const AUDIO_RETENTION_WARN_HOURS = 36;
 export const AUDIO_RETENTION_MS = AUDIO_RETENTION_HOURS * 60 * 60 * 1000;
 export const AUDIO_RETENTION_WARN_MS = AUDIO_RETENTION_WARN_HOURS * 60 * 60 * 1000;
+export const AUDIO_RETENTION_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+export const AUDIO_TOMBSTONE_CONTRACT = 'cosmabot.private-recording-audio-tombstone.v1';
+export const AUDIO_DELETED_STUB_CONTRACT = 'cosmabot.private-recording-audio-deleted.v1';
 
 export type AudioRetentionClock = () => number;
 export type AudioRetentionPolicy = {
   enabled: boolean;
   hours?: number;
   warnHours?: number;
+  enabledAt?: string | null;
+  serverNow?: string | null;
 };
 
 export type AudioRetentionManifestLike = {
@@ -35,11 +41,92 @@ export type AudioRetentionAnchor = {
   expired: boolean;
 };
 
+export type AudioTombstone = {
+  contract: typeof AUDIO_TOMBSTONE_CONTRACT;
+  recordingId: string;
+  deletedAt: string;
+  outcome: 'deleted' | 'failed';
+};
+
+export type AudioDeletedStub = {
+  contract: typeof AUDIO_DELETED_STUB_CONTRACT;
+  recordingId: string;
+  scope: string;
+  phase: 'audio_deleted';
+  updatedAt: string;
+};
+
 const ACTIVE = new Set(['starting', 'recording', 'pausing', 'stopping']);
+
+function parseIsoMs(value: unknown): number | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function optionalFiniteHours(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
+  return value;
+}
+
+function optionalIso(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') return null;
+  return value;
+}
+
+/**
+ * Map camelCase or snake_case policy payloads. Absent/invalid raw → null.
+ * Non-true `enabled` → `{enabled: false}` (off).
+ */
+export function normalizeAudioRetentionPolicy(raw: unknown): AudioRetentionPolicy | null {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (o.enabled !== true) return {enabled: false};
+  const hours = optionalFiniteHours(o.hours);
+  const warnHours = optionalFiniteHours(o.warnHours ?? o.warn_hours);
+  const enabledAt = optionalIso(o.enabledAt ?? o.enabled_at);
+  const serverNow = optionalIso(o.serverNow ?? o.server_now);
+  const policy: AudioRetentionPolicy = {enabled: true};
+  if (hours !== undefined) policy.hours = hours;
+  if (warnHours !== undefined) policy.warnHours = warnHours;
+  if (enabledAt !== undefined) policy.enabledAt = enabledAt;
+  if (serverNow !== undefined) policy.serverNow = serverNow;
+  return policy;
+}
 
 /** Absent, unknown, or disabled policy means no deletion and no label. */
 export function audioRetentionEffective(policy: AudioRetentionPolicy | null | undefined): boolean {
   return policy?.enabled === true;
+}
+
+/** Fail closed: enabled without a usable enabledAt is off for delete/label/refuse. */
+export function audioRetentionEnabledAtMs(policy: AudioRetentionPolicy | null | undefined): number | null {
+  if (!audioRetentionEffective(policy)) return null;
+  return parseIsoMs(policy?.enabledAt);
+}
+
+type RetentionClockResolution = {
+  effectiveNowMs: number;
+  allowDelete: boolean;
+};
+
+/**
+ * serverNow present + skew within bound → use server time and allow delete.
+ * no serverNow → device now, allow delete.
+ * skew over bound → no delete / no expired refuse; labels use device now.
+ */
+export function resolveAudioRetentionClock(
+  policy: AudioRetentionPolicy | null | undefined,
+  nowMs: number,
+): RetentionClockResolution {
+  const serverNowMs = parseIsoMs(policy?.serverNow);
+  if (serverNowMs === null) return {effectiveNowMs: nowMs, allowDelete: true};
+  if (Math.abs(nowMs - serverNowMs) > AUDIO_RETENTION_CLOCK_SKEW_MS) {
+    return {effectiveNowMs: nowMs, allowDelete: false};
+  }
+  return {effectiveNowMs: serverNowMs, allowDelete: true};
 }
 
 export function audioRetentionAnchor(
@@ -48,6 +135,8 @@ export function audioRetentionAnchor(
   policy: AudioRetentionPolicy | null | undefined = {enabled: true},
 ): AudioRetentionAnchor | null {
   if (!audioRetentionEffective(policy)) return null;
+  const enabledAtMs = audioRetentionEnabledAtMs(policy);
+  if (enabledAtMs === null) return null;
   const hours = policy?.hours ?? AUDIO_RETENTION_HOURS;
   const warnHours = policy?.warnHours ?? AUDIO_RETENTION_WARN_HOURS;
   const retentionMs = hours * 60 * 60 * 1000;
@@ -55,8 +144,9 @@ export function audioRetentionAnchor(
   const raw = typeof manifest.endedAt === 'string' && manifest.endedAt.length > 0
     ? manifest.endedAt
     : manifest.updatedAt;
-  const start = Date.parse(raw);
-  if (!Number.isFinite(start)) return null;
+  const anchorMs = Date.parse(raw);
+  if (!Number.isFinite(anchorMs)) return null;
+  const start = Math.max(anchorMs, enabledAtMs);
   const deadlineMs = start + retentionMs;
   const remainingMs = deadlineMs - nowMs;
   return {
@@ -68,20 +158,51 @@ export function audioRetentionAnchor(
   };
 }
 
-/** Human label like "deletes in 12 h". Only when retention is effective. */
+/** Human countdown. Only when retention is effective and enabledAt is usable. */
 export function audioRetentionLabel(
   manifest: AudioRetentionManifestLike,
   nowMs: number,
   policy: AudioRetentionPolicy | null | undefined,
 ): {text: string; warn: boolean} | null {
-  const anchor = audioRetentionAnchor(manifest, nowMs, policy);
+  const clock = resolveAudioRetentionClock(policy, nowMs);
+  const anchor = audioRetentionAnchor(manifest, clock.effectiveNowMs, policy);
   if (!anchor || anchor.expired) return null;
   const hours = Math.max(1, Math.ceil(anchor.remainingMs / (60 * 60 * 1000)));
-  return {text: `deletes in ${hours} h`, warn: anchor.warn};
+  return {
+    text: `Audio is removed from this device about ${hours} h from now; transcript and notes are kept.`,
+    warn: anchor.warn,
+  };
 }
 
 export function isActiveRecordingPhase(phase: string): boolean {
   return ACTIVE.has(phase);
+}
+
+export function buildAudioTombstone(
+  recordingId: string,
+  deletedAtIso: string,
+  outcome: 'deleted' | 'failed',
+): AudioTombstone {
+  return {
+    contract: AUDIO_TOMBSTONE_CONTRACT,
+    recordingId,
+    deletedAt: deletedAtIso,
+    outcome,
+  };
+}
+
+export function buildAudioDeletedStub(
+  recordingId: string,
+  scope: string,
+  updatedAtIso: string,
+): AudioDeletedStub {
+  return {
+    contract: AUDIO_DELETED_STUB_CONTRACT,
+    recordingId,
+    scope,
+    phase: 'audio_deleted',
+    updatedAt: updatedAtIso,
+  };
 }
 
 /**
@@ -119,6 +240,12 @@ export type SweepPrivateRecordingAudioOptions = {
   /** Stop and seal an in-progress recording that hit its deadline before delete. */
   sealInProgress?: (recordingId: string) => Promise<AudioRetentionManifestLike | null>;
   parseManifest: (value: unknown, recordingId: string) => AudioRetentionManifestLike;
+  /** Skip a recording (e.g. already tombstoned). */
+  shouldSkipRecording?: (recordingId: string, manifest: AudioRetentionManifestLike) => boolean;
+  /** Per-recording failure hook; one poison row must not abort the sweep. */
+  recordFailure?: (recordingId: string, error: unknown) => void;
+  /** After a successful audio delete — write tombstone + audio-deleted stub. */
+  onDeleted?: (recordingId: string) => void | Promise<void>;
 };
 
 export type SweepPrivateRecordingAudioResult = {
@@ -131,27 +258,36 @@ export async function sweepPrivateRecordingAudio(
   options: SweepPrivateRecordingAudioOptions,
 ): Promise<SweepPrivateRecordingAudioResult> {
   if (!audioRetentionEffective(options.policy)) return {deleted: [], inspected: 0};
+  if (audioRetentionEnabledAtMs(options.policy) === null) return {deleted: [], inspected: 0};
   const nowMs = options.now();
+  const clock = resolveAudioRetentionClock(options.policy, nowMs);
+  if (!clock.allowDelete) return {deleted: [], inspected: 0};
+  const effectiveNowMs = clock.effectiveNowMs;
   const keys = (await options.store.keys()).filter((key) => key.startsWith('manifest:'));
   const deleted: string[] = [];
   for (const key of keys) {
     const recordingId = key.slice('manifest:'.length);
-    let raw = await options.store.read(key);
-    if (raw === null) continue;
-    let manifest = options.parseManifest(raw, recordingId);
-    if (manifest.recordingId !== recordingId) continue;
-    let anchor = audioRetentionAnchor(manifest, nowMs, options.policy);
-    if (!anchor?.expired) continue;
-    if (isActiveRecordingPhase(manifest.phase)) {
-      const sealed = await options.sealInProgress?.(recordingId);
-      if (sealed) {
+    try {
+      let raw = await options.store.read(key);
+      if (raw === null) continue;
+      let manifest = options.parseManifest(raw, recordingId);
+      if (manifest.recordingId !== recordingId) continue;
+      if (options.shouldSkipRecording?.(recordingId, manifest)) continue;
+      let anchor = audioRetentionAnchor(manifest, effectiveNowMs, options.policy);
+      if (!anchor?.expired) continue;
+      if (isActiveRecordingPhase(manifest.phase)) {
+        const sealed = options.sealInProgress ? await options.sealInProgress(recordingId) : null;
+        if (!sealed) continue;
         manifest = sealed;
-        anchor = audioRetentionAnchor(manifest, nowMs, options.policy);
+        anchor = audioRetentionAnchor(manifest, effectiveNowMs, options.policy);
         if (!anchor?.expired) continue;
       }
+      await deletePrivateRecordingAudio(options.store, recordingId, manifest.chunks.length);
+      deleted.push(recordingId);
+      await options.onDeleted?.(recordingId);
+    } catch (error) {
+      options.recordFailure?.(recordingId, error);
     }
-    await deletePrivateRecordingAudio(options.store, recordingId, manifest.chunks.length);
-    deleted.push(recordingId);
   }
   return {deleted, inspected: keys.length};
 }
@@ -163,7 +299,9 @@ export function refuseExpiredAudio(
   nowMs: number,
   policy: AudioRetentionPolicy | null | undefined,
 ): void {
-  const anchor = audioRetentionAnchor(manifest, nowMs, policy);
+  const clock = resolveAudioRetentionClock(policy, nowMs);
+  if (!clock.allowDelete) return;
+  const anchor = audioRetentionAnchor(manifest, clock.effectiveNowMs, policy);
   if (anchor?.expired) {
     throw Object.assign(new Error('Private recording audio expired'), {code: EXPIRED_AUDIO_REFUSED});
   }
