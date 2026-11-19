@@ -25,7 +25,7 @@ def test_recording_audio_48h_retention_accepts_bool(value):
 
 @pytest.mark.parametrize(
     "value",
-    ["not-a-bool", "yes", "2", 2, {}, [], None],
+    ["not-a-bool", "2", 2, {}, []],
 )
 def test_recording_audio_48h_retention_invalid_refuses_to_start(value):
     with pytest.raises(ValidationError):

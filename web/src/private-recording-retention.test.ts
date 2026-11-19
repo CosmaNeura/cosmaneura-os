@@ -20,7 +20,12 @@ const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const consent=()=>({modality:'in_person' as const,participant_regions:['US-NY'],method:'verbal_attestation' as const,all_parties_consented:true as const,granted_at:'2026-11-01T12:00:00.000Z',language:'en-US' as const});
 const policy={enabled:true as const,hours:48,warnHours:36};
 let idb:IDBFactory;
-beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);idb=new IDBFactory();});
+beforeEach(()=>{
+  vi.stubGlobal('crypto',webcrypto);
+  vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);
+  vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
+  idb=new IDBFactory();
+});
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();});
 
 function manifest(recordingId:string,endedAt:string,phase:PrivateRecordingManifest['phase']='sealed',chunks=1):PrivateRecordingManifest{
@@ -162,7 +167,7 @@ it('transcripts and ledgers survive audio deletion',async()=>{
   const transcriptKey='private-transcript:'+id(11);
   const ledger={contract:'cosmas.private-recording.ledger.v1',recording_id:id(11),kept:true};
   const transcript={contract:'cosmabot.private-transcript.v1',text:'Synthetic visit A notes'};
-  await seed(store,manifest(id(11),ended),{[ledgerKey]:ledger,[transcriptKey]:transcript,'visit-binding:'+id(11):{kept:true}});
+  await seed(store,manifest(id(11),ended),{[ledgerKey]:ledger,[transcriptKey]:transcript,['visit-binding:'+id(11)]:{kept:true}});
   await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:policy,now:()=>start+AUDIO_RETENTION_MS});
   expect(await store.read('manifest:'+id(11))).toBeNull();
   expect(await store.read('chunk:'+id(11)+':0')).toBeNull();
@@ -172,7 +177,7 @@ it('transcripts and ledgers survive audio deletion',async()=>{
   store.close();
 });
 
-it('either switch off means no deletion and no label',()=>{
+it('either switch off means no deletion and no label',async()=>{
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
   const row=manifest(id(12),ended);
   expect(audioRetentionEffective({enabled:false})).toBe(false);
@@ -183,6 +188,13 @@ it('either switch off means no deletion and no label',()=>{
   expect(audioRetentionLabel(row,start+AUDIO_RETENTION_MS/2,{enabled:false})).toBeNull();
   expect(audioRetentionLabel(row,start+AUDIO_RETENTION_MS/2,policy)?.text).toMatch(/^deletes in \d+ h$/);
   expect(audioRetentionLabel(row,start+36*60*60*1000+1,policy)?.warn).toBe(true);
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto});
+  await seed(store,row);
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:{enabled:false},now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([]);
+  expect((await sweepExpiredPrivateRecordingAudio(scope,'desktop',{store,audioRetention:null,now:()=>start+AUDIO_RETENTION_MS})).deleted).toEqual([]);
+  expect(await store.read('manifest:'+id(12))).not.toBeNull();
+  expect(await store.read('chunk:'+id(12)+':0')).not.toBeNull();
+  store.close();
 });
 
 it('refuseExpiredAudio uses a safe failure code with no audio bytes',()=>{
