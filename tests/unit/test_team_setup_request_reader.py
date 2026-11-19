@@ -7,6 +7,15 @@ from cosmas_os.api.team_setup_schemas import contract_header, read_team_request
 from cosmas_os.application.team_setup import MAX_REQUEST_BYTES
 from cosmas_os.application.workspace import WorkspaceError
 
+CORE_BODY = b'{"name":"x"}'
+EXACT_LIMIT_BODY = CORE_BODY + b" " * (MAX_REQUEST_BYTES - len(CORE_BODY))
+OVERSIZE_BODY = CORE_BODY + b" " * (MAX_REQUEST_BYTES + 1 - len(CORE_BODY))
+NESTED_BODY = b"[" * 10_000 + b"0" + b"]" * 10_000
+assert len(EXACT_LIMIT_BODY) == MAX_REQUEST_BYTES
+assert len(OVERSIZE_BODY) == MAX_REQUEST_BYTES + 1
+assert len(NESTED_BODY) <= MAX_REQUEST_BYTES
+assert len(EXACT_LIMIT_BODY) <= MAX_REQUEST_BYTES and len(b" ") <= MAX_REQUEST_BYTES
+
 
 class Body(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -34,7 +43,7 @@ class FakeRequest:
     def __init__(self, *, headers=None, query_params=None, chunks=None):
         self.headers = Headers(headers)
         self.query_params = {} if query_params is None else query_params
-        self._chunks = [b'{"name":"x"}'] if chunks is None else list(chunks)
+        self._chunks = [CORE_BODY] if chunks is None else list(chunks)
 
     async def stream(self):
         for chunk in self._chunks:
@@ -44,7 +53,7 @@ class FakeRequest:
 def baseline(**changes):
     headers = {"content-type": ["application/json"]}
     query_params = {}
-    chunks = [b'{"name":"x"}']
+    chunks = [CORE_BODY]
     if "headers" in changes:
         headers = changes.pop("headers")
     if "query_params" in changes:
@@ -94,6 +103,13 @@ async def test_read_team_request_accepts_content_type_with_charset():
 
 
 @pytest.mark.asyncio
+async def test_read_team_request_accepts_content_type_with_spaced_parameters():
+    request = baseline(headers={"content-type": ["application/json ; charset=utf-8"]})
+    result = await read_team_request(request, Body)
+    assert result.name == "x"
+
+
+@pytest.mark.asyncio
 async def test_read_team_request_accepts_body_split_across_chunks():
     request = baseline(chunks=[b'{"name":', b'"x"}'])
     result = await read_team_request(request, Body)
@@ -109,6 +125,13 @@ async def test_read_team_request_accepts_one_authorization_value():
         }
     )
     result = await read_team_request(request, Body)
+    assert result.name == "x"
+
+
+@pytest.mark.asyncio
+async def test_read_team_request_accepts_body_at_exact_byte_limit():
+    assert len(EXACT_LIMIT_BODY) == MAX_REQUEST_BYTES
+    result = await read_team_request(baseline(chunks=[EXACT_LIMIT_BODY]), Body)
     assert result.name == "x"
 
 
@@ -131,10 +154,13 @@ async def test_read_team_request_accepts_one_authorization_value():
                 "content-encoding": ["gzip"],
             }
         },
+        {"headers": {}},
         {"chunks": [b"{"]},
         {"chunks": [b'{"name":"x","name":"y"}']},
         {"chunks": [b'{"name":"x","other":1}']},
-        {"chunks": [b"x" * (MAX_REQUEST_BYTES + 1)]},
+        {"chunks": [OVERSIZE_BODY]},
+        {"chunks": [EXACT_LIMIT_BODY, b" "]},
+        {"chunks": [NESTED_BODY]},
     ],
     ids=[
         "nonempty_query",
@@ -142,10 +168,13 @@ async def test_read_team_request_accepts_one_authorization_value():
         "duplicate_content_type",
         "duplicate_authorization",
         "content_encoding",
+        "missing_content_type",
         "invalid_json",
         "duplicate_json_key",
         "extra_field",
         "oversized_body",
+        "oversized_across_chunks",
+        "deeply_nested_body",
     ],
 )
 async def test_read_team_request_rejects_one_fault(change):
@@ -153,3 +182,4 @@ async def test_read_team_request_rejects_one_fault(change):
         await read_team_request(baseline(**change), Body)
     assert exc.value.code == "invalid_team_setup_request"
     assert exc.value.status == 422
+    assert exc.value.__cause__ is None
