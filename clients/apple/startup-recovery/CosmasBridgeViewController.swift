@@ -195,6 +195,7 @@ import CosmasNativeAuth
         #endif
         #if canImport(CosmasWorkspaceAuthPlugin)
         do {
+            bridge?.registerPluginInstance(CosmasAppleSignInPlugin())
             guard let auth = bridge?.plugin(withName: "CosmasWorkspaceAuth") as? CosmasWorkspaceAuthPlugin else {
                 throw NSError(domain: "CosmasWorkspace", code: 1)
             }
