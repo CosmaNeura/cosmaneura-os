@@ -20,6 +20,18 @@ import {workspaceApiBase} from './workspace-base';
 /** Session-scoped import queue DB name (same helper the browser queue open uses). */
 export function savedRecordingImportQueueDatabaseName(sessionId:string){return captureQueueDatabaseName(sessionId);}
 
+/** Proven-complete creator-review statuses that may release transfer protection at open. */
+export type ProvenCompleteReviewStatus=
+  |'uploaded'|'processing'|'speech_failed'|'speech_retryable'
+  |'transcript_ready'|'handed_off'|'translation_pending'|'quality_blocked';
+export const PROVEN_COMPLETE_REVIEW_STATUSES:ReadonlySet<ProvenCompleteReviewStatus>=new Set([
+  'uploaded','processing','speech_failed','speech_retryable','transcript_ready','handed_off',
+  'translation_pending','quality_blocked',
+]);
+function isProvenCompleteReviewStatus(status:string):status is ProvenCompleteReviewStatus{
+  return (PROVEN_COMPLETE_REVIEW_STATUSES as ReadonlySet<string>).has(status);
+}
+
 export async function importSavedChunks(controller:Pick<CaptureFlowController,'snapshot'|'startRecording'|'pauseRecording'|'prepareContinuation'|'stopRecording'|'resumePendingWork'>,
   source:SavedRecordingSource,total:number,current:()=>boolean):Promise<void>{
   const check=()=>{if(!current())throw new QueueInvariantError('capture_access_unavailable');};
@@ -132,11 +144,6 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
     if(activeFlow&&activeFlow.sessionId!==sessionId)throw new QueueInvariantError('capture_saved_session_changed');
     let reviewOnly=false;
     let provenComplete=false;
-    /** Positive allowlist: only proven-complete upload statuses release protection at open. */
-    const PROVEN_COMPLETE_REVIEW_STATUSES=new Set([
-      'uploaded','processing','speech_failed','speech_retryable','transcript_ready','handed_off',
-      'translation_pending','quality_blocked',
-    ]);
     if(activeFlow?.reviewAfterUpload===true&&activeFlow.phase==='processing'){
       // This encrypted terminal record proves upload, not transcript readiness.
       // The mounted review panel reauthorizes every actual transcript read.
@@ -150,17 +157,22 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
       const view=await creatorReviewApi(workspaceId,sessionId,identity,abort.signal).read();
       if(!current())throw new QueueInvariantError('capture_access_unavailable');
       if(!await controller.restore()){
-        if(PROVEN_COMPLETE_REVIEW_STATUSES.has(view.status)){reviewOnly=true;provenComplete=true;}
-        else if(view.status==='capturing')throw new QueueInvariantError('capture_saved_session_changed');
+        // Main routing: every status except created/capturing opens reviewOnly.
+        if(view.status==='capturing')throw new QueueInvariantError('capture_saved_session_changed');
         else if(view.status==='created')await controller.prepareConfigured(sessionId);
-        else throw new QueueInvariantError('capture_saved_session_changed'); // failed/cancelled/unknown
+        else{
+          reviewOnly=true;
+          // Release protection only for proven-complete allowlisted statuses.
+          if(isProvenCompleteReviewStatus(view.status))provenComplete=true;
+        }
       }
     }
     if(!current())throw new QueueInvariantError('capture_access_unavailable');
-    // Release only on proven completion (reviewOnly or restored processing) — never on mere admitted.
+    // Release only on proven completion (allowlisted reviewOnly or restored processing) — never on mere admitted.
     if(provenComplete)await releaseTransferProtection();
     const selected=controller;
     let released=false;
+    let releasing:Promise<void>|undefined;
     /** Drop session-scoped import-queue IndexedDB only when retention is effective (identical to main when off). */
     const dropImportQueueCopy=()=>{
       if(!audioRetentionEffective(options.audioRetention))return;
@@ -168,9 +180,9 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
       try{indexedDB.deleteDatabase(savedRecordingImportQueueDatabaseName(sessionId));}catch{/* best-effort bound */}
     };
     return {controller:selected,reviewOnly,transcribe:()=>{
-      // Terminal success (review-only or imported chunks): release sweep protection when retention is on.
+      // Terminal success (proven-complete reviewOnly or imported chunks): release when retention is on.
       // Never delete transfer:<id> — panel CAS persist/relaunch needs that row.
-      if(reviewOnly)return releaseTransferProtection();
+      if(reviewOnly)return provenComplete?releaseTransferProtection():Promise.resolve();
       if(!task)reference=null;
       // Outer .finally clears task so a sync rejection cannot stick on the runtime.
       return task??=(async()=>{
@@ -186,9 +198,14 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
       // Switches off: identical to main — only releaseUploadedCapture, leave queue open.
       if(!audioRetentionEffective(options.audioRetention))return selected.releaseUploadedCapture();
       if(released)return;
-      await selected.releaseUploadedCapture();
-      released=true;
-      queue?.close();queue=undefined;dropImportQueueCopy();
+      // Concurrent Continue: one in-flight release; clear on rejection so a retry can run.
+      return releasing??=(async()=>{
+        try{
+          await selected.releaseUploadedCapture();
+          released=true;
+          queue?.close();queue=undefined;dropImportQueueCopy();
+        }catch(error){releasing=undefined;throw error;}
+      })();
     },
     uploadProgress:async()=>{
       if(!queue)return {confirmed:0,total:options.chunks,reference:reference??null};

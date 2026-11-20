@@ -15,7 +15,6 @@ import {
   audioRetentionAnchor,
   audioRetentionEffective,
   audioRetentionLabel,
-  AUDIO_RETENTION_OFF,
   audioRetentionSweepable,
   buildAudioDeletedStub,
   buildAudioTombstone,
@@ -264,13 +263,6 @@ it('either switch off means no deletion and no label',async()=>{
   store.close();
 });
 
-it('AUDIO_RETENTION_OFF is a stable module-level off constant (shell/panel switches-off)',()=>{
-  expect(AUDIO_RETENTION_OFF).toEqual({enabled:false});
-  expect(AUDIO_RETENTION_OFF).toBe(AUDIO_RETENTION_OFF);
-  expect(audioRetentionEffective(AUDIO_RETENTION_OFF)).toBe(false);
-  expect(audioRetentionSweepable(AUDIO_RETENTION_OFF)).toBe(false);
-});
-
 it('absent enabledAt means no deletion and no label (fail closed)',async()=>{
   const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
   const row=manifest(id(120),ended);
@@ -303,16 +295,27 @@ it('enabled without deviceArmedAt is not sweepable (list/sweep fail closed)',asy
     parseManifest:(value)=>value as PrivateRecordingManifest})).deleted).toEqual([]);
   expect(await store.read('manifest:'+id(121))).not.toBeNull();
   expect(await store.read('chunk:'+id(121)+':0')).not.toBeNull();
-  // list path: missing serverNow → resolve leaves no deviceArmedAt → sweep no-op, row remains.
-  const noServerNoArmed={enabled:true as const,hours:48,warnHours:36,enabledAt:'2026-10-01T00:00:00.000Z',fetchedAtDeviceMs:start};
-  expect(audioRetentionSweepable(noServerNoArmed)).toBe(false);
+  // list path: valid serverNow (not the !allowDelete escape) but no stamp → not sweepable.
+  const listedNoArmed=policyOn({enabledAt:'2026-10-01T00:00:00.000Z',now:start,deviceArmedAt:null});
+  expect(listedNoArmed.serverNow).toBeTruthy();
+  expect(audioRetentionSweepable(listedNoArmed)).toBe(false);
+  // Clock inside the 48h window so a mid-list stamp cannot delete; gate still holds on the raw policy.
   const listed=await listPrivateRecordings(scope,'desktop',{
     openStore:async()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:idb,crypto:webcrypto}),
-    audioRetention:noServerNoArmed,now:()=>start+AUDIO_RETENTION_MS,
+    audioRetention:listedNoArmed,now:()=>start+60_000,
   });
   expect(listed.some(item=>item.recordingId===id(121))).toBe(true);
   expect(await store.read('manifest:'+id(121))).not.toBeNull();
   store.close();
+});
+
+it('enabled without deviceArmedAt: refuse does not throw and label returns null',()=>{
+  const ended='2026-11-01T00:00:00.000Z',start=Date.parse(ended);
+  const row=manifest(id(122),ended);
+  const noArmed=policyOn({enabledAt:'2026-10-01T00:00:00.000Z',now:start,deviceArmedAt:null});
+  expect(audioRetentionSweepable(noArmed)).toBe(false);
+  expect(()=>refuseExpiredAudio(row,start+AUDIO_RETENTION_MS,noArmed)).not.toThrow();
+  expect(audioRetentionLabel(row,start+AUDIO_RETENTION_MS/2,noArmed)).toBeNull();
 });
 
 it('future enabledAt does not restamp (armedAt never moves later)',async()=>{

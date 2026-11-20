@@ -273,12 +273,13 @@ export function audioRetentionAnchor(
   };
 }
 
-/** Human countdown. Only when retention is effective and enabledAt is usable. */
+/** Human countdown. Only when retention is sweepable (enabledAt + deviceArmedAt). */
 export function audioRetentionLabel(
   manifest: AudioRetentionManifestLike,
   nowMs: number,
   policy: AudioRetentionPolicy | null | undefined,
 ): {text: string; warn: boolean} | null {
+  if (!audioRetentionSweepable(policy)) return null;
   const clock = resolveAudioRetentionClock(policy, nowMs);
   const anchor = audioRetentionAnchor(manifest, clock.effectiveNowMs, policy);
   if (!anchor || anchor.expired) return null;
@@ -430,6 +431,7 @@ export function refuseExpiredAudio(
   options?: {skip?: boolean},
 ): void {
   if (options?.skip) return;
+  if (!audioRetentionSweepable(policy)) return;
   const clock = resolveAudioRetentionClock(policy, nowMs);
   if (!clock.allowDelete) return;
   const anchor = audioRetentionAnchor(manifest, clock.effectiveNowMs, policy);

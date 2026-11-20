@@ -26,7 +26,7 @@ import {
   type PrivateRecordingRuntime,
   type PrivateRecordingStore,
 } from './private-recording-runtime';
-import {importSavedChunks,openSavedRecordingRuntime,savedRecordingImportQueueDatabaseName,savedRecordingImportStoreNames} from './saved-recording-runtime';
+import {importSavedChunks,openSavedRecordingRuntime,PROVEN_COMPLETE_REVIEW_STATUSES,savedRecordingImportQueueDatabaseName,savedRecordingImportStoreNames} from './saved-recording-runtime';
 import type {PreparedCapture} from './capture-api';
 import {persistSavedRecordingTransfer} from './SavedRecordingTranscriptionPanel';
 import type {SavedRecordingEntry} from './session/recording-model';
@@ -321,6 +321,30 @@ it('second releaseUploadedCapture with retention on returns early; close skips d
   store.close();
 });
 
+it('concurrent releaseUploadedCapture runs once and closes the import queue once',async()=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
+  await store.write('transfer:'+recordingId,null,legacyTransfer({admitted}));
+  await seedFlow(active());
+  const recording=sealedRecording(vi.fn(async function*(){throw Error('confirmed upload must not read audio');}));
+  const on=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:retentionOn});
+  let finish!:()=>void;
+  const releaseSpy=vi.spyOn(on.controller,'releaseUploadedCapture').mockImplementation(
+    ()=>new Promise<void>(resolve=>{finish=()=>resolve();}));
+  const deleteSpy=vi.spyOn(indexedDB,'deleteDatabase');
+  const first=on.releaseUploadedCapture();
+  const second=on.releaseUploadedCapture();
+  await Promise.resolve();
+  expect(releaseSpy).toHaveBeenCalledTimes(1);
+  finish();
+  await Promise.all([first,second]);
+  expect(releaseSpy).toHaveBeenCalledTimes(1);
+  expect(deleteSpy).toHaveBeenCalledTimes(1);
+  expect(deleteSpy).toHaveBeenCalledWith(savedRecordingImportQueueDatabaseName(sessionId));
+  await on.close();
+  store.close();
+});
+
 it('with retention off, releaseUploadedCapture matches main (queue stays; real uploadProgress after release/re-release/close/reopen)',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
   await store.write('transfer:'+recordingId,null,legacyTransfer({admitted}));
@@ -348,18 +372,52 @@ it('with retention off, releaseUploadedCapture matches main (queue stays; real u
   store.close();
 });
 
-it('failed/cancelled/unknown review status does not release protection at open',async()=>{
+it.each(['failed','cancelled'] as const)('with retention off, %s opens reviewOnly without releasing',async status=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
+  const prior=legacyTransfer({admitted});
+  await store.write('transfer:'+recordingId,null,prior);
+  review.read.mockResolvedValue({status});
+  const recording=sealedRecording(vi.fn(async function*(){throw Error(status+' must not read audio');}));
+  const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:{enabled:false}});
+  expect(opened.reviewOnly).toBe(true);
+  await opened.transcribe(); // reviewOnly + not provenComplete → no release
+  expect(await isTransferRetentionReleased(store,recordingId)).toBe(false);
+  expect(await isAudioRetentionProtected(store,recordingId)).toBe(true);
+  expect(await store.read('transfer:'+recordingId)).toEqual(prior);
+  await opened.close();
+  store.close();
+});
+
+it.each([...PROVEN_COMPLETE_REVIEW_STATUSES])('allowlisted status %s opens reviewOnly and releases at open',async status=>{
+  const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
+  const prior=legacyTransfer({admitted});
+  await store.write('transfer:'+recordingId,null,prior);
+  review.read.mockResolvedValue({status});
+  const recording=sealedRecording(vi.fn(async function*(){throw Error(status+' must not read audio');}));
+  const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:retentionOn});
+  expect(opened.reviewOnly).toBe(true);
+  expect(await isTransferRetentionReleased(store,recordingId)).toBe(true);
+  expect(await store.read('transfer:'+recordingId)).toEqual(prior);
+  await opened.close();
+  store.close();
+});
+
+it('failed/cancelled/unknown with retention on open reviewOnly but do not release at open',async()=>{
   const store=await openPrivateRecordingStore(scope,'desktop',{indexedDB:indexedDB as IDBFactory,crypto:webcrypto});
   const prior=legacyTransfer({admitted});
   await store.write('transfer:'+recordingId,null,prior);
   const recording=sealedRecording(vi.fn(async function*(){throw Error('failed status must not read audio');}));
   for(const status of ['failed','cancelled','unknown_status'] as const){
     review.read.mockResolvedValue({status});
-    await expect(openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
-      scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:retentionOn}))
-      .rejects.toMatchObject({code:'capture_saved_session_changed'});
+    const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
+      scope,recording,chunks,platform:'desktop',isCurrent:()=>true,store,audioRetention:retentionOn});
+    expect(opened.reviewOnly).toBe(true);
+    await opened.transcribe();
     expect(await isTransferRetentionReleased(store,recordingId)).toBe(false);
     expect(await isAudioRetentionProtected(store,recordingId)).toBe(true);
+    await opened.close();
   }
   expect(await store.read('transfer:'+recordingId)).toEqual(prior);
   store.close();
