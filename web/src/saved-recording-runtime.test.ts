@@ -141,7 +141,7 @@ it('refuses expired audio with a safe code and never reads chunk bytes',async()=
   } as unknown as PrivateRecordingRuntime;
   let current=true;
   await expect(openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},
-    scope,recording,chunks,platform:'desktop',isCurrent:()=>current,audioRetention:{enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:Date.parse(ended)},
+    scope,recording,chunks,platform:'desktop',isCurrent:()=>current,audioRetention:{enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',deviceArmedAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:Date.parse(ended)},
     now:()=>Date.parse(ended)+48*60*60*1000})).rejects.toMatchObject({code:'private_recording_audio_expired'});
   expect(recording.savedChunks).not.toHaveBeenCalled();
   expect(fetch).not.toHaveBeenCalled();
@@ -162,7 +162,7 @@ it('skips refuse while transfer key protects, then refuses after retention relea
     delete:async(key:string)=>{rows.delete(key);},
     close:()=>{},
   };
-  const policy={enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:Date.parse(ended)};
+  const policy={enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',deviceArmedAt:'2026-10-01T00:00:00.000Z',serverNow:ended,fetchedAtDeviceMs:Date.parse(ended)};
   const now=()=>Date.parse(ended)+48*60*60*1000;
   // Protected by transfer: — refuse is skipped; open may succeed as review-only.
   const opened=await openSavedRecordingRuntime({workspaceId,admitted,identity:{mode:'clerk_jwt',getToken:async()=>null},

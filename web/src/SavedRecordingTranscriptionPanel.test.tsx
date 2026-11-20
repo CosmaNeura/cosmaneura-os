@@ -84,9 +84,11 @@ it('maps EXPIRED_AUDIO_REFUSED open failure to AUDIO_DELETED_USER_MESSAGE',async
 });
 it('makes no audioRetention policy request when the parent passes the prop',async()=>{
   const {privateRecordingApi}=await import('./private-recording-api');
+  const {AUDIO_RETENTION_OFF}=await import('./private-recording-retention');
   const spy=vi.spyOn(privateRecordingApi,'audioRetention');
-  await mount(false,{audioRetention:{enabled:false}});
+  await mount(false,{audioRetention:AUDIO_RETENTION_OFF});
   expect(spy).not.toHaveBeenCalled();
+  expect(AUDIO_RETENTION_OFF).toEqual({enabled:false});
   spy.mockRestore();
 });
 it.each(['capture_request_conflict','capture_consent_required','capture_consent_unavailable'])('retains exact intent and offers recordings rather than futile retry for %s',async code=>{

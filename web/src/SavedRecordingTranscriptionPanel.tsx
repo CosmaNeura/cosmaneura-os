@@ -131,7 +131,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   workspace:Workspace;team:ProviderTeam;isCurrent:()=>boolean;taskBot?:CaptureTaskBot;locked:boolean;notesEnabled:boolean;
   onDraftLock:(v:boolean)=>void;onReviewDraft:(v:CaptureDraft)=>void;onCurrentDraft:(v:CaptureDraft)=>void;
   scratchpad?:SavedScratchpad;notebookDirty:boolean;onNotebook:()=>void;onRecordings?:()=>void;onNavigationLock?:(busy:boolean)=>void;
-  /** T1: optional injected policy; when omitted the panel GETs once for this workspace. */
+  /** Parent-injected retention policy (stable off constant). Panel does not GET. */
   audioRetention?:AudioRetentionPolicy|null}){
   const origin=entry.originWorkspace??workspace;
   const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[consented,setConsented]=useState(false),[error,setError]=useState('');
