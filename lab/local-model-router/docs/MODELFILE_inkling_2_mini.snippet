@@ -1,0 +1,8 @@
+# Documented Modelfile snippet for inkling-2-mini (lab-only).
+# Do not apply on John's Mac from this repository; this is reference for CoS.
+# num_ctx >= 18432 covers T3 input + thinking overhead + raised num_predict.
+
+FROM inkling-2-mini
+
+PARAMETER num_predict 8192
+PARAMETER num_ctx 18432
