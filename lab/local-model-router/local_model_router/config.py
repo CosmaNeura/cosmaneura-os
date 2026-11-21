@@ -10,6 +10,18 @@ from typing import Any
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = PACKAGE_ROOT / "config" / "router_config.json"
 
+# Hard-coded denylist. Config may only ADD more flags.
+HARDCODED_FORBIDDEN_AIDER_FLAGS: frozenset[str] = frozenset(
+    {
+        "--yes",
+        "--yes-always",
+        "--dangerously-skip-permissions",
+        "--full-access",
+        "--bypass",
+        "--codex-full-access",
+    }
+)
+
 
 @dataclass(frozen=True)
 class SizeBounds:
@@ -27,6 +39,7 @@ class LaneConfig:
     max_size: str | None = None
     num_predict: int | None = None
     timeout_seconds: int | None = None
+    num_ctx: int | None = None
 
 
 @dataclass(frozen=True)
@@ -52,8 +65,11 @@ class RouterConfig:
     max_follow_ups: int
     forbidden_aider_flags: tuple[str, ...]
     metrics_jsonl_path: str
+    approval_ledger_path: str
+    azure_spend_ledger_path: str
     azure_codex_mini_endpoint_env: str
     azure_gpt_5_3_codex_endpoint_env: str
+    azure_monthly_cap_usd: float
 
     def lane_for_task(self, task_type: str) -> LaneConfig | None:
         for lane in self.lanes.values():
@@ -76,6 +92,16 @@ class RouterConfig:
                 return name
         return ordered[-1][0]
 
+    def merged_forbidden_flags(self) -> frozenset[str]:
+        return HARDCODED_FORBIDDEN_AIDER_FLAGS | frozenset(self.forbidden_aider_flags)
+
+
+def assert_fable_locked(config: RouterConfig) -> None:
+    if config.fable_configurable:
+        raise RuntimeError("fable.configurable must be false; Fable cannot be turned off.")
+    if not config.fable_review_required:
+        raise RuntimeError("fable.review_required must be true.")
+
 
 def load_config(path: Path | None = None) -> RouterConfig:
     config_path = path or DEFAULT_CONFIG_PATH
@@ -95,6 +121,7 @@ def load_config(path: Path | None = None) -> RouterConfig:
             max_size=body.get("max_size"),
             num_predict=_optional_int(body.get("num_predict")),
             timeout_seconds=_optional_int(body.get("timeout_seconds")),
+            num_ctx=_optional_int(body.get("num_ctx")),
         )
     harness = raw["harness"]
     memory = raw["memory"]
@@ -103,7 +130,8 @@ def load_config(path: Path | None = None) -> RouterConfig:
     promotion = raw["promotion"]
     step_rules = raw["step_rules"]
     azure = raw["azure"]
-    return RouterConfig(
+    paths = raw.get("paths", {})
+    config = RouterConfig(
         raw=raw,
         sizes=sizes,
         lanes=lanes,
@@ -125,11 +153,16 @@ def load_config(path: Path | None = None) -> RouterConfig:
         aider_map_tokens=int(harness["aider_map_tokens"]),
         max_attempts=int(harness["max_attempts"]),
         max_follow_ups=int(harness["max_follow_ups"]),
-        forbidden_aider_flags=tuple(harness["forbidden_aider_flags"]),
+        forbidden_aider_flags=tuple(harness.get("forbidden_aider_flags", ())),
         metrics_jsonl_path=str(raw["metrics"]["jsonl_path"]),
+        approval_ledger_path=str(paths.get("approval_ledger", "state/approval_ledger.json")),
+        azure_spend_ledger_path=str(paths.get("azure_spend_ledger", "state/azure_spend.json")),
         azure_codex_mini_endpoint_env=str(azure["codex_mini_endpoint_env"]),
         azure_gpt_5_3_codex_endpoint_env=str(azure["gpt_5_3_codex_endpoint_env"]),
+        azure_monthly_cap_usd=float(azure["monthly_cap_usd"]),
     )
+    assert_fable_locked(config)
+    return config
 
 
 def _optional_int(value: Any) -> int | None:

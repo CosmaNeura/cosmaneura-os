@@ -15,7 +15,6 @@ class Job:
     file_count: int
     token_estimate: int
     log_kind: str | None = None
-    # Optional fields for guard evaluation / dry-run scenarios.
     tokens_sent: int | None = None
     tokens_processed: int | None = None
     summary_text: str | None = None
@@ -27,6 +26,8 @@ class Job:
     security_sensitive: bool = False
     multi_file_feature: bool = False
     ambiguous_spec: bool = False
+    # Optional spend signal for Azure monthly-cap checks (USD, synthetic).
+    azure_month_spend_usd: float | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Job:
@@ -47,6 +48,7 @@ class Job:
             security_sensitive=bool(raw.get("security_sensitive", False)),
             multi_file_feature=bool(raw.get("multi_file_feature", False)),
             ambiguous_spec=bool(raw.get("ambiguous_spec", False)),
+            azure_month_spend_usd=_optional_float(raw.get("azure_month_spend_usd")),
         )
 
 
@@ -70,6 +72,8 @@ class RouteDecision:
     plan_steps: tuple[str, ...] = field(default_factory=tuple)
     guards: tuple[GuardResult, ...] = field(default_factory=tuple)
     aborted: bool = False
+    batch_kind: str = "local"  # local | azure | cloud | none
+    vendor: str = "local"
 
 
 def _optional_int(value: Any) -> int | None:

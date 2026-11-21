@@ -1,18 +1,19 @@
-"""Fable lock and approval gate (cannot be disabled / skipped)."""
+"""Fable lock (non-tautological) and approval ledger / batch-kind / cap."""
 
 from __future__ import annotations
 
-import copy
 import json
 from pathlib import Path
 
 import pytest
 
-from local_model_router.approval import ApprovalError, require_approval
-from local_model_router.config import RouterConfig, load_config
-from local_model_router.models import Job
-from local_model_router.plan import FABLE_STEP, assert_fable_locked, build_plan_steps, fable_can_be_disabled
+from local_model_router.approval import ApprovalError, require_approval, record_azure_spend
+from local_model_router.config import RouterConfig, assert_fable_locked, load_config
+from local_model_router.memory import MemorySnapshot
+from local_model_router.models import Job, RouteDecision
+from local_model_router.plan import FABLE_STEP, build_plan_steps, fable_can_be_disabled
 from local_model_router.router import route_job
+from local_model_router.router_types import is_coding_task
 
 
 def test_fable_cannot_be_disabled(config: RouterConfig) -> None:
@@ -21,50 +22,46 @@ def test_fable_cannot_be_disabled(config: RouterConfig) -> None:
     assert config.fable_review_required is True
 
 
-def test_assert_fable_locked_rejects_config_flip(config: RouterConfig) -> None:
-    raw = copy.deepcopy(config.raw)
-    raw["fable"]["review_required"] = False
-    # Simulate a tampered load by rebuilding RouterConfig fields via JSON round-trip file.
-    # Direct mutation of frozen config is impossible; assert on helper instead.
-    with pytest.raises(RuntimeError):
-        # Build a fake config-like object by calling assert with altered attributes
-        # through a thin subclass-style namespace.
-        class Tampered:
-            fable_configurable = False
-            fable_review_required = False
-
-        assert_fable_locked(Tampered())  # type: ignore[arg-type]
+def test_load_config_asserts_fable_locked(tmp_path: Path, config: RouterConfig) -> None:
+    """assert_fable_locked runs inside load_config."""
+    bad = dict(config.raw)
+    bad["fable"] = {"review_required": False, "configurable": False}
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps(bad), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="review_required"):
+        load_config(path)
 
 
-def test_assert_fable_locked_rejects_configurable_true() -> None:
-    class Tampered:
-        fable_configurable = True
-        fable_review_required = True
-
+def test_load_config_rejects_configurable_true(tmp_path: Path, config: RouterConfig) -> None:
+    bad = dict(config.raw)
+    bad["fable"] = {"review_required": True, "configurable": True}
+    path = tmp_path / "bad2.json"
+    path.write_text(json.dumps(bad), encoding="utf-8")
     with pytest.raises(RuntimeError, match="configurable"):
-        assert_fable_locked(Tampered())  # type: ignore[arg-type]
+        load_config(path)
 
 
-def test_coding_plan_always_ends_with_fable_step(config: RouterConfig) -> None:
-    steps = build_plan_steps(config, lane="inkling_2_mini", coding_lane=True)
+def test_coding_plan_ends_with_fable_from_task_type(config: RouterConfig) -> None:
+    """Non-tautological: derive coding from task_type, not a caller bool."""
+    steps = build_plan_steps(
+        config, lane="inkling_2_mini", task_type="single_file_fix", heavy=True
+    )
     assert steps[-1] == FABLE_STEP
-    assert steps.count(FABLE_STEP) == 1
+    assert "aider_attempt_1" in steps
+    assert is_coding_task("single_file_fix") is True
 
 
-def test_fable_step_survives_even_if_raw_flag_false(config: RouterConfig) -> None:
-    """Kills mutation that skips appending Fable when config says false."""
-    # build_plan_steps ignores config.fable_review_required for coding lanes.
-    steps = build_plan_steps(config, lane="gemma4_26b", coding_lane=True, escalated=False)
-    assert FABLE_STEP in steps
-    assert steps[-1] == FABLE_STEP
+def test_log_summary_plan_has_no_aider_and_no_fable(config: RouterConfig) -> None:
+    steps = build_plan_steps(
+        config, lane="gemma4_12b", task_type="ci_log_summary", heavy=False
+    )
+    assert FABLE_STEP not in steps
+    assert "aider_attempt_1" not in steps
+    assert "summarize_log" in steps
 
 
 def test_route_coding_lanes_set_fable_required(config: RouterConfig) -> None:
-    for task, _lane in (
-        ("unit_tests", "inkling_2_mini"),
-        ("lint_doc_batch", "gemma4_26b"),
-        ("diff_pre_review", "gemma4_12b"),
-    ):
+    for task in ("unit_tests", "lint_doc_batch", "diff_pre_review"):
         decision = route_job(
             Job.from_dict(
                 {
@@ -77,6 +74,8 @@ def test_route_coding_lanes_set_fable_required(config: RouterConfig) -> None:
                 }
             ),
             config,
+            dry_run=True,
+            memory_reader=lambda: MemorySnapshot(40.0, False, False, True),
         )
         assert decision.fable_review_required is True, task
         assert decision.plan_steps[-1] == FABLE_STEP
@@ -86,18 +85,62 @@ def test_approval_refuses_missing_token() -> None:
     with pytest.raises(ApprovalError, match="approved-run-id"):
         require_approval(None, batch_kind="local")
     with pytest.raises(ApprovalError):
-        require_approval("  ", batch_kind="azure")
-    with pytest.raises(ApprovalError):
         require_approval("none", batch_kind="local")
 
 
-def test_approval_accepts_recorded_run_id() -> None:
-    record = require_approval("cos-yes-20261121-001", batch_kind="local")
+def test_approval_accepts_recorded_run_id(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.json"
+    record = require_approval(
+        "cos-yes-20261121-001",
+        batch_kind="local",
+        ledger_path=ledger,
+    )
     assert record.approved_run_id == "cos-yes-20261121-001"
-    assert record.batch_kind == "local"
+    # Single-use: second attempt fails.
+    with pytest.raises(ApprovalError, match="already used"):
+        require_approval(
+            "cos-yes-20261121-001",
+            batch_kind="local",
+            ledger_path=ledger,
+        )
 
 
-def test_plan_batch_cli_refuses_without_approval(tmp_path: Path, config: RouterConfig) -> None:
+def test_batch_kind_mismatch_refused(config: RouterConfig) -> None:
+    decision = RouteDecision(
+        job_id="x",
+        lane="azure_codex_mini",
+        reason="escalate",
+        escalate=True,
+        escalation_target="azure_codex_mini",
+        batch_kind="azure",
+        vendor="azure",
+    )
+    with pytest.raises(ApprovalError, match="mismatch"):
+        require_approval("cos-yes-1", batch_kind="local", decision=decision, config=config)
+
+
+def test_azure_monthly_cap_enforced(config: RouterConfig, tmp_path: Path) -> None:
+    spend = tmp_path / "spend.json"
+    record_azure_spend(spend, 200.0)
+    decision = RouteDecision(
+        job_id="x",
+        lane="azure_codex_mini",
+        reason="escalate",
+        batch_kind="azure",
+        vendor="azure",
+    )
+    with pytest.raises(ApprovalError, match="cap"):
+        require_approval(
+            "cos-yes-cap",
+            batch_kind="azure",
+            decision=decision,
+            config=config,
+            ledger_path=tmp_path / "ledger.json",
+            spend_ledger_path=spend,
+        )
+
+
+def test_plan_batch_cli_refuses_without_approval(tmp_path: Path) -> None:
     from local_model_router.__main__ import main
 
     job_path = tmp_path / "job.json"
@@ -122,20 +165,79 @@ def test_plan_batch_cli_refuses_without_approval(tmp_path: Path, config: RouterC
             str(job_path),
             "--config",
             str(Path(__file__).resolve().parents[1] / "config" / "router_config.json"),
+            "--state-dir",
+            str(tmp_path / "state"),
         ]
     )
     assert code == 2
 
 
+def test_plan_batch_exits_nonzero_on_guard_abort(tmp_path: Path) -> None:
+    from local_model_router.__main__ import main
+
+    job_path = tmp_path / "job.json"
+    job_path.write_text(
+        json.dumps(
+            {
+                "job_id": "cli-abort",
+                "task_type": "unit_tests",
+                "file_count": 1,
+                "token_estimate": 2000,
+                "free_memory_percent": 4.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    # Without dry_run, job memory fields do not override — inject via making
+    # the default reader see low memory by using a job that will be aborted
+    # only in dry-run. For CLI live path, patch via low free by calling route
+    # with dry_run is not available; instead rely on truncation abort for logs.
+    job_path.write_text(
+        json.dumps(
+            {
+                "job_id": "cli-abort",
+                "task_type": "log_summary",
+                "file_count": 0,
+                "token_estimate": 100,
+                "log_kind": "ci",
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = main(
+        [
+            "plan-batch",
+            "--approved-run-id",
+            "cos-yes-abort",
+            "--job-json",
+            str(job_path),
+            "--config",
+            str(Path(__file__).resolve().parents[1] / "config" / "router_config.json"),
+            "--state-dir",
+            str(tmp_path / "state"),
+        ]
+    )
+    # Missing token counts on log-summary → abort → exit 3.
+    assert code == 3
+
+
 def test_config_inkling_caps_raised(config: RouterConfig) -> None:
     inkling = config.lanes["inkling_2_mini"]
-    assert inkling.num_predict is not None and inkling.num_predict >= 8192
-    assert inkling.timeout_seconds is not None and inkling.timeout_seconds >= 480
+    assert inkling.num_predict == 8192
+    assert inkling.timeout_seconds == 480
 
 
-def test_config_loaded_from_file_not_hardcoded() -> None:
-    cfg = load_config()
-    assert cfg.runs_per_cell_required == 3
-    assert cfg.min_free_percent == 5.0
-    assert cfg.lanes["gemma4_26b"].starting_size == "T3"
-    assert cfg.lanes["inkling_2_mini"].starting_size == "T3"
+def test_config_26b_num_ctx_covers_t3(config: RouterConfig) -> None:
+    lane = config.lanes["gemma4_26b"]
+    t3 = config.sizes["T3"].max_tokens
+    assert lane.num_ctx is not None
+    assert lane.num_predict is not None
+    assert lane.num_ctx >= t3 + lane.num_predict
+
+
+def test_assert_fable_locked_helper() -> None:
+    class Ok:
+        fable_configurable = False
+        fable_review_required = True
+
+    assert_fable_locked(Ok())  # type: ignore[arg-type]

@@ -17,6 +17,8 @@
     "file_count": 0,
     "token_estimate": 900,
     "log_kind": "build",
+    "source_text": "build finished in 42 seconds with 0 errors",
+    "summary_text": "Build finished in 42 seconds with 0 errors.",
     "tokens_sent": 900,
     "tokens_processed": 900,
     "free_memory_percent": 60.0
@@ -27,6 +29,8 @@
     "file_count": 0,
     "token_estimate": 1500,
     "log_kind": "test",
+    "source_text": "pytest collected 52 items, 52 passed",
+    "summary_text": "pytest collected 52 items, 52 passed.",
     "tokens_sent": 1500,
     "tokens_processed": 1500,
     "free_memory_percent": 58.0
@@ -107,5 +111,21 @@
     "free_memory_percent": 4.2,
     "gemma_12b_loaded": false,
     "swap_watchdog_tripped": false
+  },
+  {
+    "job_id": "job-longlog-single-file-keeps-fable",
+    "task_type": "single_file_fix",
+    "file_count": 1,
+    "token_estimate": 3000,
+    "log_kind": "long",
+    "free_memory_percent": 40.0,
+    "gemma_12b_loaded": false
+  },
+  {
+    "job_id": "job-unknown-unrouted",
+    "task_type": "briefs_and_prompts",
+    "file_count": 1,
+    "token_estimate": 1000,
+    "free_memory_percent": 40.0
   }
 ]

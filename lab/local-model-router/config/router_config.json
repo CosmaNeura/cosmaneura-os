@@ -39,7 +39,8 @@
       "max_size": "T3",
       "heavy": true,
       "num_predict": 2048,
-      "timeout_seconds": 300
+      "timeout_seconds": 300,
+      "num_ctx": 10240
     }
   },
   "escalation_chain": [
@@ -78,16 +79,13 @@
     "aider_map_tokens": 0,
     "max_attempts": 1,
     "max_follow_ups": 1,
-    "forbidden_aider_flags": [
-      "--yes",
-      "--yes-always",
-      "--dangerously-skip-permissions",
-      "--full-access",
-      "--bypass",
-      "--codex-full-access"
-    ]
+    "forbidden_aider_flags": []
   },
   "metrics": {
     "jsonl_path": "metrics/router_metrics.jsonl"
+  },
+  "paths": {
+    "approval_ledger": "state/approval_ledger.json",
+    "azure_spend_ledger": "state/azure_spend.json"
   }
 }

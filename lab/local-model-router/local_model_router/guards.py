@@ -8,28 +8,30 @@ from collections.abc import Iterable
 from .config import RouterConfig
 from .memory import MemoryReader, MemorySnapshot, default_memory_reader
 from .models import GuardResult, Job
+from .router_types import LOG_TASK_TYPES
 
-# Numbers and ID-like tokens that must appear in the source for 12B summaries.
-_NUMBER_OR_ID = re.compile(
-    r"""
-    (?<![A-Za-z0-9_])            # left boundary
-    (?:
-        \#?[A-Za-z]?[0-9]+[A-Za-z0-9_-]*   # numeric / ticket-ish IDs
-      | [A-Fa-f0-9]{8,}                      # hex hashes (8+)
-    )
-    (?![A-Za-z0-9_])             # right boundary
-    """,
-    re.VERBOSE,
-)
+# Any token containing a digit (run42, TS2345, job_17, abc1234, #401, …).
+_TOKEN_WITH_DIGIT = re.compile(r"[#A-Za-z0-9_-]*\d[#A-Za-z0-9_-]*")
 
 
 def check_truncation(job: Job) -> GuardResult:
-    """Hard fail when tokens processed are fewer than tokens sent."""
+    """Hard fail when tokens processed < tokens sent.
+
+    Log-summary results that omit token counts fail closed.
+    """
+    is_log = job.task_type in LOG_TASK_TYPES
     if job.tokens_sent is None or job.tokens_processed is None:
+        if is_log:
+            return GuardResult(
+                name="truncation",
+                ok=False,
+                detail="FAIL: log-summary result missing tokens_sent/tokens_processed.",
+                abort=True,
+            )
         return GuardResult(
             name="truncation",
             ok=True,
-            detail="No truncation signals provided; skipped.",
+            detail="No truncation signals provided; skipped (non-log task).",
         )
     if job.tokens_processed < job.tokens_sent:
         return GuardResult(
@@ -52,20 +54,37 @@ def check_truncation(job: Job) -> GuardResult:
 
 
 def extract_numbers_and_ids(text: str) -> set[str]:
-    return {match.group(0) for match in _NUMBER_OR_ID.finditer(text)}
+    """Extract every token that contains a digit."""
+    return set(_TOKEN_WITH_DIGIT.findall(text))
+
+
+def normalize_id_token(token: str) -> str:
+    """Strip a leading # so #401 and 401 compare equal."""
+    return token[1:] if token.startswith("#") else token
 
 
 def check_summary_numbers_and_ids(job: Job) -> GuardResult:
-    """12B summary check: every number/ID in the summary must appear in source."""
+    """Every number/ID in the summary must appear in the raw source (after # normalize)."""
+    is_log = job.task_type in LOG_TASK_TYPES
     if job.summary_text is None or job.source_text is None:
+        if is_log:
+            return GuardResult(
+                name="summary_number_id",
+                ok=False,
+                detail="FAIL: log-summary result missing summary_text/source_text.",
+                abort=True,
+            )
         return GuardResult(
             name="summary_number_id",
             ok=True,
-            detail="No summary/source pair provided; skipped.",
+            detail="No summary/source pair provided; skipped (non-log task).",
         )
     summary_tokens = extract_numbers_and_ids(job.summary_text)
-    source_tokens = extract_numbers_and_ids(job.source_text)
-    missing = sorted(token for token in summary_tokens if token not in source_tokens)
+    source = job.source_text
+    missing: list[str] = []
+    for token in sorted(summary_tokens):
+        if not _token_in_raw_source(token, source):
+            missing.append(token)
     if missing:
         return GuardResult(
             name="summary_number_id",
@@ -80,15 +99,33 @@ def check_summary_numbers_and_ids(job: Job) -> GuardResult:
     )
 
 
+def _token_in_raw_source(token: str, source: str) -> bool:
+    """Match token against raw source text; #401 matches 401 and #401."""
+    norm = normalize_id_token(token)
+    if token in source or norm in source:
+        return True
+    if f"#{norm}" in source:
+        return True
+    return False
+
+
 def check_memory(
     job: Job,
     config: RouterConfig,
     *,
     lane_is_heavy: bool,
     memory_reader: MemoryReader | None = None,
+    dry_run: bool = False,
 ) -> GuardResult:
-    """Abort when free memory < 5% or swap watchdog trips; unload 12B first."""
-    snapshot = _resolve_snapshot(job, memory_reader)
+    """Abort when free memory < 5%, swap trips, 12B still loaded, or unreadable."""
+    snapshot = _resolve_snapshot(job, memory_reader, dry_run=dry_run)
+    if not snapshot.readable:
+        return GuardResult(
+            name="memory",
+            ok=False,
+            detail="ABORT: memory could not be read.",
+            abort=True,
+        )
     if lane_is_heavy and config.unload_12b_before_heavy and snapshot.gemma_12b_loaded:
         return GuardResult(
             name="memory",
@@ -156,6 +193,7 @@ def evaluate_guards(
     *,
     lane_is_heavy: bool,
     memory_reader: MemoryReader | None = None,
+    dry_run: bool = False,
 ) -> tuple[GuardResult, ...]:
     return (
         check_truncation(job),
@@ -165,6 +203,7 @@ def evaluate_guards(
             config,
             lane_is_heavy=lane_is_heavy,
             memory_reader=memory_reader,
+            dry_run=dry_run,
         ),
         check_promotion(job, config),
     )
@@ -174,10 +213,20 @@ def any_abort(guards: Iterable[GuardResult]) -> bool:
     return any(guard.abort for guard in guards)
 
 
-def _resolve_snapshot(job: Job, memory_reader: MemoryReader | None) -> MemorySnapshot:
-    if memory_reader is not None:
-        snapshot = memory_reader()
-        # Job overrides win for dry-run / fixture scenarios.
+def _resolve_snapshot(
+    job: Job,
+    memory_reader: MemoryReader | None,
+    *,
+    dry_run: bool,
+) -> MemorySnapshot:
+    snapshot = memory_reader() if memory_reader is not None else default_memory_reader()
+
+    # Job memory fields override the reader ONLY in dry-run mode.
+    if dry_run and (
+        job.free_memory_percent is not None
+        or job.swap_watchdog_tripped
+        or job.gemma_12b_loaded
+    ):
         return MemorySnapshot(
             free_percent=(
                 job.free_memory_percent
@@ -186,15 +235,6 @@ def _resolve_snapshot(job: Job, memory_reader: MemoryReader | None) -> MemorySna
             ),
             swap_watchdog_tripped=job.swap_watchdog_tripped or snapshot.swap_watchdog_tripped,
             gemma_12b_loaded=job.gemma_12b_loaded or snapshot.gemma_12b_loaded,
+            readable=True,
         )
-    if (
-        job.free_memory_percent is not None
-        or job.swap_watchdog_tripped
-        or job.gemma_12b_loaded
-    ):
-        return MemorySnapshot(
-            free_percent=job.free_memory_percent if job.free_memory_percent is not None else 100.0,
-            swap_watchdog_tripped=job.swap_watchdog_tripped,
-            gemma_12b_loaded=job.gemma_12b_loaded,
-        )
-    return default_memory_reader()
+    return snapshot

@@ -1,4 +1,4 @@
-"""JSONL metrics logger for tokens, review rounds, Fable rejections, escalations."""
+"""JSONL metrics logger for amendment-6 fields."""
 
 from __future__ import annotations
 
@@ -7,6 +7,17 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
+
+# Amendment 6 required fields on every coding metrics record.
+AMENDMENT6_FIELDS = (
+    "tokens",
+    "vendor",
+    "activity",
+    "review_rounds",
+    "fable_rejection_after_gates",
+    "escalated",
+    "merged_pr",
+)
 
 
 @dataclass(frozen=True)
@@ -29,6 +40,9 @@ class MetricsEvent:
             del payload["extra"]
         else:
             payload.update(payload.pop("extra"))
+        for field in AMENDMENT6_FIELDS:
+            if field not in payload:
+                raise ValueError(f"metrics record missing amendment-6 field: {field}")
         return payload
 
 
@@ -71,3 +85,9 @@ class MetricsLogger:
             return 0.0
         rejected = sum(1 for event in gated if event.get("fable_rejection_after_gates"))
         return rejected / len(gated)
+
+
+def assert_amendment6_fields(record: dict[str, Any]) -> None:
+    missing = [field for field in AMENDMENT6_FIELDS if field not in record]
+    if missing:
+        raise AssertionError(f"Missing amendment-6 fields: {missing}")
