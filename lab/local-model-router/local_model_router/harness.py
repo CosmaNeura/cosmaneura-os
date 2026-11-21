@@ -107,8 +107,10 @@ def build_harness_plan(
     )
     settings_path: str | None = None
     if model_settings_dir is not None:
+        # Per-model filename so planning one lane never clobbers another lane's caps.
         model_settings_dir.mkdir(parents=True, exist_ok=True)
-        path = model_settings_dir / "aider-model-settings.yml"
+        safe = model.replace(":", "_").replace("/", "_")
+        path = model_settings_dir / f"aider-model-settings-{safe}.yml"
         path.write_text(settings_text, encoding="utf-8")
         settings_path = str(path)
 

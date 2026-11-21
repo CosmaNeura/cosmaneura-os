@@ -247,7 +247,11 @@ def _cmd_record_azure_spend(args: argparse.Namespace) -> int:
     config = load_config(Path(args.config))
     state_dir = _state_dir(args)
     spend_path = state_dir / Path(config.azure_spend_ledger_path).name
-    total = record_azure_spend(spend_path, float(args.amount_usd))
+    try:
+        total = record_azure_spend(spend_path, float(args.amount_usd))
+    except ApprovalError as exc:
+        print(f"approval_gate: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps({"path": str(spend_path), "month_total_usd": total}, sort_keys=True))
     return 0
 

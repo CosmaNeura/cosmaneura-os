@@ -65,19 +65,31 @@ def require_approval(
     if batch_kind == "azure":
         if config is None:
             raise ApprovalError("Azure batch requires router config.")
-        # Fail closed with no spend record.
         if spend_ledger_path is None:
             raise ApprovalError("Azure spend ledger required (fail closed).")
+        if not spend_ledger_path.exists():
+            raise ApprovalError("Azure spend ledger file missing (fail closed).")
         try:
             ledger_spend = _read_month_spend(spend_ledger_path)
+        except ApprovalError:
+            raise
         except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
             raise ApprovalError(f"Azure spend ledger unreadable: {exc}") from exc
-        job_spend = float(azure_month_spend_usd or 0.0)
+
+        if azure_month_spend_usd is not None and float(azure_month_spend_usd) < 0:
+            raise ApprovalError("Azure month spend must not be negative.")
+        if azure_run_estimate_usd is None:
+            raise ApprovalError("azure_run_estimate_usd required and must be > 0.")
+        estimate = float(azure_run_estimate_usd)
+        if estimate <= 0:
+            raise ApprovalError("azure_run_estimate_usd required and must be > 0.")
+
+        job_spend = float(azure_month_spend_usd) if azure_month_spend_usd is not None else 0.0
         effective = max(ledger_spend, job_spend)
-        estimate = float(azure_run_estimate_usd or 0.0)
-        if effective + estimate > config.azure_monthly_cap_usd:
+        cap = config.azure_monthly_cap_usd
+        if effective >= cap or effective + estimate >= cap:
             raise ApprovalError(
-                f"Azure monthly cap ${config.azure_monthly_cap_usd:.0f} would be exceeded "
+                f"Azure monthly cap ${cap:.0f} would be exceeded "
                 f"(spend=${effective:.2f} + estimate=${estimate:.2f})."
             )
 
@@ -104,15 +116,24 @@ def _consume_approval_id(token: str, ledger_path: Path) -> None:
 
 
 def _read_month_spend(path: Path) -> float:
+    """Read current-month spend. Missing/unreadable/negative => fail closed."""
     if not path.exists():
-        return 0.0
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    month_key = datetime.now(UTC).strftime("%Y-%m")
-    return float(raw.get("months", {}).get(month_key, 0.0))
+        raise ApprovalError("Azure spend ledger file missing (fail closed).")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        month_key = datetime.now(UTC).strftime("%Y-%m")
+        spend = float(raw.get("months", {}).get(month_key, 0.0))
+    except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+        raise ApprovalError(f"Azure spend ledger unreadable: {exc}") from exc
+    if spend < 0:
+        raise ApprovalError("Azure spend ledger has negative spend (fail closed).")
+    return spend
 
 
 def record_azure_spend(path: Path, amount_usd: float) -> float:
     """Append synthetic Azure spend for the current UTC month. Returns new total."""
+    if float(amount_usd) < 0:
+        raise ApprovalError("Azure spend amount must not be negative.")
     path.parent.mkdir(parents=True, exist_ok=True)
     months: dict[str, float] = {}
     if path.exists():
