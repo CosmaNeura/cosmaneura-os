@@ -1,0 +1,8 @@
+{
+  "job_id": "sample-unit",
+  "task_type": "unit_tests",
+  "file_count": 1,
+  "token_estimate": 3000,
+  "free_memory_percent": 40.0,
+  "gemma_12b_loaded": false
+}

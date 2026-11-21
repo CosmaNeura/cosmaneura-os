@@ -1,0 +1,111 @@
+[
+  {
+    "job_id": "job-ci-log",
+    "task_type": "ci_log_summary",
+    "file_count": 0,
+    "token_estimate": 1200,
+    "log_kind": "ci",
+    "source_text": "synth-ci job #401 failed on backend-2 after 128 tests; sha abcdef12",
+    "summary_text": "CI job #401 failed on backend-2 after 128 tests (sha abcdef12).",
+    "tokens_sent": 1200,
+    "tokens_processed": 1200,
+    "free_memory_percent": 55.0
+  },
+  {
+    "job_id": "job-build-log",
+    "task_type": "build_log_summary",
+    "file_count": 0,
+    "token_estimate": 900,
+    "log_kind": "build",
+    "tokens_sent": 900,
+    "tokens_processed": 900,
+    "free_memory_percent": 60.0
+  },
+  {
+    "job_id": "job-test-log",
+    "task_type": "test_log_summary",
+    "file_count": 0,
+    "token_estimate": 1500,
+    "log_kind": "test",
+    "tokens_sent": 1500,
+    "tokens_processed": 1500,
+    "free_memory_percent": 58.0
+  },
+  {
+    "job_id": "job-diff-prereview",
+    "task_type": "diff_pre_review",
+    "file_count": 1,
+    "token_estimate": 2500,
+    "free_memory_percent": 50.0
+  },
+  {
+    "job_id": "job-unit-tests",
+    "task_type": "unit_tests",
+    "file_count": 1,
+    "token_estimate": 3500,
+    "free_memory_percent": 40.0,
+    "gemma_12b_loaded": false,
+    "cell_run_count": 3
+  },
+  {
+    "job_id": "job-single-file",
+    "task_type": "single_file_fix",
+    "file_count": 1,
+    "token_estimate": 5000,
+    "free_memory_percent": 35.0,
+    "gemma_12b_loaded": false
+  },
+  {
+    "job_id": "job-structured",
+    "task_type": "strict_structured_output",
+    "file_count": 1,
+    "token_estimate": 1800,
+    "free_memory_percent": 42.0,
+    "gemma_12b_loaded": false
+  },
+  {
+    "job_id": "job-lint-doc",
+    "task_type": "lint_doc_batch",
+    "file_count": 2,
+    "token_estimate": 6000,
+    "free_memory_percent": 30.0,
+    "gemma_12b_loaded": false
+  },
+  {
+    "job_id": "job-large-single-file",
+    "task_type": "single_file_fix",
+    "file_count": 1,
+    "token_estimate": 20000,
+    "free_memory_percent": 40.0,
+    "gemma_12b_loaded": false
+  },
+  {
+    "job_id": "job-multi-file-feature",
+    "task_type": "single_file_fix",
+    "file_count": 4,
+    "token_estimate": 9000,
+    "multi_file_feature": true,
+    "free_memory_percent": 40.0
+  },
+  {
+    "job_id": "job-truncation-fail",
+    "task_type": "log_summary",
+    "file_count": 0,
+    "token_estimate": 10960,
+    "log_kind": "long",
+    "tokens_sent": 10960,
+    "tokens_processed": 4099,
+    "source_text": "Synthetic CI log lines 1..10960 for fixture job truncation-fail; model returned only 4099 tokens.",
+    "summary_text": "Processed 4099 of 10960 tokens.",
+    "free_memory_percent": 55.0
+  },
+  {
+    "job_id": "job-low-memory",
+    "task_type": "unit_tests",
+    "file_count": 1,
+    "token_estimate": 3000,
+    "free_memory_percent": 4.2,
+    "gemma_12b_loaded": false,
+    "swap_watchdog_tripped": false
+  }
+]
