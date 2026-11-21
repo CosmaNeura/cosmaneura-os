@@ -36,20 +36,8 @@ def route_job(
     state = size_state or TaskSizeState()
     classified = cfg.classify_size(job.file_count, job.token_estimate)
 
-    # (1) Long-log override ONLY for LOG_TASK_TYPES.
-    if _is_long_log(job, cfg):
-        lane = cfg.lanes[cfg.long_log_force_lane]
-        return _finalize(
-            job,
-            cfg,
-            lane=lane,
-            reason=cfg.long_log_reason,
-            size=classified,
-            memory_reader=memory_reader,
-            dry_run=dry_run,
-        )
-
-    # Explicit multi-file feature / security / ambiguous → Cursor cloud agent.
+    # Explicit multi-file / security / ambiguous → cloud (before long-log).
+    # Every escalation requires Fable (N2), including log_summary + multi_file.
     if job.multi_file_feature or job.security_sensitive or job.ambiguous_spec:
         return _escalation_decision(
             job,
@@ -63,6 +51,19 @@ def route_job(
             memory_reader=memory_reader,
             dry_run=dry_run,
             lane_is_heavy=False,
+        )
+
+    # (1) Long-log override ONLY for LOG_TASK_TYPES.
+    if _is_long_log(job, cfg):
+        lane = cfg.lanes[cfg.long_log_force_lane]
+        return _finalize(
+            job,
+            cfg,
+            lane=lane,
+            reason=cfg.long_log_reason,
+            size=classified,
+            memory_reader=memory_reader,
+            dry_run=dry_run,
         )
 
     lane = cfg.lane_for_task(job.task_type)
@@ -278,7 +279,7 @@ def _escalation_decision(
         size=size,
         escalate=not aborted,
         escalation_target=None if aborted else target,
-        fable_review_required=is_coding_task(job.task_type),
+        fable_review_required=True,  # N2: every escalation requires Fable
         plan_steps=plan,
         guards=guards,
         aborted=aborted,

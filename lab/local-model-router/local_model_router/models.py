@@ -26,8 +26,9 @@ class Job:
     security_sensitive: bool = False
     multi_file_feature: bool = False
     ambiguous_spec: bool = False
-    # Optional spend signal for Azure monthly-cap checks (USD, synthetic).
+    # Optional spend signals for Azure monthly-cap checks (USD, synthetic).
     azure_month_spend_usd: float | None = None
+    azure_run_estimate_usd: float | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Job:
@@ -49,6 +50,7 @@ class Job:
             multi_file_feature=bool(raw.get("multi_file_feature", False)),
             ambiguous_spec=bool(raw.get("ambiguous_spec", False)),
             azure_month_spend_usd=_optional_float(raw.get("azure_month_spend_usd")),
+            azure_run_estimate_usd=_optional_float(raw.get("azure_run_estimate_usd")),
         )
 
 

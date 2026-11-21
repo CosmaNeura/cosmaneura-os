@@ -67,6 +67,7 @@ class RouterConfig:
     metrics_jsonl_path: str
     approval_ledger_path: str
     azure_spend_ledger_path: str
+    size_state_path: str
     azure_codex_mini_endpoint_env: str
     azure_gpt_5_3_codex_endpoint_env: str
     azure_monthly_cap_usd: float
@@ -157,6 +158,7 @@ def load_config(path: Path | None = None) -> RouterConfig:
         metrics_jsonl_path=str(raw["metrics"]["jsonl_path"]),
         approval_ledger_path=str(paths.get("approval_ledger", "state/approval_ledger.json")),
         azure_spend_ledger_path=str(paths.get("azure_spend_ledger", "state/azure_spend.json")),
+        size_state_path=str(paths.get("size_state", "state/task_size_state.json")),
         azure_codex_mini_endpoint_env=str(azure["codex_mini_endpoint_env"]),
         azure_gpt_5_3_codex_endpoint_env=str(azure["gpt_5_3_codex_endpoint_env"]),
         azure_monthly_cap_usd=float(azure["monthly_cap_usd"]),

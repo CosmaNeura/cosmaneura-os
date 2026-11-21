@@ -10,13 +10,15 @@ import pytest
 
 from local_model_router.config import HARDCODED_FORBIDDEN_AIDER_FLAGS, RouterConfig
 from local_model_router.dry_run import format_table, run_dry_run
-from local_model_router.harness import build_aider_command, build_harness_plan
+from local_model_router.harness import build_aider_command, build_harness_plan, _assert_no_forbidden_flags
 from local_model_router.metrics import AMENDMENT6_FIELDS, MetricsEvent, MetricsLogger, assert_amendment6_fields
 from local_model_router.plan import FABLE_STEP
 from local_model_router.sizing import TaskSizeState, can_promote_cell, step_down_size, step_up_size
 
 
-def test_aider_command_sets_map_tokens_zero_and_ollama_env(config: RouterConfig) -> None:
+def test_aider_command_sets_map_tokens_zero_and_timeout(
+    config: RouterConfig, tmp_path: Path
+) -> None:
     lane = config.lanes["inkling_2_mini"]
     plan = build_harness_plan(
         config,
@@ -24,18 +26,21 @@ def test_aider_command_sets_map_tokens_zero_and_ollama_env(config: RouterConfig)
         message="fix synthetic module",
         files=["synthetic_module.py"],
         lane=lane,
+        model_settings_dir=tmp_path,
     )
     assert plan.env["OLLAMA_API_BASE"] == "http://127.0.0.1:11434"
     assert plan.num_predict == 8192
     assert plan.timeout_seconds == 480
-    assert plan.env["OLLAMA_NUM_PREDICT"] == "8192"
-    assert plan.env["OLLAMA_TIMEOUT_SECONDS"] == "480"
+    assert plan.num_ctx == 18432
+    assert "--timeout" in plan.aider_attempt
+    assert "num_predict: 8192" in (plan.model_settings_text or "")
+    assert "num_ctx: 18432" in (plan.model_settings_text or "")
     assert "--map-tokens" in plan.aider_attempt
     idx = plan.aider_attempt.index("--map-tokens")
     assert plan.aider_attempt[idx + 1] == "0"
 
 
-def test_26b_harness_includes_num_ctx(config: RouterConfig) -> None:
+def test_26b_harness_num_ctx_at_least_12288(config: RouterConfig, tmp_path: Path) -> None:
     lane = config.lanes["gemma4_26b"]
     plan = build_harness_plan(
         config,
@@ -43,22 +48,18 @@ def test_26b_harness_includes_num_ctx(config: RouterConfig) -> None:
         message="lint",
         files=["a.py"],
         lane=lane,
+        model_settings_dir=tmp_path,
     )
-    assert plan.num_ctx == 10240
-    assert plan.env["OLLAMA_NUM_CTX"] == "10240"
-    assert plan.num_ctx >= config.sizes["T3"].max_tokens + (lane.num_predict or 0)
+    assert plan.num_ctx is not None and plan.num_ctx >= 12288
+    assert "num_ctx: 12288" in (plan.model_settings_text or "")
 
 
 def test_hardcoded_denylist_rejects_equals_forms(config: RouterConfig) -> None:
-    """(6) Match lowercased text before '='; config may only add."""
-    from local_model_router.harness import _assert_no_forbidden_flags
-
     assert "--yes-always" in HARDCODED_FORBIDDEN_AIDER_FLAGS
     with pytest.raises(ValueError, match="Forbidden"):
         _assert_no_forbidden_flags(["aider", "--yes-always=true"], config)
     with pytest.raises(ValueError, match="Forbidden"):
         _assert_no_forbidden_flags(["aider", "--dangerously-skip-permissions=x"], config)
-    # --message value is exempt even if it looks like a flag.
     _assert_no_forbidden_flags(
         ["aider", "--message", "--yes-always=true is in the prompt"],
         config,
@@ -77,7 +78,6 @@ def test_config_can_only_add_forbidden_flags(tmp_path: Path, config: RouterConfi
     path = tmp_path / "cfg.json"
     path.write_text(json.dumps(raw), encoding="utf-8")
     from local_model_router.config import load_config
-    from local_model_router.harness import _assert_no_forbidden_flags
 
     cfg = load_config(path)
     assert "--yes-always" in cfg.merged_forbidden_flags()
@@ -89,7 +89,6 @@ def test_config_can_only_add_forbidden_flags(tmp_path: Path, config: RouterConfi
 def test_metrics_jsonl_writes_to_configured_path_with_vendor(
     tmp_path: Path, config: RouterConfig
 ) -> None:
-    """(8) Write metrics to metrics.jsonl_path; assert every amendment-6 field."""
     path = tmp_path / Path(config.metrics_jsonl_path).name
     logger = MetricsLogger(path=path)
     record = logger.log(
@@ -132,7 +131,6 @@ def test_promotion_requires_three_runs(config: RouterConfig) -> None:
 
 
 def test_step_up_gated_on_can_promote_cell(config: RouterConfig) -> None:
-    """(9) step_up requires can_promote_cell even after 10 consecutive passes."""
     assert (
         step_up_size(
             "T2",
@@ -164,7 +162,6 @@ def test_step_down_uses_window(config: RouterConfig) -> None:
 def test_task_size_state_tracks_per_task_type(config: RouterConfig) -> None:
     state = TaskSizeState()
     assert state.current_size("unit_tests", "T3") == "T3"
-    # Two Fable rejections within window → step down.
     state.record_outcome(
         "unit_tests",
         gates_and_fable_pass=False,
@@ -197,11 +194,9 @@ def test_dry_run_table_includes_guards_fable_and_unrouted(
     assert by_id["job-multi-file-feature"].lane == "cursor_cloud_agent"
     assert by_id["job-truncation-fail"].aborted is True
     assert by_id["job-low-memory"].aborted is True
-    # (1) long-log single_file_fix keeps Fable on inkling
     long_sf = by_id["job-longlog-single-file-keeps-fable"]
     assert long_sf.lane == "inkling_2_mini"
     assert long_sf.plan_steps[-1] == FABLE_STEP
-    # (3) unknown → unrouted
     assert by_id["job-unknown-unrouted"].lane == "unrouted"
     assert by_id["job-unknown-unrouted"].escalate is False
     table = format_table(decisions)

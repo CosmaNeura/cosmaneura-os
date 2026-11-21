@@ -21,8 +21,9 @@ def build_plan_steps(
     """Build the harness plan. Never runs a model; CI-safe command planning only.
 
     Coding is derived from task_type (not lane name). Log summaries get no Aider.
+    Every escalation requires Fable (even for log task types).
     """
-    coding = is_coding_task(task_type)
+    coding = is_coding_task(task_type) or escalated
 
     if aborted:
         steps = ["abort_batch", "record_abort"]
@@ -37,7 +38,7 @@ def build_plan_steps(
 
     if escalated:
         steps.append(f"escalate_to:{lane}")
-    elif coding:
+    elif is_coding_task(task_type):
         steps.extend(
             [
                 "aider_attempt_1",

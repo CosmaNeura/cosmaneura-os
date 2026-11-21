@@ -1,8 +1,10 @@
-"""Per-task-type size state with step-up / step-down rules."""
+"""Per-task-type size state with step-up / step-down rules (persisted)."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .config import RouterConfig
 
@@ -41,14 +43,18 @@ def step_down_size(
     return _neighbor(current, direction=-1, max_size="T5", min_size=min_size)
 
 
+def cell_key(task_type: str, size: str) -> str:
+    return f"{task_type}:{size}"
+
+
 @dataclass
 class TaskSizeState:
     """Keeps the current size per task type and recent Fable outcomes."""
 
     current_sizes: dict[str, str] = field(default_factory=dict)
     consecutive_passes: dict[str, int] = field(default_factory=dict)
-    # Newest-last list of bools: True = Fable rejection, scoped by step_down_window.
     fable_rejection_history: dict[str, list[bool]] = field(default_factory=dict)
+    # Keyed by (task_type, size) via cell_key.
     cell_run_counts: dict[str, int] = field(default_factory=dict)
 
     def current_size(self, task_type: str, starting_size: str) -> str:
@@ -67,11 +73,11 @@ class TaskSizeState:
     ) -> str:
         base = starting_size or self.current_sizes.get(task_type, "T3")
         current = self.current_sizes.get(task_type, base)
-        self.cell_run_counts[task_type] = self.cell_run_counts.get(task_type, 0) + 1
+        key = cell_key(task_type, current)
+        self.cell_run_counts[key] = self.cell_run_counts.get(key, 0) + 1
 
         history = self.fable_rejection_history.setdefault(task_type, [])
         history.append(bool(fable_rejected))
-        # Keep only the configured window.
         window = config.step_down_window
         if len(history) > window:
             del history[:-window]
@@ -92,10 +98,51 @@ class TaskSizeState:
                 consecutive_passes=self.consecutive_passes[task_type],
                 config=config,
                 max_size=max_size,
-                cell_run_count=self.cell_run_counts[task_type],
+                cell_run_count=self.cell_run_counts[key],
             )
         self.current_sizes[task_type] = new_size
+        # Clear rejection history after a size step.
+        if new_size != current:
+            self.fable_rejection_history[task_type] = []
+            self.consecutive_passes[task_type] = 0
         return new_size
+
+    def to_dict(self) -> dict:
+        return {
+            "current_sizes": dict(self.current_sizes),
+            "consecutive_passes": dict(self.consecutive_passes),
+            "fable_rejection_history": {
+                key: list(values) for key, values in self.fable_rejection_history.items()
+            },
+            "cell_run_counts": dict(self.cell_run_counts),
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> TaskSizeState:
+        return cls(
+            current_sizes={str(k): str(v) for k, v in raw.get("current_sizes", {}).items()},
+            consecutive_passes={
+                str(k): int(v) for k, v in raw.get("consecutive_passes", {}).items()
+            },
+            fable_rejection_history={
+                str(k): [bool(x) for x in v]
+                for k, v in raw.get("fable_rejection_history", {}).items()
+            },
+            cell_run_counts={str(k): int(v) for k, v in raw.get("cell_run_counts", {}).items()},
+        )
+
+    def save(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load(cls, path: Path) -> TaskSizeState:
+        if not path.exists():
+            return cls()
+        return cls.from_dict(json.loads(path.read_text(encoding="utf-8")))
 
 
 def _neighbor(

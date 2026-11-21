@@ -40,7 +40,9 @@ def require_approval(
     ledger_path: Path | None = None,
     spend_ledger_path: Path | None = None,
     azure_month_spend_usd: float | None = None,
+    azure_run_estimate_usd: float | None = None,
 ) -> ApprovalRecord:
+    """Validate approval. Consumes the ID only after every check passes."""
     if batch_kind not in {"local", "azure", "cloud"}:
         raise ApprovalError(f"Unknown batch_kind {batch_kind!r}.")
     if decision is not None:
@@ -60,18 +62,28 @@ def require_approval(
     if token.lower() in {"none", "null", "undefined", "-"}:
         raise ApprovalError("Refusing placeholder approval token.")
 
+    if batch_kind == "azure":
+        if config is None:
+            raise ApprovalError("Azure batch requires router config.")
+        # Fail closed with no spend record.
+        if spend_ledger_path is None:
+            raise ApprovalError("Azure spend ledger required (fail closed).")
+        try:
+            ledger_spend = _read_month_spend(spend_ledger_path)
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            raise ApprovalError(f"Azure spend ledger unreadable: {exc}") from exc
+        job_spend = float(azure_month_spend_usd or 0.0)
+        effective = max(ledger_spend, job_spend)
+        estimate = float(azure_run_estimate_usd or 0.0)
+        if effective + estimate > config.azure_monthly_cap_usd:
+            raise ApprovalError(
+                f"Azure monthly cap ${config.azure_monthly_cap_usd:.0f} would be exceeded "
+                f"(spend=${effective:.2f} + estimate=${estimate:.2f})."
+            )
+
+    # Consume only after all checks pass.
     if ledger_path is not None:
         _consume_approval_id(token, ledger_path)
-
-    if batch_kind == "azure" and config is not None:
-        spend = azure_month_spend_usd if azure_month_spend_usd is not None else 0.0
-        if spend_ledger_path is not None:
-            spend = _read_month_spend(spend_ledger_path)
-        if spend >= config.azure_monthly_cap_usd:
-            raise ApprovalError(
-                f"Azure monthly cap ${config.azure_monthly_cap_usd:.0f} reached "
-                f"(spend=${spend:.2f})."
-            )
 
     return ApprovalRecord(approved_run_id=token, batch_kind=batch_kind)
 

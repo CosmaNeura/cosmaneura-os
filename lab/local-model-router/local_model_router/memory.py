@@ -10,7 +10,9 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
+
+Ollama12bStatus = Literal["loaded", "not_loaded", "unknown"]
 
 
 @dataclass(frozen=True)
@@ -19,11 +21,13 @@ class MemorySnapshot:
     swap_watchdog_tripped: bool
     gemma_12b_loaded: bool = False
     readable: bool = True
+    ollama_12b_status: Ollama12bStatus = "not_loaded"
 
 
 MemoryReader = Callable[[], MemorySnapshot]
 CommandRunner = Callable[[list[str]], str]
 HttpGetter = Callable[[str], dict[str, Any]]
+OllamaChecker = Callable[[], Ollama12bStatus]
 
 
 class MemoryReadError(RuntimeError):
@@ -33,7 +37,7 @@ class MemoryReadError(RuntimeError):
 def default_memory_reader(
     *,
     command_runner: CommandRunner | None = None,
-    ollama_checker: Callable[[], bool] | None = None,
+    ollama_checker: OllamaChecker | None = None,
 ) -> MemorySnapshot:
     """Dispatch to macOS or Linux readers. Tests inject runners/checkers."""
     system = platform.system()
@@ -42,27 +46,51 @@ def default_memory_reader(
             snapshot = macos_memory_reader(command_runner=command_runner)
         else:
             snapshot = linux_memory_reader()
-    except (OSError, MemoryReadError, ValueError, subprocess.SubprocessError) as exc:
+    except (OSError, MemoryReadError, ValueError, subprocess.SubprocessError):
         return MemorySnapshot(
             free_percent=0.0,
             swap_watchdog_tripped=True,
             gemma_12b_loaded=False,
             readable=False,
+            ollama_12b_status="unknown",
         )
-    loaded = False
+    status: Ollama12bStatus
     if ollama_checker is not None:
-        loaded = ollama_checker()
+        status = ollama_checker()
     else:
-        try:
-            loaded = is_gemma_12b_loaded()
-        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
-            loaded = False
+        status = probe_ollama_12b_status()
     return MemorySnapshot(
         free_percent=snapshot.free_percent,
         swap_watchdog_tripped=snapshot.swap_watchdog_tripped,
-        gemma_12b_loaded=loaded,
+        gemma_12b_loaded=(status == "loaded"),
         readable=True,
+        ollama_12b_status=status,
     )
+
+
+def probe_ollama_12b_status(
+    *,
+    base_url: str = "http://127.0.0.1:11434",
+    http_get: HttpGetter | None = None,
+) -> Ollama12bStatus:
+    """Connection-refused => not_loaded; any other Ollama error => unknown."""
+    try:
+        loaded = is_gemma_12b_loaded(base_url=base_url, http_get=http_get)
+        return "loaded" if loaded else "not_loaded"
+    except urllib.error.URLError as err:
+        if _is_connection_refused(err):
+            return "not_loaded"
+        return "unknown"
+    except (OSError, TimeoutError, json.JSONDecodeError, ValueError, urllib.error.HTTPError):
+        return "unknown"
+
+
+def _is_connection_refused(err: urllib.error.URLError) -> bool:
+    reason = err.reason
+    if isinstance(reason, ConnectionRefusedError):
+        return True
+    text = str(reason).lower()
+    return "connection refused" in text or "errno 111" in text
 
 
 def linux_memory_reader(meminfo_path: str = "/proc/meminfo") -> MemorySnapshot:
@@ -90,7 +118,6 @@ def macos_memory_reader(*, command_runner: CommandRunner | None = None) -> Memor
     page_size = _parse_page_size(vm_stat_text)
     pages = _parse_vm_stat_pages(vm_stat_text)
     free_pages = pages.get("Pages free", 0) + pages.get("Pages speculative", 0)
-    # Approximate total as free + active + inactive + wired + occupied by compressor.
     total_pages = free_pages
     for key in (
         "Pages active",
@@ -104,12 +131,10 @@ def macos_memory_reader(*, command_runner: CommandRunner | None = None) -> Memor
         raise MemoryReadError("vm_stat total pages unreadable")
     free_percent = 100.0 * float(free_pages) / float(total_pages)
     used_bytes, total_bytes = _parse_swapusage(sysctl_text)
-    # Trip when swap is in use and free headroom is under 5% of swap total.
     swap_watchdog_tripped = False
     if total_bytes > 0:
         free_bytes = max(0, total_bytes - used_bytes)
         swap_watchdog_tripped = free_bytes < max(1, total_bytes // 20)
-    # page_size retained for clarity / future byte accounting.
     _ = page_size
     return MemorySnapshot(
         free_percent=free_percent,
@@ -160,7 +185,6 @@ def _run_command(argv: list[str]) -> str:
 
 
 def _http_get_json(url: str) -> dict[str, Any]:
-    # Localhost only; tests must inject http_get and never hit the network.
     if not url.startswith("http://127.0.0.1:") and not url.startswith("http://localhost:"):
         raise ValueError(f"Ollama check refused non-localhost URL: {url}")
     with urllib.request.urlopen(url, timeout=2) as response:  # noqa: S310
@@ -204,7 +228,6 @@ def _parse_vm_stat_pages(vm_stat_text: str) -> dict[str, int]:
 
 
 def _parse_swapusage(text: str) -> tuple[int, int]:
-    # Example: vm.swapusage: total = 2048.00M used = 1024.00M free = 1024.00M
     total_match = re.search(r"total\s*=\s*([\d.]+)([KMGT]?)", text, re.IGNORECASE)
     used_match = re.search(r"used\s*=\s*([\d.]+)([KMGT]?)", text, re.IGNORECASE)
     if not total_match:

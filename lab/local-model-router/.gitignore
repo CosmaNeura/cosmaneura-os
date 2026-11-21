@@ -1,0 +1,5 @@
+# Local CoS state (approval ledger, Azure spend, size state, metrics).
+state/
+*.jsonl
+.aider.model.settings.yml
+aider-model-settings.yml

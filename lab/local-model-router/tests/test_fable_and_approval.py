@@ -129,7 +129,7 @@ def test_azure_monthly_cap_enforced(config: RouterConfig, tmp_path: Path) -> Non
         batch_kind="azure",
         vendor="azure",
     )
-    with pytest.raises(ApprovalError, match="cap"):
+    with pytest.raises(ApprovalError, match="exceeded"):
         require_approval(
             "cos-yes-cap",
             batch_kind="azure",
@@ -137,11 +137,13 @@ def test_azure_monthly_cap_enforced(config: RouterConfig, tmp_path: Path) -> Non
             config=config,
             ledger_path=tmp_path / "ledger.json",
             spend_ledger_path=spend,
+            azure_run_estimate_usd=1.0,
         )
 
 
 def test_plan_batch_cli_refuses_without_approval(tmp_path: Path) -> None:
     from local_model_router.__main__ import main
+    from local_model_router.memory import MemorySnapshot
 
     job_path = tmp_path / "job.json"
     job_path.write_text(
@@ -151,11 +153,11 @@ def test_plan_batch_cli_refuses_without_approval(tmp_path: Path) -> None:
                 "task_type": "unit_tests",
                 "file_count": 1,
                 "token_estimate": 2000,
-                "free_memory_percent": 40.0,
             }
         ),
         encoding="utf-8",
     )
+    healthy = lambda: MemorySnapshot(40.0, False, False, True, "not_loaded")
     code = main(
         [
             "plan-batch",
@@ -167,13 +169,15 @@ def test_plan_batch_cli_refuses_without_approval(tmp_path: Path) -> None:
             str(Path(__file__).resolve().parents[1] / "config" / "router_config.json"),
             "--state-dir",
             str(tmp_path / "state"),
-        ]
+        ],
+        memory_reader=healthy,
     )
     assert code == 2
 
 
 def test_plan_batch_exits_nonzero_on_guard_abort(tmp_path: Path) -> None:
     from local_model_router.__main__ import main
+    from local_model_router.memory import MemorySnapshot
 
     job_path = tmp_path / "job.json"
     job_path.write_text(
@@ -183,27 +187,11 @@ def test_plan_batch_exits_nonzero_on_guard_abort(tmp_path: Path) -> None:
                 "task_type": "unit_tests",
                 "file_count": 1,
                 "token_estimate": 2000,
-                "free_memory_percent": 4.0,
             }
         ),
         encoding="utf-8",
     )
-    # Without dry_run, job memory fields do not override — inject via making
-    # the default reader see low memory by using a job that will be aborted
-    # only in dry-run. For CLI live path, patch via low free by calling route
-    # with dry_run is not available; instead rely on truncation abort for logs.
-    job_path.write_text(
-        json.dumps(
-            {
-                "job_id": "cli-abort",
-                "task_type": "log_summary",
-                "file_count": 0,
-                "token_estimate": 100,
-                "log_kind": "ci",
-            }
-        ),
-        encoding="utf-8",
-    )
+    low = lambda: MemorySnapshot(3.0, False, False, True, "not_loaded")
     code = main(
         [
             "plan-batch",
@@ -215,9 +203,9 @@ def test_plan_batch_exits_nonzero_on_guard_abort(tmp_path: Path) -> None:
             str(Path(__file__).resolve().parents[1] / "config" / "router_config.json"),
             "--state-dir",
             str(tmp_path / "state"),
-        ]
+        ],
+        memory_reader=low,
     )
-    # Missing token counts on log-summary → abort → exit 3.
     assert code == 3
 
 
@@ -229,10 +217,9 @@ def test_config_inkling_caps_raised(config: RouterConfig) -> None:
 
 def test_config_26b_num_ctx_covers_t3(config: RouterConfig) -> None:
     lane = config.lanes["gemma4_26b"]
-    t3 = config.sizes["T3"].max_tokens
-    assert lane.num_ctx is not None
-    assert lane.num_predict is not None
-    assert lane.num_ctx >= t3 + lane.num_predict
+    assert lane.num_ctx is not None and lane.num_ctx >= 12288
+    inkling = config.lanes["inkling_2_mini"]
+    assert inkling.num_ctx is not None and inkling.num_ctx >= 18432
 
 
 def test_assert_fable_locked_helper() -> None:

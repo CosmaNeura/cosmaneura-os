@@ -1,9 +1,9 @@
 # Documented Modelfile snippet for gemma4-26b coder (lab-only).
 # Do not apply on John's Mac from this repository; this is reference for CoS.
 # Cap output so long lint/doc batches stay bounded.
+# num_ctx >= 12288 covers T3 input (8000) + output (2048) with headroom.
 
 FROM gemma4-26b-coder-128k
 
 PARAMETER num_predict 2048
-# T3 input (8000) + output (2048) => num_ctx 10240
-PARAMETER num_ctx 10240
+PARAMETER num_ctx 12288

@@ -100,12 +100,20 @@ def check_summary_numbers_and_ids(job: Job) -> GuardResult:
 
 
 def _token_in_raw_source(token: str, source: str) -> bool:
-    """Match token against raw source text; #401 matches 401 and #401."""
+    """Match with word boundaries after # normalisation.
+
+    ``5`` must not match inside ``52 passed``.
+    """
     norm = normalize_id_token(token)
-    if token in source or norm in source:
-        return True
-    if f"#{norm}" in source:
-        return True
+    candidates = {norm, token, f"#{norm}"}
+    for candidate in candidates:
+        if not candidate:
+            continue
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9_]){re.escape(candidate)}(?![A-Za-z0-9_])"
+        )
+        if pattern.search(source):
+            return True
     return False
 
 
@@ -126,13 +134,22 @@ def check_memory(
             detail="ABORT: memory could not be read.",
             abort=True,
         )
-    if lane_is_heavy and config.unload_12b_before_heavy and snapshot.gemma_12b_loaded:
-        return GuardResult(
-            name="memory",
-            ok=False,
-            detail="ABORT: heavy model blocked until gemma4:12b is unloaded.",
-            abort=True,
-        )
+    if lane_is_heavy and config.unload_12b_before_heavy:
+        status = snapshot.ollama_12b_status
+        if status == "unknown":
+            return GuardResult(
+                name="memory",
+                ok=False,
+                detail="ABORT: Ollama 12B status unknown; heavy lane refused.",
+                abort=True,
+            )
+        if status == "loaded" or snapshot.gemma_12b_loaded:
+            return GuardResult(
+                name="memory",
+                ok=False,
+                detail="ABORT: heavy model blocked until gemma4:12b is unloaded.",
+                abort=True,
+            )
     if snapshot.swap_watchdog_tripped:
         return GuardResult(
             name="memory",
@@ -227,6 +244,7 @@ def _resolve_snapshot(
         or job.swap_watchdog_tripped
         or job.gemma_12b_loaded
     ):
+        loaded = job.gemma_12b_loaded or snapshot.gemma_12b_loaded
         return MemorySnapshot(
             free_percent=(
                 job.free_memory_percent
@@ -234,7 +252,8 @@ def _resolve_snapshot(
                 else snapshot.free_percent
             ),
             swap_watchdog_tripped=job.swap_watchdog_tripped or snapshot.swap_watchdog_tripped,
-            gemma_12b_loaded=job.gemma_12b_loaded or snapshot.gemma_12b_loaded,
+            gemma_12b_loaded=loaded,
             readable=True,
+            ollama_12b_status="loaded" if loaded else "not_loaded",
         )
     return snapshot
