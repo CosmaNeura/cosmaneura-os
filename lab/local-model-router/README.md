@@ -1,8 +1,9 @@
 # Local model job router (lab only)
 
 What happens tonight to existing live users: nothing. This is a developer-only
-tool under `lab/local-model-router/`. It is not part of the product runtime, CI
-gates, deploys, or infra.
+tool under `lab/local-model-router/`. It is not part of the product runtime,
+deploys, or infra, but it is now part of `synth-ci` via a required job named
+`lab-local-model-router`.
 
 ## What it does
 
@@ -79,8 +80,9 @@ Builds Aider / pytest / ruff commands; never runs a model in CI.
 
 ## Tests
 
-Collected locally (no CI workflow / ruleset edits):
+Collected via the `lab-local-model-router` job in `synth-ci`: `cd lab/local-model-router && uv run --no-project --with pytest --with pyyaml python -m pytest -q`.
 
+Locally:
 ```bash
 cd lab/local-model-router
 uv run --project ../.. pytest -c pytest.ini
