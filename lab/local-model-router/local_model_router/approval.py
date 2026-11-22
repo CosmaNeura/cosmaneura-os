@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,17 @@ from .router_types import batch_kind_for_lane
 
 class ApprovalError(ValueError):
     """Raised when a local or Azure batch is started without a valid approval."""
+
+
+def require_finite_usd(value: float, *, label: str) -> float:
+    """Fail closed on NaN/inf (and non-numeric). Cap comparisons with NaN are false."""
+    try:
+        amount = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ApprovalError(f"{label} must be a finite USD amount.") from exc
+    if not math.isfinite(amount):
+        raise ApprovalError(f"{label} must be a finite USD amount (got non-finite).")
+    return amount
 
 
 @dataclass(frozen=True)
@@ -76,17 +88,24 @@ def require_approval(
         except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
             raise ApprovalError(f"Azure spend ledger unreadable: {exc}") from exc
 
-        if azure_month_spend_usd is not None and float(azure_month_spend_usd) < 0:
-            raise ApprovalError("Azure month spend must not be negative.")
+        if azure_month_spend_usd is not None:
+            job_spend = require_finite_usd(
+                azure_month_spend_usd, label="Azure month spend"
+            )
+            if job_spend < 0:
+                raise ApprovalError("Azure month spend must not be negative.")
+        else:
+            job_spend = 0.0
         if azure_run_estimate_usd is None:
             raise ApprovalError("azure_run_estimate_usd required and must be > 0.")
-        estimate = float(azure_run_estimate_usd)
+        estimate = require_finite_usd(
+            azure_run_estimate_usd, label="azure_run_estimate_usd"
+        )
         if estimate <= 0:
             raise ApprovalError("azure_run_estimate_usd required and must be > 0.")
 
-        job_spend = float(azure_month_spend_usd) if azure_month_spend_usd is not None else 0.0
         effective = max(ledger_spend, job_spend)
-        cap = config.azure_monthly_cap_usd
+        cap = require_finite_usd(config.azure_monthly_cap_usd, label="Azure monthly cap")
         if effective >= cap or effective + estimate >= cap:
             raise ApprovalError(
                 f"Azure monthly cap ${cap:.0f} would be exceeded "
@@ -116,7 +135,7 @@ def _consume_approval_id(token: str, ledger_path: Path) -> None:
 
 
 def _read_month_spend(path: Path) -> float:
-    """Read current-month spend. Missing/unreadable/negative => fail closed."""
+    """Read current-month spend. Missing/unreadable/negative/non-finite => fail closed."""
     if not path.exists():
         raise ApprovalError("Azure spend ledger file missing (fail closed).")
     try:
@@ -125,6 +144,7 @@ def _read_month_spend(path: Path) -> float:
         spend = float(raw.get("months", {}).get(month_key, 0.0))
     except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
         raise ApprovalError(f"Azure spend ledger unreadable: {exc}") from exc
+    spend = require_finite_usd(spend, label="Azure spend ledger month total")
     if spend < 0:
         raise ApprovalError("Azure spend ledger has negative spend (fail closed).")
     return spend
@@ -132,15 +152,22 @@ def _read_month_spend(path: Path) -> float:
 
 def record_azure_spend(path: Path, amount_usd: float) -> float:
     """Append synthetic Azure spend for the current UTC month. Returns new total."""
-    if float(amount_usd) < 0:
+    amount = require_finite_usd(amount_usd, label="Azure spend amount")
+    if amount < 0:
         raise ApprovalError("Azure spend amount must not be negative.")
     path.parent.mkdir(parents=True, exist_ok=True)
     months: dict[str, float] = {}
     if path.exists():
         raw = json.loads(path.read_text(encoding="utf-8"))
-        months = {k: float(v) for k, v in raw.get("months", {}).items()}
+        for key, value in raw.get("months", {}).items():
+            months[str(key)] = require_finite_usd(
+                float(value), label=f"Azure spend ledger month {key}"
+            )
     month_key = datetime.now(UTC).strftime("%Y-%m")
-    months[month_key] = months.get(month_key, 0.0) + float(amount_usd)
+    new_total = months.get(month_key, 0.0) + amount
+    months[month_key] = require_finite_usd(
+        new_total, label="Azure spend ledger month total"
+    )
     path.write_text(
         json.dumps({"months": months}, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

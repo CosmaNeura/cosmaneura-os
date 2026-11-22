@@ -638,11 +638,25 @@ jobs:
             "${INCLUDED_VITEST[@]#clients/desktop/}"
           node --test "${INCLUDED_NODE[@]}"
 
+  # Lab-only local-model router (developer tool under lab/). Not shipped product.
+  lab-local-model-router:
+    name: lab-local-model-router
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Lab local-model-router pytest
+        working-directory: lab/local-model-router
+        run: uv run --no-project --with pytest --with pyyaml python -m pytest -q
+
   synth-gate:
     name: synth-ci-gate
     runs-on: ubuntu-24.04
     if: always()
-    needs: [ci-mode, python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey, desktop-recorder]
+    needs: [ci-mode, python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey, desktop-recorder, lab-local-model-router]
     steps:
       - name: Require every needed job succeeded
         env:
@@ -677,5 +691,5 @@ jobs:
           PY
       - name: Confirm all synth gates passed
         run: |
-          echo "python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey, desktop-recorder all green"
+          echo "python-quality, python-tests, web, container-image, beta-infra-static, enrollment-journey, desktop-recorder, lab-local-model-router all green"
           echo "No production secrets used. No deploy performed."

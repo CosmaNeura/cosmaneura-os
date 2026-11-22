@@ -8,7 +8,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .approval import ApprovalError, record_azure_spend, require_approval
+from .approval import (
+    ApprovalError,
+    record_azure_spend,
+    require_approval,
+    require_finite_usd,
+)
 from .config import PACKAGE_ROOT, load_config
 from .dry_run import format_table, run_dry_run
 from .harness import build_harness_plan
@@ -248,7 +253,9 @@ def _cmd_record_azure_spend(args: argparse.Namespace) -> int:
     state_dir = _state_dir(args)
     spend_path = state_dir / Path(config.azure_spend_ledger_path).name
     try:
-        total = record_azure_spend(spend_path, float(args.amount_usd))
+        # Fail closed before ledger write: argparse accepts nan/inf as float.
+        amount = require_finite_usd(args.amount_usd, label="--amount-usd")
+        total = record_azure_spend(spend_path, amount)
     except ApprovalError as exc:
         print(f"approval_gate: {exc}", file=sys.stderr)
         return 2
