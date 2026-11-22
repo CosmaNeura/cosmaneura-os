@@ -1,8 +1,16 @@
 from local_model_router.router_types import batch_kind_for_lane
 
 
-def test_local_lane_returns_local():
-    assert batch_kind_for_lane("local_model") == "local"
+def test_gemma4_12b_returns_local():
+    assert batch_kind_for_lane("gemma4_12b") == "local"
+
+
+def test_inkling_2_mini_returns_local():
+    assert batch_kind_for_lane("inkling_2_mini") == "local"
+
+
+def test_unknown_lane_falls_through_to_local():
+    assert batch_kind_for_lane("some_future_lane") == "local"
 
 
 def test_azure_codex_mini_returns_azure():
