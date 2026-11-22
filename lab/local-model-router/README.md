@@ -80,8 +80,9 @@ Builds Aider / pytest / ruff commands; never runs a model in CI.
 
 ## Tests
 
-Collected via the `lab-local-model-router` job in `synth-ci`:
+Collected via the `lab-local-model-router` job in `synth-ci`: `cd lab/local-model-router && uv run --no-project --with pytest --with pyyaml python -m pytest -q`.
 
+Locally:
 ```bash
 cd lab/local-model-router
 uv run --project ../.. pytest -c pytest.ini
