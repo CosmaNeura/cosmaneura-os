@@ -17,7 +17,7 @@ export async function bindCaptureQueueStorage(flow: EncryptedIndexedDbFlowStore,
   if (previous && previous !== desired) throw new QueueInvariantError("queue_storage_profile_changed");
   if (native && previous === null) {
     if (hasLegacyFlow) throw new QueueInvariantError("queue_storage_profile_changed");
-    const browser = await EncryptedIndexedDbQueueStorage.open({databaseName: `cosmas-capture-queue:${workspaceId}`});
+    const browser = await EncryptedIndexedDbQueueStorage.open({databaseName: captureQueueDatabaseName(workspaceId)});
     try {
       if ((await browser.listMetadata()).some(record => record.reservation.sessionId === sessionId && record.state !== "purged")) {
         throw new QueueInvariantError("queue_storage_profile_changed");
@@ -25,6 +25,11 @@ export async function bindCaptureQueueStorage(flow: EncryptedIndexedDbFlowStore,
     } finally { browser.close(); }
   }
   await flow.claimQueueStorageKind(sessionId, desired);
+}
+
+/** Browser IndexedDB name for a capture queue namespace (workspaceId or sessionId). */
+export function captureQueueDatabaseName(workspaceId: string): string {
+  return `cosmas-capture-queue:${validId(workspaceId)}`;
 }
 
 /** Select before opening a store. Native failure never falls back to browser custody. */
@@ -36,7 +41,7 @@ export async function openCaptureQueueStorage(workspaceId: string, sessionId: st
 ): Promise<{storage: CaptureQueueStorage; kind: "native" | "browser"; close: () => void}> {
   validId(workspaceId); validId(sessionId);
   if (!native) {
-    const storage = await EncryptedIndexedDbQueueStorage.open({databaseName: `cosmas-capture-queue:${workspaceId}`});
+    const storage = await EncryptedIndexedDbQueueStorage.open({databaseName: captureQueueDatabaseName(workspaceId)});
     return {storage, kind: "browser", close: () => storage.close()};
   }
   try {

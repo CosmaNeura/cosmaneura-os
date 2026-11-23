@@ -1,8 +1,8 @@
 # Canonical product decisions
 
 Status: reconciled owner rulings for Cursor revalidation  
-Date: 2026-09-02  
-Working version: 1.9-draft
+Date: 2026-11-19  
+Working version: 1.10-draft
 
 These decisions supersede contradictory statements in the uploaded roadmap,
 context pack, brief, and JSON pack. Cursor must challenge a locked decision only
@@ -181,6 +181,77 @@ vocabulary do not appear in normal practice workflow. The primary interface is
 the clinic's work queue. Safety and retry machinery should be invisible until
 human attention is genuinely required.
 
+### DL-20261117-01 - Owner decisions, November 17, 2026
+
+John Clemente, CEO, November 17, 2026. Recorded in `docs/DECISION_LOG.md`
+as `DL-20261117-01`.
+
+Narrowed by `DL-20261117-01` decision 10 below. Read both before acting. Scope
+confirmed by John Clemente on 19 Nov 2026: "This workstream makes no
+production deploys, no App Store submissions and no changes to live
+sign-ins." If it is unclear whether a task belongs to this workstream,
+treat it as belonging to it.
+
+Items 6 and 7 incorporate the owner follow-up recorded as `DL-20261117-02`.
+Item 6 also incorporates John's 19 Nov 2026 9:28am ET answer recorded as
+`DL-20261119-01`.
+
+These decisions set product scope. They do not change the build gate or
+the synthetic-data rule. Build and test against invented pages and
+invented patients only.
+
+1. A read-only browser extension that reads pages in the signed-in user's
+   own browser session is in scope. Unattended automation and agent-held
+   EMR logins remain deferred.
+2. Provider-triggered form fill is approved for V1, not V0. It fills visible
+   fields only after an explicit user click and never clicks Save, Submit,
+   Send or Sign.
+3. Actions started from the phone stage work at the desktop. They never
+   send. CosmaBot never signs or transmits a prescription; it may prepare
+   one for the prescriber to sign in the EMR. (PR #400: "the phone stage" is
+   not a lift of the deferred Native mobile/Capacitor item; that remains
+   deferred.)
+4. A small on-device model is permitted in the desktop app for three kinds
+   of work: perception (recognising screens, patients and changes),
+   protection (PHI minimisation, pre-fill checks, mismatch warnings), and
+   short on-screen help for staff (what is missing, what changed, call
+   notes, answers about what is on screen). It does not draft clinical
+   notes, choose codes or make clinical judgments. No model weights of
+   Chinese origin, including derivatives. The cloud remains the reasoning
+   layer. Every consequential on-device output is verified by code or
+   escalated.
+   Gloss (reviewer reading, PENDING / OPEN-JOHN): "call notes" here means
+   short on-screen staff help, not drafting clinical notes.
+   "Consequential" means any on-device output that could affect a clinical
+   or system-of-record action. If it is unclear whether an output is
+   consequential, treat it as consequential. "Chinese origin, including
+   derivatives" covers developer, fine-tune, distillation and quantisation
+   provenance; the specific on-device model is still pending John's pick.
+5. Desktop targets are Windows and Mac. Development starts on Mac for two
+   weeks and moves to Windows from week three. Platform-specific code sits
+   behind interfaces. (PR #400: start date for the two-week Mac window is
+   pending; Windows signing and distribution are not authorised by the
+   October 30 text; pending John)
+6. CosmaBot must record a visit and produce a note without depending on
+   the legacy platform. Owner follow-up (`DL-20261117-02`): "Yes, maybe
+   for initial beta we rely on legacy but going forward we need
+   independent recording and notes." John's answer of 19 Nov 2026
+   9:28am ET: "Beta does not rely on the legacy platform". Do not add
+   any dependency on the legacy platform for beta. Do not remove or change
+   an existing legacy dependency without John's instruction.
+7. Scribe remains a separate product that shares the recorder. New Scribe
+   sign-ups use CosmaBot identity (confirmed, `DL-20261117-02`). This sets
+   direction only. Existing Scribe users, their logins and their access
+   are not changed, migrated or walled. Turning this on for live sign-ups
+   is a live identity change under decision 10.
+8. Device compliance checks are deferred to V2 and are described as
+   compliance checks, not security monitoring.
+9. CosmaBot never asks a practice to disable screen locks or EMR session
+   timeouts.
+10. For this workstream: no production deploys, no store submissions and no
+    live identity changes without my explicit instruction in the task.
+    ("my" = John Clemente.)
+
 ## Validation-required technology hypothesis
 
 The intended direction is a modular monolith using FastAPI, Postgres,
@@ -205,7 +276,7 @@ Cursor must validate rather than assume:
 - Patient email versus A2P sequencing.
 - Actual Athena/Acuity access and practice identifiers.
 - Physical packing of Boxes after the first isolated beta.
-- Product runtime model/provider, if and when an LLM capability is enabled.
+- Product runtime model/provider.
 - Quantitative product graduation and kill thresholds.
 
 Conservative defaults apply until adjudicated: local fake adapters, individual
@@ -218,12 +289,19 @@ cross-Box networking, and no automatic patient sends.
 - Kafka or a generalized event-sourcing platform
 - Shared multi-Org runtime
 - Second EHR
-- Browser automation
+- Unattended automation and agent-held EMR logins
+- Provider-triggered form fill (V1, not V0)
 - Evidence/open-web retrieval zone
 - Teams
-- Native mobile/Capacitor
+- Native mobile/Capacitor (PR #400: decision 3's "phone stage" does not lift this)
 - Payment-card chase or PAN handling
-- Claims and prescription workflows
+- Claims
 - RRM workbook demo
 - Full self-service onboarding
-- Rebuilding the existing Scribe inside OS
+- Rebuilding the existing Scribe inside OS (independent recording and
+  notes per DL-20261117-01 item 6 is not this; beta does not rely on the
+  legacy platform per John's 19 Nov 2026 9:28am ET answer)
+- Device compliance checks (V2; described as compliance checks, not
+  security monitoring)
+- Signing or transmitting a prescription (never; DL-20261117-01 item 3).
+  Stage for prescription preparation is pending.

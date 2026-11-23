@@ -1,0 +1,93 @@
+{
+  "sizes": {
+    "T1": { "max_files": 1, "max_tokens": 2000 },
+    "T2": { "max_files": 1, "max_tokens": 4000 },
+    "T3": { "max_files": 2, "max_tokens": 8000 },
+    "T4": { "max_files": 3, "max_tokens": 16000 },
+    "T5": { "max_files": 8, "max_tokens": 32000 }
+  },
+  "lanes": {
+    "gemma4_12b": {
+      "model": "gemma4:12b",
+      "task_types": [
+        "ci_log_summary",
+        "build_log_summary",
+        "test_log_summary",
+        "log_summary",
+        "diff_pre_review"
+      ],
+      "heavy": false
+    },
+    "inkling_2_mini": {
+      "model": "inkling-2-mini",
+      "task_types": [
+        "unit_tests",
+        "single_file_fix",
+        "strict_structured_output"
+      ],
+      "starting_size": "T3",
+      "max_size": "T3",
+      "heavy": true,
+      "num_predict": 8192,
+      "timeout_seconds": 480,
+      "num_ctx": 18432,
+      "notes": "Raised num_predict (was 3072) and timeout so thinking cannot starve the diff. num_ctx covers T3 input + thinking + output."
+    },
+    "gemma4_26b": {
+      "model": "gemma4-26b",
+      "task_types": ["lint_doc_fix", "lint_doc_batch"],
+      "starting_size": "T3",
+      "max_size": "T3",
+      "heavy": true,
+      "num_predict": 2048,
+      "timeout_seconds": 300,
+      "num_ctx": 12288
+    }
+  },
+  "escalation_chain": [
+    "azure_codex_mini",
+    "gpt_5_3_codex",
+    "cursor_cloud_agent"
+  ],
+  "azure": {
+    "codex_mini_endpoint_env": "AZURE_CODEX_MINI_ENDPOINT",
+    "gpt_5_3_codex_endpoint_env": "AZURE_GPT_5_3_CODEX_ENDPOINT",
+    "monthly_cap_usd": 200
+  },
+  "promotion": {
+    "runs_per_cell_required": 3
+  },
+  "step_rules": {
+    "step_up_after_consecutive_passes": 10,
+    "step_down_after_fable_rejections_in_window": 2,
+    "step_down_window": 10
+  },
+  "memory": {
+    "min_free_percent": 5.0,
+    "unload_12b_before_heavy": true
+  },
+  "long_log": {
+    "token_threshold": 8000,
+    "force_lane": "gemma4_12b",
+    "reason": "Long logs route to the 12B only (truncation amendment)."
+  },
+  "fable": {
+    "review_required": true,
+    "configurable": false
+  },
+  "harness": {
+    "ollama_api_base": "http://127.0.0.1:11434",
+    "aider_map_tokens": 0,
+    "max_attempts": 1,
+    "max_follow_ups": 1,
+    "forbidden_aider_flags": []
+  },
+  "metrics": {
+    "jsonl_path": "metrics/router_metrics.jsonl"
+  },
+  "paths": {
+    "approval_ledger": "state/approval_ledger.json",
+    "azure_spend_ledger": "state/azure_spend.json",
+    "size_state": "state/task_size_state.json"
+  }
+}

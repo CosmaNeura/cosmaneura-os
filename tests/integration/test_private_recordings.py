@@ -340,3 +340,112 @@ def test_new_migration_installs_all_immutable_receipts_and_refuses_erasure(recor
         for table in ("private_recordings", "private_recording_finishes", "private_recording_links"):
             if table + "_immutable" in installed:
                 connection.execute(text("DROP TRIGGER " + table + "_immutable ON " + table))
+
+
+def _assert_audio_retention_shape(body, *, enabled: bool, enabled_at_present: bool):
+    assert body["enabled"] is enabled
+    assert body["hours"] == 48
+    assert body["warn_hours"] == 36
+    assert set(body) == {"enabled", "hours", "warn_hours", "enabled_at", "server_now"}
+    assert isinstance(body["server_now"], str) and body["server_now"].endswith("Z")
+    if enabled_at_present:
+        assert isinstance(body["enabled_at"], str) and body["enabled_at"].endswith("Z")
+    else:
+        assert body["enabled_at"] is None
+
+
+def test_audio_retention_policy_defaults_off(recording, session):
+    from cosmas_os.config import settings
+    from cosmas_os.models import BoxContext
+
+    f, draft, _ = recording
+    response = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert response.status_code == 200, response.text
+    _assert_audio_retention_shape(response.json(), enabled=False, enabled_at_present=False)
+    assert response.headers.get("cache-control") == "no-store"
+    box = session.get(BoxContext, f.box)
+    assert box is not None
+    assert box.recording_audio_48h_retention_enabled is False
+    assert box.recording_audio_48h_retention_enabled_at is None
+    assert settings.recording_audio_48h_retention_enabled is False
+
+
+def test_audio_retention_enabled_only_when_process_and_box_opt_in(recording, session, monkeypatch):
+    from datetime import UTC
+
+    from cosmas_os.application import private_recording as service
+    from cosmas_os.models import BoxContext
+
+    f, draft, _ = recording
+    box = session.get(BoxContext, f.box)
+    assert box is not None
+    box.recording_audio_48h_retention_enabled = True
+    session.commit()
+    session.refresh(box)
+    assert box.recording_audio_48h_retention_enabled_at is not None
+    stamped = box.recording_audio_48h_retention_enabled_at
+
+    monkeypatch.setattr(service.runtime_settings, "recording_audio_48h_retention_enabled", False)
+    off = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert off.status_code == 200
+    # Box opted in (enabled_at set) but process switch still off → effective false.
+    _assert_audio_retention_shape(off.json(), enabled=False, enabled_at_present=True)
+
+    monkeypatch.setattr(service.runtime_settings, "recording_audio_48h_retention_enabled", True)
+    on = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert on.status_code == 200
+    _assert_audio_retention_shape(on.json(), enabled=True, enabled_at_present=True)
+    assert on.json()["enabled_at"] == stamped.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+    # Re-enable stays true without moving enabled_at (grandfathering stamp stable).
+    box.recording_audio_48h_retention_enabled = True
+    session.commit()
+    session.refresh(box)
+    assert box.recording_audio_48h_retention_enabled_at == stamped
+
+    box.recording_audio_48h_retention_enabled = False
+    session.commit()
+    session.refresh(box)
+    assert box.recording_audio_48h_retention_enabled_at is None
+    again = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert again.status_code == 200
+    _assert_audio_retention_shape(again.json(), enabled=False, enabled_at_present=False)
+
+
+def test_audio_retention_returns_flip_plus_48h_grandfathering_fields(recording, session, monkeypatch):
+    """enabled_at + server_now are the fields clients need for flip+48h grandfathering."""
+    from datetime import UTC, datetime
+
+    from cosmas_os.application import private_recording as service
+    from cosmas_os.models import BoxContext
+
+    f, draft, _ = recording
+    before = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert before.status_code == 200
+    body = before.json()
+    _assert_audio_retention_shape(body, enabled=False, enabled_at_present=False)
+    assert datetime.fromisoformat(body["server_now"].replace("Z", "+00:00")).tzinfo is not None
+
+    box = session.get(BoxContext, f.box)
+    assert box is not None
+    box.recording_audio_48h_retention_enabled = True
+    session.commit()
+    session.refresh(box)
+    monkeypatch.setattr(service.runtime_settings, "recording_audio_48h_retention_enabled", True)
+    after = f.client.get(base(draft) + "/audio-retention", headers=headers(f))
+    assert after.status_code == 200
+    payload = after.json()
+    _assert_audio_retention_shape(payload, enabled=True, enabled_at_present=True)
+    enabled_at = datetime.fromisoformat(payload["enabled_at"].replace("Z", "+00:00"))
+    server_now = datetime.fromisoformat(payload["server_now"].replace("Z", "+00:00"))
+    assert enabled_at.tzinfo is not None and server_now.tzinfo is not None
+    assert enabled_at <= server_now.astimezone(UTC)
+    # Clients use enabled_at as the grandfather cutover; pre-cutover audio gets
+    # flip+48h grace instead of an immediate wipe from an old ended_at.
+    assert (server_now - enabled_at).total_seconds() < 60
+
+
+def test_audio_retention_requires_private_recording_contract(recording):
+    f, draft, _ = recording
+    bare = f.client.get(base(draft) + "/audio-retention", headers={"Authorization": "Bearer " + f.token()})
+    assert bare.status_code == 426

@@ -1,10 +1,11 @@
 import {PrivateTranscriptPanel} from './PrivateTranscriptPanel';
 import {useCallback,useEffect,useRef,useState} from 'react';
-import {PrivateRecordingRuntime,openPrivateRecordingStore,type PrivateRecordingStore} from './private-recording-runtime';
+import {PrivateRecordingRuntime,AUDIO_DELETED_USER_MESSAGE,clearTransferRetentionReleased,markTransferRetentionReleased,openPrivateRecordingStore,type PrivateRecordingStore} from './private-recording-runtime';
 import {PrivateRecordingLedgerController} from './private-recording-ledger';
 import {privateRecordingApi,parsePrivateRecordingReceipt,parseRecordingVisitBinding,type RecordingVisitBinding,type RecordingVisitRequest,type PrivateRecordingLinkRequest,type PrivateRecordingReceipt} from './private-recording-api';
 import {prepareCapture,type PreparedCapture,type CaptureAttestation,type CaptureLanguage,type SavedRecordingSelection} from './capture-api';
 import {openSavedRecordingRuntime} from './saved-recording-runtime';
+import {audioRetentionEffective,EXPIRED_AUDIO_REFUSED,resolveArmedAudioRetentionPolicy,type AudioRetentionPolicy} from './private-recording-retention';
 import {validPrivateWorkspace,type Workspace,type ProviderTeam,type AuthenticatedWorkspaceIdentity,type CaptureTaskBot} from './workspace-api';
 import {WorkspaceApiError} from './workspace-api';
 import {CreatorReviewPanel} from './CreatorReviewPanel';
@@ -116,11 +117,22 @@ export function requireLegacySavedRecordingTarget(transfer:Transfer,workspace:Wo
     workspace.appointment_id&&transfer.admitted?.workspace_id===workspace.id);
 }
 
+/** Panel persist path: validate then CAS-write transfer:<id>. Exported so tests hit the real write. */
+export async function persistSavedRecordingTransfer(
+  store:PrivateRecordingStore,entry:SavedRecordingEntry,workspaceId:string,prior:Transfer|null,next:Transfer,
+):Promise<Transfer>{
+  validate(next,entry,workspaceId);
+  await store.write('transfer:'+entry.recordingId,prior,next);
+  return next;
+}
+
 export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,isCurrent,taskBot,locked,notesEnabled,
-  onDraftLock,onReviewDraft,onCurrentDraft,scratchpad,notebookDirty,onNotebook,onRecordings,onNavigationLock}:{entry:SavedRecordingEntry;identity:AuthenticatedWorkspaceIdentity;
+  onDraftLock,onReviewDraft,onCurrentDraft,scratchpad,notebookDirty,onNotebook,onRecordings,onNavigationLock,audioRetention}:{entry:SavedRecordingEntry;identity:AuthenticatedWorkspaceIdentity;
   workspace:Workspace;team:ProviderTeam;isCurrent:()=>boolean;taskBot?:CaptureTaskBot;locked:boolean;notesEnabled:boolean;
   onDraftLock:(v:boolean)=>void;onReviewDraft:(v:CaptureDraft)=>void;onCurrentDraft:(v:CaptureDraft)=>void;
-  scratchpad?:SavedScratchpad;notebookDirty:boolean;onNotebook:()=>void;onRecordings?:()=>void;onNavigationLock?:(busy:boolean)=>void}){
+  scratchpad?:SavedScratchpad;notebookDirty:boolean;onNotebook:()=>void;onRecordings?:()=>void;onNavigationLock?:(busy:boolean)=>void;
+  /** Parent-injected retention policy (stable off constant). Panel does not GET. */
+  audioRetention?:AudioRetentionPolicy|null}){
   const origin=entry.originWorkspace??workspace;
   const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[consented,setConsented]=useState(false),[error,setError]=useState('');
   const [renewConsent,setRenewConsent]=useState(false),[claimedContinuation,setClaimedContinuation]=useState(false);
@@ -132,8 +144,11 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const [retainedReviewSession,setRetainedReviewSession]=useState<string|null>(null);
   const [reviewAvailability,setReviewAvailability]=useState<'loading'|'ready'|'unavailable'>('loading');
   const [review,setReview]=useState<CreatorReviewView|null>(null),[reviewLock,setReviewLock]=useState(false),[showDraft,setShowDraft]=useState(false),[draftLocked,setDraftLocked]=useState(false);
-  const live=useRef({identity,entry,workspace,team,isCurrent,locked,taskBot});live.current={identity,entry,workspace,team,isCurrent,locked,taskBot};
-  const owner=useRef<{alive:boolean;identity:AuthenticatedWorkspaceIdentity;authorityKey:string;scope:string;recordingId:string;store:PrivateRecordingStore;recording:PrivateRecordingRuntime;runtime:Runtime|null;unsubscribe?:()=>void}|null>(null);
+  // Parent passes policy (no panel GET — switches-off network matches main).
+  const retentionRef=useRef<AudioRetentionPolicy|null|undefined>(audioRetention);
+  const [ownerEpoch,setOwnerEpoch]=useState(0);
+  const live=useRef({identity,entry,workspace,team,isCurrent,locked,taskBot,audioRetention});live.current={identity,entry,workspace,team,isCurrent,locked,taskBot,audioRetention};
+  const owner=useRef<{alive:boolean;identity:AuthenticatedWorkspaceIdentity;authorityKey:string;scope:string;recordingId:string;store:PrivateRecordingStore;recording:PrivateRecordingRuntime;runtime:Runtime|null;unsubscribe?:()=>void;armedRetention:AudioRetentionPolicy|null|undefined}|null>(null);
   const latestReview=useRef<{owner:typeof owner.current;availability:typeof reviewAvailability;view:CreatorReviewView|null}>({owner:null,availability:'loading',view:null});
   const openingFailure=useRef<{identity:AuthenticatedWorkspaceIdentity;authorityKey:string;scope:string;recordingId:string}|null>(null);
   const privatePreparation=useRef<{owner:NonNullable<typeof owner.current>;prepare:()=>Promise<void>}|null>(null);
@@ -146,12 +161,29 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   useEffect(()=>{onNavigationLock?.(busy||privateBusy||privateDirty||privateTransition);return()=>onNavigationLock?.(false);},[busy,privateBusy,privateDirty,privateTransition,onNavigationLock]);
   useEffect(()=>{if(ready){const heading=transcriptionSection.current?.querySelector<HTMLElement>('h2');if(heading){heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}}},[ready]);
   useEffect(()=>{if(showDraft){const heading=noteSection.current?.querySelector<HTMLElement>('h3');if(heading){heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}}},[showDraft]);
+  useEffect(()=>{retentionRef.current=audioRetention;},[audioRetention]);
   const authorityKey=vendorCanonical({workspace:workspace.id,workspace_revision:workspace.revision,origin:origin.id,appointment:workspace.appointment_id,binding:entry.binding??null,team_revision:team.revision,recovery_scope:team.recovery_scope??null,bot:taskBot?.selection??null,enabled:taskBot?.enabled??false});
   const authorityCurrent=()=>live.current.identity===identity&&live.current.entry.scope===entry.scope&&live.current.entry.recordingId===entry.recordingId&&live.current.workspace.id===workspace.id&&
     live.current.workspace.appointment_id===workspace.appointment_id&&live.current.workspace.revision===workspace.revision&&(live.current.entry.originWorkspace?.id??live.current.workspace.id)===origin.id&&live.current.team.revision===team.revision&&live.current.team.recovery_scope===team.recovery_scope&&
     vendorCanonical(live.current.entry.binding??null)===vendorCanonical(entry.binding??null)&&vendorCanonical(live.current.taskBot?.selection??null)===vendorCanonical(taskBot?.selection??null)&&live.current.taskBot?.enabled===taskBot?.enabled&&live.current.isCurrent();
   const current=(selected=owner.current)=>!!selected?.alive&&owner.current===selected&&selected.identity===identity&&selected.authorityKey===authorityKey&&
     selected.scope===entry.scope&&selected.recordingId===entry.recordingId&&authorityCurrent();
+  // Re-resolve when owner is assigned or the prop changes (no panel GET).
+  useEffect(()=>{
+    const selected=owner.current;
+    if(!selected||!current(selected))return;
+    let active=true;
+    void(async()=>{
+      try{
+        const base=audioRetention!==undefined?audioRetention:retentionRef.current;
+        const armed=await resolveArmedAudioRetentionPolicy(selected.store,base,Date.now());
+        if(!active||!current(selected))return;
+        retentionRef.current=armed;
+        selected.armedRetention=armed;
+      }catch{/* best-effort resolve; off-path is a no-op */}
+    })();
+    return()=>{active=false;};
+  },[ownerEpoch,audioRetention,identity,entry.recordingId,entry.scope,authorityKey]);
   const reportReviewAvailability=useCallback((value:'loading'|'ready'|'unavailable')=>{if(current()){latestReview.current={...latestReview.current,owner:owner.current,availability:value};setReviewAvailability(value);}},[identity,entry.scope,entry.recordingId,authorityKey]);
   const reportReview=useCallback((value:CreatorReviewView|null)=>{if(current()){latestReview.current={...latestReview.current,owner:owner.current,view:value};setReview(value);}},[identity,entry.scope,entry.recordingId,authorityKey]);
   const reportPrivateDirty=useCallback((value:boolean)=>{if(current())setPrivateDirty(value);},[identity,entry.scope,entry.recordingId,authorityKey]);
@@ -174,9 +206,24 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     void(async()=>{
       const store=await openPrivateRecordingStore(entry.scope,entry.platform);
       let recording:PrivateRecordingRuntime;
-      try{recording=await PrivateRecordingRuntime.open({scope:entry.scope,platform:entry.platform,isCurrent:()=>alive&&authorityCurrent(),openStore:async()=>store},{recordingId:entry.recordingId,title:'Saved recording'});}catch(cause){store.close();throw cause;}
+      let armed:AudioRetentionPolicy|null|undefined;
+      try{
+        // Resolve inside the try that closes the store on failure (no leaked handle).
+        const basePolicy=audioRetention!==undefined?audioRetention:retentionRef.current;
+        armed=await resolveArmedAudioRetentionPolicy(store,basePolicy,Date.now());
+        retentionRef.current=armed;
+        // Live getter reads selected.armedRetention ?? retentionRef — never pin mount-time armed.
+        recording=await PrivateRecordingRuntime.open({scope:entry.scope,platform:entry.platform,isCurrent:()=>alive&&authorityCurrent(),openStore:async()=>store,
+          getAudioRetention:()=>owner.current?.armedRetention??retentionRef.current,audioRetention:armed??undefined},{recordingId:entry.recordingId,title:'Saved recording'});
+      }catch(cause){store.close();throw cause;}
       if(!alive||!authorityCurrent()){await recording.close();return;}
-      const selected={alive:true,identity,authorityKey,scope:entry.scope,recordingId:entry.recordingId,store,recording,runtime:null as Runtime|null,unsubscribe:undefined as (()=>void)|undefined};owner.current=selected;latestReview.current={owner:selected,availability:'loading',view:null};
+      if(recording.snapshot.phase==='audio_deleted'){
+        await recording.close();
+        if(alive&&authorityCurrent()){openingFailure.current={identity,authorityKey,scope:entry.scope,recordingId:entry.recordingId};setClaimedContinuation(false);setError(AUDIO_DELETED_USER_MESSAGE);}
+        return;
+      }
+      const selected={alive:true,identity,authorityKey,scope:entry.scope,recordingId:entry.recordingId,store,recording,runtime:null as Runtime|null,unsubscribe:undefined as (()=>void)|undefined,armedRetention:armed};owner.current=selected;latestReview.current={owner:selected,availability:'loading',view:null};
+      setOwnerEpoch(epoch=>epoch+1);
       need(recording.snapshot.workspaceId===origin.id&&recording.snapshot.phase==='sealed'&&recording.snapshot.recordedChunks>0);
       const check=()=>alive&&current(selected);
       const audioDetails=await recording.snapshotForLedger();if(!check())return;
@@ -184,6 +231,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       const value=await store.read('transfer:'+entry.recordingId);if(!check())return;
       saved.current=value===null?null:validate(value,entry,workspace.id);
       if(saved.current?.receipt){const ledger=new PrivateRecordingLedgerController({identity,team,workspace:origin,store,scope:entry.scope,isCurrent:check});const original=await ledger.readCurrent(entry.recordingId);need(original?.state==='finished');await parsePrivateRecordingReceipt(saved.current.receipt,original.attach);need(check());if(entry.binding)await parseRecordingVisitBinding(entry.binding,saved.current.receipt);need(check());}
+      if(!check())return;
       setTransfer(saved.current);
       if(saved.current?.admitted){
         if(!entry.binding&&!origin.appointment_id){
@@ -198,11 +246,18 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
             audioDetails.chunks===receipt.finish!.chunks&&audioDetails.frames===receipt.finish!.frames);
           requireLegacySavedRecordingTarget(transfer,workspace);
           const existing=await readExistingScribeSource(workspace.id,identity);need(check()&&existing.status==='available'&&existing.review?.session_id===transfer.admitted!.session_id);
+          // Proven completion on the legacy retained-review path — release sweep protection only.
+          if(audioRetentionEffective(selected.armedRetention??retentionRef.current)){
+            try{await markTransferRetentionReleased(store,entry.recordingId,new Date().toISOString());}catch{/* best-effort marker */}
+          }
           setRetainedReviewSession(transfer.admitted!.session_id);
         }else await openRuntime(saved.current.admitted,selected);
       }
       if(check())setReady(true);
-    })().catch(()=>{if(alive&&authorityCurrent()){openingFailure.current={identity,authorityKey,scope:entry.scope,recordingId:entry.recordingId};setClaimedContinuation(false);setError('This saved recording could not be opened for transcription. Your original audio is retained.');}});
+    })().catch(cause=>{if(alive&&authorityCurrent()){openingFailure.current={identity,authorityKey,scope:entry.scope,recordingId:entry.recordingId};setClaimedContinuation(false);
+      const code=cause&&typeof cause==='object'&&'code'in cause?cause.code:'';
+      const deleted=code===EXPIRED_AUDIO_REFUSED||(cause&&typeof cause==='object'&&'message'in cause&&cause.message===AUDIO_DELETED_USER_MESSAGE);
+      setError(deleted?AUDIO_DELETED_USER_MESSAGE:'This saved recording could not be opened for transcription. Your original audio is retained.');}});
     return()=>{alive=false;const selected=owner.current;if(selected){selected.alive=false;selected.unsubscribe?.();void(async()=>{try{await selected.runtime?.close();}finally{await selected.recording.close();}})();}owner.current=null;};
   },[identity,entry.scope,entry.recordingId,workspace.id,workspace.appointment_id,workspace.revision,origin.id,team.revision,team.recovery_scope,taskBot?.selection.address,taskBot?.selection.team_revision,taskBot?.enabled,entry.binding?.request_sha256,entry.binding?.source_sha256,authorityKey]);
   useEffect(()=>{
@@ -210,11 +265,14 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     if(!ready||locked||!current()||!next?.armed||next.started||next.identity!==identity||next.recordingId!==entry.recordingId||next.scope!==entry.scope||next.authority!==authorityKey)return;
     const selected=owner.current;next.started=true;void transcribe(next.gesture).finally(()=>{if(current(selected))setClaimedContinuation(false);});
   },[ready,locked,identity,entry.recordingId,entry.scope,authorityKey]);
-  async function persist(next:Transfer,selected=owner.current){need(current(selected)&&selected);validate(next,entry,workspace.id);
-    await selected.store.write('transfer:'+entry.recordingId,saved.current,next);need(current(selected));saved.current=next;setTransfer(next);}
+  async function persist(next:Transfer,selected=owner.current){need(current(selected)&&selected);
+    const written=await persistSavedRecordingTransfer(selected.store,entry,workspace.id,saved.current,next);
+    need(current(selected));saved.current=written;setTransfer(written);}
   async function openRuntime(admitted:PreparedCapture,selected=owner.current){need(current(selected)&&selected);
+    const armedPolicy=selected.armedRetention??retentionRef.current;
     const opened=await openSavedRecordingRuntime({workspaceId:workspace.id,admitted,identity,scope:entry.scope,recording:selected.recording,
-      chunks:saved.current!.admission!.source.chunks,platform:entry.platform,isCurrent:()=>current(selected)});
+      chunks:saved.current!.admission!.source.chunks,platform:entry.platform,isCurrent:()=>current(selected),store:selected.store,
+      audioRetention:armedPolicy,now:()=>Date.now()});
     if(!current(selected)){await opened.close();return;}selected.runtime=opened;selected.unsubscribe=opened.controller.subscribe(value=>{if(current(selected))setSnapshot(value);});
     if(opened.reviewOnly)setSnapshot({...opened.controller.snapshot,state:'processing',sessionId:admitted.session_id});
   }
@@ -267,6 +325,9 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       next={...next,receipt};await persist(next,selected);
       if(renewConsent){
         need(consented&&next.admission&&!next.admitted&&(next.prior_admissions?.length??0)<20);
+        // Re-import must be protected again until the new upload succeeds (gated: identical to main when off).
+        if(audioRetentionEffective(selected.armedRetention??retentionRef.current))
+          await clearTransferRetentionReleased(selected.store,entry.recordingId);
         next={...next,contract:'cosmas.saved-transfer.v3',prior_admissions:[...(next.prior_admissions??[]),next.admission],
           renew_saved_consent:true,admission:{...next.admission,key:crypto.randomUUID(),attestation:{...next.admission.attestation,granted_at:new Date().toISOString()}}};
         await persist(next,selected);setRenewConsent(false);
@@ -313,10 +374,11 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     {openingFailure.current?.identity===identity&&openingFailure.current.authorityKey===authorityKey&&openingFailure.current.scope===entry.scope&&openingFailure.current.recordingId===entry.recordingId&&error&&<p role="alert">{error}</p>}</section>;
   const retainedReview=!!transfer?.admitted&&retainedReviewSession===transfer.admitted.session_id;
   const processing=!!transfer?.admitted&&(snapshot?.state==='processing'||review!==null||retainedReview);
+  const retentionOnDevice=audioRetentionEffective(audioRetention!==undefined?audioRetention:retentionRef.current);
   return <section ref={transcriptionSection} className="capture-panel saved-transcription" aria-label="Saved recording transcription" data-english-only={transfer?.admission?.language==='en-US'}>
     <h2>{showDraft?'Review your visit note':processing?'Review your transcript':'Transcribe your saved recording'}</h2>
     {workspace.appointment_id&&<><ol aria-label="Transcription steps"><li>Visit confirmed</li><li>{retainedReview?'Recording connected to Scribe':processing?'Audio uploaded':'Send recording to Scribe'}</li><li>Review transcript and save your note</li></ol>
-    <p>Your original recording stays on this device. Find it under Home → Recordings on this device.</p></>}
+    {!retentionOnDevice&&<p>Your original recording stays on this device. Find it under Home → Recordings on this device.</p>}</>}
     {!workspace.appointment_id?<p role="status">Choose a visit below, then send this recording to Scribe.</p>:<>
       <p><strong>{workspace.label}</strong> · {owner.current?.recording.snapshot.title}</p>
       {ready&&owner.current&&<p>{clipDate&&<time dateTime={clipDate}>{new Date(clipDate).toLocaleString()} · </time>}{Math.floor(owner.current.recording.snapshot.elapsedSeconds/60)}:{String(Math.floor(owner.current.recording.snapshot.elapsedSeconds%60)).padStart(2,'0')} saved recording</p>}

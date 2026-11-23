@@ -24,9 +24,23 @@ vi.mock('./PrivateTranscriptPanel',async original=>{
 });
 vi.mock('./private-transcription-native',async original=>({...await original<typeof import('./private-transcription-native')>(),privateSpeechNative:{begin:mocks.privateBegin,append:mocks.privateAppend,finish:mocks.privateFinish,cancel:mocks.privateCancel}}));
 vi.mock('./saved-recording-runtime',()=>({openSavedRecordingRuntime:mocks.savedRuntime}));
-vi.mock('./private-recording-runtime',()=>({openPrivateRecordingStore:async()=>({read:mocks.read,write:mocks.write,close:mocks.close}),PrivateRecordingRuntime:{open:mocks.open}}));
+vi.mock('./private-recording-runtime',()=>({
+  openPrivateRecordingStore:async()=>({read:mocks.read,write:mocks.write,close:mocks.close,keys:async()=>[],delete:async()=>{}}),
+  PrivateRecordingRuntime:{open:mocks.open},
+  AUDIO_DELETED_USER_MESSAGE:'Audio deleted on this device; transcript and notes kept.',
+  clearTransferRetentionReleased:async()=>{},
+  isTransferRetentionReleased:async()=>false,
+  markTransferRetentionReleased:async()=>{},
+}));
+vi.mock('./private-recording-retention',async original=>{
+  const actual=await original<typeof import('./private-recording-retention')>();
+  return {
+    ...actual,
+    resolveArmedAudioRetentionPolicy:async(_store:unknown,policy:unknown)=>policy,
+  };
+});
 vi.mock('./private-recording-ledger',()=>({PrivateRecordingLedgerController:class{readCurrent=mocks.ledger;}}));
-vi.mock('./private-recording-api',()=>({parsePrivateRecordingReceipt:async()=>{},parseRecordingVisitBinding:async()=>{},privateRecordingApi:{read:async()=>activeReceipt,readVisitBinding:async()=>activeBinding,bindVisit:mocks.bindVisit}}));
+vi.mock('./private-recording-api',()=>({parsePrivateRecordingReceipt:async()=>{},parseRecordingVisitBinding:async()=>{},privateRecordingApi:{read:async()=>activeReceipt,readVisitBinding:async()=>activeBinding,bindVisit:mocks.bindVisit,audioRetention:async()=>({enabled:false})}}));
 vi.mock('./capture-api',()=>({prepareCapture:vi.fn()}));
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const identity={mode:'clerk_jwt' as const,getToken:async()=>null};
@@ -50,10 +64,33 @@ beforeEach(()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 const button=(name:string)=>[...host.querySelectorAll('button')].find(b=>b.textContent===name);
-async function mount(processing=false){await act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform:'desktop'}} identity={identity} workspace={workspace} team={{revision:1} as ProviderTeam}
+async function mount(processing=false,extra:Record<string,unknown>={}){await act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform:'desktop'}} identity={identity} workspace={workspace} team={{revision:1} as ProviderTeam}
   isCurrent={()=>true} locked={false} notesEnabled={false} onDraftLock={()=>{}} onReviewDraft={()=>{}} onCurrentDraft={()=>{}} notebookDirty={false} onNotebook={()=>{}}
-  onRecordings={back} onNavigationLock={navigation} taskBot={{selection:{address:'scribe',team_revision:1},name:'Scribe',enabled:true,includeNotebook:false}}/>));
+  onRecordings={back} onNavigationLock={navigation} taskBot={{selection:{address:'scribe',team_revision:1},name:'Scribe',enabled:true,includeNotebook:false}} {...extra}/>));
   await vi.waitFor(()=>expect(processing?host.textContent?.includes('Review your transcript'):button('Continue transcription')?.disabled===false).toBe(true));}
+it('hides retained-on-device copy when retention is effective',async()=>{
+  const retention={enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:'2026-10-09T12:00:00.000Z',fetchedAtDeviceMs:Date.parse('2026-10-09T12:00:00.000Z')};
+  await mount(false,{audioRetention:retention});
+  expect(host.textContent).not.toContain('Your original recording stays on this device');
+  expect(host.textContent).toContain('Send recording to Scribe');
+});
+it('maps EXPIRED_AUDIO_REFUSED open failure to AUDIO_DELETED_USER_MESSAGE',async()=>{
+  mocks.open.mockRejectedValueOnce(Object.assign(new Error('Audio deleted on this device; transcript and notes kept.'),{code:'private_recording_audio_expired'}));
+  await act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform:'desktop'}} identity={identity} workspace={workspace} team={{revision:1} as ProviderTeam}
+    isCurrent={()=>true} locked={false} notesEnabled={false} onDraftLock={()=>{}} onReviewDraft={()=>{}} onCurrentDraft={()=>{}} notebookDirty={false} onNotebook={()=>{}}
+    onRecordings={back} taskBot={{selection:{address:'scribe',team_revision:1},name:'Scribe',enabled:true,includeNotebook:false}}
+    audioRetention={{enabled:true,enabledAt:'2026-10-01T00:00:00.000Z',serverNow:'2026-10-09T12:00:00.000Z',fetchedAtDeviceMs:Date.parse('2026-10-09T12:00:00.000Z')}}/>));
+  await vi.waitFor(()=>expect(host.querySelector('[role="alert"]')?.textContent).toBe('Audio deleted on this device; transcript and notes kept.'));
+});
+it('makes no audioRetention policy request when the parent passes the prop',async()=>{
+  const {privateRecordingApi}=await import('./private-recording-api');
+  const {AUDIO_RETENTION_OFF}=await import('./private-recording-retention');
+  const spy=vi.spyOn(privateRecordingApi,'audioRetention');
+  await mount(false,{audioRetention:AUDIO_RETENTION_OFF});
+  expect(spy).not.toHaveBeenCalled();
+  expect(AUDIO_RETENTION_OFF).toEqual({enabled:false});
+  spy.mockRestore();
+});
 it.each(['capture_request_conflict','capture_consent_required','capture_consent_unavailable'])('retains exact intent and offers recordings rather than futile retry for %s',async code=>{
   const original=structuredClone(stored);
   vi.mocked(prepareCapture).mockRejectedValue(new BffResponseError(409,code,null));

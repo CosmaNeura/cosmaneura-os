@@ -43,11 +43,14 @@ class BriefSchedule(ProtectedModel):
             return False
         return start <= clock < end if start < end else clock >= start or clock < end
 
+    def _zone(self) -> ZoneInfo:
+        return ZoneInfo(self.timezone)
+
     def occurrence(self, day: date) -> datetime | None:
         if day.isoweekday() not in self.weekdays:
             return None
         naive = datetime.combine(day, time.fromisoformat(self.at))
-        zone = ZoneInfo(self.timezone)
+        zone = self._zone()
         # A repeated civil time means its first occurrence only. A missing
         # spring-forward time is skipped rather than silently moved.
         utc = naive.replace(tzinfo=zone, fold=0).astimezone(UTC)
@@ -60,7 +63,7 @@ class BriefSchedule(ProtectedModel):
             raise ValueError("An aware clock is required")
         if not self.enabled:
             return "paused", None
-        local = now.astimezone(ZoneInfo(self.timezone))
+        local = now.astimezone(self._zone())
         occurrence = self.occurrence(local.date())
         if occurrence is None or occurrence < activated_at or now < occurrence:
             return "waiting", occurrence
@@ -72,7 +75,7 @@ class BriefSchedule(ProtectedModel):
         return "due", occurrence
 
     def next_occurrence(self, now: datetime) -> datetime | None:
-        day = now.astimezone(ZoneInfo(self.timezone)).date()
+        day = now.astimezone(self._zone()).date()
         for offset in range(15):
             occurrence = self.occurrence(day + timedelta(days=offset))
             if occurrence is not None and occurrence > now:
