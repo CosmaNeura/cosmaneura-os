@@ -96,7 +96,8 @@ root shell. `bootstrap_host.py` accepts any root-owned mode `0600` or `0400`
 regular receipt file; bootstrap itself creates `/etc/cosmabot` (including
 `host-bootstrap.json`). Bootstrap-close always runs close-and-verify of the
 temporary SSH rule; the `host-bootstrap.json` check uses `sudo test` before
-that close so a missing file still leaves the rule closed.
+that close when `SSH_KNOWN_HOSTS_FILE` is present, otherwise skips the host
+check and still closes (close fence falls back to `/dev/null`).
 
 Use the printed `sha256=` value (or the runbook export line) with
 `--creation-receipt-sha256`. Local proof:
@@ -273,9 +274,10 @@ do not create `/etc/cosmabot` yet) → root shell with the printed export lines
 and hand-set `FORMAT_APPROVAL_DISK_ID` → `#389` bootstrap so `/etc/cosmabot`
 exists (`apply_started_utc` under 24 hours, or STOP and tell the CTO) →
 bootstrap-close (always close-and-verify the TEMP SSH rule; `sudo test` for
-`/etc/cosmabot/host-bootstrap.json` before that close; secrets blocked if
-missing) → second vault window → stage-from-vault (STOP if `LOCAL_STAGING`
-already set and exists) → `TEMP-JOHN-SSH-SECRETS-INSTALL` → ssh-stdin install →
+`/etc/cosmabot/host-bootstrap.json` before that close when known_hosts is set,
+else skip host check and still close; secrets blocked if missing) → second
+vault window → stage-from-vault (STOP if `LOCAL_STAGING` already set and
+exists) → `TEMP-JOHN-SSH-SECRETS-INSTALL` → ssh-stdin install →
 close-and-verify. John's hands-on: `/32`, vault window, SSH key.
 
 SSH install window (John `/32` only; see runbook §4.5 and `fences/`):

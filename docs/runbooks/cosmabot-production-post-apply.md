@@ -1521,9 +1521,11 @@ and for the close-verify probe, then opens an interactive root shell with
 `StrictHostKeyChecking=yes`. You should see
 `PASS: bootstrap-ssh TEMP-JOHN-SSH-SECRETS-INSTALL open`, then the root prompt.
 Exit that shell when ready for the copy paste; the `/32` rule stays open until
-bootstrap-close. If this interactive `ssh -t ... sudo -i` fails, go straight to
-the bootstrap-close paste (or the Terminal closed partway recovery box) so the
-temporary SSH rule is closed and verified:
+bootstrap-close. If this interactive `ssh -t ... sudo -i` fails, or if any of
+the five host-key pin steps after `cosmabot_ssh_nsg_open` STOPs (mktemp,
+run-command, parse, shape, write), go straight to the bootstrap-close paste or
+paste the Terminal closed partway recovery box so the temporary SSH rule is
+closed and verified:
 
 ```bash
 if ! test -n "${RG:-}"; then
@@ -1549,26 +1551,26 @@ else
   if ! cosmabot_ssh_nsg_open; then
     echo "STOP: bootstrap-ssh cosmabot_ssh_nsg_open failed" >&2
   elif ! SSH_KNOWN_HOSTS_FILE=$(mktemp "${TMPDIR:-/tmp}/cosmabot-known-hosts.XXXXXX"); then
-    echo "STOP: bootstrap-ssh known_hosts mktemp failed" >&2
+    echo "STOP: bootstrap-ssh known_hosts mktemp failed - paste the Terminal closed partway recovery box" >&2
   else
     export SSH_KNOWN_HOSTS_FILE
     if ! HOSTKEY_JSON=$(az vm run-command invoke --resource-group "$RG" --name vm-cosmabot-prod-eus2-01 --command-id RunShellScript --scripts "cat /etc/ssh/ssh_host_ed25519_key.pub" -o json); then
-      echo "STOP: bootstrap-ssh host-key run-command failed" >&2
+      echo "STOP: bootstrap-ssh host-key run-command failed - paste the Terminal closed partway recovery box" >&2
       rm -f "$SSH_KNOWN_HOSTS_FILE"
     elif ! HOSTKEY_LINE=$(printf '%s' "$HOSTKEY_JSON" | jq -r '.value[0].message | split("\n") | map(select(test("^ssh-ed25519 "))) | .[0] // empty'); then
-      echo "STOP: bootstrap-ssh host-key parse failed" >&2
+      echo "STOP: bootstrap-ssh host-key parse failed - paste the Terminal closed partway recovery box" >&2
       rm -f "$SSH_KNOWN_HOSTS_FILE"
     elif ! printf '%s' "$HOSTKEY_LINE" | grep -Eq '^ssh-ed25519 [A-Za-z0-9+/=]+'; then
-      echo "STOP: bootstrap-ssh host-key shape invalid" >&2
+      echo "STOP: bootstrap-ssh host-key shape invalid - paste the Terminal closed partway recovery box" >&2
       rm -f "$SSH_KNOWN_HOSTS_FILE"
     else
       HOSTKEY_BODY=$(printf '%s' "$HOSTKEY_LINE" | awk '{print $1" "$2}')
       if ! printf '%s %s\n' "$VM_PUBLIC_IP" "$HOSTKEY_BODY" >"$SSH_KNOWN_HOSTS_FILE"; then
-        echo "STOP: bootstrap-ssh known_hosts write failed" >&2
+        echo "STOP: bootstrap-ssh known_hosts write failed - paste the Terminal closed partway recovery box" >&2
         rm -f "$SSH_KNOWN_HOSTS_FILE"
       else
         echo "PASS: bootstrap-ssh TEMP-JOHN-SSH-SECRETS-INSTALL open; host key pinned"
-        echo "NOTE: if this interactive ssh fails, paste bootstrap-close or the Terminal closed partway recovery box to close the TEMP SSH rule"
+        echo "NOTE: if this interactive ssh fails, or if a host-key pin STOP printed above, paste bootstrap-close or the Terminal closed partway recovery box to close the TEMP SSH rule"
         ssh -i "$SSH_IDENTITY_PATH" -t -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}" "${ADMIN_USERNAME}@${VM_PUBLIC_IP}" 'sudo -i'
       fi
     fi
@@ -1656,7 +1658,7 @@ else
   if ! ssh -i "$SSH_IDENTITY_PATH" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}" "${ADMIN_USERNAME}@${VM_PUBLIC_IP}" "sudo sh -c 'cat > /root/cosmabot-creation-receipt.json && chown root:root /root/cosmabot-creation-receipt.json && chmod 0600 /root/cosmabot-creation-receipt.json'" < "$HOME/.cosmabot-sitting2/creation-receipt.json"; then
     echo "STOP: receipt-place could not write /root/cosmabot-creation-receipt.json on the VM" >&2
   else
-    if ! REMOTE_SHA_RAW=$(ssh -i "$SSH_IDENTITY_PATH" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}" "${ADMIN_USERNAME}@${VM_PUBLIC_IP}" 'sudo sha256sum /root/cosmabot-creation-receipt.json'); then
+    if ! REMOTE_SHA_RAW=$(ssh -n -i "$SSH_IDENTITY_PATH" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}" "${ADMIN_USERNAME}@${VM_PUBLIC_IP}" 'sudo sha256sum /root/cosmabot-creation-receipt.json'); then
       echo "STOP: receipt-place remote sudo sha256sum failed" >&2
     else
       REMOTE_RECEIPT_SHA256=${REMOTE_SHA_RAW%% *}
@@ -1754,14 +1756,17 @@ rule name the secrets session will reuse). Design: when prerequisites are
 present, `cosmabot_ssh_nsg_close_and_verify` **always** runs so the temporary
 SSH `/32` rule is closed and verified no matter what the host-file check
 returns. The host check must use SSH, so it runs first with
-`sudo test -f /etc/cosmabot/host-bootstrap.json` over the pinned host key
-(`/etc/cosmabot` is root-owned mode 0700 after bootstrap). Then close runs on
-both the present and missing branches. If the host file is missing after a
-successful close, print STOP (secrets window blocked; rule already closed) and
-name the Terminal closed partway recovery box if the rule may still exist from
-another session. Exports `SSH_KNOWN_HOSTS_FILE` for the close-verify SSH probe.
-You should see the close PASS (and host-bootstrap present) before any second
-vault window or §4.5 secrets session:
+`sudo test -f /etc/cosmabot/host-bootstrap.json` when `SSH_KNOWN_HOSTS_FILE` is
+set (`/etc/cosmabot` is root-owned mode 0700 after bootstrap). If that file is
+unset or missing, skip the host check, leave `BOOTSTRAP_HOST_OK=0`, and still
+run close-and-verify (the close fence falls back to `/dev/null` for
+`UserKnownHostsFile`). Then close runs on both the present and missing
+branches. If the host file is missing after a successful close, print STOP
+(secrets window blocked; rule already closed) and name the Terminal closed
+partway recovery box if the rule may still exist from another session. Exports
+`SSH_KNOWN_HOSTS_FILE` for the close-verify SSH probe when present. You should
+see the close PASS (and host-bootstrap present) before any second vault window
+or §4.5 secrets session:
 
 ```bash
 if ! test -n "${RG:-}"; then
@@ -1778,18 +1783,19 @@ elif ! test -n "${SSH_IDENTITY_PATH:-}"; then
   echo "STOP: bootstrap-close SSH_IDENTITY_PATH unset - export the private key path matching admin_ssh_public_key first" >&2
 elif ! test -f "$SSH_IDENTITY_PATH"; then
   echo "STOP: bootstrap-close SSH_IDENTITY_PATH missing" >&2
-elif ! test -n "${SSH_KNOWN_HOSTS_FILE:-}"; then
-  echo "STOP: bootstrap-close SSH_KNOWN_HOSTS_FILE unset - paste the bootstrap-ssh open box first" >&2
-elif ! test -f "$SSH_KNOWN_HOSTS_FILE"; then
-  echo "STOP: bootstrap-close SSH_KNOWN_HOSTS_FILE missing" >&2
 elif ! test -f infra/beta/vm/host/fences/fence-ssh-nsg-close-verify.sh; then
   echo "STOP: bootstrap-close fence-ssh-nsg-close-verify.sh missing - run from the repo root" >&2
 else
-  export RG SECRETS_TRANSPORT_PY VM_PUBLIC_IP ADMIN_USERNAME SSH_IDENTITY_PATH SSH_KNOWN_HOSTS_FILE
+  export RG SECRETS_TRANSPORT_PY VM_PUBLIC_IP ADMIN_USERNAME SSH_IDENTITY_PATH
+  if test -n "${SSH_KNOWN_HOSTS_FILE:-}"; then
+    export SSH_KNOWN_HOSTS_FILE
+  fi
   source infra/beta/vm/host/fences/fence-ssh-nsg-close-verify.sh
   BOOTSTRAP_HOST_OK=0
-  if ssh -i "$SSH_IDENTITY_PATH" -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}" "${ADMIN_USERNAME}@${VM_PUBLIC_IP}" 'sudo test -f /etc/cosmabot/host-bootstrap.json'; then
-    BOOTSTRAP_HOST_OK=1
+  if test -n "${SSH_KNOWN_HOSTS_FILE:-}" && test -f "$SSH_KNOWN_HOSTS_FILE"; then
+    if ssh -n -i "$SSH_IDENTITY_PATH" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=${SSH_KNOWN_HOSTS_FILE}" "${ADMIN_USERNAME}@${VM_PUBLIC_IP}" 'sudo test -f /etc/cosmabot/host-bootstrap.json'; then
+      BOOTSTRAP_HOST_OK=1
+    fi
   fi
   if ! cosmabot_ssh_nsg_close_and_verify; then
     echo "STOP: bootstrap-close cosmabot_ssh_nsg_close_and_verify failed" >&2
