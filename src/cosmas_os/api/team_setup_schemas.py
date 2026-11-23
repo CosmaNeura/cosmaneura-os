@@ -1,6 +1,8 @@
 """Bounded team commands without reflecting private settings in error payloads."""
 import json
 
+from pydantic import BaseModel
+
 from cosmas_os.api.team_schemas import TeamSave
 from cosmas_os.application.team_setup import MAX_REQUEST_BYTES
 from cosmas_os.application.workspace import WorkspaceError
@@ -24,12 +26,18 @@ def _unique(pairs):
     return value
 
 
-async def read_team_request(request, schema):
+def _headers_acceptable(request) -> bool:
+    return not (
+        request.query_params or len(request.headers.getlist('content-type')) != 1
+        or request.headers['content-type'].split(';', 1)[0].strip().lower() != 'application/json'
+        or len(request.headers.getlist('authorization')) > 1
+        or request.headers.getlist('content-encoding')
+    )
+
+
+async def read_team_request[T: BaseModel](request, schema: type[T]) -> T:
     try:
-        if (request.query_params or len(request.headers.getlist('content-type')) != 1
-            or request.headers['content-type'].split(';', 1)[0].strip().lower() != 'application/json'
-            or len(request.headers.getlist('authorization')) > 1
-            or request.headers.getlist('content-encoding')):
+        if not _headers_acceptable(request):
             raise ValueError()
         body = bytearray()
         async for chunk in request.stream():

@@ -46,6 +46,16 @@ class BoxContext(Base):
     real_patient_recording_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Kill engaged by default: real-patient recording stays off until ops clears it.
     real_patient_recording_kill_engaged: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # T1: Box opt-in for 48-hour recording AUDIO delete. Default false; process
+    # switch recording_audio_48h_retention_enabled must also be true.
+    recording_audio_48h_retention_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Set by BEFORE INSERT/UPDATE trigger when enabled becomes true; cleared
+    # when enabled becomes false. Clients use this for flip+48h grandfathering.
+    recording_audio_48h_retention_enabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Principal(Base):

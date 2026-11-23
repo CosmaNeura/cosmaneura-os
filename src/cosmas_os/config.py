@@ -134,6 +134,9 @@ class Settings(BaseSettings):
     # Process env must stay false. Real-patient recording is a Box DB switch only
     # and takes effect solely when clinic/BAA/PHI refs are present (T-REL-6).
     real_patient_recording_enabled: bool = False
+    # T1: process switch for 48-hour recording AUDIO retention. Default false.
+    # Effective only when this is true AND the Box opt-in is true.
+    recording_audio_48h_retention_enabled: bool = False
 
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)

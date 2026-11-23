@@ -17,6 +17,8 @@ class WorkerProgress:
     """
 
     def __init__(self, max_age_seconds: float, *, clock: Callable[[], float] = time.monotonic):
+        if isinstance(max_age_seconds, bool):
+            raise ValueError("invalid worker progress interval")
         if not 0 < max_age_seconds <= ROUTINE_MAX_AGE_SECONDS:
             raise ValueError("invalid worker progress interval")
         self._clock = clock

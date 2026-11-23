@@ -7,6 +7,16 @@ type Snapshot=Awaited<ReturnType<PrivateRecordingRuntime['snapshotForLedger']>>;
 export type PrivateRecordingLedger={contract:'cosmas.private-recording.ledger.v1';recording_id:string;workspace_id:string;
   recovery_scope:string;attach:PrivateRecordingIntent;receipt:PrivateRecordingReceipt|null;finish:PrivateRecordingFinishIntent|null;
   state:'attach_pending'|'attached'|'finish_pending'|'finished';uncertain:boolean;retry_ready:boolean};
+/** Ledger keys are never deleted by 48-hour audio retention. */
+export function privateRecordingLedgerKey(recordingId:string):string{
+  if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(recordingId))throw new WorkspaceApiError(503,'private_recording_unavailable');
+  return 'ledger:'+recordingId;
+}
+/** Instant the label/countdown may use from a finished ledger (audio-only retention). */
+export function ledgerAudioEndedAt(ledger:PrivateRecordingLedger|null):string|null{
+  const ended=ledger?.finish?.request.ended_at??ledger?.receipt?.finish?.ended_at??null;
+  return typeof ended==='string'?ended:null;
+}
 type Options={identity:AuthenticatedWorkspaceIdentity;team:ProviderTeam;workspace:Workspace;store:PrivateRecordingStore;scope:string;isCurrent:()=>boolean};
 const closed=(v:unknown,keys:string):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===keys.split(',').sort().join(',');
 function need(v:unknown):asserts v {if(!v)throw new WorkspaceApiError(503,'private_recording_unavailable');}
@@ -17,7 +27,7 @@ export class PrivateRecordingLedgerController {
   constructor(private options:Options){}
   private current(){need(this.options.isCurrent());}
   private async wait<T>(promise:Promise<T>):Promise<T>{this.current();const value=await promise;this.current();return value;}
-  private key(id:string){need(/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(id));return 'ledger:'+id;}
+  private key(id:string){return privateRecordingLedgerKey(id);}
   private async validate(value:unknown,id:string):Promise<PrivateRecordingLedger>{
     need(closed(value,'contract,recording_id,workspace_id,recovery_scope,attach,receipt,finish,state,uncertain,retry_ready')&&value.contract==='cosmas.private-recording.ledger.v1'&&value.recording_id===id&&value.workspace_id===this.options.workspace.id&&value.recovery_scope===this.options.team.recovery_scope&&typeof value.uncertain==='boolean'&&typeof value.retry_ready==='boolean'&&['attach_pending','attached','finish_pending','finished'].includes(String(value.state)));
     const record=value as PrivateRecordingLedger;await this.wait(validatePrivateRecordingIntent(record.attach,this.options.team));

@@ -1,6 +1,6 @@
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
-import {PrivateRecordingLedgerController} from './private-recording-ledger';
+import {PrivateRecordingLedgerController,ledgerAudioEndedAt,privateRecordingLedgerKey} from './private-recording-ledger';
 import {openPrivateRecordingStore,type PrivateRecordingStore,type PrivateRecordingRuntime} from './private-recording-runtime';
 import {privateRecordingApi,type PrivateRecordingIntent,type PrivateRecordingReceipt} from './private-recording-api';
 import {vendorCanonical,vendorSha256} from './vendor-contract';
@@ -43,4 +43,11 @@ it('refuses stop-unconfirmed or empty PCM outcomes and changed identity before n
   const submit=vi.spyOn(privateRecordingApi,'attach').mockImplementation(async(_identity,v)=>receipt(v)),finish=vi.spyOn(privateRecordingApi,'finish');const c=controller();await c.attach(snapshot());
   await expect(c.finish({...snapshot(),phase:'stop_unconfirmed'})).rejects.toThrow();await expect(c.finish({...snapshot(),phase:'sealed',chunks:0,frames:0})).rejects.toThrow();expect(finish).not.toHaveBeenCalled();
   current=false;await expect(c.checkSaved(id(2))).rejects.toThrow();expect(submit).toHaveBeenCalledTimes(1);
+});
+it('exposes ledger key and ended-at for the retention label without deleting ledgers',async()=>{
+  expect(privateRecordingLedgerKey(id(2))).toBe('ledger:'+id(2));
+  vi.spyOn(privateRecordingApi,'attach').mockImplementation(async(_identity,v)=>receipt(v));
+  const c=controller();const attached=await c.attach(snapshot());
+  expect(ledgerAudioEndedAt(attached)).toBeNull();
+  expect(await store.read(privateRecordingLedgerKey(id(2)))).toMatchObject({state:'attached'});
 });
