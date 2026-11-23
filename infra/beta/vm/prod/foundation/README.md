@@ -18,12 +18,15 @@ path that replaces only `azurerm_linux_virtual_machine.workload` and
 `azurerm_managed_disk.data` (plus the data-disk attachment) under
 `plans/recreate-workload-<UTC>.tfplan` with `-var=allow_workload_recreate=true`.
 Default `allow_workload_recreate=false` keeps `prevent_destroy` on those two
-resources. When a live private `module/` still pins the first-apply `*.tf`
-snapshot, run `python3 bootstrap_local.py refresh-module-snapshot
---confirm-refresh` on a clean `origin/main` checkout (sanctioned `*.tf` diffs
-only; binds new digests into `manifest.source` for John's next approval). OpenAI
-opt-in must be in the first apply's inputs or wait for a separately reviewed
-day-2 tool. Do not run raw tofu by hand.
+resources (`nullable = false` on the variable). After go-live, write
+`<private-dir>/workload-live.json` mode `0600` (see runbook §9.9); prepare,
+plan, and apply then refuse `--recreate-workload` while that latch exists.
+When a live private `module/` still pins the first-apply `*.tf` snapshot, run
+`python3 bootstrap_local.py refresh-module-snapshot --confirm-refresh` on a
+clean `origin/main` checkout (sanctioned `*.tf` diffs only; binds new digests
+into `manifest.source` for John's next approval). OpenAI opt-in must be in the
+first apply's inputs or wait for a separately reviewed day-2 tool. Do not run
+raw tofu by hand.
 
 Azure OpenAI is a separate module (variable default `false`). John's first-apply
 reviewed inputs set `"enable_azure_openai": true` to include `gpt-4.1-dzus` at

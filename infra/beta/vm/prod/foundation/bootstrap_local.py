@@ -123,7 +123,31 @@ RECREATE_ALLOWED_ALERT_ADDRESSES = frozenset(
         'azurerm_monitor_metric_alert.vm["disk_iops"]',
     }
 )
-# Types that must never appear as create/update/replace/delete in a recreate plan.
+# Optional replace-only when runtime_monitoring_enabled retargets after VM recreate.
+RECREATE_ALLOWED_OPTIONAL_REPLACE_ADDRESSES = frozenset(
+    {
+        "azurerm_virtual_machine_extension.health[0]",
+        "azurerm_monitor_data_collection_rule_association.health[0]",
+    }
+)
+# Update-only, limited to query or scopes, when the scheduled-query alert embeds workload.id.
+RECREATE_ALLOWED_RUNTIME_ALERT_ADDRESSES = frozenset(
+    {
+        'azurerm_monitor_scheduled_query_rules_alert_v2.runtime["application"]',
+        'azurerm_monitor_scheduled_query_rules_alert_v2.runtime["backup"]',
+    }
+)
+# Every module resource address that may reference azurerm_linux_virtual_machine.workload.id.
+WORKLOAD_ID_REFERENCE_ADDRESSES = frozenset(
+    {
+        RECREATE_ATTACHMENT_ADDRESS,
+        *RECREATE_ALLOWED_ALERT_ADDRESSES,
+        *RECREATE_ALLOWED_OPTIONAL_REPLACE_ADDRESSES,
+        *RECREATE_ALLOWED_RUNTIME_ALERT_ADDRESSES,
+    }
+)
+# Types that must never appear as create/update/replace/delete in a recreate plan
+# unless the exact address is in an allow-list above.
 RECREATE_FORBIDDEN_TOUCH_TYPES = frozenset(
     {
         "azurerm_public_ip",
@@ -154,6 +178,8 @@ RECREATE_FORBIDDEN_TOUCH_TYPES = frozenset(
     }
 )
 OS_DISK_NAME = "osdisk-vm-cosmabot-prod-eus2-01"
+DATA_DISK_NAME = "data-vm-cosmabot-prod-eus2-01"
+WORKLOAD_LIVE_NAME = "workload-live.json"
 OS_DISK_COMPUTE_TF_NEEDLE = 'name                 = "osdisk-${local.vm_name}"'
 ALLOW_WORKLOAD_RECREATE_VAR = "allow_workload_recreate=true"
 # Private-module refresh may rewrite only these reviewed *.tf paths (relative to module/).
@@ -1015,6 +1041,7 @@ def prepare_recreate_workload(
     context = owner_context(env, inputs, recreate_workload=True)
     tofu = _verify_tofu_mirror(tofu, mirror, env)
     folder = private_directory(folder, fresh=False)
+    assert_no_workload_live_latch(folder)
     passphrase = folder / "encryption.passphrase"
     state_path = folder / "state/foundation.tfstate"
     if not passphrase.exists():
@@ -1318,7 +1345,32 @@ def _recheck_tofu_commands(
     return commands
 
 
+def plan_json_allow_workload_recreate_value(plan_json: dict):
+    """Return tofu show -json variables.allow_workload_recreate.value, or None if absent."""
+    variables = plan_json.get("variables")
+    if not isinstance(variables, dict):
+        return None
+    entry = variables.get("allow_workload_recreate")
+    if not isinstance(entry, dict) or "value" not in entry:
+        return None
+    return entry["value"]
+
+
+def assert_non_recreate_refuses_allow_workload_recreate_true(
+    plan_json: dict, *, mode: str
+) -> None:
+    """First-apply / recover / recheck must refuse when the plan var is True."""
+    if plan_json_allow_workload_recreate_value(plan_json) is True:
+        raise Refused(
+            f"{mode} refuses when plan variables.allow_workload_recreate.value is true; "
+            "use --recreate-workload only"
+        )
+
+
 def sanitize_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256: str) -> dict:
+    assert_non_recreate_refuses_allow_workload_recreate_true(
+        plan_json, mode="First-apply plan"
+    )
     changes = plan_json.get("resource_changes") or []
     counts: dict[str, Counter] = {
         "create": Counter(),
@@ -1548,6 +1600,9 @@ def assert_recover_add_only(plan_json: dict, *, subscription_id: str) -> Counter
 
 
 def sanitize_recover_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256: str) -> dict:
+    assert_non_recreate_refuses_allow_workload_recreate_true(
+        plan_json, mode="Recovery plan"
+    )
     creates = assert_recover_add_only(plan_json, subscription_id=str(inputs["subscription_id"]))
     enabled = bool(inputs.get("enable_azure_openai", False))
     summary = {
@@ -1631,6 +1686,9 @@ def assert_recheck_zero_drift(plan_json: dict) -> list[str]:
 
 
 def sanitize_recheck_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256: str) -> dict:
+    assert_non_recreate_refuses_allow_workload_recreate_true(
+        plan_json, mode="Post-apply re-check"
+    )
     assert_recheck_zero_drift(plan_json)
     enabled = bool(inputs.get("enable_azure_openai", False))
     summary = {
@@ -1650,21 +1708,67 @@ def sanitize_recheck_plan_summary(plan_json: dict, *, inputs: dict, plan_sha256:
     return summary
 
 
-def assert_recreate_allow_var(allow_workload_recreate: bool) -> None:
-    """Workload recreate must refuse unless allow_workload_recreate is exactly true."""
-    if allow_workload_recreate is not True:
+def assert_recreate_allow_var(plan_json: dict) -> bool:
+    """Require tofu show -json variables.allow_workload_recreate.value is exactly True."""
+    value = plan_json_allow_workload_recreate_value(plan_json)
+    if value is not True:
         raise Refused(
-            "Workload recreate requires allow_workload_recreate=true; "
-            "the mode refuses when the variable is false"
+            "Workload recreate requires plan variables.allow_workload_recreate.value "
+            "to be true (from tofu show -json); the mode refuses when the variable is "
+            f"false or missing (got {value!r})"
         )
+    return True
 
 
 def _is_replace_actions(actions: list) -> bool:
     return isinstance(actions, list) and "delete" in actions and "create" in actions
 
 
+def _runtime_alert_update_limited_to_query_or_scopes(change_body: dict) -> bool:
+    """True when before/after differ only in scopes and/or criteria.query."""
+    before = change_body.get("before")
+    after = change_body.get("after")
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    before_keys = set(before)
+    after_keys = set(after)
+    if before_keys != after_keys:
+        return False
+    for key in sorted(before_keys):
+        if before.get(key) == after.get(key):
+            continue
+        if key == "scopes":
+            continue
+        if key == "criteria":
+            before_criteria = before.get("criteria")
+            after_criteria = after.get("criteria")
+            if not isinstance(before_criteria, dict) or not isinstance(after_criteria, dict):
+                # AzureRM may encode criteria as a single-element list.
+                if not (
+                    isinstance(before_criteria, list)
+                    and isinstance(after_criteria, list)
+                    and len(before_criteria) == 1
+                    and len(after_criteria) == 1
+                    and isinstance(before_criteria[0], dict)
+                    and isinstance(after_criteria[0], dict)
+                ):
+                    return False
+                before_criteria = before_criteria[0]
+                after_criteria = after_criteria[0]
+            if set(before_criteria) != set(after_criteria):
+                return False
+            for ckey in before_criteria:
+                if before_criteria.get(ckey) == after_criteria.get(ckey):
+                    continue
+                if ckey != "query":
+                    return False
+            continue
+        return False
+    return True
+
+
 def assert_recreate_workload_changeset(
-    plan_json: dict, *, subscription_id: str, allow_workload_recreate: bool = True
+    plan_json: dict, *, subscription_id: str
 ) -> dict[str, list[str]]:
     """Hard-fail unless the plan is exactly VM+data-disk(+attachment) recreate.
 
@@ -1672,13 +1776,16 @@ def assert_recreate_workload_changeset(
     - replace, or
     - create (mid-replace recovery when the address is absent from state)
 
-    Optional in-place updates of the three azurerm_monitor_metric_alert.vm[...] only.
+    Optional replace-only for health extension + DCRA when runtime monitoring
+    retargets the new VM. Optional in-place updates of the three
+    azurerm_monitor_metric_alert.vm[...] and update-only query/scopes changes
+    on the two scheduled-query runtime alerts.
 
     Everything else must be no-op/read. Public IP, NIC, identity, role assignments,
     Key Vault, storage, registry, OpenAI, network, DNS, and staging are refused on
     any create/update/replace/delete.
     """
-    assert_recreate_allow_var(allow_workload_recreate)
+    assert_recreate_allow_var(plan_json)
     if not isinstance(subscription_id, str) or not subscription_id:
         raise Refused("Workload recreate plan validation requires subscription_id")
     changes = plan_json.get("resource_changes") or []
@@ -1724,34 +1831,70 @@ def assert_recreate_workload_changeset(
             raise Refused(f"Workload recreate plan touches staging names: {exc}") from exc
         if actions == ["no-op"] or actions == ["read"]:
             continue
+        if _is_replace_actions(actions):
+            if address in RECREATE_REQUIRED_REPLACE_ADDRESSES:
+                recreate_addresses.append(address)
+                replace_addresses.append(address)
+                continue
+            if address in RECREATE_ALLOWED_OPTIONAL_REPLACE_ADDRESSES:
+                replace_addresses.append(address)
+                continue
+            if rtype in RECREATE_FORBIDDEN_TOUCH_TYPES:
+                raise Refused(
+                    "Workload recreate refuses changes to public IP, NIC, identity, role "
+                    f"assignments, Key Vault, storage, registry, OpenAI, network, DNS, or "
+                    f"other non-workload resources: {address}"
+                )
+            raise Refused(f"Workload recreate plan has unexpected replace: {address}")
+        if actions == ["create"]:
+            if address not in RECREATE_REQUIRED_REPLACE_ADDRESSES:
+                if rtype in RECREATE_FORBIDDEN_TOUCH_TYPES:
+                    raise Refused(
+                        "Workload recreate refuses changes to public IP, NIC, identity, role "
+                        f"assignments, Key Vault, storage, registry, OpenAI, network, DNS, or "
+                        f"other non-workload resources: {address}"
+                    )
+                raise Refused(f"Workload recreate plan must not create extra resources: {address}")
+            recreate_addresses.append(address)
+            create_addresses.append(address)
+            continue
+        if actions == ["update"]:
+            if address in RECREATE_ALLOWED_ALERT_ADDRESSES:
+                update_addresses.append(address)
+                continue
+            if address in RECREATE_ALLOWED_RUNTIME_ALERT_ADDRESSES:
+                if not _runtime_alert_update_limited_to_query_or_scopes(change_body):
+                    raise Refused(
+                        "Workload recreate allows scheduled-query alert updates only when "
+                        f"limited to query or scopes; refused: {address}"
+                    )
+                update_addresses.append(address)
+                continue
+            if rtype in RECREATE_FORBIDDEN_TOUCH_TYPES:
+                raise Refused(
+                    "Workload recreate refuses changes to public IP, NIC, identity, role "
+                    f"assignments, Key Vault, storage, registry, OpenAI, network, DNS, or "
+                    f"other non-workload resources: {address}"
+                )
+            raise Refused(
+                "Workload recreate allows in-place updates only for the three "
+                "azurerm_monitor_metric_alert.vm[...] resources and query/scopes "
+                f"updates on the two runtime scheduled-query alerts; refused: {address}"
+            )
+        if actions == ["delete"] or "delete" in actions:
+            if rtype in RECREATE_FORBIDDEN_TOUCH_TYPES:
+                raise Refused(
+                    "Workload recreate refuses changes to public IP, NIC, identity, role "
+                    f"assignments, Key Vault, storage, registry, OpenAI, network, DNS, or "
+                    f"other non-workload resources: {address}"
+                )
+            raise Refused(f"Workload recreate plan must not destroy extra resources: {address}")
         if rtype in RECREATE_FORBIDDEN_TOUCH_TYPES:
             raise Refused(
                 "Workload recreate refuses changes to public IP, NIC, identity, role "
                 f"assignments, Key Vault, storage, registry, OpenAI, network, DNS, or "
                 f"other non-workload resources: {address}"
             )
-        if _is_replace_actions(actions):
-            if address not in RECREATE_REQUIRED_REPLACE_ADDRESSES:
-                raise Refused(f"Workload recreate plan has unexpected replace: {address}")
-            recreate_addresses.append(address)
-            replace_addresses.append(address)
-            continue
-        if actions == ["create"]:
-            if address not in RECREATE_REQUIRED_REPLACE_ADDRESSES:
-                raise Refused(f"Workload recreate plan must not create extra resources: {address}")
-            recreate_addresses.append(address)
-            create_addresses.append(address)
-            continue
-        if actions == ["update"]:
-            if address not in RECREATE_ALLOWED_ALERT_ADDRESSES:
-                raise Refused(
-                    "Workload recreate allows in-place updates only for the three "
-                    f"azurerm_monitor_metric_alert.vm[...] resources; refused: {address}"
-                )
-            update_addresses.append(address)
-            continue
-        if actions == ["delete"] or "delete" in actions:
-            raise Refused(f"Workload recreate plan must not destroy extra resources: {address}")
         raise Refused(f"Workload recreate plan refused actions {actions} on {address}")
     missing = RECREATE_REQUIRED_REPLACE_ADDRESSES - set(recreate_addresses)
     if missing:
@@ -1765,7 +1908,8 @@ def assert_recreate_workload_changeset(
             "Workload recreate plan create/replace set must be exactly "
             + ", ".join(sorted(RECREATE_REQUIRED_REPLACE_ADDRESSES))
         )
-    unexpected_alerts = set(update_addresses) - RECREATE_ALLOWED_ALERT_ADDRESSES
+    allowed_updates = RECREATE_ALLOWED_ALERT_ADDRESSES | RECREATE_ALLOWED_RUNTIME_ALERT_ADDRESSES
+    unexpected_alerts = set(update_addresses) - allowed_updates
     if unexpected_alerts:
         raise Refused(
             "Workload recreate plan has unexpected alert updates: "
@@ -1780,12 +1924,12 @@ def assert_recreate_workload_changeset(
 
 
 def sanitize_recreate_workload_plan_summary(
-    plan_json: dict, *, inputs: dict, plan_sha256: str, allow_workload_recreate: bool = True
+    plan_json: dict, *, inputs: dict, plan_sha256: str
 ) -> dict:
+    allow_value = assert_recreate_allow_var(plan_json)
     addressed = assert_recreate_workload_changeset(
         plan_json,
         subscription_id=str(inputs["subscription_id"]),
-        allow_workload_recreate=allow_workload_recreate,
     )
     enabled = bool(inputs.get("enable_azure_openai", False))
     replace_counts: Counter = Counter()
@@ -1798,14 +1942,21 @@ def sanitize_recreate_workload_plan_summary(
             into["azurerm_managed_disk"] += 1
         elif address.startswith("azurerm_virtual_machine_data_disk_attachment."):
             into["azurerm_virtual_machine_data_disk_attachment"] += 1
+        elif address.startswith("azurerm_virtual_machine_extension."):
+            into["azurerm_virtual_machine_extension"] += 1
+        elif address.startswith("azurerm_monitor_data_collection_rule_association."):
+            into["azurerm_monitor_data_collection_rule_association"] += 1
 
     for address in addressed["replace_addresses"]:
         _count(address, replace_counts)
     for address in addressed["create_addresses"]:
         _count(address, create_counts)
     update_counts: Counter = Counter()
-    if addressed["update_addresses"]:
-        update_counts["azurerm_monitor_metric_alert"] = len(addressed["update_addresses"])
+    for address in addressed["update_addresses"]:
+        if address.startswith("azurerm_monitor_metric_alert."):
+            update_counts["azurerm_monitor_metric_alert"] += 1
+        elif address.startswith("azurerm_monitor_scheduled_query_rules_alert_v2."):
+            update_counts["azurerm_monitor_scheduled_query_rules_alert_v2"] += 1
     summary = {
         "create": dict(sorted(create_counts.items())),
         "update": dict(sorted(update_counts.items())),
@@ -1822,7 +1973,7 @@ def sanitize_recreate_workload_plan_summary(
         "resource_group": RESOURCE_GROUP,
         "first_apply_only": False,
         "recreate_workload": True,
-        "allow_workload_recreate": True,
+        "allow_workload_recreate": allow_value,
     }
     summary["summary_sha256"] = hashlib.sha256(json_bytes(summary)).hexdigest()
     return summary
@@ -2042,6 +2193,17 @@ def _list_named_os_disks(
     return named
 
 
+def assert_no_workload_live_latch(folder: Path) -> None:
+    """Refuse --recreate-workload after go-live wrote workload-live.json (mode 0600)."""
+    latch = folder / WORKLOAD_LIVE_NAME
+    if latch.exists():
+        raise Refused(
+            f"{WORKLOAD_LIVE_NAME} is present under the private directory; "
+            "--recreate-workload refuses after go-live. Remove only with John's "
+            "explicit go-live reversal decision."
+        )
+
+
 def assert_os_disk_preflight(env: dict, inputs: dict) -> None:
     """Pre-apply: refuse any OS_DISK_NAME disk not attached to the current VM.
 
@@ -2065,6 +2227,110 @@ def assert_os_disk_preflight(env: dict, inputs: dict) -> None:
                 f"workload VM id {expected_workload_vm_resource_id(subscription_id)}; "
                 "refuse recreate"
             )
+
+
+def assert_data_disk_preflight(env: dict, inputs: dict) -> None:
+    """Pre-apply: az disk show data disk must be Empty/128GiB and unattached or on workload VM."""
+    subscription_id = str(inputs["subscription_id"])
+    try:
+        result = command(
+            [
+                "az",
+                "disk",
+                "show",
+                "--resource-group",
+                RESOURCE_GROUP,
+                "--subscription",
+                subscription_id,
+                "--name",
+                DATA_DISK_NAME,
+                "--query",
+                "{createOption:creationData.createOption,diskSizeGb:diskSizeGb,managedBy:managedBy}",
+                "--output",
+                "json",
+                "--only-show-errors",
+            ],
+            env=env,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+        raise Refused(
+            f"Could not show data disk {DATA_DISK_NAME}; refuse (fail-closed): {exc}"
+        ) from exc
+    if result.returncode:
+        raise Refused(f"Could not show data disk {DATA_DISK_NAME}; refuse (fail-closed)")
+    try:
+        disk = json.loads(result.stdout or b"")
+    except json.JSONDecodeError as exc:
+        raise Refused(
+            f"Data disk show for {DATA_DISK_NAME} was not valid JSON; refuse (fail-closed)"
+        ) from exc
+    if not isinstance(disk, dict):
+        raise Refused(
+            f"Data disk show for {DATA_DISK_NAME} was not a JSON object; refuse (fail-closed)"
+        )
+    create_option = disk.get("createOption")
+    size = disk.get("diskSizeGb")
+    managed_by = disk.get("managedBy")
+    if create_option != "Empty":
+        raise Refused(
+            f"Pre-apply data disk check: {DATA_DISK_NAME} createOption must be Empty "
+            f"(got {create_option!r}); refuse recreate"
+        )
+    if size != 128:
+        raise Refused(
+            f"Pre-apply data disk check: {DATA_DISK_NAME} diskSizeGb must be 128 "
+            f"(got {size!r}); refuse recreate"
+        )
+    if managed_by in (None, "", []):
+        return
+    if not managed_by_matches_workload_vm(managed_by, subscription_id=subscription_id):
+        raise Refused(
+            f"Pre-apply data disk check: {DATA_DISK_NAME} managedBy must be empty or the "
+            f"exact workload VM id {expected_workload_vm_resource_id(subscription_id)}; "
+            "refuse recreate"
+        )
+
+
+def module_workload_id_reference_addresses(module_dir: Path | None = None) -> set[str]:
+    """Scan module *.tf for azurerm_linux_virtual_machine.workload.id resource addresses."""
+    root = module_dir if module_dir is not None else MODULE
+    needle = "azurerm_linux_virtual_machine.workload.id"
+    resource_header = re.compile(
+        r'^resource\s+"([^"]+)"\s+"([^"]+)"\s*\{',
+        re.MULTILINE,
+    )
+    found: set[str] = set()
+    for path in sorted(root.glob("*.tf")):
+        text = path.read_text()
+        if needle not in text:
+            continue
+        # Walk resource blocks; record those whose body contains the needle.
+        matches = list(resource_header.finditer(text))
+        for index, match in enumerate(matches):
+            start = match.end()
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+            body = text[start:end]
+            if needle not in body:
+                continue
+            rtype, name = match.group(1), match.group(2)
+            if "for_each" in body.split("{", 1)[0] or re.search(
+                r"^\s*for_each\s*=", body, re.MULTILINE
+            ):
+                # Expand known for_each keys used with workload.id in this module.
+                if rtype == "azurerm_monitor_metric_alert" and name == "vm":
+                    for key in ("unavailable", "cpu", "disk_iops"):
+                        found.add(f'{rtype}.{name}["{key}"]')
+                elif rtype == "azurerm_monitor_scheduled_query_rules_alert_v2" and name == "runtime":
+                    for key in ("application", "backup"):
+                        found.add(f'{rtype}.{name}["{key}"]')
+                else:
+                    found.add(f"{rtype}.{name}")
+            elif re.search(r"^\s*count\s*=", body, re.MULTILINE):
+                found.add(f"{rtype}.{name}[0]")
+            else:
+                found.add(f"{rtype}.{name}")
+    return found
 
 
 def assert_no_orphaned_os_disk(env: dict, inputs: dict) -> None:
@@ -2339,9 +2605,10 @@ def plan_recreate_workload(folder: Path) -> dict:
 
     Mid-replace recovery: after init, list state and pass -replace only for the
     workload VM / data disk addresses still present. Addresses absent from state
-    are expected as create-only in the sanitised change-set.
+    are expected as create-only in the sanitised change-set. The plan sanitiser
+    requires tofu show -json variables.allow_workload_recreate.value is True.
     """
-    assert_recreate_allow_var(True)
+    assert_no_workload_live_latch(folder)
     manifest, inputs = _verify_prepared(folder)
     if not manifest.get("recreate_workload"):
         raise Refused(
@@ -2465,7 +2732,6 @@ def plan_recreate_workload(folder: Path) -> dict:
             json.loads(show.stdout),
             inputs=inputs,
             plan_sha256=plan_sha,
-            allow_workload_recreate=True,
         )
         result = {
             "planned": True,
@@ -2477,6 +2743,7 @@ def plan_recreate_workload(folder: Path) -> dict:
             "plan_sha256": plan_sha,
             "summary_sha256": summary["summary_sha256"],
             "enable_azure_openai": summary["enable_azure_openai"],
+            "allow_workload_recreate": summary["allow_workload_recreate"],
             "replace_addresses": summary["replace_addresses"],
             "create_addresses": summary["create_addresses"],
             "recreate_addresses": summary["recreate_addresses"],
@@ -2819,6 +3086,10 @@ def _resolve_mode_apply_artifacts(
         )
     if plan_result.get("recheck") or summary.get("recheck"):
         raise Refused(f"{mode} apply refuses recheck plans; post-apply re-check is print-only")
+    if mode != "recreate-workload" and (
+        plan_result.get("recreate_workload") or summary.get("recreate_workload")
+    ):
+        raise Refused(f"{mode} apply refuses recreate-workload plan artifacts")
     if not resolved_plan.is_file():
         raise Refused(f"Reviewed {mode} plan file is required before apply")
     if not plan_result.get(marker) or not summary.get(marker):
@@ -2886,6 +3157,8 @@ def apply(
         raise Refused("refusing apply without --confirm-apply")
     os.umask(0o077)
     _assert_single_mode(recover=recover, recreate_workload=recreate_workload)
+    if recreate_workload:
+        assert_no_workload_live_latch(folder)
     manifest, inputs = _verify_prepared(folder)
     if manifest.get("resource_group") != RESOURCE_GROUP:
         raise Refused(f"manifest resource_group is not production: {manifest.get('resource_group')}")
@@ -2989,7 +3262,6 @@ def apply(
             json.loads(show.stdout),
             inputs=inputs,
             plan_sha256=plan_sha,
-            allow_workload_recreate=True,
         )
     elif recover:
         recomputed = sanitize_recover_plan_summary(
@@ -3010,8 +3282,10 @@ def apply(
     if recomputed["summary_sha256"] != read_json(approval_path)["summary_sha256"]:
         raise Refused("Recomputed plan summary does not match approval summary_sha256")
     if recreate_workload:
-        # Pre-apply orphan fence: must run before tofu apply starts.
+        # Pre-apply fences: must run before tofu apply starts.
+        assert_no_workload_live_latch(folder)
         assert_os_disk_preflight(env, inputs)
+        assert_data_disk_preflight(env, inputs)
     logs.mkdir(mode=0o700, exist_ok=True)
     if recreate_workload:
         log_prefix = "recreate-workload-apply"

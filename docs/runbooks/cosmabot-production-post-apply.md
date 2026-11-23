@@ -2950,17 +2950,39 @@ continue-prep yes, then John's hands-on bootstrap/secrets, then agents):**
 
 ---
 
-## Workload recreate day (off-by-default; `--recreate-workload`)
+## 9. Workload recreate day (off-by-default; `--recreate-workload`)
 
 Use only when John has approved a recreate of `azurerm_linux_virtual_machine.workload`
 and `azurerm_managed_disk.data` for `rg-cosmabot-prod-eus2-01`. Mode is off by
 default (`allow_workload_recreate=false`). Do not touch
 `infra/beta/vm/host/bootstrap_host.py` or its 24h rule from this path. Coding
-agents must not run apply. Order is mandatory.
+agents must not run apply. Order is mandatory. After go-live, the private
+directory holds `workload-live.json` (mode 0600); `--recreate-workload` then
+refuses in prepare, plan, and apply.
 
 Pasteable fences below are wrapped in functions so a failed check stops the
 paste with `return 1` without killing the operator SSH session. Do not add
 `set -e` or bare `exit` at the top level of these pastes.
+
+The recreated VM has a **new SSH host key**. Sitting 2 boxes must re-pin it;
+do not reuse an old `known_hosts` entry from before the recreate.
+
+### 9.0 Fingerprint for John's review (before any refresh)
+
+Print the reviewed foundation digests and stop for John's eyes before a
+module-snapshot refresh:
+
+```bash
+cosmabot_recreate_print_fingerprint() {
+  SOURCE_SHA256="$(python3 -c 'from pathlib import Path; import sys; sys.path.insert(0, "infra/beta/vm/prod/foundation"); import bootstrap_local as b; print(b.fingerprint()["source_sha256"])')" || return 1
+  LOCK_SHA256="$(python3 -c 'from pathlib import Path; import sys; sys.path.insert(0, "infra/beta/vm/prod/foundation"); import bootstrap_local as b; print(b.fingerprint()["lock_sha256"])')" || return 1
+  echo "SOURCE_SHA256=${SOURCE_SHA256}"
+  echo "LOCK_SHA256=${LOCK_SHA256}"
+  echo "STOP: John reviews SOURCE_SHA256 and LOCK_SHA256 before any refresh or recreate continue"
+  return 1
+}
+cosmabot_recreate_print_fingerprint
+```
 
 If the live private `module/` still pins the first-apply `*.tf` snapshot and
 `--recheck` / `--recover` / `--recreate-workload` refuse with
@@ -2984,18 +3006,21 @@ cosmabot_refresh_module_snapshot() {
 cosmabot_refresh_module_snapshot
 ```
 
-### 1. Refresh the disk-empty evidence
+### 9.1 Disk metadata check
 
 This fence checks Azure disk **metadata only** (`createOption`, size, attachment).
 It does not prove the volume has never been written. Write-bytes / ops evidence
 is Sitting 2 host bootstrap with the reviewed creation receipt
-(`infra/beta/vm/host/bootstrap_host.py --format-new-empty-disk`, after step 7).
+(`infra/beta/vm/host/bootstrap_host.py --format-new-empty-disk`, after step 9.7).
+John's typed approval on the recreate plan hashes is John's acceptance that
+recreating the data disk means **data loss** of whatever was on that volume.
 
 ```bash
 cosmabot_recreate_disk_evidence() {
   test -n "${RG:-}" || { echo "STOP: RG unset" >&2; return 1; }
   test -n "${SUBSCRIPTION_ID:-}" || { echo "STOP: SUBSCRIPTION_ID unset" >&2; return 1; }
   echo "INFO: metadata-only check; write-bytes/ops evidence is Sitting 2 format with creation receipt"
+  echo "INFO: recreate approval is John's acceptance of data loss on data-vm-cosmabot-prod-eus2-01"
   az disk show \
     --resource-group "$RG" \
     --subscription "$SUBSCRIPTION_ID" \
@@ -3008,7 +3033,11 @@ cosmabot_recreate_disk_evidence
 
 Stop unless `createOption` is `Empty` and `sizeGb` is `128`.
 
-### 2. Recheck is clean
+### 9.2 Recheck is clean
+
+Precondition: TEMP SSH is closed via the existing bootstrap-close box before
+this step and through step 9.6. Do not open a TEMP SSH rule during recreate
+plan/apply.
 
 ```bash
 cosmabot_recreate_recheck() {
@@ -3034,7 +3063,7 @@ cosmabot_recreate_recheck
 
 Stop unless this exits 0 (0 add / 0 change / 0 destroy / 0 replace).
 
-### 3. Recreate plan
+### 9.3 Recreate plan
 
 ```bash
 cosmabot_recreate_plan() {
@@ -3061,15 +3090,16 @@ cosmabot_recreate_plan
 Record the printed `plan_sha256` and `summary_sha256`. Confirm the summary lists
 exact create-or-replace addresses for the workload VM, data disk, and data-disk
 attachment (mid-replace recovery may be create-only for addresses absent from
-state).
+state). Keep TEMP SSH closed (bootstrap-close) through this step.
 
-### 4. John's typed yes on both hashes
+### 9.4 John's typed yes on both hashes
 
 John types **yes** on the exact recreate `plan_sha256` and `summary_sha256`, then
 binds a four-key approval file (mode 0600, outside the repo) with `reviewer`,
-`review_reference`, `plan_sha256`, and `summary_sha256` only.
+`review_reference`, `plan_sha256`, and `summary_sha256` only. That **yes** is
+John's acceptance of data loss on the recreated data disk.
 
-### 5. Apply
+### 9.5 Apply
 
 ```bash
 cosmabot_recreate_apply() {
@@ -3085,9 +3115,12 @@ cosmabot_recreate_apply
 ```
 
 Pre-apply refuses an unattached / wrong-VM `osdisk-vm-cosmabot-prod-eus2-01`.
-Post-apply (and ApplyAttempted) refuse if that OS disk is missing or unattached.
+Pre-apply also runs `az disk show` on `data-vm-cosmabot-prod-eus2-01` and refuses
+unless `createOption` is `Empty`, `diskSizeGb` is `128`, and `managedBy` is empty
+or the workload VM id. Post-apply (and ApplyAttempted) refuse if the OS disk is
+missing or unattached. Keep TEMP SSH closed (bootstrap-close) through this step.
 
-### Orphan OS disk resolution (human decision; never deletes)
+### 9.5a Orphan OS disk resolution (human decision; never deletes)
 
 If preflight or post-apply refuses because `osdisk-vm-cosmabot-prod-eus2-01`
 exists unattached or attached to the wrong VM, paste this fence. It only lists
@@ -3110,7 +3143,7 @@ cosmabot_recreate_os_disk_orphan_inspect() {
 cosmabot_recreate_os_disk_orphan_inspect
 ```
 
-### Mid-replace recovery
+### 9.5b Mid-replace recovery
 
 If a prior recreate apply stopped after destroying the VM and/or data disk,
 re-run prepare then plan then apply with `--recreate-workload`. The planner lists
@@ -3121,17 +3154,19 @@ If Azure still holds an orphan `osdisk-vm-cosmabot-prod-eus2-01` not attached to
 `vm-cosmabot-prod-eus2-01`, preflight refuses until that disk is resolved via the
 orphan-inspect fence above.
 
-### 6. Recheck
+### 9.6 Recheck
 
-Repeat step 2. Stop unless the post-recreate recheck exits 0.
+Repeat step 9.2. Stop unless the post-recreate recheck exits 0. Keep TEMP SSH
+closed (bootstrap-close) through this step.
 
-### 7. Build the creation receipt and run Sitting 2 within 24h
+### 9.7 Build the creation receipt and run Sitting 2 within 24h
 
 Build the host creation receipt with
 `infra/beta/vm/host/build_creation_receipt.py` (depends on PR #397 merging
 first; do not invent a substitute). Then run Sitting 2 (format empty disk +
 secrets install) within 24 hours of the recreate apply. Sitting 2 format with
 the creation receipt is the write-bytes / ops evidence for the data disk.
+Re-pin the new VM host key in Sitting 2; do not reuse pre-recreate `known_hosts`.
 
 ```bash
 cosmabot_recreate_build_receipt() {
@@ -3147,11 +3182,29 @@ cosmabot_recreate_build_receipt() {
 cosmabot_recreate_build_receipt
 ```
 
-### 8. If 24h lapses
+### 9.8 If 24h lapses
 
-Stop. Do not continue Sitting 2 on a stale receipt. Run a new recreate plan,
-get a new typed **yes** on both new hashes, apply again, recheck, rebuild the
-receipt, and only then restart Sitting 2.
+Stop. Do not continue Sitting 2 on a stale receipt. Restart at step 9.1 (disk
+metadata check), then continue through fingerprint/review as needed, a new
+recreate plan, a new typed **yes** on both new hashes, apply, recheck, rebuild
+the receipt, and only then restart Sitting 2.
+
+### 9.9 Go-live latch (after Sitting 2 succeeds)
+
+When the workload is live and recreate must stay dark, write the latch (mode
+0600) under the private directory:
+
+```bash
+cosmabot_recreate_write_workload_live_latch() {
+  test -n "${PRIVATE_DIR:-}" || { echo "STOP: PRIVATE_DIR unset" >&2; return 1; }
+  umask 077
+  printf '%s\n' '{"go_live":true,"note":"synthetic latch; --recreate-workload refuses while present"}' \
+    >"${PRIVATE_DIR}/workload-live.json" || return 1
+  chmod 600 "${PRIVATE_DIR}/workload-live.json" || return 1
+  echo "PASS: wrote ${PRIVATE_DIR}/workload-live.json mode 0600; recreate path refuses until removed by John"
+}
+cosmabot_recreate_write_workload_live_latch
+```
 
 ## 10. Today's checklist (Fri 13 Nov)
 
