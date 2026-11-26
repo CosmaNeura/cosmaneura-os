@@ -7,7 +7,6 @@ import importlib.util
 import io
 import json
 import os
-import re
 import secrets
 import shutil
 import signal
@@ -190,6 +189,7 @@ class BootstrapSafety(unittest.TestCase):
         self.assertFalse(result["applied"])
         self.assertTrue((self.folder / "plan-summary.json").is_file())
         for argv, kwargs in calls:
+            self.assertFalse(any(arg.startswith(("-var=", "-replace=")) for arg in argv))
             self.assertNotIn("-backend=false", argv)
             self.assertEqual(kwargs["env"]["TF_WORKSPACE"], "default")
             self.assertEqual(kwargs["env"]["TF_VAR_bootstrap_key_file"], str(self.folder / "encryption.passphrase"))
@@ -1662,6 +1662,7 @@ class RecoveryMode(unittest.TestCase):
         self.assertEqual(bootstrap.digest(self.folder / "plan-result.json"), first_result_sha)
         self.assertEqual(bootstrap.digest(self.folder / "encryption.passphrase"), passphrase_sha)
         self.assertEqual([argv[1] for argv in calls], ["init", "plan", "show"])
+        self.assertFalse(any(arg.startswith(("-var=", "-replace=")) for arg in calls[1]))
         self.assertTrue((self.folder / "manifest.first-apply.json").is_file())
         backups = json.loads((self.folder / "manifest.json").read_text())["recover_backups"]
         backup = Path(backups["state_pre_recover"])
@@ -2877,6 +2878,7 @@ class RecheckMode(unittest.TestCase):
         self.assertEqual(result["data_dir"], str(self.folder / "tofu-data-recheck-20261114T120000Z"))
         self.assertEqual([argv[1] for argv in calls], ["init", "plan", "show"])
         plan_argv = next(argv for argv in calls if argv[1] == "plan")
+        self.assertFalse(any(arg.startswith(("-var=", "-replace=")) for arg in plan_argv))
         # Mutation kill: if -refresh=false is reintroduced, this fails.
         self.assertNotIn("-refresh=false", plan_argv)
         self.assertIn("-lock=true", plan_argv)
@@ -5642,35 +5644,10 @@ class RecreateWorkloadMode(unittest.TestCase):
         )
         self.assertTrue(recheck_ok["recheck"])
 
-    def test_first_recover_recreate_recheck_plan_argv_have_no_var_or_replace(self):
-        """H2a: first / recover / recheck plan argv contain no -var= and no -replace=."""
-        source = Path(bootstrap.__file__).read_text()
-        plan_fn_start = source.index("def plan(folder: Path")
-        plan_recover_start = source.index("def plan_recover")
-        plan_recreate_start = source.index("def plan_recreate_workload")
-        plan_recheck_start = source.index("def plan_recheck")
-        first_chunk = source[plan_fn_start:plan_recover_start]
-        first_apply_body = first_chunk.split("if recreate_workload:", 1)[1]
-        self.assertNotIn("allow_workload_recreate", first_apply_body)
-        self.assertNotIn("-replace=", first_apply_body)
-        recover_body = source[plan_recover_start:plan_recreate_start]
-        self.assertNotIn("allow_workload_recreate", recover_body)
-        self.assertNotIn("-replace=", recover_body)
-        match = re.search(r"\ndef [a-zA-Z_]", source[plan_recheck_start + 20 :])
-        self.assertIsNotNone(match)
-        recheck_body = source[plan_recheck_start : plan_recheck_start + 20 + match.start()]
-        self.assertNotIn("-var=allow_workload_recreate", recheck_body)
-        self.assertNotIn('"-replace=', recheck_body)
-        self.assertIn(
-            "-var={ALLOW_WORKLOAD_RECREATE_VAR}",
-            source[source.index("def _recreate_workload_tofu_commands") : plan_recheck_start],
-        )
-
     def test_recreate_artefact_refused_by_first_apply_and_recover_apply(self):
         """H2b: recreate plan artefacts refused by first-apply and --recover apply."""
         self._seed_private_dir()
-        self._recreate_prepare()
-        plan_sha, summary, plan_json, plan_path = self._write_recreate_artifacts()
+        plan_sha, summary, _, plan_path = self._write_recreate_artifacts()
         # Plant recreate summary/result as first-apply names (overwrite seeded first-apply files).
         bootstrap.replace_private(self.folder / "plan-summary.json", bootstrap.json_bytes(summary))
         bootstrap.replace_private(
@@ -5685,9 +5662,12 @@ class RecreateWorkloadMode(unittest.TestCase):
                 }
             ),
         )
-        with self.assertRaises(bootstrap.Refused) as first:
-            bootstrap._resolve_apply_artifacts(self.folder)
-        self.assertIn("recreate-workload", str(first.exception).lower())
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        with patch.object(bootstrap, "command") as run, self.assertRaisesRegex(
+            bootstrap.Refused, "refuses recreate-workload plan artifacts"
+        ):
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval)
+        run.assert_not_called()
         # Recover-named files carrying recreate_workload marker must refuse.
         stamp = "20261123T120000Z"
         recover_result = self.folder / f"recover-plan-result-{stamp}.json"
@@ -5718,9 +5698,15 @@ class RecreateWorkloadMode(unittest.TestCase):
                 }
             ),
         )
-        with self.assertRaises(bootstrap.Refused) as recover:
-            bootstrap._resolve_apply_artifacts(self.folder, recover=True)
-        self.assertIn("recreate-workload", str(recover.exception).lower())
+        manifest_path = self.folder / "manifest.json"
+        manifest = bootstrap.read_json(manifest_path)
+        manifest["recover"] = True
+        bootstrap.replace_private(manifest_path, bootstrap.json_bytes(manifest))
+        with patch.object(bootstrap, "command") as run, self.assertRaisesRegex(
+            bootstrap.Refused, "refuses recreate-workload plan artifacts"
+        ):
+            bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval, recover=True)
+        run.assert_not_called()
 
     def test_recreate_apply_refuses_without_manifest_flag(self):
         """H2c: recreate apply refused when manifest lacks recreate_workload."""
@@ -5755,74 +5741,175 @@ class RecreateWorkloadMode(unittest.TestCase):
         self.assertTrue(result["recheck"])
         self.assertTrue(result["prepared"])
 
-    def test_data_disk_preflight_and_workload_live_latch(self):
-        """H3: data-disk metadata preflight + workload-live.json latch."""
-        env = {}
-        good = {
-            "createOption": "Empty",
-            "diskSizeGb": 128,
-            "managedBy": None,
-        }
-        with patch.object(
-            bootstrap,
-            "command",
-            return_value=subprocess.CompletedProcess([], 0, json.dumps(good).encode(), b""),
-        ):
-            bootstrap.assert_data_disk_preflight(env, self.inputs)
-        bad_size = dict(good, diskSizeGb=64)
-        with patch.object(
-            bootstrap,
-            "command",
-            return_value=subprocess.CompletedProcess([], 0, json.dumps(bad_size).encode(), b""),
-        ), self.assertRaises(bootstrap.Refused) as size_err:
-            bootstrap.assert_data_disk_preflight(env, self.inputs)
-        self.assertIn("128", str(size_err.exception))
-        bad_opt = dict(good, createOption="Copy")
-        with patch.object(
-            bootstrap,
-            "command",
-            return_value=subprocess.CompletedProcess([], 0, json.dumps(bad_opt).encode(), b""),
-        ), self.assertRaises(bootstrap.Refused) as opt_err:
-            bootstrap.assert_data_disk_preflight(env, self.inputs)
-        self.assertIn("Empty", str(opt_err.exception))
-        wrong_vm = dict(
-            good,
-            managedBy=(
-                f"/subscriptions/{self.inputs['subscription_id']}/resourceGroups/"
-                f"{bootstrap.RESOURCE_GROUP}/providers/Microsoft.Compute/virtualMachines/vm-other"
-            ),
+    def test_data_disk_preflight_checks_metadata_and_full_vm_id(self):
+        vm_id = bootstrap.expected_workload_vm_resource_id(self.inputs["subscription_id"])
+        good = {"createOption": "Empty", "diskSizeGb": 128, "managedBy": None}
+        cases = (
+            (good, None),
+            (dict(good, managedBy=""), None),
+            (dict(good, managedBy=vm_id.upper()), None),
+            (dict(good, createOption="Copy"), "createOption must be Empty"),
+            (dict(good, diskSizeGb=64), "diskSizeGb must be 128"),
+            (dict(good, managedBy=vm_id + "-other"), "managedBy must be empty"),
+            (dict(good, managedBy=[]), "managedBy must be empty"),
+            ({"createOption": "Empty", "diskSizeGb": 128}, "managedBy must be empty"),
         )
-        with patch.object(
-            bootstrap,
-            "command",
-            return_value=subprocess.CompletedProcess([], 0, json.dumps(wrong_vm).encode(), b""),
-        ), self.assertRaises(bootstrap.Refused) as vm_err:
-            bootstrap.assert_data_disk_preflight(env, self.inputs)
-        self.assertIn(bootstrap.DATA_DISK_NAME, str(vm_err.exception))
-        # Latch
+        for disk, error in cases:
+            with self.subTest(disk=disk), patch.object(
+                bootstrap, "command",
+                return_value=subprocess.CompletedProcess([], 0, json.dumps(disk).encode(), b""),
+            ):
+                if error:
+                    with self.assertRaisesRegex(bootstrap.Refused, error):
+                        bootstrap.assert_data_disk_preflight({}, self.inputs)
+                else:
+                    bootstrap.assert_data_disk_preflight({}, self.inputs)
+
+    def test_first_package_admit_creates_0600_latch_and_retry_preserves_it(self):
         self._seed_private_dir()
         latch = self.folder / bootstrap.WORKLOAD_LIVE_NAME
-        latch.write_text(json.dumps({"go_live": True, "synthetic": True}))
+        argv = ["bootstrap_local.py", "admit-first-package", "--private-dir", str(self.folder)]
+        with patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()) as output:
+            bootstrap.main()
+        self.assertTrue(json.loads(output.getvalue())["first_package_admitted"])
+        self.assertEqual(stat.S_IMODE(latch.stat().st_mode), 0o600)
+        self.assertEqual(bootstrap.read_json(latch), {"go_live": True})
+        original = latch.stat()
+        bootstrap.admit_first_package(self.folder)
+        self.assertEqual(latch.stat(), original)
+
+        latch.chmod(0o644)
+        with self.assertRaisesRegex(bootstrap.Refused, "ownership or mode"):
+            bootstrap.admit_first_package(self.folder)
+        self.assertEqual(stat.S_IMODE(latch.stat().st_mode), 0o644)
         latch.chmod(0o600)
-        with self.assertRaises(bootstrap.Refused) as latch_err:
-            bootstrap.assert_no_workload_live_latch(self.folder)
-        self.assertIn(bootstrap.WORKLOAD_LIVE_NAME, str(latch_err.exception))
+        latch.write_text('{"go_live": false}\n')
+        with self.assertRaisesRegex(bootstrap.Refused, "unexpected contents"):
+            bootstrap.admit_first_package(self.folder)
+        self.assertEqual(latch.read_text(), '{"go_live": false}\n')
+
+    def test_latch_present_refuses_recreate_prepare_plan_and_apply(self):
+        self._seed_private_dir()
+        self._recreate_prepare()
+        plan_sha, summary, _, _ = self._write_recreate_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        latch = self.folder / bootstrap.WORKLOAD_LIVE_NAME
+        bootstrap.admit_first_package(self.folder)
+        original = latch.read_bytes()
+        original_stat = latch.stat()
         fp = bootstrap.fingerprint()
+        for entrypoint, args, kwargs in (
+            (bootstrap.prepare,
+             (self.folder, self.input_file, fp["source_sha256"], fp["lock_sha256"], self.tofu, self.mirror),
+             {}),
+            (bootstrap.plan, (self.folder,), {}),
+            (bootstrap.apply, (self.folder,), {"confirm_apply": True, "approval_path": approval}),
+        ):
+            with self.subTest(entrypoint=entrypoint.__name__), patch.object(
+                bootstrap, "command"
+            ) as run, patch.object(subprocess, "Popen") as apply:
+                with self.assertRaisesRegex(bootstrap.Refused, "workload-live.json is present"):
+                    entrypoint(*args, recreate_workload=True, **kwargs)
+                run.assert_not_called()
+                apply.assert_not_called()
+            self.assertEqual(latch.stat(), original_stat)
+            self.assertEqual(latch.read_bytes(), original)
+
+        latch.unlink()
+        latch.symlink_to(self.folder / "missing")
+        with self.assertRaisesRegex(bootstrap.Refused, "workload-live.json is present"):
+            bootstrap.plan(self.folder, recreate_workload=True)
+        self.assertTrue(latch.is_symlink())
+
+    def test_recreate_prepare_refuses_an_attempt_to_write_or_replace_latch(self):
+        self._seed_private_dir()
+        latch = self.folder / bootstrap.WORKLOAD_LIVE_NAME
+        for second, mutation in enumerate((bootstrap.write_private, bootstrap.replace_private)):
+            with self.subTest(mutation=mutation.__name__):
+                def redirected_write(_path, value):
+                    mutation(latch, value)
+
+                fp = bootstrap.fingerprint()
+                with patch.object(bootstrap, "replace_private", side_effect=redirected_write), patch.object(
+                    bootstrap, "owner_context", return_value=self.context
+                ), patch.object(
+                    bootstrap, "_verify_tofu_mirror", return_value=self.tofu
+                ), patch.object(
+                    bootstrap, "utc_plan_stamp", return_value=f"20261126T12000{second}Z"
+                ), self.assertRaisesRegex(bootstrap.Refused, "only be created by first package admission"):
+                    bootstrap.prepare(
+                        self.folder, self.input_file, fp["source_sha256"], fp["lock_sha256"],
+                        self.tofu, self.mirror, recreate_workload=True,
+                    )
+                self.assertFalse(latch.exists())
+
+    def test_recreate_apply_lock_blocks_admit_until_child_exits(self):
+        self._seed_private_dir()
+        self._recreate_prepare()
+        plan_sha, summary, plan_json, _ = self._write_recreate_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        latch = self.folder / bootstrap.WORKLOAD_LIVE_NAME
+
+        def spawn(_argv, **kwargs):
+            self.assertEqual(len(kwargs["pass_fds"]), 1)
+            with self.assertRaisesRegex(bootstrap.Refused, "already running"):
+                bootstrap.admit_first_package(self.folder)
+            self.assertFalse(latch.exists())
+            return child
+
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
-            bootstrap,
-            "command",
-            return_value=subprocess.CompletedProcess([], 0, b'{"terraform_version":"1.12.5"}', b""),
-        ), self.assertRaises(bootstrap.Refused) as prep_err:
-            bootstrap.prepare(
-                self.folder,
-                self.input_file,
-                fp["source_sha256"],
-                fp["lock_sha256"],
-                self.tofu,
-                self.mirror,
-                recreate_workload=True,
+            bootstrap, "command", side_effect=self._az_command_side_effect(plan_json)
+        ), patch.object(subprocess, "Popen", side_effect=spawn) as popen:
+            child = popen.return_value
+            child.wait.return_value = 0
+            result = bootstrap.apply(
+                self.folder, confirm_apply=True, approval_path=approval, recreate_workload=True
             )
-        self.assertIn(bootstrap.WORKLOAD_LIVE_NAME, str(prep_err.exception))
+        self.assertTrue(result["applied"])
+        bootstrap.admit_first_package(self.folder)
+        self.assertTrue(latch.is_file())
+
+    def test_recreate_apply_refuses_bad_disk_or_latch_at_launch(self):
+        self._seed_private_dir()
+        self._recreate_prepare()
+        plan_sha, summary, plan_json, _ = self._write_recreate_artifacts()
+        approval = self._approval(plan_sha, summary["summary_sha256"])
+        latch = self.folder / bootstrap.WORKLOAD_LIVE_NAME
+
+        def external_latch(_env, _inputs):
+            latch.write_bytes(b'{"go_live": true}\n')
+
+        bad_disk = b'{"createOption": "Copy", "diskSizeGb": 128, "managedBy": null}'
+        with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
+            subprocess, "Popen"
+        ) as popen:
+            with patch.object(
+                bootstrap, "command", side_effect=self._az_command_side_effect(plan_json, data_show=bad_disk)
+            ), self.assertRaisesRegex(bootstrap.Refused, "createOption must be Empty"):
+                bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval, recreate_workload=True)
+            with patch.object(
+                bootstrap, "command", side_effect=self._az_command_side_effect(plan_json)
+            ), patch.object(
+                bootstrap, "assert_data_disk_preflight", side_effect=external_latch
+            ), self.assertRaisesRegex(bootstrap.Refused, "workload-live.json is present"):
+                bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval, recreate_workload=True)
+        popen.assert_not_called()
+        self.assertEqual(latch.read_bytes(), b'{"go_live": true}\n')
+
+    def test_recreate_artifacts_cannot_follow_a_symlink_to_the_latch(self):
+        self._seed_private_dir()
+        self._recreate_prepare()
+        latch = self.folder / bootstrap.WORKLOAD_LIVE_NAME
+        stamp = "20261126T120000Z"
+        artifact = self.folder / "plans" / f"recreate-workload-{stamp}.tfplan"
+        artifact.symlink_to(latch)
+        with patch.object(bootstrap, "utc_plan_stamp", return_value=stamp), patch.object(
+            bootstrap, "command"
+        ) as command, self.assertRaisesRegex(bootstrap.Refused, "refuse overwrite"):
+            bootstrap.plan(self.folder, recreate_workload=True)
+        command.assert_not_called()
+        self.assertFalse(latch.exists())
+        self.assertTrue(artifact.is_symlink())
 
     def test_runtime_monitoring_optional_replace_and_workload_id_scan(self):
         """H4: health replace + runtime alert query/scopes update; workload.id scan."""
@@ -5864,7 +5951,13 @@ class RecreateWorkloadMode(unittest.TestCase):
         ]
         plan = self._exact_recreate_plan(with_alerts=False, extra=extra)
         addressed = bootstrap.assert_recreate_workload_changeset(plan, subscription_id=sub)
-        self.assertIn("azurerm_virtual_machine_extension.health[0]", addressed["replace_addresses"])
+        for health in extra[:2]:
+            self.assertIn(health["address"], addressed["replace_addresses"])
+            for actions in (["create"], ["update"], ["delete"], ["delete", "create", "update"]):
+                rejected = dict(health, change={**health["change"], "actions": actions})
+                bad = self._exact_recreate_plan(with_alerts=False, extra=[rejected])
+                with self.subTest(address=health["address"], actions=actions), self.assertRaises(bootstrap.Refused):
+                    bootstrap.assert_recreate_workload_changeset(bad, subscription_id=sub)
         self.assertIn(
             'azurerm_monitor_scheduled_query_rules_alert_v2.runtime["application"]',
             addressed["update_addresses"],
@@ -5895,8 +5988,39 @@ class RecreateWorkloadMode(unittest.TestCase):
         with self.assertRaises(bootstrap.Refused) as err:
             bootstrap.assert_recreate_workload_changeset(bad, subscription_id=sub)
         self.assertIn("query or scopes", str(err.exception).lower())
+
+        alert = extra[-1]
+        change = alert["change"]
+        before = {**change["before"], "criteria": [change["before"]["criteria"]]}
+        after = {"criteria": [{"threshold": 0}], "severity": 1}
+        allowed_unknown = {"scopes": True, "criteria": [{"query": True}]}
+        for unknown, allowed in (
+            (allowed_unknown, True),
+            ({**allowed_unknown, "severity": True}, False),
+            ({**allowed_unknown, "criteria": [{"query": True, "threshold": True}]}, False),
+        ):
+            delta = {**change, "before": before, "after": after, "after_unknown": unknown}
+            test_plan = self._exact_recreate_plan(with_alerts=False, extra=[dict(alert, change=delta)])
+            with self.subTest(unknown=unknown):
+                if allowed:
+                    accepted = bootstrap.assert_recreate_workload_changeset(test_plan, subscription_id=sub)
+                    self.assertIn(alert["address"], accepted["update_addresses"])
+                else:
+                    with self.assertRaisesRegex(bootstrap.Refused, "query or scopes"):
+                        bootstrap.assert_recreate_workload_changeset(test_plan, subscription_id=sub)
         found = bootstrap.module_workload_id_reference_addresses()
         self.assertEqual(found, set(bootstrap.WORKLOAD_ID_REFERENCE_ADDRESSES))
+
+    def test_workload_id_scan_detects_new_runtime_alert_instance(self):
+        monitoring = (MODULE / "runtime_monitoring.tf").read_text()
+        (self.root / "runtime_monitoring.tf").write_text(
+            monitoring.replace('["application", "backup"]', '["application", "backup", "extra"]')
+        )
+        found = bootstrap.module_workload_id_reference_addresses(self.root)
+        self.assertEqual(
+            found - bootstrap.WORKLOAD_ID_REFERENCE_ADDRESSES,
+            {'azurerm_monitor_scheduled_query_rules_alert_v2.runtime["extra"]'},
+        )
 
 
 

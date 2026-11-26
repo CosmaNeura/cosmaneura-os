@@ -2412,7 +2412,9 @@ cosmabot_compare_bundle_to_baseline() {
 
 Do not ship or admit a candidate that fails the STOP checks or the baseline
 compare. Re-record the baseline only when John accepts a new known-good build.
-Keep N3 marked **Pending** until that acceptance exists.
+Keep N3 marked **Pending** until that acceptance exists. When John approves the
+first package admission, run the [go-live latch step](#step-9-go-live-latch-at-first-package-admit)
+before opening access to that package.
 
 ### 4.3 Interrupted Key Vault access window
 
@@ -2950,7 +2952,7 @@ continue-prep yes, then John's hands-on bootstrap/secrets, then agents):**
 
 ---
 
-## 9. Workload recreate day (off-by-default; `--recreate-workload`)
+### (c) Workload recreate day (off-by-default; `--recreate-workload`)
 
 Use only when John has approved a recreate of `azurerm_linux_virtual_machine.workload`
 and `azurerm_managed_disk.data` for `rg-cosmabot-prod-eus2-01`. Mode is off by
@@ -2965,9 +2967,9 @@ paste with `return 1` without killing the operator SSH session. Do not add
 `set -e` or bare `exit` at the top level of these pastes.
 
 The recreated VM has a **new SSH host key**. Sitting 2 boxes must re-pin it;
-do not reuse an old `known_hosts` entry from before the recreate.
+start with a fresh `known_hosts` file for this VM and do not reuse a pre-recreate file.
 
-### 9.0 Fingerprint for John's review (before any refresh)
+#### Step 0. Fingerprint for John's review (before any refresh)
 
 Print the reviewed foundation digests and stop for John's eyes before a
 module-snapshot refresh:
@@ -3006,12 +3008,12 @@ cosmabot_refresh_module_snapshot() {
 cosmabot_refresh_module_snapshot
 ```
 
-### 9.1 Disk metadata check
+#### Step 1. Disk metadata check
 
 This fence checks Azure disk **metadata only** (`createOption`, size, attachment).
 It does not prove the volume has never been written. Write-bytes / ops evidence
 is Sitting 2 host bootstrap with the reviewed creation receipt
-(`infra/beta/vm/host/bootstrap_host.py --format-new-empty-disk`, after step 9.7).
+(`infra/beta/vm/host/bootstrap_host.py --format-new-empty-disk`, after step 7).
 John's typed approval on the recreate plan hashes is John's acceptance that
 recreating the data disk means **data loss** of whatever was on that volume.
 
@@ -3031,12 +3033,12 @@ cosmabot_recreate_disk_evidence() {
 cosmabot_recreate_disk_evidence
 ```
 
-Stop unless `createOption` is `Empty` and `sizeGb` is `128`.
+Stop unless `createOption` is `Empty`, `sizeGb` is `128`, and `managedBy` is empty or the full workload VM ID.
 
-### 9.2 Recheck is clean
+#### Step 2. Recheck is clean
 
 Precondition: TEMP SSH is closed via the existing bootstrap-close box before
-this step and through step 9.6. Do not open a TEMP SSH rule during recreate
+this step and through step 6. Do not open a TEMP SSH rule during recreate
 plan/apply.
 
 ```bash
@@ -3063,7 +3065,7 @@ cosmabot_recreate_recheck
 
 Stop unless this exits 0 (0 add / 0 change / 0 destroy / 0 replace).
 
-### 9.3 Recreate plan
+#### Step 3. Recreate plan
 
 ```bash
 cosmabot_recreate_plan() {
@@ -3092,14 +3094,14 @@ exact create-or-replace addresses for the workload VM, data disk, and data-disk
 attachment (mid-replace recovery may be create-only for addresses absent from
 state). Keep TEMP SSH closed (bootstrap-close) through this step.
 
-### 9.4 John's typed yes on both hashes
+#### Step 4. John's typed yes on both hashes
 
 John types **yes** on the exact recreate `plan_sha256` and `summary_sha256`, then
 binds a four-key approval file (mode 0600, outside the repo) with `reviewer`,
 `review_reference`, `plan_sha256`, and `summary_sha256` only. That **yes** is
 John's acceptance of data loss on the recreated data disk.
 
-### 9.5 Apply
+#### Step 5. Apply
 
 ```bash
 cosmabot_recreate_apply() {
@@ -3120,7 +3122,7 @@ unless `createOption` is `Empty`, `diskSizeGb` is `128`, and `managedBy` is empt
 or the workload VM id. Post-apply (and ApplyAttempted) refuse if the OS disk is
 missing or unattached. Keep TEMP SSH closed (bootstrap-close) through this step.
 
-### 9.5a Orphan OS disk resolution (human decision; never deletes)
+#### Step 5a. Orphan OS disk resolution (human decision; never deletes)
 
 If preflight or post-apply refuses because `osdisk-vm-cosmabot-prod-eus2-01`
 exists unattached or attached to the wrong VM, paste this fence. It only lists
@@ -3143,7 +3145,7 @@ cosmabot_recreate_os_disk_orphan_inspect() {
 cosmabot_recreate_os_disk_orphan_inspect
 ```
 
-### 9.5b Mid-replace recovery
+#### Step 5b. Mid-replace recovery
 
 If a prior recreate apply stopped after destroying the VM and/or data disk,
 re-run prepare then plan then apply with `--recreate-workload`. The planner lists
@@ -3154,12 +3156,12 @@ If Azure still holds an orphan `osdisk-vm-cosmabot-prod-eus2-01` not attached to
 `vm-cosmabot-prod-eus2-01`, preflight refuses until that disk is resolved via the
 orphan-inspect fence above.
 
-### 9.6 Recheck
+#### Step 6. Recheck
 
-Repeat step 9.2. Stop unless the post-recreate recheck exits 0. Keep TEMP SSH
+Repeat step 2. Stop unless the post-recreate recheck exits 0. Keep TEMP SSH
 closed (bootstrap-close) through this step.
 
-### 9.7 Build the creation receipt and run Sitting 2 within 24h
+#### Step 7. Build the creation receipt and run Sitting 2 within 24h
 
 Build the host creation receipt with
 `infra/beta/vm/host/build_creation_receipt.py` (depends on PR #397 merging
@@ -3182,29 +3184,32 @@ cosmabot_recreate_build_receipt() {
 cosmabot_recreate_build_receipt
 ```
 
-### 9.8 If 24h lapses
+#### Step 8. If 24h lapses
 
-Stop. Do not continue Sitting 2 on a stale receipt. Restart at step 9.1 (disk
+Stop. Do not continue Sitting 2 on a stale receipt. Restart at step 1 (disk
 metadata check), then continue through fingerprint/review as needed, a new
 recreate plan, a new typed **yes** on both new hashes, apply, recheck, rebuild
 the receipt, and only then restart Sitting 2.
 
-### 9.9 Go-live latch (after Sitting 2 succeeds)
+#### Step 9. Go-live latch at first package admit
 
-When the workload is live and recreate must stay dark, write the latch (mode
-0600) under the private directory:
+After Sitting 2 succeeds, run this as the first action of John's approved
+package admission, before granting access or admitting testers. Use the same
+`PRIVATE_DIR` as foundation prepare, plan, and apply. Stop admission if the
+command fails, including when a recreate is still running.
 
 ```bash
-cosmabot_recreate_write_workload_live_latch() {
+cosmabot_admit_first_package() {
   test -n "${PRIVATE_DIR:-}" || { echo "STOP: PRIVATE_DIR unset" >&2; return 1; }
-  umask 077
-  printf '%s\n' '{"go_live":true,"note":"synthetic latch; --recreate-workload refuses while present"}' \
-    >"${PRIVATE_DIR}/workload-live.json" || return 1
-  chmod 600 "${PRIVATE_DIR}/workload-live.json" || return 1
-  echo "PASS: wrote ${PRIVATE_DIR}/workload-live.json mode 0600; recreate path refuses until removed by John"
+  python3 infra/beta/vm/prod/foundation/bootstrap_local.py admit-first-package \
+    --private-dir "$PRIVATE_DIR" || return 1
 }
-cosmabot_recreate_write_workload_live_latch
+cosmabot_admit_first_package
 ```
+
+The command creates `workload-live.json` with mode `0600`. A retry checks
+the existing latch and preserves it. Recreate prepare, plan, and apply refuse
+while the latch is present.
 
 ## 10. Today's checklist (Fri 13 Nov)
 

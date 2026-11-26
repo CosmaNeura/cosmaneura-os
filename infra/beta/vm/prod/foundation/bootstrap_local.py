@@ -17,6 +17,7 @@ reviewed day-2 tool. Do not run raw tofu by hand.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -27,6 +28,7 @@ import stat
 import subprocess
 import sys
 from collections import Counter
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -262,9 +264,19 @@ def secure_file(path: Path) -> None:
         raise Refused("Private bootstrap file ownership or mode is invalid")
 
 
-def write_private(path: Path, value: bytes) -> None:
+def _assert_not_workload_live_path(path: Path) -> None:
+    if path.name == WORKLOAD_LIVE_NAME:
+        raise Refused(f"{WORKLOAD_LIVE_NAME} can only be created by first package admission")
+
+
+def _open_private_exclusive(path: Path):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "wb") as stream:
+    return os.fdopen(fd, "wb")
+
+
+def write_private(path: Path, value: bytes) -> None:
+    _assert_not_workload_live_path(path)
+    with _open_private_exclusive(path) as stream:
         stream.write(value)
         stream.flush()
         os.fsync(stream.fileno())
@@ -272,6 +284,7 @@ def write_private(path: Path, value: bytes) -> None:
 
 def replace_private(path: Path, value: bytes) -> None:
     """Replace an existing 0600 private file without widening mode or following links."""
+    _assert_not_workload_live_path(path)
     secure_file(path)
     tmp = path.with_name(path.name + ".tmp-" + secrets.token_hex(4))
     write_private(tmp, value)
@@ -1032,6 +1045,19 @@ def prepare_recreate_workload(
     tofu: Path,
     mirror: Path,
 ) -> dict:
+    with _workload_lifecycle_lock(folder):
+        assert_no_workload_live_latch(folder)
+        return _prepare_recreate_workload(folder, inputs_path, expected_source, expected_lock, tofu, mirror)
+
+
+def _prepare_recreate_workload(
+    folder: Path,
+    inputs_path: Path,
+    expected_source: str,
+    expected_lock: str,
+    tofu: Path,
+    mirror: Path,
+) -> dict:
     """Reuse an existing private dir for VM+data-disk recreate. Never regenerate the passphrase."""
     env = clean_environment()
     actual = fingerprint()
@@ -1040,8 +1066,6 @@ def prepare_recreate_workload(
     inputs = normalize_inputs(read_json(inputs_path))
     context = owner_context(env, inputs, recreate_workload=True)
     tofu = _verify_tofu_mirror(tofu, mirror, env)
-    folder = private_directory(folder, fresh=False)
-    assert_no_workload_live_latch(folder)
     passphrase = folder / "encryption.passphrase"
     state_path = folder / "state/foundation.tfstate"
     if not passphrase.exists():
@@ -1721,50 +1745,35 @@ def assert_recreate_allow_var(plan_json: dict) -> bool:
 
 
 def _is_replace_actions(actions: list) -> bool:
-    return isinstance(actions, list) and "delete" in actions and "create" in actions
+    return actions in (["delete", "create"], ["create", "delete"])
 
 
 def _runtime_alert_update_limited_to_query_or_scopes(change_body: dict) -> bool:
     """True when before/after differ only in scopes and/or criteria.query."""
+    def without_query_or_scopes(values: dict) -> dict:
+        remaining = {key: value for key, value in values.items() if key != "scopes"}
+        criteria = remaining.get("criteria")
+        if isinstance(criteria, dict):
+            remaining["criteria"] = {key: value for key, value in criteria.items() if key != "query"}
+        elif isinstance(criteria, list) and len(criteria) == 1 and isinstance(criteria[0], dict):
+            remaining["criteria"] = [{key: value for key, value in criteria[0].items() if key != "query"}]
+        return remaining
+
+    def has_unknown(value) -> bool:
+        if isinstance(value, dict):
+            return any(has_unknown(entry) for entry in value.values())
+        if isinstance(value, list):
+            return any(has_unknown(entry) for entry in value)
+        return value is not False
+
     before = change_body.get("before")
     after = change_body.get("after")
-    if not isinstance(before, dict) or not isinstance(after, dict):
-        return False
-    before_keys = set(before)
-    after_keys = set(after)
-    if before_keys != after_keys:
-        return False
-    for key in sorted(before_keys):
-        if before.get(key) == after.get(key):
-            continue
-        if key == "scopes":
-            continue
-        if key == "criteria":
-            before_criteria = before.get("criteria")
-            after_criteria = after.get("criteria")
-            if not isinstance(before_criteria, dict) or not isinstance(after_criteria, dict):
-                # AzureRM may encode criteria as a single-element list.
-                if not (
-                    isinstance(before_criteria, list)
-                    and isinstance(after_criteria, list)
-                    and len(before_criteria) == 1
-                    and len(after_criteria) == 1
-                    and isinstance(before_criteria[0], dict)
-                    and isinstance(after_criteria[0], dict)
-                ):
-                    return False
-                before_criteria = before_criteria[0]
-                after_criteria = after_criteria[0]
-            if set(before_criteria) != set(after_criteria):
-                return False
-            for ckey in before_criteria:
-                if before_criteria.get(ckey) == after_criteria.get(ckey):
-                    continue
-                if ckey != "query":
-                    return False
-            continue
-        return False
-    return True
+    unknown = change_body.get("after_unknown", {})
+    return (
+        all(isinstance(values, dict) for values in (before, after, unknown))
+        and without_query_or_scopes(before) == without_query_or_scopes(after)
+        and not has_unknown(without_query_or_scopes(unknown))
+    )
 
 
 def assert_recreate_workload_changeset(
@@ -2196,12 +2205,48 @@ def _list_named_os_disks(
 def assert_no_workload_live_latch(folder: Path) -> None:
     """Refuse --recreate-workload after go-live wrote workload-live.json (mode 0600)."""
     latch = folder / WORKLOAD_LIVE_NAME
-    if latch.exists():
-        raise Refused(
-            f"{WORKLOAD_LIVE_NAME} is present under the private directory; "
-            "--recreate-workload refuses after go-live. Remove only with John's "
-            "explicit go-live reversal decision."
-        )
+    try:
+        latch.lstat()
+    except FileNotFoundError:
+        return
+    raise Refused(f"{WORKLOAD_LIVE_NAME} is present; --recreate-workload refuses after go-live")
+
+
+@contextmanager
+def _workload_lifecycle_lock(folder: Path):
+    """Serialize first admission with recreate in the same private directory."""
+    private_directory(folder)
+    fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise Refused("First package admission or workload recreate is already running") from exc
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def admit_first_package(folder: Path) -> dict:
+    """Record the operator's first package admission before opening access."""
+    with _workload_lifecycle_lock(folder) as folder_fd:
+        latch = folder / WORKLOAD_LIVE_NAME
+        record = {"go_live": True}
+        try:
+            stream = _open_private_exclusive(latch)
+        except FileExistsError:
+            secure_file(latch)
+            existing = read_json(latch)
+            if not isinstance(existing, dict) or existing.get("go_live") is not True:
+                raise Refused(f"Existing {WORKLOAD_LIVE_NAME} has unexpected contents")
+        else:
+            with stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(json_bytes(record))
+                stream.flush()
+                os.fsync(stream.fileno())
+        os.fsync(folder_fd)
+        return {"first_package_admitted": True, "workload_live_latch": str(latch)}
 
 
 def assert_os_disk_preflight(env: dict, inputs: dict) -> None:
@@ -2271,7 +2316,7 @@ def assert_data_disk_preflight(env: dict, inputs: dict) -> None:
         )
     create_option = disk.get("createOption")
     size = disk.get("diskSizeGb")
-    managed_by = disk.get("managedBy")
+    managed_by = disk.get("managedBy", False)
     if create_option != "Empty":
         raise Refused(
             f"Pre-apply data disk check: {DATA_DISK_NAME} createOption must be Empty "
@@ -2282,7 +2327,7 @@ def assert_data_disk_preflight(env: dict, inputs: dict) -> None:
             f"Pre-apply data disk check: {DATA_DISK_NAME} diskSizeGb must be 128 "
             f"(got {size!r}); refuse recreate"
         )
-    if managed_by in (None, "", []):
+    if managed_by in (None, ""):
         return
     if not managed_by_matches_workload_vm(managed_by, subscription_id=subscription_id):
         raise Refused(
@@ -2295,41 +2340,34 @@ def assert_data_disk_preflight(env: dict, inputs: dict) -> None:
 def module_workload_id_reference_addresses(module_dir: Path | None = None) -> set[str]:
     """Scan module *.tf for azurerm_linux_virtual_machine.workload.id resource addresses."""
     root = module_dir if module_dir is not None else MODULE
-    needle = "azurerm_linux_virtual_machine.workload.id"
-    resource_header = re.compile(
-        r'^resource\s+"([^"]+)"\s+"([^"]+)"\s*\{',
-        re.MULTILINE,
-    )
+    reference = re.compile(r"\bazurerm_linux_virtual_machine\.workload\.id\b")
+    resource_blocks = re.compile(r'^resource "([^"]+)" "([^"]+)" \{\n(.*?)^\}', re.M | re.S)
     found: set[str] = set()
     for path in sorted(root.glob("*.tf")):
         text = path.read_text()
-        if needle not in text:
-            continue
-        # Walk resource blocks; record those whose body contains the needle.
-        matches = list(resource_header.finditer(text))
-        for index, match in enumerate(matches):
-            start = match.end()
-            end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-            body = text[start:end]
-            if needle not in body:
+        for rtype, name, body in resource_blocks.findall(text):
+            if not reference.search(body):
                 continue
-            rtype, name = match.group(1), match.group(2)
-            if "for_each" in body.split("{", 1)[0] or re.search(
-                r"^\s*for_each\s*=", body, re.MULTILINE
-            ):
-                # Expand known for_each keys used with workload.id in this module.
-                if rtype == "azurerm_monitor_metric_alert" and name == "vm":
-                    for key in ("unavailable", "cpu", "disk_iops"):
-                        found.add(f'{rtype}.{name}["{key}"]')
-                elif rtype == "azurerm_monitor_scheduled_query_rules_alert_v2" and name == "runtime":
-                    for key in ("application", "backup"):
-                        found.add(f'{rtype}.{name}["{key}"]')
+            address = f"{rtype}.{name}"
+            for_each = re.search(r"^  for_each\s*=\s*(.+)$", body, re.M)
+            count = re.search(r"^  count\s*=\s*(.+)$", body, re.M)
+            if for_each:
+                expression = for_each.group(1)
+                literal_set = re.fullmatch(r'var\.\w+ \? toset\((\[.*\])\) : toset\(\[\]\)', expression)
+                local_map = re.fullmatch(r"local\.(\w+)", expression)
+                if literal_set:
+                    keys = json.loads(literal_set.group(1))
+                elif local_map and (mapping := re.search(rf"^  {local_map[1]}\s*=\s*\{{\n(.*?)^  \}}", text, re.M | re.S)):
+                    keys = re.findall(r"^    (\w+)\s*=", mapping.group(1), re.M)
                 else:
-                    found.add(f"{rtype}.{name}")
-            elif re.search(r"^\s*count\s*=", body, re.MULTILINE):
-                found.add(f"{rtype}.{name}[0]")
+                    raise Refused(f"Cannot enumerate workload.id references for {address}")
+                found.update(f"{address}[{json.dumps(key)}]" for key in keys)
+            elif count:
+                if not re.fullmatch(r"var\.\w+ \? 1 : 0", count.group(1)):
+                    raise Refused(f"Cannot enumerate workload.id references for {address}")
+                found.add(f"{address}[0]")
             else:
-                found.add(f"{rtype}.{name}")
+                found.add(address)
     return found
 
 
@@ -2601,6 +2639,12 @@ def plan_recover(folder: Path) -> dict:
 
 
 def plan_recreate_workload(folder: Path) -> dict:
+    with _workload_lifecycle_lock(folder):
+        assert_no_workload_live_latch(folder)
+        return _plan_recreate_workload(folder)
+
+
+def _plan_recreate_workload(folder: Path) -> dict:
     """Plan exact VM + data-disk recreate with -var=allow_workload_recreate=true.
 
     Mid-replace recovery: after init, list state and pass -replace only for the
@@ -2608,7 +2652,6 @@ def plan_recreate_workload(folder: Path) -> dict:
     are expected as create-only in the sanitised change-set. The plan sanitiser
     requires tofu show -json variables.allow_workload_recreate.value is True.
     """
-    assert_no_workload_live_latch(folder)
     manifest, inputs = _verify_prepared(folder)
     if not manifest.get("recreate_workload"):
         raise Refused(
@@ -2643,10 +2686,12 @@ def plan_recreate_workload(folder: Path) -> dict:
     plan_path = folder / "plans" / f"recreate-workload-{stamp}.tfplan"
     summary_path = folder / f"recreate-workload-plan-summary-{stamp}.json"
     result_path = folder / f"recreate-workload-plan-result-{stamp}.json"
+    for path in (plan_path, summary_path, result_path):
+        _assert_not_workload_live_path(path)
+        if path.is_symlink() or path.exists():
+            raise Refused("Workload recreate plan path already exists; refuse overwrite")
     if plan_path.name == "first.tfplan" or plan_path.resolve() == (folder / "plans/first.tfplan").resolve():
         raise Refused("Workload recreate plan must not overwrite plans/first.tfplan")
-    if plan_path.exists() or summary_path.exists() or result_path.exists():
-        raise Refused("Workload recreate plan path already exists; refuse overwrite")
     tofu = Path(manifest["tofu"])
     if digest(tofu) != manifest["tofu_sha256"]:
         raise Refused("Pinned OpenTofu executable changed")
@@ -3155,10 +3200,17 @@ def apply(
         )
     if not confirm_apply:
         raise Refused("refusing apply without --confirm-apply")
-    os.umask(0o077)
     _assert_single_mode(recover=recover, recreate_workload=recreate_workload)
-    if recreate_workload:
-        assert_no_workload_live_latch(folder)
+    with (_workload_lifecycle_lock(folder) if recreate_workload else nullcontext()) as lifecycle_fd:
+        if recreate_workload:
+            assert_no_workload_live_latch(folder)
+        return _apply(folder, approval_path, recover=recover, lifecycle_fd=lifecycle_fd)
+
+
+def _apply(folder: Path, approval_path: Path, *, recover: bool, lifecycle_fd: int | None) -> dict:
+    recreate_workload = lifecycle_fd is not None
+    logs = folder / "logs"
+    os.umask(0o077)
     manifest, inputs = _verify_prepared(folder)
     if manifest.get("resource_group") != RESOURCE_GROUP:
         raise Refused(f"manifest resource_group is not production: {manifest.get('resource_group')}")
@@ -3283,7 +3335,6 @@ def apply(
         raise Refused("Recomputed plan summary does not match approval summary_sha256")
     if recreate_workload:
         # Pre-apply fences: must run before tofu apply starts.
-        assert_no_workload_live_latch(folder)
         assert_os_disk_preflight(env, inputs)
         assert_data_disk_preflight(env, inputs)
     logs.mkdir(mode=0o700, exist_ok=True)
@@ -3294,6 +3345,7 @@ def apply(
     else:
         log_prefix = "apply"
     log_path = logs / f"{log_prefix}-{secrets.token_hex(8)}.log"
+    _assert_not_workload_live_path(log_path)
     _operator_print(f"Apply log path: {log_path}")
     argv = [
         str(tofu),
@@ -3325,8 +3377,13 @@ def apply(
             inputs=inputs,
         )
 
+    # Keep the lock in the recreate child so admission still refuses if this
+    # process dies while OpenTofu is running.
+    child_options = {"pass_fds": (lifecycle_fd,)} if recreate_workload else {}
     try:
-        with open(log_path, "wb") as log_stream:
+        with (_open_private_exclusive(log_path) if recreate_workload else open(log_path, "wb")) as log_stream:
+            if recreate_workload:
+                assert_no_workload_live_latch(folder)
             for sig in (signal.SIGTERM, signal.SIGHUP):
                 previous_handlers[sig] = signal.signal(sig, _route_to_keyboard_interrupt)
             handlers_installed = True
@@ -3342,6 +3399,7 @@ def apply(
                         stderr=subprocess.STDOUT,
                         umask=0o077,
                         start_new_session=True,
+                        **child_options,
                     )
                 except OSError:
                     apply_started = False
@@ -3448,6 +3506,10 @@ def main() -> None:
     apply_cmd.add_argument("--approval", type=Path, required=True)
     apply_cmd.add_argument("--recover", action="store_true")
     apply_cmd.add_argument("--recreate-workload", action="store_true")
+    admit_cmd = commands.add_parser(
+        "admit-first-package", help="Record go-live before admitting the first production package"
+    )
+    admit_cmd.add_argument("--private-dir", type=Path, required=True)
     refresh_cmd = commands.add_parser(
         "refresh-module-snapshot",
         help=(
@@ -3502,6 +3564,8 @@ def main() -> None:
                 args.lock_sha256,
                 confirm_refresh=args.confirm_refresh,
             )
+        elif args.command == "admit-first-package":
+            result = admit_first_package(args.private_dir)
         else:
             result = apply(
                 args.private_dir,

@@ -18,9 +18,10 @@ path that replaces only `azurerm_linux_virtual_machine.workload` and
 `azurerm_managed_disk.data` (plus the data-disk attachment) under
 `plans/recreate-workload-<UTC>.tfplan` with `-var=allow_workload_recreate=true`.
 Default `allow_workload_recreate=false` keeps `prevent_destroy` on those two
-resources (`nullable = false` on the variable). After go-live, write
-`<private-dir>/workload-live.json` mode `0600` (see runbook §9.9); prepare,
-plan, and apply then refuse `--recreate-workload` while that latch exists.
+resources (`nullable = false` on the variable). At first package admission, run
+`bootstrap_local.py admit-first-package --private-dir <private-dir>` before
+opening access (runbook §9(c), step 9). It creates `workload-live.json` with mode
+`0600` and prepare, plan, and apply refuse `--recreate-workload` while it exists.
 When a live private `module/` still pins the first-apply `*.tf` snapshot, run
 `python3 bootstrap_local.py refresh-module-snapshot --confirm-refresh` on a
 clean `origin/main` checkout (sanctioned `*.tf` diffs only; binds new digests
