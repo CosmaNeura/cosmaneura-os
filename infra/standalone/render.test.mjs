@@ -44,6 +44,7 @@ test('dedicated host preparation binds every client, database, service, TLS and 
     'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
     'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED',
     'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
+    'INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED',
     'RECORDING_AUDIO_48H_RETENTION_ENABLED'])
     assert.equal(env[flag],'false',flag);
   assert.deepEqual(files['instance.json'],{schema:'cosmabot-standalone-runtime/v1',instance_id:sample.instance_id});
@@ -102,6 +103,7 @@ test('staging session policy must be explicitly matched to existing development 
     'COSMAS_EHR_REAL_DATA_ENABLED','WORKSPACE_RX_SANDBOX_ENABLED',
     'REAL_PATIENT_RECORDING_ENABLED','WORKSPACE_EFAX_SANDBOX_ENABLED',
     'INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
+    'INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED',
     'RECORDING_AUDIO_48H_RETENTION_ENABLED'])
     assert.equal(files['api-public.json'][flag],'false',flag);
   assert.equal(files['clients/desktop-identity.json'].profile,'operational-staging-v1');

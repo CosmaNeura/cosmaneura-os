@@ -141,6 +141,12 @@ class Settings(BaseSettings):
     # T2a: CosmaBot independent transcription. Default off for existing live users.
     # Box opt-in is separate (box_contexts.independent_recording_transcription_enabled).
     independent_recording_transcription_enabled: bool = False
+    # T2a-azure: Azure Fast Transcription adapter. Default off; requires main switch + endpoint.
+    independent_recording_transcription_azure_enabled: bool = False
+    # HTTPS Cognitive Services URL (US region host, fixed path). Never a secret value.
+    azure_fast_transcription_endpoint: str | None = None
+    # Explicit auth when Azure is on: entra|key. Default None so standalone azure_* stays empty.
+    azure_fast_transcription_auth: Literal["entra", "key"] | None = None
 
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)
@@ -690,11 +696,15 @@ class Settings(BaseSettings):
         )
 
     def _independent_transcription_real_processor_configured(self) -> bool:
-        """True when a non-fake transcription processor is configured.
+        """True when Azure Fast Transcription is enabled with a valid endpoint."""
+        if not self.independent_recording_transcription_azure_enabled:
+            return False
+        from cosmas_os.adapters.azure_fast_transcription import (
+            validate_azure_fast_transcription_endpoint,
+        )
 
-        PR1 ships fake-only; Azure configuration lands in T2a-azure.
-        """
-        return False
+        endpoint = self.azure_fast_transcription_endpoint
+        return bool(endpoint and validate_azure_fast_transcription_endpoint(endpoint))
 
     def runtime_configuration_errors(self) -> list[str]:
         """Return configuration faults without exposing configured values."""
@@ -706,8 +716,7 @@ class Settings(BaseSettings):
                 "configuration; enable only via Box after clinic, BAA and PHI refs"
             )
         # T2a: refuse enabling the process switch in standalone/production until a
-        # real processor is configured (Azure lands in T2a-azure). Fake-only stays
-        # for synth_os tests/CI.
+        # real processor is configured. Fake-only stays for synth_os tests/CI.
         if self.independent_recording_transcription_enabled:
             real_processor = self._independent_transcription_real_processor_configured()
             if not real_processor and (
@@ -716,6 +725,29 @@ class Settings(BaseSettings):
                 errors.append(
                     "INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED requires a configured "
                     "real transcription processor in standalone and production"
+                )
+        # T2a-azure: Azure Fast Transcription refuses to start without the main
+        # switch and a valid endpoint. Never echo configured values.
+        if self.independent_recording_transcription_azure_enabled:
+            if not self.independent_recording_transcription_enabled:
+                errors.append(
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED requires "
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED"
+                )
+            from cosmas_os.adapters.azure_fast_transcription import (
+                validate_azure_fast_transcription_endpoint,
+            )
+
+            endpoint = self.azure_fast_transcription_endpoint
+            if not endpoint or not validate_azure_fast_transcription_endpoint(endpoint):
+                errors.append(
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED requires a "
+                    "valid https AZURE_FAST_TRANSCRIPTION_ENDPOINT without query or credentials"
+                )
+            if self.azure_fast_transcription_auth not in {"entra", "key"}:
+                errors.append(
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED requires "
+                    "AZURE_FAST_TRANSCRIPTION_AUTH=entra|key"
                 )
         if self.cosmas_env in STANDALONE_ENVS:
             return errors + self._standalone_configuration_errors()

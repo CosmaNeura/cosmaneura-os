@@ -99,10 +99,9 @@ function assertNoRealPatientOn(files){
 
 // Off-path must stay byte-identical to origin/main after #361 (eight Settings
 // bools rendered explicitly false). Values match render-goldens.test.mjs.
-// Regenerated after schema_revision bump to c68d4e1f0253 (recording_audio_48h_retention).
-// Regenerated after merge of #404 and rechain to c68f2a91b053.
-const MAIN_DEDICATED_FINGERPRINT='e46859a75beb56bab2babd8595b657cb51bd25c29fea472f94e5223c845bb6c7';
-const MAIN_OWNED_STAGING_FINGERPRINT='92e0e66cf0d23e21a51289475f27d8878f3133eb284b5aec6800a138b3de97e9';
+// Regenerated after #405/#404 merge + AZURE_ENABLED explicit false.
+const MAIN_DEDICATED_FINGERPRINT='5b7ca3642180f4bff544dafb8fc56887bd4c22b8eec47e66721776c6b9b76ab7';
+const MAIN_OWNED_STAGING_FINGERPRINT='d16c716ba578ef8f24ed178bbb213c0733b14134ca8a197485ab0b0a570d993b';
 
 test('opt-in absent keeps byte-identical capture-dark main output',()=>{
   const baseline=render(structuredClone(sample));
@@ -174,6 +173,7 @@ test('opt-in on renders exact capture and agent-tools keys for synthetic staging
     'WORKSPACE_ENROLLMENT_MANAGED','COSMAS_EHR_REAL_DATA_ENABLED',
     'WORKSPACE_RX_SANDBOX_ENABLED','REAL_PATIENT_RECORDING_ENABLED',
     'WORKSPACE_EFAX_SANDBOX_ENABLED','INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED',
+    'INDEPENDENT_RECORDING_TRANSCRIPTION_AZURE_ENABLED',
     'RECORDING_AUDIO_48H_RETENTION_ENABLED',
   ])assert.equal(env[flag],'false',flag);
   assert.match(files['api-public.env'],/^WORKSPACE_AGENT_TOOLS_ENABLED="true"$/m);
