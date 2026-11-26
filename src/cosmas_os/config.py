@@ -138,6 +138,10 @@ class Settings(BaseSettings):
     # Effective only when this is true AND the Box opt-in is true.
     recording_audio_48h_retention_enabled: bool = False
 
+    # T2a: CosmaBot independent transcription. Default off for existing live users.
+    # Box opt-in is separate (box_contexts.independent_recording_transcription_enabled).
+    independent_recording_transcription_enabled: bool = False
+
     cosmas_clock_now: str | None = None
     sync_worker: bool = True  # execute operations in-process when True (tests/demo)
     execution_backend: Literal["celery", "postgres_local"] = "celery"
@@ -685,6 +689,13 @@ class Settings(BaseSettings):
             and not parsed.fragment
         )
 
+    def _independent_transcription_real_processor_configured(self) -> bool:
+        """True when a non-fake transcription processor is configured.
+
+        PR1 ships fake-only; Azure configuration lands in T2a-azure.
+        """
+        return False
+
     def runtime_configuration_errors(self) -> list[str]:
         """Return configuration faults without exposing configured values."""
 
@@ -694,6 +705,18 @@ class Settings(BaseSettings):
                 "REAL_PATIENT_RECORDING_ENABLED must remain false in process "
                 "configuration; enable only via Box after clinic, BAA and PHI refs"
             )
+        # T2a: refuse enabling the process switch in standalone/production until a
+        # real processor is configured (Azure lands in T2a-azure). Fake-only stays
+        # for synth_os tests/CI.
+        if self.independent_recording_transcription_enabled:
+            real_processor = self._independent_transcription_real_processor_configured()
+            if not real_processor and (
+                self.cosmas_env in STANDALONE_ENVS or self.cosmas_env == "early_adopter_beta"
+            ):
+                errors.append(
+                    "INDEPENDENT_RECORDING_TRANSCRIPTION_ENABLED requires a configured "
+                    "real transcription processor in standalone and production"
+                )
         if self.cosmas_env in STANDALONE_ENVS:
             return errors + self._standalone_configuration_errors()
         errors.extend(self.workspace_enrollment_configuration_errors())

@@ -79,3 +79,30 @@ Honest limits:
   **refuse delete** (and expired-audio refuse) until skew recovers; labels still
   use device time.
 - No compliance claim, no SOC 2 claim.
+
+## Recording audio uploaded for transcription (48 hours)
+
+- CosmaBot-independent transcription audio becomes **unreadable after 48 hours**
+  (`audio_expires_at`). Blobs are removed only when purge runs: an owner calls
+  the `/private-recordings/audio-purge` route, or ops invokes the
+  `cosmas_os.purge_independent_recording_audio` Celery task. There is no Celery
+  beat schedule for this sweep in v1 (beat registration is a separate pre-flip
+  ticket). The purge path does not re-check the feature switch, so leftover
+  audio can still be swept after the switch is turned off. Tests use an
+  injectable clock. Reads refuse expired audio even before purge runs.
+- Purge deletes **audio blobs only**. Immutable transcript rows, transcript
+  content, jobs, and audit rows stay under existing retention.
+- On a failed blob delete the row keeps `blob_key`, records outcome `failed`,
+  and is retried on the next sweep. Blob not-found is treated as success
+  (`purged`).
+- Revoke deletes the audio blob immediately (with a purge receipt) and marks
+  the upload revoked. An already-written transcript remains readable; reads
+  without a transcript return `revoked`.
+- Purge writes a receipt with: opaque `upload_id`, retention rule
+  (`audio_plus_48h` or `revoke_delete`), deletion time, outcome (`purged` or
+  `failed`). No patient label, blob path, or content hash of deleted bytes.
+  Audit events record `recording_audio.purged` without payload bytes.
+- Account delete removes the owner's transcription blobs, then transcripts,
+  uploads, and receipts (transcripts before uploads for FK safety).
+- Server backup copies of purged audio age out on the normal backup cycle under
+  BAA 2.3 section 4.3.3. This document does not change the BAA.
