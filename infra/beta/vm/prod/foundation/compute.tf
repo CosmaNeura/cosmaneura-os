@@ -32,7 +32,9 @@ resource "azurerm_linux_virtual_machine" "workload" {
   }
   boot_diagnostics {}
   tags = merge(local.tags, { component = "production-workload", control_path = "separate-release-ticket" })
-  lifecycle { prevent_destroy = true }
+  # Default false keeps prevent_destroy. --recreate-workload plans pass
+  # -var=allow_workload_recreate=true so only these two resources can be replaced.
+  lifecycle { prevent_destroy = !var.allow_workload_recreate }
 }
 resource "azurerm_managed_disk" "data" {
   name                          = "data-${local.vm_name}"
@@ -44,7 +46,7 @@ resource "azurerm_managed_disk" "data" {
   network_access_policy         = "DenyAll"
   public_network_access_enabled = false
   tags                          = local.tags
-  lifecycle { prevent_destroy = true }
+  lifecycle { prevent_destroy = !var.allow_workload_recreate }
 }
 resource "azurerm_virtual_machine_data_disk_attachment" "data" {
   managed_disk_id    = azurerm_managed_disk.data.id

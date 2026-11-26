@@ -2,7 +2,8 @@
 # Review CosmaBot production foundation: name guards, monthly cost estimate, OpenTofu plan.
 # First-apply-only by default. Pass --recover for the separately reviewed partial-apply
 # recovery path. Pass --recheck for a print-only post-apply re-check (0 add/change/
-# destroy/replace). Does not apply. Requires John's az login for the plan portion.
+# destroy/replace). Pass --recreate-workload for the off-by-default VM+data-disk
+# recreate plan. Does not apply. Requires John's az login for the plan portion.
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -19,12 +20,14 @@ lock_sha256=""
 skip_plan=0
 recover=0
 recheck=0
+recreate_workload=0
 
 usage() {
   cat <<EOF
 Usage: $0 --subscription-id UUID --inputs PATH --private-dir PATH
           --source-sha256 HEX --lock-sha256 HEX
-          [--tofu PATH] [--provider-mirror PATH] [--cost-only] [--recover | --recheck]
+          [--tofu PATH] [--provider-mirror PATH] [--cost-only]
+          [--recover | --recheck | --recreate-workload]
 
 First-apply-only review by default. Prints the checked-in monthly cost estimate
 (labeled with price dates), refuses staging names, then runs the encrypted local
@@ -40,7 +43,11 @@ It runs a normal refreshed plan (Azure read) and requires the encrypted local
 state file digest to stay unchanged. It fails unless the plan is 0 add /
 0 change / 0 destroy / 0 replace (and no import/move/deposed), printing
 resource addresses only on stderr.
---recover and --recheck are mutually exclusive.
+With --recreate-workload, --private-dir must already exist with post-apply
+encrypted state; the plan is written to plans/recreate-workload-<UTC>.tfplan
+with -var=allow_workload_recreate=true and -replace on the workload VM and
+data disk only. The sanitised summary lists resource addresses.
+--recover, --recheck, and --recreate-workload are mutually exclusive.
 --source-sha256 / --lock-sha256 must be operator-supplied (from a prior
 fingerprint review), not self-trusted.
 --subscription-id must equal inputs.subscription_id.
@@ -69,6 +76,7 @@ while [[ $# -gt 0 ]]; do
     --cost-only) skip_plan=1; shift ;;
     --recover) recover=1; shift ;;
     --recheck) recheck=1; shift ;;
+    --recreate-workload) recreate_workload=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -77,8 +85,9 @@ done
 [[ -f "$price_file" ]] || die "missing price table"
 [[ -f "$prod_dir/name_guards.py" ]] || die "missing name guards"
 
-if [[ "$recover" -eq 1 && "$recheck" -eq 1 ]]; then
-  die "--recover and --recheck are mutually exclusive"
+mode_count=$((recover + recheck + recreate_workload))
+if [[ "$mode_count" -gt 1 ]]; then
+  die "--recover, --recheck, and --recreate-workload are mutually exclusive"
 fi
 
 python3 - "$price_file" "$prod_dir" <<'PY'
@@ -200,6 +209,8 @@ if [[ "$recheck" -eq 1 ]]; then
   [[ -d "$private_dir" ]] || die "recheck --private-dir must already exist with encrypted state"
 elif [[ "$recover" -eq 1 ]]; then
   [[ -d "$private_dir" ]] || die "recovery --private-dir must already exist with encrypted state"
+elif [[ "$recreate_workload" -eq 1 ]]; then
+  [[ -d "$private_dir" ]] || die "recreate-workload --private-dir must already exist with encrypted state"
 else
   [[ ! -e "$private_dir" ]] || die "private directory must be fresh (path must not exist yet)"
 fi
@@ -238,18 +249,23 @@ if [[ "$recheck" -eq 1 ]]; then
   prepare_args+=(--recheck)
   plan_args+=(--recheck)
 fi
+if [[ "$recreate_workload" -eq 1 ]]; then
+  prepare_args+=(--recreate-workload)
+  plan_args+=(--recreate-workload)
+fi
 
 python3 "$foundation_dir/bootstrap_local.py" "${prepare_args[@]}"
 
 plan_json="$(python3 "$foundation_dir/bootstrap_local.py" "${plan_args[@]}")"
-python3 - "$plan_json" "$private_dir" "$recover" "$recheck" <<'PY'
+python3 - "$plan_json" "$private_dir" "$recover" "$recheck" "$recreate_workload" <<'PY'
 import json, sys
 from pathlib import Path
 result = json.loads(sys.argv[1])
 private_dir = Path(sys.argv[2])
 recover = sys.argv[3] == "1"
 recheck = sys.argv[4] == "1"
-if recover or recheck:
+recreate_workload = sys.argv[5] == "1"
+if recover or recheck or recreate_workload:
     summary_path = Path(result["summary_path"])
 else:
     summary_path = private_dir / "plan-summary.json"
@@ -269,6 +285,16 @@ if recheck:
     print("Nothing was applied. State, manifests, first.tfplan, and recover artifacts were not overwritten.")
     print("This mode never applies and never prints the state passphrase or secrets.")
     print("On drift, stderr lists resource addresses only — do not open the raw plan log.")
+elif recreate_workload:
+    print("Workload recreate review complete. Plan saved under plans/recreate-workload-<UTC>.tfplan.")
+    print(f"Summary/result: {summary_path.name} / {Path(result['result_path']).name}")
+    print("Replace addresses:", ", ".join(summary.get("replace_addresses") or []))
+    print("Update addresses:", ", ".join(summary.get("update_addresses") or []) or "(none)")
+    print("Nothing was applied. plans/first.tfplan was not overwritten.")
+    print("After John's yes on both hashes, bind an approval file (0600, outside the repo) to:")
+    print(f"  plan_sha256={result['plan_sha256']}")
+    print(f"  summary_sha256={result['summary_sha256']}")
+    print("Then follow the Apply section / recreate-day runbook.")
 elif recover:
     print("Recovery review complete. Plan saved under plans/recover-<UTC>.tfplan.")
     print(f"Summary/result: {summary_path.name} / {Path(result['result_path']).name}")

@@ -92,3 +92,9 @@ variable "alert_contact_email" {
     error_message = "Supply the approved alert recipient's email address."
   }
 }
+variable "allow_workload_recreate" {
+  type        = bool
+  nullable    = false
+  description = "Off by default. When true, lifts prevent_destroy only on azurerm_linux_virtual_machine.workload and azurerm_managed_disk.data for the reviewed --recreate-workload path. Never set true in first-apply, --recover, or --recheck."
+  default     = false
+}
