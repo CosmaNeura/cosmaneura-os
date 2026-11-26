@@ -4941,7 +4941,7 @@ class RecreateWorkloadMode(unittest.TestCase):
         return path
 
     def _az_disk_payloads(self, *, managed_by=None, data_managed_by="ATTACHED"):
-        """Synthetic az disk list/show payloads for OS + data-disk preflight."""
+        """Synthetic az disk list payloads for OS and data-disk preflight."""
         if managed_by is None:
             managed_by = bootstrap.expected_workload_vm_resource_id(self.inputs["subscription_id"])
         if data_managed_by == "ATTACHED":
@@ -4949,27 +4949,28 @@ class RecreateWorkloadMode(unittest.TestCase):
         os_list = json.dumps(
             [{"name": bootstrap.OS_DISK_NAME, "managedBy": managed_by}]
         ).encode()
-        data_show = json.dumps(
-            {
+        data_list = json.dumps(
+            [{
                 "createOption": "Empty",
                 "diskSizeGb": 128,
                 "managedBy": data_managed_by,
-            }
+            }]
         ).encode()
-        return os_list, data_show
+        return os_list, data_list
 
-    def _az_command_side_effect(self, plan_json, *, os_list=None, data_show=None, post_os_list=None):
-        if os_list is None or data_show is None:
+    def _az_command_side_effect(self, plan_json, *, os_list=None, data_list=None, post_os_list=None):
+        if os_list is None or data_list is None:
             default_os, default_data = self._az_disk_payloads()
             os_list = os_list if os_list is not None else default_os
-            data_show = data_show if data_show is not None else default_data
+            data_list = data_list if data_list is not None else default_data
         list_calls = {"n": 0}
 
         def run(argv, **kwargs):
             if argv[0] == "az":
-                if argv[1:3] == ["disk", "show"]:
-                    return subprocess.CompletedProcess(argv, 0, data_show, b"")
                 if argv[1:3] == ["disk", "list"]:
+                    query = argv[argv.index("--query") + 1]
+                    if bootstrap.DATA_DISK_NAME in query:
+                        return subprocess.CompletedProcess(argv, 0, data_list, b"")
                     list_calls["n"] += 1
                     if list_calls["n"] > 1 and post_os_list is not None:
                         return subprocess.CompletedProcess(argv, 0, post_os_list, b"")
@@ -5173,22 +5174,70 @@ class RecreateWorkloadMode(unittest.TestCase):
         self.assertTrue(result["recreate_workload"])
         self.assertEqual(result["orphaned_os_disk_check"], "passed")
         self.assertEqual(result["os_disk_name"], bootstrap.OS_DISK_NAME)
-        # OS list (preflight) + data show (preflight) + OS list (post-apply).
-        self.assertGreaterEqual(len(az_calls), 3)
-        self.assertTrue(any(c[1:3] == ["disk", "list"] for c in az_calls))
-        self.assertTrue(any(c[1:3] == ["disk", "show"] for c in az_calls))
-        self.assertTrue(
-            any(bootstrap.DATA_DISK_NAME in c for c in az_calls if c[1:3] == ["disk", "show"])
+        # OS list (preflight) + data list (preflight) + OS list (post-apply).
+        self.assertEqual(len(az_calls), 3)
+        self.assertEqual(az_calls[0], az_calls[2])
+        self.assertEqual(
+            az_calls[1],
+            [
+                "az", "disk", "list",
+                "--resource-group", bootstrap.RESOURCE_GROUP,
+                "--subscription", self.inputs["subscription_id"],
+                "--query", "[?name=='data-vm-cosmabot-prod-eus2-01']."
+                "{createOption:creationData.createOption,diskSizeGb:diskSizeGb,managedBy:managedBy}",
+                "--output", "json", "--only-show-errors",
+            ],
         )
+
+    def test_apply_recreate_with_absent_data_disk_requires_create_only_plan(self):
+        self._seed_private_dir()
+        self._recreate_prepare()
+        post_os_list, _ = self._az_disk_payloads()
+        cases = (
+            (frozenset(), False),
+            (bootstrap.RECREATE_REQUIRED_REPLACE_ADDRESSES - {bootstrap.RECREATE_DISK_ADDRESS}, False),
+            (bootstrap.RECREATE_REQUIRED_REPLACE_ADDRESSES, True),
+        )
+        for create_addresses, should_launch in cases:
+            with self.subTest(create_addresses=create_addresses):
+                plan_json = self._exact_recreate_plan()
+                for change in plan_json["resource_changes"]:
+                    if change["address"] in create_addresses:
+                        change["change"]["actions"] = ["create"]
+                plan_sha, summary, _, plan_path = self._write_recreate_artifacts(plan_json)
+                approval = self._approval(plan_sha, summary["summary_sha256"])
+                run = self._az_command_side_effect(
+                    plan_json, os_list=b"[]", data_list=b"[]", post_os_list=post_os_list
+                )
+                with patch.object(
+                    bootstrap, "owner_context", return_value=self.context
+                ), patch.object(bootstrap, "command", side_effect=run), patch.object(
+                    subprocess, "Popen"
+                ) as popen:
+                    if should_launch:
+                        popen.return_value.wait.return_value = 0
+                        result = bootstrap.apply(
+                            self.folder, confirm_apply=True, approval_path=approval, recreate_workload=True
+                        )
+                        self.assertTrue(result["applied"])
+                        popen.assert_called_once()
+                        self.assertEqual(popen.call_args.args[0][-1], str(plan_path))
+                    else:
+                        with self.assertRaisesRegex(bootstrap.Refused, "expected exactly one disk"):
+                            bootstrap.apply(
+                                self.folder, confirm_apply=True, approval_path=approval,
+                                recreate_workload=True,
+                            )
+                        popen.assert_not_called()
 
     def test_apply_recreate_attempted_runs_orphan_check_fail_closed(self):
         self._seed_private_dir()
         self._recreate_prepare()
         plan_sha, summary, plan_json, _plan_path = self._write_recreate_artifacts()
         approval = self._approval(plan_sha, summary["summary_sha256"])
-        os_list, data_show = self._az_disk_payloads()
+        os_list, data_list = self._az_disk_payloads()
         run = self._az_command_side_effect(
-            plan_json, os_list=os_list, data_show=data_show, post_os_list=b"[]"
+            plan_json, os_list=os_list, data_list=data_list, post_os_list=b"[]"
         )
 
         class FakeProc:
@@ -5471,12 +5520,12 @@ class RecreateWorkloadMode(unittest.TestCase):
         self._recreate_prepare()
         plan_sha, summary, plan_json, _plan_path = self._write_recreate_artifacts()
         approval = self._approval(plan_sha, summary["summary_sha256"])
-        os_list, data_show = self._az_disk_payloads()
+        os_list, data_list = self._az_disk_payloads()
         post_orphan = json.dumps(
             [{"name": bootstrap.OS_DISK_NAME, "managedBy": None}]
         ).encode()
         run = self._az_command_side_effect(
-            plan_json, os_list=os_list, data_show=data_show, post_os_list=post_orphan
+            plan_json, os_list=os_list, data_list=data_list, post_os_list=post_orphan
         )
 
         class FakeProc:
@@ -5754,16 +5803,65 @@ class RecreateWorkloadMode(unittest.TestCase):
             (dict(good, managedBy=[]), "managedBy must be empty"),
             ({"createOption": "Empty", "diskSizeGb": 128}, "managedBy must be empty"),
         )
-        for disk, error in cases:
-            with self.subTest(disk=disk), patch.object(
+        for action in ("create_addresses", "replace_addresses"):
+            summary = {"create_addresses": [], "replace_addresses": []}
+            summary[action].append(bootstrap.RECREATE_DISK_ADDRESS)
+            for disk, error in cases:
+                with self.subTest(action=action, disk=disk), patch.object(
+                    bootstrap, "command",
+                    return_value=subprocess.CompletedProcess([], 0, json.dumps([disk]).encode(), b""),
+                ):
+                    if error:
+                        with self.assertRaisesRegex(bootstrap.Refused, error):
+                            bootstrap.assert_data_disk_preflight({}, self.inputs, summary)
+                    else:
+                        bootstrap.assert_data_disk_preflight({}, self.inputs, summary)
+
+    def test_data_disk_preflight_refuses_invalid_list_even_for_create(self):
+        summary = {"create_addresses": [bootstrap.RECREATE_DISK_ADDRESS], "replace_addresses": []}
+        cases = (
+            (1, b"[]", "Could not list data disk"),
+            (0, b"", "not valid JSON"),
+            (0, b"\xff", "not valid JSON"),
+            (0, b"{}", "not a JSON array"),
+            (0, b"[null]", "expected exactly one disk"),
+            (0, b"[{}, {}]", "expected exactly one disk"),
+        )
+        for returncode, payload, error in cases:
+            with self.subTest(returncode=returncode, payload=payload), patch.object(
                 bootstrap, "command",
-                return_value=subprocess.CompletedProcess([], 0, json.dumps(disk).encode(), b""),
+                return_value=subprocess.CompletedProcess([], returncode, payload, b""),
+            ), self.assertRaisesRegex(bootstrap.Refused, error):
+                bootstrap.assert_data_disk_preflight({}, self.inputs, summary)
+        with patch.object(bootstrap, "command", side_effect=OSError("synthetic failure")):
+            with self.assertRaisesRegex(bootstrap.Refused, "Could not list data disk"):
+                bootstrap.assert_data_disk_preflight({}, self.inputs, summary)
+
+    def test_first_package_admit_refuses_unprepared_private_directory(self):
+        self.folder.mkdir(mode=0o700)
+        with self.assertRaisesRegex(bootstrap.Refused, "Prepared bootstrap missing manifest.json"):
+            bootstrap.admit_first_package(self.folder)
+        self.assertFalse((self.folder / bootstrap.WORKLOAD_LIVE_NAME).exists())
+
+    def test_first_package_admit_refuses_wrong_profile_or_resource_group(self):
+        self._seed_private_dir()
+        manifest_path = self.folder / "manifest.json"
+        manifest = bootstrap.read_json(manifest_path)
+        for field in ("profile", "resource_group"):
+            with self.subTest(field=field), self.assertRaisesRegex(
+                bootstrap.Refused, "no longer matches the reviewed source/namespace"
             ):
-                if error:
-                    with self.assertRaisesRegex(bootstrap.Refused, error):
-                        bootstrap.assert_data_disk_preflight({}, self.inputs)
-                else:
-                    bootstrap.assert_data_disk_preflight({}, self.inputs)
+                bootstrap.replace_private(
+                    manifest_path, bootstrap.json_bytes({**manifest, field: "synthetic-other"})
+                )
+                bootstrap.admit_first_package(self.folder)
+            self.assertFalse((self.folder / bootstrap.WORKLOAD_LIVE_NAME).exists())
+
+    def test_first_package_admit_refuses_missing_state(self):
+        self._first_prepare()
+        with self.assertRaisesRegex(bootstrap.Refused, "requires existing state/foundation.tfstate"):
+            bootstrap.admit_first_package(self.folder)
+        self.assertFalse((self.folder / bootstrap.WORKLOAD_LIVE_NAME).exists())
 
     def test_first_package_admit_creates_0600_latch_and_retry_preserves_it(self):
         self._seed_private_dir()
@@ -5876,15 +5974,15 @@ class RecreateWorkloadMode(unittest.TestCase):
         approval = self._approval(plan_sha, summary["summary_sha256"])
         latch = self.folder / bootstrap.WORKLOAD_LIVE_NAME
 
-        def external_latch(_env, _inputs):
+        def external_latch(_env, _inputs, _summary):
             latch.write_bytes(b'{"go_live": true}\n')
 
-        bad_disk = b'{"createOption": "Copy", "diskSizeGb": 128, "managedBy": null}'
+        bad_disk = b'[{"createOption": "Copy", "diskSizeGb": 128, "managedBy": null}]'
         with patch.object(bootstrap, "owner_context", return_value=self.context), patch.object(
             subprocess, "Popen"
         ) as popen:
             with patch.object(
-                bootstrap, "command", side_effect=self._az_command_side_effect(plan_json, data_show=bad_disk)
+                bootstrap, "command", side_effect=self._az_command_side_effect(plan_json, data_list=bad_disk)
             ), self.assertRaisesRegex(bootstrap.Refused, "createOption must be Empty"):
                 bootstrap.apply(self.folder, confirm_apply=True, approval_path=approval, recreate_workload=True)
             with patch.object(

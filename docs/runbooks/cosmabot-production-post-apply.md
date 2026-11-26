@@ -3117,10 +3117,14 @@ cosmabot_recreate_apply
 ```
 
 Pre-apply refuses an unattached / wrong-VM `osdisk-vm-cosmabot-prod-eus2-01`.
-Pre-apply also runs `az disk show` on `data-vm-cosmabot-prod-eus2-01` and refuses
-unless `createOption` is `Empty`, `diskSizeGb` is `128`, and `managedBy` is empty
-or the workload VM id. Post-apply (and ApplyAttempted) refuse if the OS disk is
-missing or unattached. Keep TEMP SSH closed (bootstrap-close) through this step.
+Pre-apply runs `az disk list` filtered to `data-vm-cosmabot-prod-eus2-01`.
+The recomputed plan summary determines whether the disk must exist. A replace
+requires exactly one disk record. A create-only action also allows an empty
+list. Any returned disk must have `createOption` of `Empty`, `diskSizeGb` of
+`128`, and `managedBy` empty or matching the workload VM id. CLI failures,
+invalid JSON, non-array output, and multiple disk records all cause refusal.
+Post-apply (and ApplyAttempted) refuse if the OS disk is missing or unattached.
+Keep TEMP SSH closed (bootstrap-close) through this step.
 
 #### Step 5a. Orphan OS disk resolution (human decision; never deletes)
 
@@ -3152,6 +3156,10 @@ re-run prepare then plan then apply with `--recreate-workload`. The planner list
 state and passes `-replace` only for addresses still present; addresses absent
 from state are planned as create-only. The sanitiser still requires the exact
 three-address set (VM + data disk + attachment) and refuses any other touch.
+If the data disk has a create-only action, preflight can proceed when the
+filtered Azure disk list is empty. If Azure returns the disk, it must pass
+the metadata checks in step 5. An absent data disk with a replace action
+causes preflight to refuse.
 If Azure still holds an orphan `osdisk-vm-cosmabot-prod-eus2-01` not attached to
 `vm-cosmabot-prod-eus2-01`, preflight refuses until that disk is resolved via the
 orphan-inspect fence above.

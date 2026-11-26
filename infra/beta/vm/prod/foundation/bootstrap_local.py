@@ -2230,6 +2230,9 @@ def _workload_lifecycle_lock(folder: Path):
 def admit_first_package(folder: Path) -> dict:
     """Record the operator's first package admission before opening access."""
     with _workload_lifecycle_lock(folder) as folder_fd:
+        _verify_prepared(folder)
+        if not (folder / "state/foundation.tfstate").is_file():
+            raise Refused("First package admission requires existing state/foundation.tfstate")
         latch = folder / WORKLOAD_LIVE_NAME
         record = {"go_live": True}
         try:
@@ -2274,22 +2277,21 @@ def assert_os_disk_preflight(env: dict, inputs: dict) -> None:
             )
 
 
-def assert_data_disk_preflight(env: dict, inputs: dict) -> None:
-    """Pre-apply: az disk show data disk must be Empty/128GiB and unattached or on workload VM."""
+def assert_data_disk_preflight(env: dict, inputs: dict, summary: dict) -> None:
+    """Check data disk metadata, allowing absence only for a create-only plan action."""
     subscription_id = str(inputs["subscription_id"])
     try:
         result = command(
             [
                 "az",
                 "disk",
-                "show",
+                "list",
                 "--resource-group",
                 RESOURCE_GROUP,
                 "--subscription",
                 subscription_id,
-                "--name",
-                DATA_DISK_NAME,
                 "--query",
+                f"[?name=='{DATA_DISK_NAME}']."
                 "{createOption:creationData.createOption,diskSizeGb:diskSizeGb,managedBy:managedBy}",
                 "--output",
                 "json",
@@ -2300,20 +2302,28 @@ def assert_data_disk_preflight(env: dict, inputs: dict) -> None:
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
         raise Refused(
-            f"Could not show data disk {DATA_DISK_NAME}; refuse (fail-closed): {exc}"
+            f"Could not list data disk {DATA_DISK_NAME}; refuse (fail-closed): {exc}"
         ) from exc
     if result.returncode:
-        raise Refused(f"Could not show data disk {DATA_DISK_NAME}; refuse (fail-closed)")
+        raise Refused(f"Could not list data disk {DATA_DISK_NAME}; refuse (fail-closed)")
     try:
-        disk = json.loads(result.stdout or b"")
-    except json.JSONDecodeError as exc:
+        disks = json.loads(result.stdout or b"")
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise Refused(
-            f"Data disk show for {DATA_DISK_NAME} was not valid JSON; refuse (fail-closed)"
+            f"Data disk list for {DATA_DISK_NAME} was not valid JSON; refuse (fail-closed)"
         ) from exc
-    if not isinstance(disk, dict):
+    if not isinstance(disks, list):
         raise Refused(
-            f"Data disk show for {DATA_DISK_NAME} was not a JSON object; refuse (fail-closed)"
+            f"Data disk list for {DATA_DISK_NAME} was not a JSON array; refuse (fail-closed)"
         )
+    if not disks and RECREATE_DISK_ADDRESS in summary["create_addresses"]:
+        return
+    if len(disks) != 1 or not isinstance(disks[0], dict):
+        raise Refused(
+            f"Pre-apply data disk check: expected exactly one disk record for {DATA_DISK_NAME}; "
+            "refuse recreate"
+        )
+    disk = disks[0]
     create_option = disk.get("createOption")
     size = disk.get("diskSizeGb")
     managed_by = disk.get("managedBy", False)
@@ -3336,7 +3346,7 @@ def _apply(folder: Path, approval_path: Path, *, recover: bool, lifecycle_fd: in
     if recreate_workload:
         # Pre-apply fences: must run before tofu apply starts.
         assert_os_disk_preflight(env, inputs)
-        assert_data_disk_preflight(env, inputs)
+        assert_data_disk_preflight(env, inputs, recomputed)
     logs.mkdir(mode=0o700, exist_ok=True)
     if recreate_workload:
         log_prefix = "recreate-workload-apply"
