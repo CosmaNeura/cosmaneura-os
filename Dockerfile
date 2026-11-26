@@ -4,12 +4,15 @@ FROM python:3.13-slim@sha256:d0a9e379c0c588befb0e427db17ca9731751d281f32c6cb1a90
 # libpcre2 pin from the prior base refresh.
 # zlib1g 1:1.3.dfsg+really1.3.1-1+deb13u1 closes CVE-2026-76844 and
 # CVE-2026-85091 (DSA-6613-1) on Debian trixie.
+# libzstd1 1.5.7+dfsg-1+deb13u1 closes CVE-2026-124851 on Debian trixie
+# (trixie-security); newest python:3.13-slim still ships 1.5.7+dfsg-1.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends \
         apt=3.0.4 \
         libapt-pkg7.0=3.0.4 \
         libpcre2-8-0=10.46-1~deb13u3 \
         zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 \
+        libzstd1=1.5.7+dfsg-1+deb13u1 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
